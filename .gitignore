@@ -3,6 +3,7 @@ __pycache__/
 photo-library/
 .pytest_cache/
 node_modules/
+dist/
 
 .DS_Store
 .env
