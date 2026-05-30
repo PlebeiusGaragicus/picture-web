@@ -61,7 +61,7 @@ def test_persistent_draft_canvas_round_trip(tmp_path, monkeypatch):
         "nodes": {
             "draft_1": {
                 "type": "draft",
-                "displayName": "Draft",
+                "displayName": "Blue square candidates",
                 "x": 10,
                 "y": 20,
                 "refs": [parent_id],
@@ -116,6 +116,29 @@ def test_display_patch_does_not_mutate_generation(tmp_path, monkeypatch):
     assert metadata["provider"]["response"]["usageMetadata"]["totalTokenCount"] == 1
 
 
+def test_full_image_endpoint_serves_pixels(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    asset_id = "01HIMG"
+    make_png(library.asset_png_path("farm-comic", asset_id), color="green")
+    library.write_json(
+        library.asset_json_path("farm-comic", asset_id),
+        {
+            "id": asset_id,
+            "kind": "imported",
+            "title": "Image",
+            "tags": [],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+
+    response = client.get(f"/api/projects/farm-comic/assets/{asset_id}/image")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG")
+
+
 def test_generate_with_mocked_boundary_persists_receipt(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
@@ -163,7 +186,7 @@ def test_generate_from_draft_updates_canvas_group(tmp_path, monkeypatch):
         "nodes": {
             "draft_1": {
                 "type": "draft",
-                "displayName": "Draft",
+                "displayName": "Blue square candidates",
                 "x": 10,
                 "y": 20,
                 "refs": [],
@@ -193,6 +216,7 @@ def test_generate_from_draft_updates_canvas_group(tmp_path, monkeypatch):
     canvas_response = client.get("/api/projects/farm-comic/canvas").json()
     node = canvas_response["nodes"]["draft_1"]
     assert node["type"] == "imageGroup"
+    assert node["displayName"] == "Blue square candidates"
     assert len(node["assetIds"]) == 2
     assert node["activeAssetId"] == node["assetIds"][0]
     assert list(canvas_response["nodes"].keys()) == ["draft_1"]

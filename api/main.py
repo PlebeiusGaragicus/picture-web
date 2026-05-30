@@ -87,6 +87,11 @@ def get_thumb(slug: str, asset_id: str) -> FileResponse:
     return FileResponse(library.thumbnail_path(slug, asset_id))
 
 
+@app.get("/api/projects/{slug}/assets/{asset_id}/image")
+def get_image(slug: str, asset_id: str) -> FileResponse:
+    return FileResponse(library.image_path(slug, asset_id), media_type="image/png")
+
+
 @app.post("/api/projects/{slug}/generate", response_model=GenerateResponse)
 def generate(slug: str, payload: GenerateRequest) -> GenerateResponse:
     import gemini

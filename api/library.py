@@ -314,6 +314,13 @@ def thumbnail_path(slug: str, asset_id: str) -> Path:
     return path
 
 
+def image_path(slug: str, asset_id: str) -> Path:
+    path = asset_png_path(slug, asset_id)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"Pixels not found: {asset_id}")
+    return path
+
+
 def create_generated_assets(
     slug: str,
     payload: GenerateRequest,
@@ -394,8 +401,9 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
         x = existing.x if isinstance(existing, DraftCanvasNode) else 120
         y = existing.y if isinstance(existing, DraftCanvasNode) else 120
         width = existing.width if isinstance(existing, DraftCanvasNode) else None
+        display_name = existing.displayName if isinstance(existing, DraftCanvasNode) else None
         canvas.nodes[node_id] = ImageGroupCanvasNode(
-            displayName=assets[0].title if assets else "Generated image",
+            displayName=display_name or (assets[0].title if assets else "Generated image"),
             x=x,
             y=y,
             width=width,
