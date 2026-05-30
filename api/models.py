@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 TAG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 SLUG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
@@ -129,24 +129,49 @@ class DisplayPatch(BaseModel):
         return tags
 
 
-class CanvasNode(BaseModel):
+class CanvasNodeLayout(BaseModel):
+    displayName: str
     x: float
     y: float
     width: float | None = None
 
 
-class CanvasStack(BaseModel):
-    runId: str
-    collapsed: bool = True
+class GenerationParams(BaseModel):
+    model: str | None = None
+    aspectRatio: str | None = None
+    imageSize: str | None = None
+    seed: int | None = Field(default=None, ge=0)
+    batchCount: int = Field(default=1, ge=1, le=8)
+
+
+class DraftCanvasNode(CanvasNodeLayout):
+    type: Literal["draft"] = "draft"
+    refs: list[str] = Field(default_factory=list)
+    prompt: str = ""
+    params: GenerationParams = Field(default_factory=GenerationParams)
+
+
+class ImageGroupCanvasNode(CanvasNodeLayout):
+    type: Literal["imageGroup"] = "imageGroup"
+    assetIds: list[str] = Field(default_factory=list, min_length=1)
+    activeAssetId: str | None = None
+
+    @model_validator(mode="after")
+    def active_asset_defaults_to_first(self) -> "ImageGroupCanvasNode":
+        if self.activeAssetId is None or self.activeAssetId not in self.assetIds:
+            self.activeAssetId = self.assetIds[0]
+        return self
+
+
+CanvasNode = DraftCanvasNode | ImageGroupCanvasNode
 
 
 class CanvasDocument(BaseModel):
-    version: int = 1
+    version: int = 2
     viewport: dict[str, float] = Field(
         default_factory=lambda: {"x": 0.0, "y": 0.0, "zoom": 1.0}
     )
     nodes: dict[str, CanvasNode] = Field(default_factory=dict)
-    stacks: list[CanvasStack] = Field(default_factory=list)
 
 
 class GenerateRequest(BaseModel):
@@ -159,6 +184,7 @@ class GenerateRequest(BaseModel):
     batchCount: int = Field(default=1, ge=1, le=8)
     title: str | None = Field(default=None, min_length=1)
     tags: list[str] = Field(default_factory=list)
+    canvasNodeId: str | None = None
 
     @field_validator("tags")
     @classmethod

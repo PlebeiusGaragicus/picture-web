@@ -1,12 +1,34 @@
 import type { Asset, CanvasDocument, GeneratePayload, Project, ProjectDetail } from './types';
 
+const DEBUG = true;
+
+function debugLog(message: string, details?: unknown) {
+  if (!DEBUG) return;
+  if (details === undefined) {
+    console.debug(`[photo-web] ${message}`);
+  } else {
+    console.debug(`[photo-web] ${message}`, details);
+  }
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    headers: init?.body instanceof FormData ? undefined : { 'Content-Type': 'application/json' },
-    ...init,
-  });
+  const method = init?.method ?? 'GET';
+  debugLog(`request ${method} ${url}`);
+  const started = performance.now();
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: init?.body instanceof FormData ? undefined : { 'Content-Type': 'application/json' },
+      ...init,
+    });
+  } catch (error) {
+    console.error(`[photo-web] request failed before response ${method} ${url}`, error);
+    throw error;
+  }
+  debugLog(`response ${response.status} ${method} ${url}`, { ms: Math.round(performance.now() - started) });
   if (!response.ok) {
     const detail = await response.text();
+    console.error(`[photo-web] request failed ${method} ${url}`, { status: response.status, detail });
     throw new Error(detail || response.statusText);
   }
   return response.json() as Promise<T>;

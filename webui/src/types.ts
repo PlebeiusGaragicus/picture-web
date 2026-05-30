@@ -46,11 +46,40 @@ export interface ProjectDetail {
 }
 
 export interface CanvasDocument {
-  version: number;
+  version: 2;
   viewport: { x: number; y: number; zoom: number };
-  nodes: Record<string, { x: number; y: number; width?: number | null }>;
-  stacks: Array<{ runId: string; collapsed: boolean }>;
+  nodes: Record<string, CanvasNode>;
 }
+
+export interface GenerationParams {
+  model?: string | null;
+  aspectRatio?: string | null;
+  imageSize?: string | null;
+  seed?: number | null;
+  batchCount: number;
+}
+
+export interface CanvasNodeLayout {
+  displayName: string;
+  x: number;
+  y: number;
+  width?: number | null;
+}
+
+export interface DraftCanvasNode extends CanvasNodeLayout {
+  type: 'draft';
+  refs: string[];
+  prompt: string;
+  params: GenerationParams;
+}
+
+export interface ImageGroupCanvasNode extends CanvasNodeLayout {
+  type: 'imageGroup';
+  assetIds: string[];
+  activeAssetId?: string | null;
+}
+
+export type CanvasNode = DraftCanvasNode | ImageGroupCanvasNode;
 
 export interface GeneratePayload {
   prompt: string;
@@ -62,4 +91,5 @@ export interface GeneratePayload {
   batchCount: number;
   title?: string | null;
   tags: string[];
+  canvasNodeId?: string | null;
 }

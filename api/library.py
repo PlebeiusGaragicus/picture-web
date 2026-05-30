@@ -15,10 +15,12 @@ from models import (
     AssetMetadata,
     AssetSummary,
     CanvasDocument,
+    DraftCanvasNode,
     DisplayPatch,
     GenerateRequest,
     GenerateResponse,
     GenerationReceipt,
+    ImageGroupCanvasNode,
     Prompt,
     ProviderCapture,
     ProjectCreate,
@@ -160,6 +162,11 @@ def patch_display(slug: str, asset_id: str, payload: DisplayPatch) -> AssetSumma
 
 def read_canvas(slug: str) -> CanvasDocument:
     require_project(slug)
+    return normalize_variant_groups(slug, default_canvas_for_assets(slug, read_stored_canvas(slug)))
+
+
+def read_stored_canvas(slug: str) -> CanvasDocument:
+    require_project(slug)
     path = canvas_json_path(slug)
     if not path.is_file():
         return CanvasDocument()
@@ -168,8 +175,92 @@ def read_canvas(slug: str) -> CanvasDocument:
 
 def write_canvas(slug: str, canvas: CanvasDocument) -> CanvasDocument:
     require_project(slug)
+    validate_canvas(slug, canvas)
     write_json(canvas_json_path(slug), canvas.model_dump(mode="json"))
     return canvas
+
+
+def validate_canvas(slug: str, canvas: CanvasDocument) -> None:
+    require_project(slug)
+    for node_id, node in canvas.nodes.items():
+        if isinstance(node, DraftCanvasNode):
+            validate_refs(slug, node.refs)
+        elif isinstance(node, ImageGroupCanvasNode):
+            for asset_id in node.assetIds:
+                if not asset_json_path(slug, asset_id).is_file() or not asset_png_path(slug, asset_id).is_file():
+                    raise HTTPException(status_code=400, detail=f"Invalid asset in canvas node {node_id}: {asset_id}")
+
+
+def canvas_node_id(asset_id: str) -> str:
+    return f"node_{asset_id}"
+
+
+def default_canvas_for_assets(slug: str, canvas: CanvasDocument) -> CanvasDocument:
+    """Add visible image groups for assets not yet represented on the canvas."""
+    represented = {
+        asset_id
+        for node in canvas.nodes.values()
+        if isinstance(node, ImageGroupCanvasNode)
+        for asset_id in node.assetIds
+    }
+    next_canvas = canvas.model_copy(deep=True)
+    index = len(next_canvas.nodes)
+    for asset in list_assets(slug):
+        if asset.id in represented:
+            continue
+        node_id = canvas_node_id(asset.id)
+        while node_id in next_canvas.nodes:
+            node_id = f"{canvas_node_id(asset.id)}_{index}"
+            index += 1
+        next_canvas.nodes[node_id] = ImageGroupCanvasNode(
+            displayName=asset.title,
+            x=80 + index * 40,
+            y=80 + index * 40,
+            assetIds=[asset.id],
+            activeAssetId=asset.id,
+        )
+        index += 1
+    return next_canvas
+
+
+def variant_key_for_asset(slug: str, asset_id: str) -> tuple[str, tuple[str, ...]] | None:
+    metadata = read_asset_metadata(slug, asset_id)
+    if metadata.kind != "generated" or metadata.prompt is None or metadata.generation is None:
+        return None
+    return (metadata.prompt.text, tuple(metadata.generation.refs))
+
+
+def variant_key_for_node(slug: str, node: ImageGroupCanvasNode) -> tuple[str, tuple[str, ...]] | None:
+    for asset_id in node.assetIds:
+        key = variant_key_for_asset(slug, asset_id)
+        if key is not None:
+            return key
+    return None
+
+
+def normalize_variant_groups(slug: str, canvas: CanvasDocument) -> CanvasDocument:
+    """Collapse generated image groups that are variants of the same prompt/refs."""
+    next_canvas = canvas.model_copy(deep=True)
+    node_by_key: dict[tuple[str, tuple[str, ...]], str] = {}
+    for node_id, node in list(next_canvas.nodes.items()):
+        if not isinstance(node, ImageGroupCanvasNode):
+            continue
+        key = variant_key_for_node(slug, node)
+        if key is None:
+            continue
+        target_id = node_by_key.get(key)
+        if target_id is None:
+            node_by_key[key] = node_id
+            continue
+        target = next_canvas.nodes[target_id]
+        if not isinstance(target, ImageGroupCanvasNode):
+            continue
+        target.assetIds = list(dict.fromkeys([*target.assetIds, *node.assetIds]))
+        if target.activeAssetId not in target.assetIds:
+            target.activeAssetId = target.assetIds[0]
+        next_canvas.nodes[target_id] = target
+        del next_canvas.nodes[node_id]
+    return next_canvas
 
 
 def validate_refs(slug: str, refs: list[str]) -> None:
@@ -281,4 +372,67 @@ def create_generated_assets(
             ),
         )
         created.append(write_asset_metadata(slug, metadata))
+    if payload.canvasNodeId:
+        attach_generated_assets_to_canvas(slug, payload.canvasNodeId, created)
     return GenerateResponse(assets=created)
+
+
+def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[AssetSummary]) -> None:
+    canvas = normalize_variant_groups(slug, read_stored_canvas(slug))
+    existing = canvas.nodes.get(node_id)
+    asset_ids = [asset.id for asset in assets]
+    active_asset_id = asset_ids[0] if asset_ids else None
+    target_node_id = matching_variant_group_node_id(slug, canvas, assets)
+    if target_node_id and target_node_id != node_id:
+        target = canvas.nodes[target_node_id]
+        if isinstance(target, ImageGroupCanvasNode):
+            target.assetIds = list(dict.fromkeys([*target.assetIds, *asset_ids]))
+            target.activeAssetId = active_asset_id or target.activeAssetId
+            canvas.nodes[target_node_id] = target
+            canvas.nodes.pop(node_id, None)
+    elif existing is None or isinstance(existing, DraftCanvasNode):
+        x = existing.x if isinstance(existing, DraftCanvasNode) else 120
+        y = existing.y if isinstance(existing, DraftCanvasNode) else 120
+        width = existing.width if isinstance(existing, DraftCanvasNode) else None
+        canvas.nodes[node_id] = ImageGroupCanvasNode(
+            displayName=assets[0].title if assets else "Generated image",
+            x=x,
+            y=y,
+            width=width,
+            assetIds=asset_ids,
+            activeAssetId=active_asset_id,
+        )
+    elif isinstance(existing, ImageGroupCanvasNode):
+        merged = list(dict.fromkeys([*existing.assetIds, *asset_ids]))
+        existing.assetIds = merged
+        existing.activeAssetId = active_asset_id or existing.activeAssetId
+        canvas.nodes[node_id] = existing
+    write_canvas(slug, canvas)
+
+
+def matching_variant_group_node_id(
+    slug: str,
+    canvas: CanvasDocument,
+    assets: list[AssetSummary],
+) -> str | None:
+    if not assets:
+        return None
+    first = assets[0]
+    if first.kind != "generated" or first.prompt is None or first.generation is None:
+        return None
+    prompt_text = first.prompt.text
+    refs = first.generation.refs
+    for node_id, node in canvas.nodes.items():
+        if not isinstance(node, ImageGroupCanvasNode):
+            continue
+        for asset_id in node.assetIds:
+            metadata = read_asset_metadata(slug, asset_id)
+            if (
+                metadata.kind == "generated"
+                and metadata.prompt is not None
+                and metadata.generation is not None
+                and metadata.prompt.text == prompt_text
+                and metadata.generation.refs == refs
+            ):
+                return node_id
+    return None

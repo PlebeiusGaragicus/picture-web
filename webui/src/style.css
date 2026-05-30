@@ -33,10 +33,6 @@ button {
   width: 100vw;
 }
 
-.app.canvas-only {
-  display: block;
-}
-
 .landing {
   display: grid;
   place-items: center;
@@ -89,7 +85,6 @@ button {
   position: relative;
   min-width: 0;
   height: 100vh;
-  width: 100vw;
 }
 
 .canvas.dragging-file {
@@ -116,6 +111,18 @@ button {
   backdrop-filter: blur(8px);
 }
 
+.zoom-panel {
+  margin-left: 48px;
+  padding: 6px 9px;
+  color: #e5e7eb;
+  background: rgb(15 23 42 / 0.88);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+}
+
 section {
   display: grid;
   gap: 8px;
@@ -125,6 +132,10 @@ section {
 .row {
   display: flex;
   gap: 8px;
+}
+
+.row.compact {
+  width: auto;
 }
 
 input,
@@ -142,6 +153,12 @@ textarea {
   min-height: 100px;
 }
 
+.prompt-textarea {
+  min-height: 180px;
+  overflow: hidden;
+  resize: none;
+}
+
 button {
   padding: 8px 10px;
   color: #0f172a;
@@ -156,11 +173,26 @@ button.secondary {
   background: #334155;
 }
 
+button.danger {
+  color: #fff;
+  background: #dc2626;
+}
+
 .plus-button {
   width: 38px;
   height: 38px;
   padding: 0;
   font-size: 24px;
+  line-height: 1;
+}
+
+.small-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 18px;
   line-height: 1;
 }
 
@@ -170,9 +202,13 @@ button:disabled {
 }
 
 pre {
+  max-width: 100%;
   max-height: 260px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   background: #020617;
   border-radius: 8px;
 }
@@ -224,19 +260,20 @@ pre {
   background: #1e293b;
 }
 
-.popover {
-  position: absolute;
+.details-sidebar {
   z-index: 25;
   display: grid;
-  gap: 10px;
-  width: 340px;
-  max-height: calc(100vh - 48px);
-  overflow: auto;
-  padding: 14px;
+  align-content: start;
+  gap: 18px;
+  width: 360px;
+  min-width: 0;
+  height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 18px;
   background: #0f172a;
-  border: 1px solid #475569;
-  border-radius: 14px;
-  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
+  border-left: 1px solid #334155;
+  box-shadow: -18px 0 48px rgb(0 0 0 / 0.22);
 }
 
 .popover-header {
@@ -244,14 +281,143 @@ pre {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
-.popover h2,
+.popover-header button {
+  flex: 0 0 auto;
+}
+
+.details-sidebar h2,
 .toolbar strong {
   margin: 0;
 }
 
+.details-sidebar h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.details-sidebar h3 {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.sidebar-section {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.parent-section {
+  position: relative;
+}
+
+.parent-list {
+  display: grid;
+  gap: 6px;
+}
+
+.add-parent-button {
+  width: 100%;
+  padding: 8px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.parent-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 6px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+}
+
+.parent-item img,
+.parent-thumb-placeholder {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  object-fit: cover;
+  background: #020617;
+  border-radius: 5px;
+}
+
+.parent-item span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parent-remove {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: #fecaca;
+  background: #7f1d1d;
+  border-radius: 999px;
+  line-height: 1;
+}
+
+.asset-picker-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: grid;
+  gap: 6px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px;
+  background: #020617;
+  border: 1px solid #475569;
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
+}
+
+.asset-picker-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 6px;
+  color: #e5e7eb;
+  background: #1e293b;
+  border: 1px solid #334155;
+  text-align: left;
+}
+
+.asset-picker-row img {
+  width: 34px;
+  height: 34px;
+  object-fit: cover;
+  border-radius: 5px;
+}
+
+.asset-picker-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-picker-row small {
+  color: #94a3b8;
+}
+
 .node {
+  position: relative;
   display: grid;
   gap: 4px;
   width: 180px;
@@ -266,10 +432,71 @@ pre {
 }
 
 .draft-node {
-  min-height: 96px;
-  padding: 14px;
+  padding: 8px;
   color: #dbeafe;
   background: #1e3a8a;
   border: 2px dashed #93c5fd;
   border-radius: 12px;
+}
+
+.draft-placeholder {
+  width: 100%;
+  height: 120px;
+  background:
+    linear-gradient(135deg, rgb(147 197 253 / 0.16) 25%, transparent 25%) -8px 0 / 16px 16px,
+    linear-gradient(225deg, rgb(147 197 253 / 0.16) 25%, transparent 25%) -8px 0 / 16px 16px,
+    linear-gradient(315deg, rgb(147 197 253 / 0.16) 25%, transparent 25%) 0 0 / 16px 16px,
+    linear-gradient(45deg, rgb(147 197 253 / 0.16) 25%, #172554 25%) 0 0 / 16px 16px;
+  border: 1px dashed #bfdbfe;
+  border-radius: 6px;
+}
+
+.image-group-node {
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.24);
+}
+
+.image-group-node.stacked::before,
+.image-group-node.stacked::after {
+  position: absolute;
+  inset: 6px;
+  z-index: -1;
+  content: "";
+  background: #e2e8f0;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+}
+
+.image-group-node.stacked::before {
+  transform: translate(7px, 7px);
+}
+
+.image-group-node.stacked::after {
+  transform: translate(13px, 13px);
+}
+
+.variant-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.variant-controls button {
+  flex: 1;
+  padding: 4px 6px;
+}
+
+.react-flow__handle.output-handle {
+  right: -13px;
+  width: 26px;
+  height: 26px;
+  background: #2563eb;
+  border: 3px solid #dbeafe;
+  box-shadow: 0 0 0 4px rgb(37 99 235 / 0.22);
+}
+
+.react-flow__handle.output-handle:hover {
+  transform: translateY(-50%) scale(1.15);
 }
