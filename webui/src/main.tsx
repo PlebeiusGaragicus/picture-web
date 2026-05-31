@@ -267,18 +267,37 @@ function App() {
 
   const reload = async () => loadProject(openProjectSlug);
 
-  const deleteNodeById = useCallback((nodeId: string) => {
+  const deleteNodeById = useCallback((nodeId: string, assetId?: string) => {
     const nodeToDelete = nodes.find((node) => node.id === nodeId);
+    const assetIdsToDelete = nodeToDelete?.data.kind === 'imageGroup'
+      ? [assetId ?? nodeToDelete.data.activeAsset?.id ?? nodeToDelete.data.activeAssetId ?? nodeToDelete.data.assetIds[0]].filter((id): id is string => Boolean(id))
+      : [];
+    const message = nodeToDelete?.data.kind === 'imageGroup'
+      ? `Delete this variant and move its files to the system Trash?`
+      : 'Delete this draft?';
+    if (!window.confirm(message)) return;
     if (nodeToDelete?.data.kind === 'imageGroup') {
-      void Promise.all(nodeToDelete.data.assetIds.map((assetId) => api.deleteAsset(openProjectSlug, assetId)))
+      void Promise.all(assetIdsToDelete.map((assetId) => api.deleteAsset(openProjectSlug, assetId)))
         .then(() => loadProject(openProjectSlug))
         .catch((err) => {
-          console.error('[photo-web] failed to delete image group assets', err);
+          console.error('[photo-web] failed to delete image asset', err);
           setError(String(err));
         });
     }
     setNodes((current) => {
-      const next = current.filter((node) => node.id !== nodeId);
+      const next = nodeToDelete?.data.kind === 'imageGroup'
+        ? current
+            .map((node) => {
+              if (node.id !== nodeId || node.data.kind !== 'imageGroup') return node;
+              const nextAssetIds = node.data.assetIds.filter((id) => !assetIdsToDelete.includes(id));
+              if (!nextAssetIds.length) return null;
+              const nextActiveAssetId = nextAssetIds.includes(node.data.activeAssetId ?? '') ? node.data.activeAssetId : nextAssetIds[0];
+              const nextAssets = node.data.assets.filter((asset) => nextAssetIds.includes(asset.id));
+              const nextActiveAsset = nextAssets.find((asset) => asset.id === nextActiveAssetId) ?? nextAssets[0] ?? null;
+              return { ...node, data: { ...node.data, assetIds: nextAssetIds, activeAssetId: nextActiveAssetId, assets: nextAssets, activeAsset: nextActiveAsset } };
+            })
+            .filter((node): node is Node<PhotoNodeData> => Boolean(node))
+        : current.filter((node) => node.id !== nodeId);
       void persistNodes(next);
       return next;
     });
@@ -374,6 +393,10 @@ function App() {
     if (!selectedNodeIds.length) return;
     const selected = new Set(selectedNodeIds);
     const selectedImageNodes = nodes.filter((node) => selected.has(node.id) && node.data.kind === 'imageGroup') as Node<ImageGroupNodeData>[];
+    const message = selectedImageNodes.length
+      ? `Delete ${selectedNodeIds.length} selected node(s) and move image files to the system Trash?`
+      : `Delete ${selectedNodeIds.length} selected draft node(s)?`;
+    if (!window.confirm(message)) return;
     try {
       await Promise.all(selectedImageNodes.flatMap((node) => node.data.assetIds.map((assetId) => api.deleteAsset(openProjectSlug, assetId))));
     } catch (err) {
@@ -630,6 +653,7 @@ function App() {
           onImageGroupChange={updateImageGroup}
           onGenerate={generateDraft}
           onGenerateVariants={generateImageVariants}
+          onVariant={changeVariant}
           onDelete={deleteNodeById}
         />
       )}
@@ -639,6 +663,7 @@ function App() {
           projectSlug={openProjectSlug}
           onClose={() => setViewerNodeId(null)}
           onVariant={changeVariant}
+          onDelete={deleteNodeById}
         />
       )}
     </div>
@@ -699,6 +724,7 @@ function NodeSidebar({
   onImageGroupChange,
   onGenerate,
   onGenerateVariants,
+  onVariant,
   onDelete,
 }: {
   node: Node<PhotoNodeData>;
@@ -707,7 +733,8 @@ function NodeSidebar({
   onImageGroupChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
-  onDelete: (id: string) => void;
+  onVariant: (nodeId: string, direction: -1 | 1) => void;
+  onDelete: (id: string, assetId?: string) => void;
 }) {
   if (node.data.kind === 'draft') {
     const draftNode: Node<DraftNodeData> = { ...node, data: node.data };
@@ -738,6 +765,7 @@ function NodeSidebar({
       assets={assets}
       onDelete={onDelete}
       onNodeChange={onImageGroupChange}
+      onVariant={onVariant}
       onGenerateVariants={onGenerateVariants}
     />
   );
@@ -754,7 +782,7 @@ function DraftSidebar({
   assets: Asset[];
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string, assetId?: string) => void;
 }) {
   const draft = node.data;
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
@@ -874,13 +902,15 @@ function ImageSidebar({
   assets,
   onDelete,
   onNodeChange,
+  onVariant,
   onGenerateVariants,
 }: {
   node: Node<ImageGroupNodeData>;
   asset: Asset;
   assets: Asset[];
-  onDelete: (id: string) => void;
+  onDelete: (id: string, assetId?: string) => void;
   onNodeChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
+  onVariant: (nodeId: string, direction: -1 | 1) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
 }) {
   const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
@@ -888,6 +918,13 @@ function ImageSidebar({
   const prompt = asset.prompt?.text ?? '';
   const refs = asset.generation?.refs ?? [];
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
+  const activeVariantIndex = Math.max(0, node.data.assetIds.indexOf(asset.id));
+  const changeSidebarVariantByClickSide = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (node.data.assetIds.length < 2) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const direction = event.clientX < rect.left + rect.width / 2 ? -1 : 1;
+    onVariant(node.id, direction);
+  };
   useEffect(() => {
     setVariantParams({
       model: asset.generation?.model ?? defaultDraftParams.model,
@@ -901,13 +938,40 @@ function ImageSidebar({
     <aside className="details-sidebar">
       <div className="popover-header">
         <h2>{node.data.displayName}</h2>
-        <button className="danger" onClick={() => onDelete(node.id)}>Delete</button>
+        <button className="danger" onClick={() => onDelete(node.id, asset.id)}>Delete Variant</button>
       </div>
       <label className="field-label">
         Name
         <input value={node.data.displayName} onChange={(event) => onNodeChange(node.id, { displayName: event.target.value })} />
       </label>
-      <p className="muted">Variant {(node.data.assetIds.indexOf(asset.id) + 1) || 1} / {node.data.assetIds.length}</p>
+      <div className="sidebar-variant-preview" onClick={changeSidebarVariantByClickSide}>
+        {asset.thumbnailUrl && <img src={asset.thumbnailUrl} alt="" />}
+        <span>{activeVariantIndex + 1} / {node.data.assetIds.length}</span>
+        {node.data.assetIds.length > 1 && (
+          <>
+            <button
+              className="sidebar-variant-nav previous"
+              onClick={(event) => {
+                event.stopPropagation();
+                onVariant(node.id, -1);
+              }}
+              title="Previous variant"
+            >
+              &lt;
+            </button>
+            <button
+              className="sidebar-variant-nav next"
+              onClick={(event) => {
+                event.stopPropagation();
+                onVariant(node.id, 1);
+              }}
+              title="Next variant"
+            >
+              &gt;
+            </button>
+          </>
+        )}
+      </div>
       {prompt && (
         <section className="sidebar-section">
           <label className="field-label">
@@ -1101,11 +1165,13 @@ function ImageViewer({
   projectSlug,
   onClose,
   onVariant,
+  onDelete,
 }: {
   node?: Node<ImageGroupNodeData>;
   projectSlug: string;
   onClose: () => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
+  onDelete: (nodeId: string, assetId?: string) => void;
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1133,6 +1199,15 @@ function ImageViewer({
       <div className="image-viewer-toolbar" onClick={(event) => event.stopPropagation()}>
         <strong>{node.data.displayName}</strong>
         <span>{currentIndex + 1} / {node.data.assetIds.length}</span>
+        <button
+          className="danger"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete(node.id, asset.id);
+          }}
+        >
+          Delete Variant
+        </button>
         <button className="secondary" onClick={onClose}>Close</button>
       </div>
       {node.data.assetIds.length > 1 && (

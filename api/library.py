@@ -33,6 +33,7 @@ from models import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LIBRARY_ROOT = REPO_ROOT / "photo-library"
 PROJECTS_ROOT = LIBRARY_ROOT / "projects"
+SYSTEM_TRASH = Path.home() / ".Trash"
 THUMB_MAX_SIZE = (384, 384)
 
 
@@ -165,12 +166,24 @@ def write_asset_metadata(slug: str, metadata: AssetMetadata) -> AssetSummary:
     return metadata_to_summary(slug, metadata)
 
 
+def move_to_trash(path: Path) -> None:
+    if not path.exists():
+        return
+    destination = SYSTEM_TRASH / path.name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    counter = 1
+    while destination.exists():
+        destination = SYSTEM_TRASH / f"{path.stem}_{counter}{path.suffix}"
+        counter += 1
+    shutil.move(str(path), str(destination))
+
+
 def delete_asset(slug: str, asset_id: str) -> None:
     require_project(slug)
     if not asset_json_path(slug, asset_id).is_file():
         raise HTTPException(status_code=404, detail=f"Asset not found: {asset_id}")
-    asset_json_path(slug, asset_id).unlink(missing_ok=True)
-    asset_png_path(slug, asset_id).unlink(missing_ok=True)
+    move_to_trash(asset_json_path(slug, asset_id))
+    move_to_trash(asset_png_path(slug, asset_id))
 
     canvas = read_stored_canvas(slug)
     changed = False

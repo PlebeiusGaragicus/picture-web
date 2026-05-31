@@ -203,6 +203,63 @@ textarea {
   background: #111827;
 }
 
+.sidebar-variant-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  min-height: 180px;
+  background: #fff;
+  border-radius: 12px;
+}
+
+.sidebar-variant-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: 240px;
+  object-fit: contain;
+}
+
+.sidebar-variant-preview span {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 4px 8px;
+  color: #dbeafe;
+  background: rgb(15 23 42 / 0.82);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sidebar-variant-nav {
+  position: absolute;
+  top: 50%;
+  width: 36px;
+  height: 52px;
+  padding: 0;
+  color: #dbeafe;
+  background: rgb(15 23 42 / 0.78);
+  border: 1px solid #93c5fd;
+  border-radius: 999px;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease;
+}
+
+.sidebar-variant-preview:hover .sidebar-variant-nav {
+  opacity: 1;
+}
+
+.sidebar-variant-nav.previous {
+  left: 10px;
+}
+
+.sidebar-variant-nav.next {
+  right: 10px;
+}
+
 button {
   padding: 8px 10px;
   color: #0f172a;
@@ -596,9 +653,13 @@ pre {
   font-family: Georgia, serif;
   font-size: 17px;
   font-style: italic;
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
 
-.image-group-node:hover .view-image-button {
+.image-group-node:hover .view-image-button,
+.image-group-node:hover .details-button,
+.draft-node:hover .details-button {
   opacity: 1;
 }
 

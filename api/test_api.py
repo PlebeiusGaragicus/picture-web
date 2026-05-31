@@ -13,6 +13,7 @@ def setup_tmp_library(tmp_path, monkeypatch):
     root = tmp_path / "photo-library"
     monkeypatch.setattr(library, "LIBRARY_ROOT", root)
     monkeypatch.setattr(library, "PROJECTS_ROOT", root / "projects")
+    monkeypatch.setattr(library, "SYSTEM_TRASH", tmp_path / "system-trash")
     return TestClient(app)
 
 
@@ -169,6 +170,8 @@ def test_delete_imported_asset_removes_canvas_node_and_pixels(tmp_path, monkeypa
     assert response.status_code == 204
     assert not library.asset_json_path("farm-comic", asset_id).exists()
     assert not library.asset_png_path("farm-comic", asset_id).exists()
+    assert (library.SYSTEM_TRASH / f"{asset_id}.json").exists()
+    assert (library.SYSTEM_TRASH / f"{asset_id}.png").exists()
     assert client.get("/api/projects/farm-comic/canvas").json()["nodes"] == {}
 
 
