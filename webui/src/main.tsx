@@ -973,7 +973,7 @@ function DraftSidebar({
           Generate
         </button>
         <label>
-          Candidates
+          Batch size
           <input
             type="number"
             min={1}
@@ -1043,6 +1043,16 @@ function ImageSidebar({
       <div className="sidebar-variant-preview" onClick={changeSidebarVariantByClickSide}>
         {asset.thumbnailUrl && <img src={asset.thumbnailUrl} alt="" />}
         <span>{activeVariantIndex + 1} / {node.data.assetIds.length}</span>
+        <button
+          className="sidebar-preview-eye"
+          onClick={(event) => {
+            event.stopPropagation();
+            node.data.onView(node.id);
+          }}
+          title="View full image"
+        >
+          👁️
+        </button>
         {node.data.assetIds.length > 1 && (
           <>
             <button
@@ -1095,7 +1105,7 @@ function ImageSidebar({
       )}
       {asset.generation && (
         <section className="sidebar-section generation-section">
-          <h3>Generation</h3>
+          <h3>Parameters</h3>
           <label className="field-label">
             Model
             <select
@@ -1148,7 +1158,7 @@ function ImageSidebar({
               </button>
               <button className="secondary" onClick={() => setIsVariantPanelOpen(false)}>Cancel</button>
               <label>
-                Candidates
+                Batch size
                 <input
                   type="number"
                   min={1}

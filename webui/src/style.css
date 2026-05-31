@@ -190,7 +190,10 @@ textarea {
 }
 
 .prompt-preview {
-  min-height: 96px;
+  min-height: 140px;
+  max-height: 320px;
+  overflow-y: auto;
+  resize: vertical;
 }
 
 .variant-panel {
@@ -231,6 +234,28 @@ textarea {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 800;
+}
+
+.sidebar-preview-eye {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  color: #dbeafe;
+  background: rgb(15 23 42 / 0.78);
+  border: 1px solid #93c5fd;
+  border-radius: 999px;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  transition: opacity 120ms ease;
+}
+
+.sidebar-variant-preview:hover .sidebar-preview-eye {
+  opacity: 1;
 }
 
 .sidebar-variant-nav {
@@ -460,6 +485,7 @@ pre {
   grid-template-columns: 1fr auto 112px;
   gap: 8px;
   align-items: end;
+  margin-top: 14px;
 }
 
 .generate-control button {
