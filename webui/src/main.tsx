@@ -237,14 +237,14 @@ function App() {
       const refs = new Set(node.data.assets.flatMap((asset) => asset.generation?.refs ?? []));
       return Array.from(refs).flatMap((ref) => {
         const source = nodeForAsset.get(ref);
-        return source && source !== node.id ? [{ id: `${source}-${node.id}-${ref}`, source, target: node.id }] : [];
+        return source && source !== node.id ? [{ id: `${source}-${node.id}-${ref}`, source, target: node.id, selectable: false, focusable: false }] : [];
       });
     });
     const draftEdges = nodes.flatMap((node) => {
       if (node.data.kind !== 'draft') return [];
       return node.data.refs.flatMap((ref) => {
         const source = nodeForAsset.get(ref);
-        return source ? [{ id: `${source}-${node.id}-${ref}`, source, target: node.id, animated: true }] : [];
+        return source ? [{ id: `${source}-${node.id}-${ref}`, source, target: node.id, animated: true, selectable: false, focusable: false }] : [];
       });
     });
     return [...assetEdges, ...draftEdges];
@@ -546,6 +546,10 @@ function App() {
           nodeTypes={nodeTypes}
           nodes={nodes}
           edges={edges}
+          edgesFocusable={false}
+          edgesUpdatable={false}
+          selectNodesOnDrag={false}
+          elementsSelectable
           minZoom={minZoom}
           maxZoom={maxZoom}
           onMove={(_, viewport) => setZoomPercent(zoomToPercent(viewport.zoom))}
@@ -627,10 +631,6 @@ function App() {
           onGenerate={generateDraft}
           onGenerateVariants={generateImageVariants}
           onDelete={deleteNodeById}
-          onDisplaySaved={async () => {
-            await reload();
-          }}
-          projectSlug={openProjectSlug}
         />
       )}
       {viewerNodeId && (
@@ -695,23 +695,19 @@ function ProjectLanding({
 function NodeSidebar({
   node,
   assets,
-  projectSlug,
   onDraftChange,
   onImageGroupChange,
   onGenerate,
   onGenerateVariants,
   onDelete,
-  onDisplaySaved,
 }: {
   node: Node<PhotoNodeData>;
   assets: Asset[];
-  projectSlug: string;
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onImageGroupChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
   onDelete: (id: string) => void;
-  onDisplaySaved: () => void;
 }) {
   if (node.data.kind === 'draft') {
     const draftNode: Node<DraftNodeData> = { ...node, data: node.data };
@@ -740,11 +736,9 @@ function NodeSidebar({
       node={imageNode}
       asset={node.data.activeAsset}
       assets={assets}
-      projectSlug={projectSlug}
       onDelete={onDelete}
       onNodeChange={onImageGroupChange}
       onGenerateVariants={onGenerateVariants}
-      onDisplaySaved={onDisplaySaved}
     />
   );
 }
@@ -878,31 +872,23 @@ function ImageSidebar({
   node,
   asset,
   assets,
-  projectSlug,
   onDelete,
   onNodeChange,
   onGenerateVariants,
-  onDisplaySaved,
 }: {
   node: Node<ImageGroupNodeData>;
   asset: Asset;
   assets: Asset[];
-  projectSlug: string;
   onDelete: (id: string) => void;
   onNodeChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
-  onDisplaySaved: () => void;
 }) {
-  const [title, setTitle] = useState(asset.title);
-  const [tags, setTags] = useState(asset.tags.join(', '));
   const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
   const [variantParams, setVariantParams] = useState(defaultDraftParams);
   const prompt = asset.prompt?.text ?? '';
   const refs = asset.generation?.refs ?? [];
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   useEffect(() => {
-    setTitle(asset.title);
-    setTags(asset.tags.join(', '));
     setVariantParams({
       model: asset.generation?.model ?? defaultDraftParams.model,
       aspectRatio: asset.generation?.aspectRatio ?? defaultDraftParams.aspectRatio,
@@ -911,10 +897,6 @@ function ImageSidebar({
       batchCount: 1,
     });
   }, [asset]);
-  const save = async () => {
-    await api.patchDisplay(projectSlug, asset.id, title, tags.split(',').map((tag) => tag.trim()).filter(Boolean));
-    onDisplaySaved();
-  };
   return (
     <aside className="details-sidebar">
       <div className="popover-header">
@@ -926,9 +908,6 @@ function ImageSidebar({
         <input value={node.data.displayName} onChange={(event) => onNodeChange(node.id, { displayName: event.target.value })} />
       </label>
       <p className="muted">Variant {(node.data.assetIds.indexOf(asset.id) + 1) || 1} / {node.data.assetIds.length}</p>
-      <input value={title} onChange={(event) => setTitle(event.target.value)} />
-      <input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="tags, comma-separated" />
-      <button onClick={save}>Save display</button>
       {prompt && (
         <section className="sidebar-section">
           <label className="field-label">
@@ -1020,7 +999,7 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
   if (!asset) {
     return (
       <div className="node">
-        <Handle type="target" position={Position.Left} isConnectable={false} />
+        <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
         <strong>Missing image</strong>
         <Handle type="source" position={Position.Right} className="output-handle" />
       </div>
@@ -1038,30 +1017,7 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
     .join('\n');
   return (
     <div className={`node image-group-node ${data.assetIds.length > 1 ? 'stacked' : ''}`} title={tooltip}>
-      <Handle type="target" position={Position.Left} isConnectable={false} />
-      <div className="node-image-frame">
-        {asset.thumbnailUrl && <img src={asset.thumbnailUrl} alt="" />}
-      </div>
-      <button
-        className="node-action-button view-image-button"
-        onClick={(event) => {
-          event.stopPropagation();
-          data.onView(data.nodeId);
-        }}
-        title="View full image"
-      >
-        👁️
-      </button>
-      <button
-        className="node-action-button details-button"
-        onClick={(event) => {
-          event.stopPropagation();
-          data.onDetails(data.nodeId);
-        }}
-        title="Show details"
-      >
-        i
-      </button>
+      <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       {isEditingName ? (
         <input
           className="node-title-input"
@@ -1083,10 +1039,37 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
           {visibleDisplayName(data.displayName) || 'title'}
         </strong>
       )}
+      <div className="node-image-frame">
+        {asset.thumbnailUrl && <img src={asset.thumbnailUrl} alt="" />}
+      </div>
+      <button
+        className="node-action-button view-image-button nodrag nopan"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          data.onView(data.nodeId);
+        }}
+        title="View full image"
+      >
+        👁️
+      </button>
+      <button
+        className="node-action-button details-button nodrag nopan"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          data.onDetails(data.nodeId);
+        }}
+        title="Show details"
+      >
+        i
+      </button>
       {data.assetIds.length > 1 && <small>{currentIndex + 1} / {data.assetIds.length}</small>}
       {data.assetIds.length > 1 && (
         <div className="variant-controls">
           <button
+            className="nodrag nopan"
+            onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
               data.onVariant(data.nodeId, -1);
@@ -1096,6 +1079,8 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
             &lt;
           </button>
           <button
+            className="nodrag nopan"
+            onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
               data.onVariant(data.nodeId, 1);
@@ -1136,6 +1121,13 @@ function ImageViewer({
   const asset = node.data.activeAsset;
   const currentIndex = Math.max(0, node.data.assetIds.indexOf(asset.id));
   const imageUrl = `/api/projects/${projectSlug}/assets/${asset.id}/image`;
+  const changeByClickSide = (event: React.MouseEvent<HTMLImageElement>) => {
+    event.stopPropagation();
+    if (node.data.assetIds.length < 2) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const direction = event.clientX < rect.left + rect.width / 2 ? -1 : 1;
+    onVariant(node.id, direction);
+  };
   return (
     <div className="image-viewer" onClick={onClose}>
       <div className="image-viewer-toolbar" onClick={(event) => event.stopPropagation()}>
@@ -1155,7 +1147,7 @@ function ImageViewer({
           &lt;
         </button>
       )}
-      <img src={imageUrl} alt={node.data.displayName} onClick={(event) => event.stopPropagation()} />
+      <img src={imageUrl} alt={node.data.displayName} onClick={changeByClickSide} />
       {node.data.assetIds.length > 1 && (
         <button
           className="image-viewer-nav next"
@@ -1181,7 +1173,7 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
   ].join('\n');
   return (
     <div className="node draft-node" title={tooltip}>
-      <Handle type="target" position={Position.Left} isConnectable={false} />
+      <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       <button
         className="node-action-button details-button"
         onClick={(event) => {
