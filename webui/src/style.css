@@ -169,6 +169,26 @@ textarea {
   resize: none;
 }
 
+.locked-field {
+  color: #cbd5e1;
+  background: #0f172a;
+  border-color: #334155;
+}
+
+.prompt-preview {
+  min-height: 96px;
+}
+
+.variant-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 14px;
+  background: #111827;
+}
+
 button {
   padding: 8px 10px;
   color: #0f172a;
@@ -506,6 +526,35 @@ pre {
   border: 1px solid #cbd5e1;
   border-radius: 12px;
   box-shadow: 0 12px 30px rgb(0 0 0 / 0.24);
+}
+
+.node-title {
+  min-height: 18px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-title:empty::before {
+  content: "";
+}
+
+.node-title.placeholder {
+  color: #94a3b8;
+  font-style: italic;
+  font-weight: 600;
+}
+
+.node-title-input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  color: #0f172a;
+  background: #fff;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  font: inherit;
 }
 
 .view-image-button {

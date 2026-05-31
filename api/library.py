@@ -403,7 +403,7 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
         width = existing.width if isinstance(existing, DraftCanvasNode) else None
         display_name = existing.displayName if isinstance(existing, DraftCanvasNode) else None
         canvas.nodes[node_id] = ImageGroupCanvasNode(
-            displayName=display_name or (assets[0].title if assets else "Generated image"),
+            displayName=display_name if display_name is not None else (assets[0].title if assets else ""),
             x=x,
             y=y,
             width=width,

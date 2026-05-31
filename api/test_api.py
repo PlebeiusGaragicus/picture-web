@@ -268,6 +268,43 @@ def test_generate_matching_prompt_and_refs_merges_into_existing_group(tmp_path, 
     assert len(node["assetIds"]) == 2
 
 
+def test_generate_variants_appends_to_existing_image_group(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    def fake_generate(**kwargs):
+        make_png(kwargs["output_png"], color="blue")
+
+        class Result:
+            provider_response = {"imageFile": kwargs["output_png"].name, "response": {"candidates": [{"finishReason": "STOP"}]}}
+
+        return Result()
+
+    import gemini
+
+    monkeypatch.setattr(gemini, "generate_image", fake_generate)
+    first = client.post(
+        "/api/projects/farm-comic/generate",
+        json={"prompt": "same child", "refs": [], "seed": 1, "batchCount": 1, "tags": [], "canvasNodeId": "node_1", "title": "Child"},
+    )
+    assert first.status_code == 200
+    first_asset = first.json()["assets"][0]["id"]
+
+    second = client.post(
+        "/api/projects/farm-comic/generate",
+        json={"prompt": "same child", "refs": [], "seed": 2, "batchCount": 2, "tags": [], "canvasNodeId": "node_1", "title": "Child"},
+    )
+    assert second.status_code == 200
+
+    canvas = client.get("/api/projects/farm-comic/canvas").json()
+    assert list(canvas["nodes"].keys()) == ["node_1"]
+    node = canvas["nodes"]["node_1"]
+    assert node["displayName"] == "Child"
+    assert len(node["assetIds"]) == 3
+    assert node["assetIds"][0] == first_asset
+    assert node["activeAssetId"] == node["assetIds"][1]
+
+
 def test_read_canvas_normalizes_stale_duplicate_variant_nodes(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)

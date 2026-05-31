@@ -17,7 +17,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import './style.css';
 import { api } from './api';
-import type { Asset, CanvasDocument, DraftCanvasNode, GeneratePayload, ImageGroupCanvasNode, Project } from './types';
+import type { Asset, CanvasDocument, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project } from './types';
 
 interface DraftNodeData extends DraftCanvasNode {
   kind: 'draft';
@@ -32,6 +32,7 @@ interface ImageGroupNodeData extends ImageGroupCanvasNode {
   activeAsset: Asset | null;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onView: (nodeId: string) => void;
+  onDisplayNameChange: (nodeId: string, displayName: string) => void;
 }
 
 type PhotoNodeData = DraftNodeData | ImageGroupNodeData;
@@ -42,7 +43,7 @@ const emptyCanvas: CanvasDocument = {
   nodes: {},
 };
 
-const defaultDraftParams = { model: 'gemini-3.1-flash-image', aspectRatio: '16:9', imageSize: '1K', seed: null, batchCount: 1 };
+const defaultDraftParams: GenerationParams = { model: 'gemini-3.1-flash-image', aspectRatio: '16:9', imageSize: '1K', seed: null, batchCount: 1 };
 const minZoom = 0.2;
 const maxZoom = 2;
 
@@ -89,9 +90,8 @@ function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): Ca
   };
 }
 
-function displayNameFromPrompt(prompt: string) {
-  const firstLine = prompt.trim().split(/\s+/).slice(0, 6).join(' ');
-  return firstLine || 'Draft';
+function visibleDisplayName(displayName: string) {
+  return /^(Draft|Generated\s+[0-9A-Z]+)$/i.test(displayName.trim()) ? '' : displayName;
 }
 
 function toFlowNodes(
@@ -99,6 +99,7 @@ function toFlowNodes(
   assets: Asset[],
   onVariant: (nodeId: string, direction: -1 | 1) => void = () => undefined,
   onView: (nodeId: string) => void = () => undefined,
+  onDisplayNameChange: (nodeId: string, displayName: string) => void = () => undefined,
 ): Node<PhotoNodeData>[] {
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
   const displayNameByAssetId = new Map<string, string>();
@@ -122,7 +123,7 @@ function toFlowNodes(
       id,
       position: { x: canvasNode.x, y: canvasNode.y },
       type: 'imageGroup',
-      data: { ...canvasNode, kind: 'imageGroup', nodeId: id, assets: groupAssets, activeAsset, onVariant, onView },
+      data: { ...canvasNode, kind: 'imageGroup', nodeId: id, assets: groupAssets, activeAsset, onVariant, onView, onDisplayNameChange },
     };
   });
 }
@@ -145,6 +146,19 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const reactFlowRef = useRef<ReactFlowInstance<PhotoNodeData> | null>(null);
+
+  const updateImageGroupDisplayName = useCallback((nodeId: string, displayName: string) => {
+    setNodes((current) => {
+      const nextNodes = current.map((node) =>
+        node.id === nodeId && node.data.kind === 'imageGroup' ? { ...node, data: { ...node.data, displayName } } : node,
+      );
+      persistNodes(nextNodes, { refresh: false }).catch((err) => {
+        console.error('[photo-web] failed to persist image group name', err);
+        setError(String(err));
+      });
+      return nextNodes;
+    });
+  }, []);
 
   const changeVariant = useCallback((nodeId: string, direction: -1 | 1) => {
     setNodes((current) => {
@@ -184,8 +198,8 @@ function App() {
     const [detail, layout] = await Promise.all([api.getProject(projectSlug), api.getCanvas(projectSlug)]);
     setAssets(detail.assets);
     setCanvas(layout);
-    setNodes(toFlowNodes(layout, detail.assets, changeVariant, openViewer));
-  }, [changeVariant, openViewer]);
+    setNodes(toFlowNodes(layout, detail.assets, changeVariant, openViewer, updateImageGroupDisplayName));
+  }, [changeVariant, openViewer, updateImageGroupDisplayName]);
 
   useEffect(() => {
     loadProjects().catch((err) => setError(String(err)));
@@ -322,7 +336,7 @@ function App() {
     const saved = await api.saveCanvas(openProjectSlug, next);
     setCanvas(saved);
     if (options.refresh ?? true) {
-      setNodes(toFlowNodes(saved, assets, changeVariant, openViewer));
+      setNodes(toFlowNodes(saved, assets, changeVariant, openViewer, updateImageGroupDisplayName));
     }
   };
 
@@ -359,7 +373,7 @@ function App() {
         kind: 'draft',
         nodeId,
         type: 'draft',
-        displayName: 'Draft',
+        displayName: '',
         x: position.x,
         y: position.y,
         refs: Array.from(new Set(refs)),
@@ -395,13 +409,40 @@ function App() {
         imageSize: draft.params.imageSize,
         seed: draft.params.seed,
         batchCount: draft.params.batchCount,
-        title: draft.displayName,
+        title: visibleDisplayName(draft.displayName) || null,
         tags: [],
         canvasNodeId: id,
       };
       await api.generate(openProjectSlug, payload);
       setPopoverNodeId(null);
       await reload();
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const generateImageVariants = async (id: string, group: ImageGroupNodeData, params: GenerationParams) => {
+    const sourceAsset = group.activeAsset ?? group.assets[0] ?? null;
+    const prompt = sourceAsset?.prompt?.text ?? '';
+    const refs = sourceAsset?.generation?.refs ?? [];
+    if (!prompt || !sourceAsset?.generation) return;
+    try {
+      setError(null);
+      const payload: GeneratePayload = {
+        prompt,
+        refs,
+        model: params.model,
+        aspectRatio: params.aspectRatio,
+        imageSize: params.imageSize,
+        seed: params.seed,
+        batchCount: params.batchCount,
+        title: visibleDisplayName(group.displayName) || null,
+        tags: [],
+        canvasNodeId: id,
+      };
+      await api.generate(openProjectSlug, payload);
+      await reload();
+      setPopoverNodeId(id);
     } catch (err) {
       setError(String(err));
     }
@@ -548,6 +589,7 @@ function App() {
           onDraftChange={updateDraft}
           onImageGroupChange={updateImageGroup}
           onGenerate={generateDraft}
+          onGenerateVariants={generateImageVariants}
           onDelete={deleteNodeById}
           onDisplaySaved={async () => {
             await reload();
@@ -623,6 +665,7 @@ function NodeSidebar({
   onDraftChange,
   onImageGroupChange,
   onGenerate,
+  onGenerateVariants,
   onDelete,
   onDisplaySaved,
 }: {
@@ -632,6 +675,7 @@ function NodeSidebar({
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onImageGroupChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
+  onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
   onDelete: (id: string) => void;
   onDisplaySaved: () => void;
 }) {
@@ -657,7 +701,17 @@ function NodeSidebar({
       </aside>
     );
   }
-  return <ImageSidebar node={imageNode} asset={node.data.activeAsset} projectSlug={projectSlug} onDelete={onDelete} onNodeChange={onImageGroupChange} onDisplaySaved={onDisplaySaved} />;
+  return (
+    <ImageSidebar
+      node={imageNode}
+      asset={node.data.activeAsset}
+      projectSlug={projectSlug}
+      onDelete={onDelete}
+      onNodeChange={onImageGroupChange}
+      onGenerateVariants={onGenerateVariants}
+      onDisplaySaved={onDisplaySaved}
+    />
+  );
 }
 
 function DraftSidebar({
@@ -687,7 +741,7 @@ function DraftSidebar({
   return (
     <aside className="details-sidebar">
       <div className="popover-header">
-        <h2>{draft.displayName}</h2>
+        <h2>{visibleDisplayName(draft.displayName) || 'Draft'}</h2>
         <button className="danger" onClick={() => onDelete(node.id)}>Delete</button>
       </div>
       <label className="field-label">
@@ -764,12 +818,7 @@ function DraftSidebar({
         className="prompt-textarea"
         autoFocus
         value={draft.prompt}
-        onChange={(event) =>
-          onDraftChange(node.id, {
-            prompt: event.target.value,
-            displayName: draft.displayName === 'Draft' ? displayNameFromPrompt(event.target.value) : draft.displayName,
-          })
-        }
+        onChange={(event) => onDraftChange(node.id, { prompt: event.target.value })}
         placeholder="Prompt"
       />
       <div className="generate-control">
@@ -797,6 +846,7 @@ function ImageSidebar({
   projectSlug,
   onDelete,
   onNodeChange,
+  onGenerateVariants,
   onDisplaySaved,
 }: {
   node: Node<ImageGroupNodeData>;
@@ -804,13 +854,25 @@ function ImageSidebar({
   projectSlug: string;
   onDelete: (id: string) => void;
   onNodeChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
+  onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
   onDisplaySaved: () => void;
 }) {
   const [title, setTitle] = useState(asset.title);
   const [tags, setTags] = useState(asset.tags.join(', '));
+  const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
+  const [variantParams, setVariantParams] = useState(defaultDraftParams);
+  const prompt = asset.prompt?.text ?? '';
+  const refs = asset.generation?.refs ?? [];
   useEffect(() => {
     setTitle(asset.title);
     setTags(asset.tags.join(', '));
+    setVariantParams({
+      model: asset.generation?.model ?? defaultDraftParams.model,
+      aspectRatio: asset.generation?.aspectRatio ?? defaultDraftParams.aspectRatio,
+      imageSize: asset.generation?.imageSize ?? defaultDraftParams.imageSize,
+      seed: null,
+      batchCount: 1,
+    });
   }, [asset]);
   const save = async () => {
     await api.patchDisplay(projectSlug, asset.id, title, tags.split(',').map((tag) => tag.trim()).filter(Boolean));
@@ -830,6 +892,78 @@ function ImageSidebar({
       <input value={title} onChange={(event) => setTitle(event.target.value)} />
       <input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="tags, comma-separated" />
       <button onClick={save}>Save display</button>
+      {prompt && (
+        <section className="sidebar-section">
+          <label className="field-label">
+            Prompt
+            <textarea className="prompt-textarea locked-field prompt-preview" value={prompt} readOnly />
+          </label>
+        </section>
+      )}
+      {asset.generation && (
+        <section className="sidebar-section">
+          <button className="secondary" onClick={() => setIsVariantPanelOpen((current) => !current)}>
+            {isVariantPanelOpen ? 'Hide variant options' : 'Create variants'}
+          </button>
+          {isVariantPanelOpen && (
+            <div className="variant-panel">
+              <div>
+                <h3>Parents</h3>
+                {refs.length === 0 && <p className="muted">None</p>}
+                {refs.length > 0 && (
+                  <div className="parent-list">
+                    {refs.map((ref) => (
+                      <div className="parent-item" key={ref}>
+                        <div className="parent-thumb-placeholder" />
+                        <span>{ref}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="row">
+                <input
+                  value={variantParams.seed ?? ''}
+                  onChange={(event) =>
+                    setVariantParams((current) => ({ ...current, seed: event.target.value ? Number(event.target.value) : null }))
+                  }
+                  placeholder="Seed optional"
+                />
+              </div>
+              <div className="row">
+                <select value={variantParams.aspectRatio ?? '16:9'} onChange={(event) => setVariantParams((current) => ({ ...current, aspectRatio: event.target.value }))}>
+                  <option value="16:9">16:9</option>
+                  <option value="4:3">4:3</option>
+                  <option value="1:1">1:1</option>
+                  <option value="3:4">3:4</option>
+                  <option value="9:16">9:16</option>
+                </select>
+                <select value={variantParams.imageSize ?? '1K'} onChange={(event) => setVariantParams((current) => ({ ...current, imageSize: event.target.value }))}>
+                  <option value="512">512</option>
+                  <option value="1K">1K</option>
+                  <option value="2K">2K</option>
+                  <option value="4K">4K</option>
+                </select>
+              </div>
+              <div className="generate-control">
+                <button onClick={() => onGenerateVariants(node.id, node.data, variantParams)} disabled={!prompt.trim()}>
+                  Generate variants
+                </button>
+                <label>
+                  Candidates
+                  <input
+                    type="number"
+                    min={1}
+                    max={8}
+                    value={variantParams.batchCount}
+                    onChange={(event) => setVariantParams((current) => ({ ...current, batchCount: Number(event.target.value) }))}
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
       {asset.generation && <pre>{JSON.stringify({ prompt: asset.prompt, generation: asset.generation }, null, 2)}</pre>}
     </aside>
   );
@@ -837,6 +971,15 @@ function ImageSidebar({
 
 function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
   const asset = data.activeAsset;
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [draftName, setDraftName] = useState(visibleDisplayName(data.displayName));
+  useEffect(() => {
+    if (!isEditingName) setDraftName(visibleDisplayName(data.displayName));
+  }, [data.displayName, isEditingName]);
+  const saveName = () => {
+    data.onDisplayNameChange(data.nodeId, draftName.trim());
+    setIsEditingName(false);
+  };
   if (!asset) {
     return (
       <div className="node">
@@ -872,7 +1015,27 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
       >
         *
       </button>
-      <strong>{data.displayName}</strong>
+      {isEditingName ? (
+        <input
+          className="node-title-input"
+          value={draftName}
+          autoFocus
+          onChange={(event) => setDraftName(event.target.value)}
+          onBlur={saveName}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') saveName();
+            if (event.key === 'Escape') {
+              setDraftName(visibleDisplayName(data.displayName));
+              setIsEditingName(false);
+            }
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+        />
+      ) : (
+        <strong className={`node-title ${visibleDisplayName(data.displayName) ? '' : 'placeholder'}`} onDoubleClick={() => setIsEditingName(true)}>
+          {visibleDisplayName(data.displayName) || 'title'}
+        </strong>
+      )}
       {data.assetIds.length > 1 && <small>{currentIndex + 1} / {data.assetIds.length}</small>}
       {data.assetIds.length > 1 && (
         <div className="variant-controls">
