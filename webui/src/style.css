@@ -726,6 +726,11 @@ pre {
   font-weight: 600;
 }
 
+.image-group-node .node-title {
+  color: #e5e7eb;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+}
+
 .node-title-input {
   width: 100%;
   min-width: 0;
