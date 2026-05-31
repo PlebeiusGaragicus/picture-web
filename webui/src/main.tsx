@@ -1430,6 +1430,13 @@ function ImageViewer({
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
   const parentAssets = (asset.generation?.refs ?? []).map((ref) => assetById.get(ref)).filter((asset): asset is Asset => Boolean(asset));
   const childAssets = assets.filter((candidate) => candidate.generation?.refs.includes(asset.id));
+  const viewerClassName = [
+    'image-viewer',
+    parentAssets.length > 0 ? 'has-parents' : '',
+    childAssets.length > 0 ? 'has-children' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   const changeByClickSide = (event: React.MouseEvent<HTMLImageElement>) => {
     event.stopPropagation();
     if (node.data.assetIds.length < 2) return;
@@ -1438,7 +1445,7 @@ function ImageViewer({
     onVariant(node.id, direction);
   };
   return (
-    <div className="image-viewer" onClick={onClose}>
+    <div className={viewerClassName} onClick={onClose}>
       <div className="image-viewer-toolbar" onClick={(event) => event.stopPropagation()}>
         <div className="image-viewer-toolbar-main">
           <strong>{node.data.displayName}</strong>

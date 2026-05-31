@@ -4,6 +4,8 @@ Local development commands for the image lineage canvas app.
 
 For the current product and implementation spec, see [docs/spec.md](docs/spec.md).
 
+![Example canvas showing image lineage from sketches to final illustrations](assets/example-canvas.jpg)
+
 ## Run Both Servers
 
 ```bash

@@ -879,18 +879,30 @@ pre {
 }
 
 .image-viewer {
+  --image-viewer-top-space: 88px;
+  --image-viewer-bottom-space: 64px;
+
   position: fixed;
   inset: 0;
   z-index: 100;
   display: grid;
   place-items: center;
-  padding: 64px;
+  box-sizing: border-box;
+  padding: var(--image-viewer-top-space) 64px var(--image-viewer-bottom-space);
   background: rgb(2 6 23 / 0.94);
 }
 
+.image-viewer.has-parents {
+  --image-viewer-top-space: 160px;
+}
+
+.image-viewer.has-children {
+  --image-viewer-bottom-space: 82px;
+}
+
 .image-viewer-main-image {
-  max-width: 100%;
-  max-height: 100%;
+  max-width: calc(100vw - 128px);
+  max-height: calc(100vh - var(--image-viewer-top-space) - var(--image-viewer-bottom-space));
   object-fit: contain;
   border-radius: 10px;
   box-shadow: 0 24px 80px rgb(0 0 0 / 0.55);
