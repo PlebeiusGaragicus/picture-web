@@ -43,6 +43,7 @@ class AssetMetadata(BaseModel):
     kind: AssetKind
     title: str
     tags: list[str] = Field(default_factory=list)
+    contentHash: str | None = None
     createdAt: str
     updatedAt: str
     prompt: Prompt | None = None

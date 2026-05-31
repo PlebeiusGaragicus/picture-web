@@ -24,6 +24,7 @@ export interface Asset {
   kind: AssetKind;
   title: string;
   tags: string[];
+  contentHash?: string | null;
   createdAt: string;
   updatedAt: string;
   prompt?: Prompt | null;

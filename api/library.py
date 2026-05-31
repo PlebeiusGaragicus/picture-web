@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 from pathlib import Path
 from typing import Any
@@ -133,6 +134,21 @@ def list_assets(slug: str) -> list[AssetSummary]:
     return items
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def matching_import_by_hash(slug: str, content_hash: str) -> AssetSummary | None:
+    for asset in list_assets(slug):
+        if asset.kind == "imported" and asset.contentHash == content_hash:
+            return asset
+    return None
+
+
 def read_asset(slug: str, asset_id: str) -> AssetSummary:
     require_project(slug)
     metadata = AssetMetadata.model_validate(read_json(asset_json_path(slug, asset_id)))
@@ -147,6 +163,35 @@ def read_asset_metadata(slug: str, asset_id: str) -> AssetMetadata:
 def write_asset_metadata(slug: str, metadata: AssetMetadata) -> AssetSummary:
     write_json(asset_json_path(slug, metadata.id), metadata.model_dump(mode="json"))
     return metadata_to_summary(slug, metadata)
+
+
+def delete_asset(slug: str, asset_id: str) -> None:
+    require_project(slug)
+    if not asset_json_path(slug, asset_id).is_file():
+        raise HTTPException(status_code=404, detail=f"Asset not found: {asset_id}")
+    asset_json_path(slug, asset_id).unlink(missing_ok=True)
+    asset_png_path(slug, asset_id).unlink(missing_ok=True)
+
+    canvas = read_stored_canvas(slug)
+    changed = False
+    for node_id, node in list(canvas.nodes.items()):
+        if isinstance(node, DraftCanvasNode):
+            next_refs = [ref for ref in node.refs if ref != asset_id]
+            if next_refs != node.refs:
+                node.refs = next_refs
+                canvas.nodes[node_id] = node
+                changed = True
+        elif isinstance(node, ImageGroupCanvasNode) and asset_id in node.assetIds:
+            node.assetIds = [current_id for current_id in node.assetIds if current_id != asset_id]
+            if node.assetIds:
+                if node.activeAssetId == asset_id or node.activeAssetId not in node.assetIds:
+                    node.activeAssetId = node.assetIds[0]
+                canvas.nodes[node_id] = node
+            else:
+                del canvas.nodes[node_id]
+            changed = True
+    if changed:
+        write_canvas(slug, canvas)
 
 
 def patch_display(slug: str, asset_id: str, payload: DisplayPatch) -> AssetSummary:
@@ -292,6 +337,11 @@ async def import_asset(slug: str, upload: UploadFile, title: str | None = None) 
             shutil.copyfileobj(upload.file, fh)
         with Image.open(tmp_path) as image:
             image.save(out_png, format="PNG")
+        content_hash = file_sha256(out_png)
+        duplicate = matching_import_by_hash(slug, content_hash)
+        if duplicate is not None:
+            out_png.unlink(missing_ok=True)
+            raise HTTPException(status_code=409, detail=f"Already imported: {duplicate.title}")
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -301,6 +351,7 @@ async def import_asset(slug: str, upload: UploadFile, title: str | None = None) 
         kind="imported",
         title=title or Path(upload.filename or asset_id).stem or asset_id,
         tags=[],
+        contentHash=content_hash,
         createdAt=now,
         updatedAt=now,
     )

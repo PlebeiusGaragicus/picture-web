@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from starlette import status
 
 import library
 from models import (
@@ -61,6 +62,11 @@ def get_asset(slug: str, asset_id: str) -> AssetSummary:
 @app.patch("/api/projects/{slug}/assets/{asset_id}/display", response_model=AssetSummary)
 def patch_display(slug: str, asset_id: str, payload: DisplayPatch) -> AssetSummary:
     return library.patch_display(slug, asset_id, payload)
+
+
+@app.delete("/api/projects/{slug}/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_asset(slug: str, asset_id: str) -> None:
+    library.delete_asset(slug, asset_id)
 
 
 @app.post("/api/projects/{slug}/assets/import", response_model=AssetSummary)

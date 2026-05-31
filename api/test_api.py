@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from io import BytesIO
 
 import library
 from fastapi.testclient import TestClient
@@ -23,6 +24,12 @@ def create_project(client: TestClient) -> None:
 def make_png(path: Path, color: str = "red") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (16, 16), color=color).save(path)
+
+
+def png_bytes(color: str = "red") -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", (16, 16), color=color).save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def test_project_and_canvas_round_trip(tmp_path, monkeypatch):
@@ -137,6 +144,52 @@ def test_full_image_endpoint_serves_pixels(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.content.startswith(b"\x89PNG")
+
+
+def test_delete_imported_asset_removes_canvas_node_and_pixels(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    asset_id = "01HIMAGE"
+    make_png(library.asset_png_path("farm-comic", asset_id), color="red")
+    library.write_json(
+        library.asset_json_path("farm-comic", asset_id),
+        {
+            "id": asset_id,
+            "kind": "imported",
+            "title": "Image",
+            "tags": [],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    canvas = client.get("/api/projects/farm-comic/canvas").json()
+    assert canvas["nodes"]
+
+    response = client.delete(f"/api/projects/farm-comic/assets/{asset_id}")
+    assert response.status_code == 204
+    assert not library.asset_json_path("farm-comic", asset_id).exists()
+    assert not library.asset_png_path("farm-comic", asset_id).exists()
+    assert client.get("/api/projects/farm-comic/canvas").json()["nodes"] == {}
+
+
+def test_import_duplicate_file_returns_conflict(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    image = png_bytes("red")
+
+    first = client.post(
+        "/api/projects/farm-comic/assets/import",
+        files={"file": ("same.png", image, "image/png")},
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        "/api/projects/farm-comic/assets/import",
+        files={"file": ("same-again.png", image, "image/png")},
+    )
+    assert second.status_code == 409
+    assert "Already imported" in second.text
+    assert len(client.get("/api/projects/farm-comic/assets").json()) == 1
 
 
 def test_generate_with_mocked_boundary_persists_receipt(tmp_path, monkeypatch):

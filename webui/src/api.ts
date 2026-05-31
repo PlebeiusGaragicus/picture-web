@@ -31,6 +31,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     console.error(`[photo-web] request failed ${method} ${url}`, { status: response.status, detail });
     throw new Error(detail || response.statusText);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -57,6 +58,10 @@ export const api = {
     request<Asset>(`/api/projects/${slug}/assets/${assetId}/display`, {
       method: 'PATCH',
       body: JSON.stringify({ title, tags }),
+    }),
+  deleteAsset: (slug: string, assetId: string) =>
+    request<void>(`/api/projects/${slug}/assets/${assetId}`, {
+      method: 'DELETE',
     }),
   importAsset: (slug: string, file: File) => {
     const data = new FormData();

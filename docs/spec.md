@@ -144,7 +144,7 @@ Image = { id, metadata, pixels }
 | Part | On disk | Notes |
 |------|---------|--------|
 | `id` | stem of `{id}.json` / `{id}.png` | Stable forever; ULID; UI shows `title` + thumbnail. |
-| `metadata` | `{id}.json` | Tags, kind, prompt, generation params, parent refs, run grouping. |
+| `metadata` | `{id}.json` | Tags, kind, optional import content hash, prompt, generation params, parent refs, run grouping. |
 | `pixels` | `{id}.png` | Required for every saved asset. Draft canvas nodes have no pixels until generated. |
 
 ### Kinds (`metadata.kind`)
@@ -288,7 +288,7 @@ One edge kind: **lineage** — **parent → child**. Parent ids come from draft 
 
 **UI rule:** The input side of a node shows existing parent lineage and is not draggable. Only the output side can be dragged to create children. Dropping an output connection on the canvas creates a persistent draft node whose `refs` include the source asset/group. Existing generated asset refs are read-only; changing inputs means creating or editing a draft and generating new child assets. Invalid targets are rejected (e.g. child cannot be a parent of itself).
 
-**Node rule:** Every asset with `{id}.json` and `{id}.png` can appear in an `imageGroup`. Generated images remain visible by default. Removing an image group from `canvas.json` only hides it from the current layout and never deletes files or changes lineage. Removing a draft deletes only the draft note, because no image asset exists yet.
+**Node rule:** Every asset with `{id}.json` and `{id}.png` can appear in an `imageGroup`. Deleting an image group in the UI deletes its represented asset files from the project and removes refs from any draft nodes. Deleting a draft deletes only the draft note, because no image asset exists yet.
 
 **Hover rule:** Hovering over a node shows a quick preview of prompt text, parent titles/ids, model, aspect ratio, image size, seed, and variant count.
 
@@ -317,13 +317,14 @@ Implemented in `api/` (FastAPI). Base: `http://127.0.0.1:<port>/api`
 | POST | `/projects` | Create project (slug + name) |
 | GET | `/projects/:slug` | Project meta + asset index |
 | GET | `/projects/:slug/assets` | List metadata (+ hasPixels flag) |
-| GET | `/projects/:slug/assets/:id` | One metadata + thumbnail URL |
+| GET | `/projects/:slug/assets/:id` | One metadata + image URL |
 | PATCH | `/projects/:slug/assets/:id/display` | Update display metadata only (`title`, `tags`) |
-| POST | `/projects/:slug/assets/import` | Multipart PNG → `imported` + file |
+| DELETE | `/projects/:slug/assets/:id` | Delete asset pixels/metadata and remove canvas refs |
+| POST | `/projects/:slug/assets/import` | Multipart image → `imported` + file; duplicate imports are rejected by content hash |
 | POST | `/projects/:slug/generate` | Generate one or more new `generated` assets from prompt/settings/parent refs |
 | GET | `/projects/:slug/canvas` | Load `canvas.json` |
 | PUT | `/projects/:slug/canvas` | Save layout |
-| GET | `/projects/:slug/assets/:id/thumb` | Resized image for canvas |
+| GET | `/projects/:slug/assets/:id/thumb` | Canvas image URL; currently returns original PNG |
 
 **Generate:** Accept prompt text, same-project parent refs, settings, optional seed, and optional batch count. Create a `runId`, allocate one ULID per output, choose/pass/store explicit seeds, resolve `assets/{parent}.png` paths, call the Gemini SDK through a rewritten `api/gemini.py`, then write each `assets/{id}.json` + `assets/{id}.png`. Persist the full serializable response metadata for each output under `provider.response`, excluding duplicated inline image bytes. Return created assets in the response body.
 
@@ -336,9 +337,9 @@ Implemented in `api/` (FastAPI). Base: `http://127.0.0.1:<port>/api`
 ### Canvas (React Flow)
 
 - Pan/zoom, drag nodes, save positions to `canvas.json`.
-- Custom node: thumbnail + title + kind badge.
+- Custom node: image preview + user display name. Generic ids and imported/generated labels are hidden from normal canvas UI.
 - Link gesture: **parent → Generate / Refine form** selects image inputs for the next child; saved generated nodes are immutable.
-- Filters: tags (multi), kind, text search on `title` + `prompt.text`.
+- Filters: tags (multi), kind, text search on `title` + `prompt.text` are deferred.
 - Project switcher: load one project at a time.
 
 ### Side Panel (Schema-driven)
@@ -400,7 +401,7 @@ Timestamped outputs `*-YYYYMMDD-HHMMSS.png` → one `generated` child per file; 
 4. Generation form: prompt, parent picker, model, aspect ratio, image size, batch count.
 5. Generate → one or more unique immutable `generated` assets; batch siblings share `generation.runId` and can render as a stack.
 6. React Flow: derived parent→child edges, layout persist.
-7. Tag filter + search.
+7. Tag filter + search. (Deferred until the core canvas workflow is stable.)
 8. Localhost-only API + `photo-library/.env` for API key.
 
 ## Deferred
@@ -408,7 +409,7 @@ Timestamped outputs `*-YYYYMMDD-HHMMSS.png` → one `generated` child per file; 
 - Cross-project refs and global asset pool.
 - Auto-layout, minimap polish, WebSocket vs poll.
 - Export/import project zip for sharing.
-- Cached thumbnails / lazy thumbnail pipeline if on-the-fly resizing becomes slow.
+- Cached thumbnails / lazy thumbnail pipeline if serving original images becomes slow.
 - Collections / group nodes beyond tags.
 
 ---
@@ -430,7 +431,7 @@ Timestamped outputs `*-YYYYMMDD-HHMMSS.png` → one `generated` child per file; 
 | ID format | **ULID** for every saved asset and generate run |
 | Overwrite on regenerate | **Never by default**; every saved output gets a new image id |
 | Generation batches | Multiple outputs from one generate action share `generation.runId` and display as a stack |
-| Drafts | No persistent draft assets in v1; prompt edits are UI state until generation succeeds |
+| Drafts | Persistent canvas nodes with prompt, refs, and generation params, but no asset files until generation succeeds |
 | Generated metadata | Immutable receipt; prompt, refs, model, seed, and hyperparameters are never edited in place |
 | Seed handling | Pass and store an explicit integer seed for every generated output; user may provide it, otherwise API chooses it |
 | Provider metadata | Persist the full serializable Gemini response metadata for generated assets, excluding duplicated image bytes |
@@ -460,7 +461,7 @@ These choices are now part of the v1 shape:
 2. **Generation stacks:** A generate action can produce multiple images. Each output gets its own id, and siblings share `generation.runId` so the UI can show them as a stack.
 3. **No persistent drafts:** A prompt/settings form is UI state. Once generation succeeds, the image is saved and visible on the canvas.
 4. **FastAPI backend:** Python FastAPI is the only backend; Gemini integration stays in `api/gemini.py`.
-5. **Thumbnails:** Start with on-the-fly API resizing. Add cached `thumb.webp` only if performance suffers.
+5. **Image serving:** The canvas currently uses original PNGs through the image endpoint. Add cached thumbnails only if performance suffers.
 6. **Project boundary:** Parent refs are same-project only in v1.
 7. **Visibility:** Generated images stay visible by default. Keep visibility simple; no archive or automatic `superseded` tagging.
 8. **Repo boundary:** App code and `photo-library/` live in this repo. Legacy migration remains optional and deferred.
