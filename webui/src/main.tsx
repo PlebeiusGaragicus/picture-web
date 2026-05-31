@@ -1253,9 +1253,13 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
   const asset = data.activeAsset;
   const [isEditingName, setIsEditingName] = useState(false);
   const [draftName, setDraftName] = useState(visibleDisplayName(data.displayName));
+  const [imageRatio, setImageRatio] = useState<number | null>(null);
   useEffect(() => {
     if (!isEditingName) setDraftName(visibleDisplayName(data.displayName));
   }, [data.displayName, isEditingName]);
+  useEffect(() => {
+    setImageRatio(null);
+  }, [asset?.id]);
   const saveName = () => {
     data.onDisplayNameChange(data.nodeId, draftName.trim());
     setIsEditingName(false);
@@ -1303,8 +1307,66 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
           {visibleDisplayName(data.displayName) || 'title'}
         </strong>
       )}
-      <div className="node-image-frame">
-        {asset.thumbnailUrl && <img src={asset.thumbnailUrl} alt="" />}
+      <div className="node-image-frame" style={{ aspectRatio: imageRatio ? `${imageRatio}` : undefined }}>
+        {asset.thumbnailUrl && (
+          <img
+            src={asset.thumbnailUrl}
+            alt=""
+            onLoad={(event) => {
+              const { naturalWidth, naturalHeight } = event.currentTarget;
+              if (naturalWidth > 0 && naturalHeight > 0) setImageRatio(naturalWidth / naturalHeight);
+            }}
+          />
+        )}
+        {data.assetIds.length > 1 && <small className="variant-indicator">{currentIndex + 1} / {data.assetIds.length}</small>}
+        {data.assetIds.length > 1 && (
+          <div className="variant-controls">
+            <button
+              className="nodrag nopan"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                data.onVariant(data.nodeId, -1);
+              }}
+              title="Previous variant"
+            >
+              &lt;
+            </button>
+            <button
+              className="nodrag nopan"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                data.onVariant(data.nodeId, 1);
+              }}
+              title="Next variant"
+            >
+              &gt;
+            </button>
+          </div>
+        )}
+        <button
+          className="node-action-button view-image-button nodrag nopan"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            data.onView(data.nodeId);
+          }}
+          title="View full image"
+        >
+          👁️
+        </button>
+        <button
+          className="node-action-button details-button nodrag nopan"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            data.onDetails(data.nodeId);
+          }}
+          title="Show details"
+        >
+          i
+        </button>
         {data.isGenerating && (
           <div className="node-generating-overlay">
             <span className="spinner" aria-hidden="true" />
@@ -1312,55 +1374,6 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
           </div>
         )}
       </div>
-      <button
-        className="node-action-button view-image-button nodrag nopan"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          data.onView(data.nodeId);
-        }}
-        title="View full image"
-      >
-        👁️
-      </button>
-      <button
-        className="node-action-button details-button nodrag nopan"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          data.onDetails(data.nodeId);
-        }}
-        title="Show details"
-      >
-        i
-      </button>
-      {data.assetIds.length > 1 && <small>{currentIndex + 1} / {data.assetIds.length}</small>}
-      {data.assetIds.length > 1 && (
-        <div className="variant-controls">
-          <button
-            className="nodrag nopan"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              data.onVariant(data.nodeId, -1);
-            }}
-            title="Previous variant"
-          >
-            &lt;
-          </button>
-          <button
-            className="nodrag nopan"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              data.onVariant(data.nodeId, 1);
-            }}
-            title="Next variant"
-          >
-            &gt;
-          </button>
-        </div>
-      )}
       <Handle type="source" position={Position.Right} className="output-handle" />
     </div>
   );
