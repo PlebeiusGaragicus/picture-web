@@ -893,6 +893,7 @@ pre {
 .image-viewer {
   --image-viewer-top-space: 88px;
   --image-viewer-bottom-space: 64px;
+  --image-viewer-side-space: 18px;
 
   position: fixed;
   inset: 0;
@@ -900,7 +901,7 @@ pre {
   display: grid;
   place-items: center;
   box-sizing: border-box;
-  padding: var(--image-viewer-top-space) 64px var(--image-viewer-bottom-space);
+  padding: var(--image-viewer-top-space) var(--image-viewer-side-space) var(--image-viewer-bottom-space);
   background: rgb(2 6 23 / 0.94);
 }
 
@@ -913,7 +914,7 @@ pre {
 }
 
 .image-viewer-main-image {
-  max-width: calc(100vw - 128px);
+  max-width: calc(100vw - (var(--image-viewer-side-space) * 2));
   max-height: calc(100vh - var(--image-viewer-top-space) - var(--image-viewer-bottom-space));
   object-fit: contain;
   border-radius: 10px;
