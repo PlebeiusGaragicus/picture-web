@@ -261,6 +261,11 @@ function App() {
     setPopoverNodeId(nodeId);
   }, []);
 
+  const openViewerDetails = useCallback((nodeId: string) => {
+    setPopoverNodeId(nodeId);
+    setViewerNodeId(null);
+  }, []);
+
   const loadProjects = useCallback(async () => {
     setProjects(await api.listProjects());
   }, []);
@@ -806,6 +811,7 @@ function App() {
           onClose={() => setViewerNodeId(null)}
           onVariant={changeVariant}
           onViewAsset={openAssetInViewer}
+          onDetails={openViewerDetails}
           onDelete={deleteNodeById}
         />
       )}
@@ -1403,6 +1409,7 @@ function ImageViewer({
   onClose,
   onVariant,
   onViewAsset,
+  onDetails,
   onDelete,
 }: {
   node?: Node<ImageGroupNodeData>;
@@ -1411,6 +1418,7 @@ function ImageViewer({
   onClose: () => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onViewAsset: (assetId: string) => void;
+  onDetails: (nodeId: string) => void;
   onDelete: (nodeId: string, assetId?: string) => void;
 }) {
   useEffect(() => {
@@ -1448,8 +1456,6 @@ function ImageViewer({
     <div className={viewerClassName} onClick={onClose}>
       <div className="image-viewer-toolbar" onClick={(event) => event.stopPropagation()}>
         <div className="image-viewer-toolbar-main">
-          <strong>{node.data.displayName}</strong>
-          <span>{currentIndex + 1} / {node.data.assetIds.length}</span>
           <button
             className="danger"
             onClick={(event) => {
@@ -1459,7 +1465,14 @@ function ImageViewer({
           >
             Delete Variant
           </button>
-          <button className="secondary" onClick={onClose}>Close</button>
+          <strong>{node.data.displayName}</strong>
+          <div className="image-viewer-toolbar-actions">
+            <span>{currentIndex + 1} / {node.data.assetIds.length}</span>
+            <button className="image-viewer-info-button secondary" onClick={() => onDetails(node.id)} title="Show details">
+              i
+            </button>
+            <button className="secondary" onClick={onClose}>Close</button>
+          </div>
         </div>
       </div>
       {parentAssets.length > 0 && (

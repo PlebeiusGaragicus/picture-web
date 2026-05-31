@@ -943,15 +943,37 @@ pre {
   flex: 1;
   gap: 12px;
   align-items: center;
+  justify-content: space-between;
   min-width: 0;
 }
 
 .image-viewer-toolbar strong {
-  flex: 1;
+  position: absolute;
+  left: 50%;
+  max-width: 42%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.image-viewer-toolbar-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.image-viewer-info-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-family: Georgia, serif;
+  font-size: 18px;
+  font-style: italic;
+  border-radius: 999px;
 }
 
 .image-viewer-parents-rail,
