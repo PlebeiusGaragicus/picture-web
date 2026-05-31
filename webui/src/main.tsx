@@ -22,6 +22,7 @@ interface DraftNodeData extends DraftCanvasNode {
   kind: 'draft';
   nodeId: string;
   parentDisplayNames?: Map<string, string>;
+  isGenerating?: boolean;
   onDetails: (nodeId: string) => void;
 }
 
@@ -34,6 +35,7 @@ interface ImageGroupNodeData extends ImageGroupCanvasNode {
   onView: (nodeId: string) => void;
   onDetails: (nodeId: string) => void;
   onDisplayNameChange: (nodeId: string, displayName: string) => void;
+  isGenerating?: boolean;
 }
 
 type PhotoNodeData = DraftNodeData | ImageGroupNodeData;
@@ -134,6 +136,7 @@ function normalizedParamsForModel(params: GenerationParams, model: string) {
 function toFlowNodes(
   canvas: CanvasDocument,
   assets: Asset[],
+  generatingNodeIds: Set<string> = new Set(),
   onVariant: (nodeId: string, direction: -1 | 1) => void = () => undefined,
   onView: (nodeId: string) => void = () => undefined,
   onDetails: (nodeId: string) => void = () => undefined,
@@ -152,7 +155,7 @@ function toFlowNodes(
         id,
         position: { x: canvasNode.x, y: canvasNode.y },
         type: 'draft',
-        data: { ...canvasNode, kind: 'draft', nodeId: id, parentDisplayNames: displayNameByAssetId, onDetails },
+        data: { ...canvasNode, kind: 'draft', nodeId: id, parentDisplayNames: displayNameByAssetId, isGenerating: generatingNodeIds.has(id), onDetails },
       };
     }
     const groupAssets = canvasNode.assetIds.map((assetId) => assetById.get(assetId)).filter((asset): asset is Asset => Boolean(asset));
@@ -161,7 +164,7 @@ function toFlowNodes(
       id,
       position: { x: canvasNode.x, y: canvasNode.y },
       type: 'imageGroup',
-      data: { ...canvasNode, kind: 'imageGroup', nodeId: id, assets: groupAssets, activeAsset, onVariant, onView, onDetails, onDisplayNameChange },
+      data: { ...canvasNode, kind: 'imageGroup', nodeId: id, assets: groupAssets, activeAsset, onVariant, onView, onDetails, onDisplayNameChange, isGenerating: generatingNodeIds.has(id) },
     };
   });
 }
@@ -182,14 +185,35 @@ function App() {
   const [zoomPercent, setZoomPercent] = useState(zoomToPercent(1));
   const [viewerNodeId, setViewerNodeId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ nodeId: string; assetId?: string } | null>(null);
+  const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const reactFlowRef = useRef<ReactFlowInstance<PhotoNodeData> | null>(null);
+  const generatingNodeIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    generatingNodeIdsRef.current = generatingNodeIds;
+  }, [generatingNodeIds]);
 
   const updateImageGroupDisplayName = useCallback((nodeId: string, displayName: string) => {
     setNodes((current) => {
+      const renamedNode = current.find((node) => node.id === nodeId && node.data.kind === 'imageGroup') as Node<ImageGroupNodeData> | undefined;
+      const renamedAssetIds = renamedNode?.data.assetIds ?? [];
       const nextNodes = current.map((node) =>
-        node.id === nodeId && node.data.kind === 'imageGroup' ? { ...node, data: { ...node.data, displayName } } : node,
+        node.id === nodeId && node.data.kind === 'imageGroup'
+          ? { ...node, data: { ...node.data, displayName } }
+          : node.data.kind === 'draft' && renamedAssetIds.length
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  parentDisplayNames: new Map([
+                    ...(node.data.parentDisplayNames ?? new Map<string, string>()),
+                    ...renamedAssetIds.map((assetId) => [assetId, displayName] as [string, string]),
+                  ]),
+                },
+              }
+            : node,
       );
       persistNodes(nextNodes, { refresh: false }).catch((err) => {
         console.error('[photo-web] failed to persist image group name', err);
@@ -231,7 +255,7 @@ function App() {
     const [detail, layout] = await Promise.all([api.getProject(projectSlug), api.getCanvas(projectSlug)]);
     setAssets(detail.assets);
     setCanvas(layout);
-    setNodes(toFlowNodes(layout, detail.assets, changeVariant, openViewer, openDetails, updateImageGroupDisplayName));
+    setNodes(toFlowNodes(layout, detail.assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, updateImageGroupDisplayName));
   }, [changeVariant, openDetails, openViewer, updateImageGroupDisplayName]);
 
   useEffect(() => {
@@ -259,26 +283,37 @@ function App() {
   }, []);
 
   const edges: Edge[] = useMemo(() => {
-    const nodeForAsset = new Map<string, string>();
+    const nodeForAsset = new Map<string, Node<ImageGroupNodeData>>();
     nodes.forEach((node) => {
       if (node.data.kind === 'imageGroup') {
-        node.data.assetIds.forEach((assetId) => nodeForAsset.set(assetId, node.id));
+        const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
+        node.data.assetIds.forEach((assetId) => nodeForAsset.set(assetId, imageNode));
       }
     });
+    const edgeForAssetRef = (childNode: Node<ImageGroupNodeData> | Node<DraftNodeData>, childAssetId: string | null, ref: string): Edge | null => {
+      const sourceNode = nodeForAsset.get(ref);
+      if (!sourceNode || sourceNode.id === childNode.id) return null;
+      const sourceVisible = sourceNode.data.activeAsset?.id === ref;
+      const childVisible = childNode.data.kind === 'draft' || childNode.data.activeAsset?.id === childAssetId;
+      const isVisibleLineage = sourceVisible && childVisible;
+      return {
+        id: `${sourceNode.id}-${childNode.id}-${childAssetId ?? 'draft'}-${ref}`,
+        source: sourceNode.id,
+        target: childNode.id,
+        animated: childNode.data.kind === 'draft',
+        className: isVisibleLineage ? 'lineage-edge-visible' : 'lineage-edge-hidden',
+        style: isVisibleLineage ? undefined : { strokeDasharray: '5 5', opacity: 0.35 },
+      };
+    };
     const assetEdges = nodes.flatMap((node) => {
       if (node.data.kind !== 'imageGroup') return [];
-      const refs = new Set(node.data.assets.flatMap((asset) => asset.generation?.refs ?? []));
-      return Array.from(refs).flatMap((ref) => {
-        const source = nodeForAsset.get(ref);
-        return source && source !== node.id ? [{ id: `${source}-${node.id}-${ref}`, source, target: node.id, selectable: false, focusable: false }] : [];
-      });
+      const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
+      return node.data.assets.flatMap((asset) => (asset.generation?.refs ?? []).flatMap((ref) => edgeForAssetRef(imageNode, asset.id, ref) ?? []));
     });
     const draftEdges = nodes.flatMap((node) => {
       if (node.data.kind !== 'draft') return [];
-      return node.data.refs.flatMap((ref) => {
-        const source = nodeForAsset.get(ref);
-        return source ? [{ id: `${source}-${node.id}-${ref}`, source, target: node.id, animated: true, selectable: false, focusable: false }] : [];
-      });
+      const draftNode: Node<DraftNodeData> = { ...node, data: node.data };
+      return node.data.refs.flatMap((ref) => edgeForAssetRef(draftNode, null, ref) ?? []);
     });
     return [...assetEdges, ...draftEdges];
   }, [nodes]);
@@ -401,9 +436,26 @@ function App() {
 
   const updateImageGroup = async (id: string, patch: Partial<ImageGroupCanvasNode>) => {
     setNodes((current) => {
-      const nextNodes = current.map((node) =>
-        node.id === id && node.data.kind === 'imageGroup' ? { ...node, data: { ...node.data, ...patch } } : node,
-      );
+      const updatedNode = current.find((node) => node.id === id && node.data.kind === 'imageGroup') as Node<ImageGroupNodeData> | undefined;
+      const renamedAssetIds = patch.displayName !== undefined ? updatedNode?.data.assetIds ?? [] : [];
+      const nextNodes = current.map((node) => {
+        if (node.id === id && node.data.kind === 'imageGroup') {
+          return { ...node, data: { ...node.data, ...patch } };
+        }
+        if (node.data.kind === 'draft' && patch.displayName !== undefined && renamedAssetIds.length) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              parentDisplayNames: new Map([
+                ...(node.data.parentDisplayNames ?? new Map<string, string>()),
+                ...renamedAssetIds.map((assetId) => [assetId, patch.displayName ?? ''] as [string, string]),
+              ]),
+            },
+          };
+        }
+        return node;
+      });
       persistNodes(nextNodes, { refresh: false }).catch((err) => {
         console.error('[photo-web] failed to persist image group update', err);
         setError(String(err));
@@ -418,7 +470,7 @@ function App() {
     const saved = await api.saveCanvas(openProjectSlug, next);
     setCanvas(saved);
     if (options.refresh ?? true) {
-      setNodes(toFlowNodes(saved, assets, changeVariant, openViewer, openDetails, updateImageGroupDisplayName));
+      setNodes(toFlowNodes(saved, assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, updateImageGroupDisplayName));
     }
   };
 
@@ -518,6 +570,8 @@ function App() {
   const generateDraft = async (id: string, draft: DraftNodeData) => {
     try {
       setError(null);
+      setGeneratingNodeIds((current) => new Set(current).add(id));
+      setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
       const payload: GeneratePayload = {
         prompt: draft.prompt,
         refs: draft.refs,
@@ -535,6 +589,13 @@ function App() {
       await reload();
     } catch (err) {
       setError(String(err));
+    } finally {
+      setGeneratingNodeIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+      setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: false } } : node)));
     }
   };
 
@@ -545,6 +606,8 @@ function App() {
     if (!prompt || !sourceAsset?.generation) return;
     try {
       setError(null);
+      setGeneratingNodeIds((current) => new Set(current).add(id));
+      setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
       const payload: GeneratePayload = {
         prompt,
         refs,
@@ -562,6 +625,13 @@ function App() {
       setPopoverNodeId(id);
     } catch (err) {
       setError(String(err));
+    } finally {
+      setGeneratingNodeIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+      setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: false } } : node)));
     }
   };
 
@@ -924,7 +994,7 @@ function DraftSidebar({
                 }}
               >
                 {asset.thumbnailUrl ? <img src={asset.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
-                <span>{assetLabel(asset)}</span>
+                <span>{visibleDisplayName(draft.parentDisplayNames?.get(asset.id) ?? '') || assetLabel(asset)}</span>
               </button>
             ))}
           </div>
@@ -969,8 +1039,9 @@ function DraftSidebar({
         </select>
       </div>
       <div className="generate-control">
-        <button onClick={() => onGenerate(node.id, draft)} disabled={!draft.prompt.trim()}>
-          Generate
+        <button className="generate-button" onClick={() => onGenerate(node.id, draft)} disabled={!draft.prompt.trim() || draft.isGenerating}>
+          {draft.isGenerating && <span className="spinner" aria-hidden="true" />}
+          {draft.isGenerating ? 'Generating...' : 'Generate'}
         </button>
         <label>
           Batch size
@@ -1037,7 +1108,7 @@ function ImageSidebar({
     <aside className="details-sidebar">
       <button className="danger" onClick={() => onDelete(node.id, asset.id)}>Delete</button>
       <label className="field-label">
-        Name
+        Group name
         <input value={node.data.displayName} onChange={(event) => onNodeChange(node.id, { displayName: event.target.value })} />
       </label>
       <div className="sidebar-variant-preview" onClick={changeSidebarVariantByClickSide}>
@@ -1153,8 +1224,9 @@ function ImageSidebar({
           </div>
           {isVariantPanelOpen ? (
             <div className="generate-control">
-              <button onClick={() => onGenerateVariants(node.id, node.data, variantParams)} disabled={!prompt.trim()}>
-                Generate variants
+              <button className="generate-button" onClick={() => onGenerateVariants(node.id, node.data, variantParams)} disabled={!prompt.trim() || node.data.isGenerating}>
+                {node.data.isGenerating && <span className="spinner" aria-hidden="true" />}
+                {node.data.isGenerating ? 'Generating...' : 'Generate variants'}
               </button>
               <button className="secondary" onClick={() => setIsVariantPanelOpen(false)}>Cancel</button>
               <label>
@@ -1169,7 +1241,7 @@ function ImageSidebar({
               </label>
             </div>
           ) : (
-            <button className="secondary" onClick={() => setIsVariantPanelOpen(true)}>Create variants</button>
+            <button className="secondary" onClick={() => setIsVariantPanelOpen(true)} disabled={node.data.isGenerating}>Create variants</button>
           )}
         </section>
       )}
@@ -1208,7 +1280,7 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
     .filter(Boolean)
     .join('\n');
   return (
-    <div className={`node image-group-node ${data.assetIds.length > 1 ? 'stacked' : ''}`} title={tooltip}>
+    <div className={`node image-group-node ${data.assetIds.length > 1 ? 'stacked' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       {isEditingName ? (
         <input
@@ -1233,6 +1305,12 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
       )}
       <div className="node-image-frame">
         {asset.thumbnailUrl && <img src={asset.thumbnailUrl} alt="" />}
+        {data.isGenerating && (
+          <div className="node-generating-overlay">
+            <span className="spinner" aria-hidden="true" />
+            <span>Generating</span>
+          </div>
+        )}
       </div>
       <button
         className="node-action-button view-image-button nodrag nopan"
@@ -1375,7 +1453,7 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
     `ratio: ${data.params.aspectRatio ?? 'default'}, size: ${data.params.imageSize ?? 'default'}, seed: ${data.params.seed ?? 'auto'}`,
   ].join('\n');
   return (
-    <div className="node draft-node" title={tooltip}>
+    <div className={`node draft-node ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       <button
         className="node-action-button details-button"
@@ -1387,7 +1465,14 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
       >
         i
       </button>
-      <div className="draft-placeholder" aria-hidden="true" />
+      <div className="draft-placeholder" aria-hidden="true">
+        {data.isGenerating && (
+          <div className="node-generating-overlay">
+            <span className="spinner" aria-hidden="true" />
+            <span>Generating</span>
+          </div>
+        )}
+      </div>
       <strong>Draft</strong>
       <small>{data.refs.length} parent{data.refs.length === 1 ? '' : 's'}</small>
     </div>

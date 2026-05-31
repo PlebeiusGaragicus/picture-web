@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -18,6 +20,13 @@ from models import (
     ProjectDetail,
     ProjectMetadata,
 )
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    force=True,
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="photo-web", docs_url="/api/docs", openapi_url="/api/openapi.json")
 app.add_middleware(
@@ -102,4 +111,16 @@ def get_image(slug: str, asset_id: str) -> FileResponse:
 def generate(slug: str, payload: GenerateRequest) -> GenerateResponse:
     import gemini
 
+    logger.debug(
+        "generate request slug=%s canvas_node=%s refs=%s model=%s aspect_ratio=%s image_size=%s seed=%s batch_count=%s prompt_chars=%s",
+        slug,
+        payload.canvasNodeId,
+        payload.refs,
+        payload.model,
+        payload.aspectRatio,
+        payload.imageSize,
+        payload.seed,
+        payload.batchCount,
+        len(payload.prompt),
+    )
     return library.create_generated_assets(slug, payload, gemini.generate_image)

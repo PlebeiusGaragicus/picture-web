@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LIBRARY_ROOT = REPO_ROOT / "photo-library"
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gemini-3.1-flash-image"
 DEFAULT_ASPECT_RATIO = "16:9"
@@ -31,6 +33,7 @@ def load_client() -> genai.Client:
         raise RuntimeError(
             "GOOGLE_API_KEY is not set. Add it to photo-library/.env or export it."
         )
+    logger.debug("loaded Gemini client api_key_present=%s", bool(api_key))
     return genai.Client(api_key=api_key)
 
 
@@ -92,22 +95,26 @@ def _safe_json(value: Any) -> Any:
     return str(value)
 
 
-def _strip_inline_image_bytes(value: Any, image_refs: list[str]) -> Any:
+def _strip_provider_payloads(value: Any) -> Any:
     if isinstance(value, dict):
         cleaned: dict[str, Any] = {}
         for key, item in value.items():
             normalized_key = key.lower()
-            if normalized_key in {"data", "inline_data", "inlinedata"} and isinstance(
+            if normalized_key in {"thought_signature", "thoughtsignature"} and isinstance(
+                item, str
+            ):
+                cleaned[key] = f"<thought-signature:{len(item)} chars>"
+            elif normalized_key in {"data", "inline_data", "inlinedata"} and isinstance(
                 item, str
             ):
                 cleaned[key] = f"<inline-image-data:{len(item)} chars>"
             elif normalized_key == "data" and isinstance(item, (bytes, bytearray)):
                 cleaned[key] = f"<inline-image-data:{len(item)} bytes>"
             else:
-                cleaned[key] = _strip_inline_image_bytes(item, image_refs)
+                cleaned[key] = _strip_provider_payloads(item)
         return cleaned
     if isinstance(value, list):
-        return [_strip_inline_image_bytes(item, image_refs) for item in value]
+        return [_strip_provider_payloads(item) for item in value]
     return value
 
 
@@ -116,7 +123,7 @@ def serialize_response_metadata(response: Any, output_png: Path) -> dict[str, An
     raw = _safe_json(response)
     return {
         "imageFile": output_png.name,
-        "response": _strip_inline_image_bytes(raw, [output_png.name]),
+        "response": _strip_provider_payloads(raw),
     }
 
 
@@ -137,15 +144,28 @@ def generate_image(
     if parent_png_paths:
         contents.extend(load_parent_images(parent_png_paths))
 
+    resolved_model = model or default_model()
+    resolved_aspect_ratio = aspect_ratio or default_aspect_ratio()
+    resolved_image_size = image_size or default_image_size()
+    logger.debug(
+        "Gemini generate_content model=%s aspect_ratio=%s image_size=%s seed=%s parent_count=%s prompt_chars=%s output=%s",
+        resolved_model,
+        resolved_aspect_ratio,
+        resolved_image_size,
+        seed,
+        len(parent_png_paths),
+        len(prompt_text),
+        output_png,
+    )
     response = client.models.generate_content(
-        model=model or default_model(),
+        model=resolved_model,
         contents=contents,
         config=types.GenerateContentConfig(
             response_modalities=["IMAGE"],
             seed=seed,
             image_config=types.ImageConfig(
-                aspect_ratio=aspect_ratio or default_aspect_ratio(),
-                image_size=image_size or default_image_size(),
+                aspect_ratio=resolved_aspect_ratio,
+                image_size=resolved_image_size,
             ),
         ),
     )
@@ -153,6 +173,7 @@ def generate_image(
         if part.inline_data is not None:
             output_png.parent.mkdir(parents=True, exist_ok=True)
             part.as_image().save(output_png)
+            logger.debug("Gemini image saved output=%s", output_png)
             return GeneratedImage(
                 output_png=output_png,
                 provider_response=serialize_response_metadata(response, output_png),

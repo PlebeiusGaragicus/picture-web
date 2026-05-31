@@ -357,7 +357,7 @@ pre {
 .confirm-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 120;
   display: grid;
   place-items: center;
   background: rgb(2 6 23 / 0.72);
@@ -492,6 +492,28 @@ pre {
   height: 42px;
 }
 
+.generate-button {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgb(219 234 254 / 0.45);
+  border-top-color: #dbeafe;
+  border-radius: 999px;
+  animation: spin 850ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .generate-control label {
   display: grid;
   gap: 4px;
@@ -601,6 +623,7 @@ pre {
 }
 
 .node-image-frame {
+  position: relative;
   width: 100%;
   max-width: 100%;
   height: 142px;
@@ -631,6 +654,7 @@ pre {
 }
 
 .draft-placeholder {
+  position: relative;
   width: 100%;
   height: 120px;
   background:
@@ -649,6 +673,36 @@ pre {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   box-shadow: 0 12px 30px rgb(0 0 0 / 0.24);
+}
+
+.node.generating {
+  animation: generating-pulse 1.3s ease-in-out infinite;
+}
+
+.node-generating-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  color: #dbeafe;
+  background: rgb(15 23 42 / 0.64);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+@keyframes generating-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(96 165 250 / 0.55), 0 12px 30px rgb(0 0 0 / 0.24);
+  }
+
+  50% {
+    box-shadow: 0 0 0 7px rgb(96 165 250 / 0), 0 12px 30px rgb(0 0 0 / 0.24);
+  }
 }
 
 .node-title {
@@ -761,6 +815,15 @@ pre {
 .react-flow__edge path,
 .react-flow__edge-interaction {
   pointer-events: none;
+}
+
+.react-flow__edge.lineage-edge-visible path {
+  stroke-opacity: 1;
+}
+
+.react-flow__edge.lineage-edge-hidden path {
+  stroke-dasharray: 5 5;
+  stroke-opacity: 0.35;
 }
 
 .react-flow__handle.output-handle {

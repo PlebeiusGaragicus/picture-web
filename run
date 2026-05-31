@@ -59,7 +59,7 @@ echo "Setting up web UI dependencies..."
 echo "Starting FastAPI on http://127.0.0.1:$API_PORT"
 (
   cd "$API_DIR"
-  "$VENV_DIR/bin/uvicorn" main:app --reload --host 127.0.0.1 --port "$API_PORT"
+  "$VENV_DIR/bin/uvicorn" main:app --reload --host 127.0.0.1 --port "$API_PORT" --log-level debug
 ) &
 PIDS+=("$!")
 

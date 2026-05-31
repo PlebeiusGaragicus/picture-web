@@ -4,6 +4,7 @@ from pathlib import Path
 from io import BytesIO
 
 import library
+import gemini
 from fastapi.testclient import TestClient
 from main import app
 from PIL import Image
@@ -31,6 +32,31 @@ def png_bytes(color: str = "red") -> bytes:
     buffer = BytesIO()
     Image.new("RGB", (16, 16), color=color).save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def test_provider_metadata_strips_large_payloads(tmp_path):
+    output_png = tmp_path / "generated.png"
+    response = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "inline_data": {"data": "abc123", "mime_type": "image/png"},
+                            "thought_signature": "secret" * 300,
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+
+    metadata = gemini.serialize_response_metadata(response, output_png)
+    part = metadata["response"]["candidates"][0]["content"]["parts"][0]
+
+    assert metadata["imageFile"] == "generated.png"
+    assert part["inline_data"]["data"] == "<inline-image-data:6 chars>"
+    assert part["thought_signature"] == "<thought-signature:1800 chars>"
 
 
 def test_project_and_canvas_round_trip(tmp_path, monkeypatch):
@@ -230,8 +256,6 @@ def test_generate_with_mocked_boundary_persists_receipt(tmp_path, monkeypatch):
 
         return Result()
 
-    import gemini
-
     monkeypatch.setattr(gemini, "generate_image", fake_generate)
     response = client.post(
         "/api/projects/farm-comic/generate",
@@ -281,8 +305,6 @@ def test_generate_from_draft_updates_canvas_group(tmp_path, monkeypatch):
 
         return Result()
 
-    import gemini
-
     monkeypatch.setattr(gemini, "generate_image", fake_generate)
     response = client.post(
         "/api/projects/farm-comic/generate",
@@ -309,8 +331,6 @@ def test_generate_matching_prompt_and_refs_merges_into_existing_group(tmp_path, 
             provider_response = {"imageFile": kwargs["output_png"].name, "response": {"candidates": [{"finishReason": "STOP"}]}}
 
         return Result()
-
-    import gemini
 
     monkeypatch.setattr(gemini, "generate_image", fake_generate)
     first = client.post(
@@ -355,8 +375,6 @@ def test_generate_variants_appends_to_existing_image_group(tmp_path, monkeypatch
             provider_response = {"imageFile": kwargs["output_png"].name, "response": {"candidates": [{"finishReason": "STOP"}]}}
 
         return Result()
-
-    import gemini
 
     monkeypatch.setattr(gemini, "generate_image", fake_generate)
     first = client.post(

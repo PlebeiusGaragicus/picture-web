@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import logging
 import shutil
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,7 @@ LIBRARY_ROOT = REPO_ROOT / "photo-library"
 PROJECTS_ROOT = LIBRARY_ROOT / "projects"
 SYSTEM_TRASH = Path.home() / ".Trash"
 THUMB_MAX_SIZE = (384, 384)
+logger = logging.getLogger(__name__)
 
 
 def ensure_library() -> None:
@@ -162,12 +164,14 @@ def read_asset_metadata(slug: str, asset_id: str) -> AssetMetadata:
 
 
 def write_asset_metadata(slug: str, metadata: AssetMetadata) -> AssetSummary:
+    logger.debug("write asset metadata slug=%s asset_id=%s kind=%s title=%s", slug, metadata.id, metadata.kind, metadata.title)
     write_json(asset_json_path(slug, metadata.id), metadata.model_dump(mode="json"))
     return metadata_to_summary(slug, metadata)
 
 
 def move_to_trash(path: Path) -> None:
     if not path.exists():
+        logger.debug("trash skip missing path=%s", path)
         return
     destination = SYSTEM_TRASH / path.name
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -176,12 +180,14 @@ def move_to_trash(path: Path) -> None:
         destination = SYSTEM_TRASH / f"{path.stem}_{counter}{path.suffix}"
         counter += 1
     shutil.move(str(path), str(destination))
+    logger.debug("moved to trash source=%s destination=%s", path, destination)
 
 
 def delete_asset(slug: str, asset_id: str) -> None:
     require_project(slug)
     if not asset_json_path(slug, asset_id).is_file():
         raise HTTPException(status_code=404, detail=f"Asset not found: {asset_id}")
+    logger.debug("delete asset slug=%s asset_id=%s", slug, asset_id)
     move_to_trash(asset_json_path(slug, asset_id))
     move_to_trash(asset_png_path(slug, asset_id))
 
@@ -205,6 +211,7 @@ def delete_asset(slug: str, asset_id: str) -> None:
             changed = True
     if changed:
         write_canvas(slug, canvas)
+        logger.debug("delete asset updated canvas slug=%s asset_id=%s", slug, asset_id)
 
 
 def patch_display(slug: str, asset_id: str, payload: DisplayPatch) -> AssetSummary:
@@ -345,6 +352,14 @@ async def import_asset(slug: str, upload: UploadFile, title: str | None = None) 
     out_png = asset_png_path(slug, asset_id)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = out_png.with_suffix(".upload")
+    logger.debug(
+        "import asset start slug=%s asset_id=%s filename=%s content_type=%s title=%s",
+        slug,
+        asset_id,
+        upload.filename,
+        upload.content_type,
+        title,
+    )
     try:
         with tmp_path.open("wb") as fh:
             shutil.copyfileobj(upload.file, fh)
@@ -353,6 +368,7 @@ async def import_asset(slug: str, upload: UploadFile, title: str | None = None) 
         content_hash = file_sha256(out_png)
         duplicate = matching_import_by_hash(slug, content_hash)
         if duplicate is not None:
+            logger.debug("import duplicate slug=%s asset_id=%s duplicate_id=%s hash=%s", slug, asset_id, duplicate.id, content_hash)
             out_png.unlink(missing_ok=True)
             raise HTTPException(status_code=409, detail=f"Already imported: {duplicate.title}")
     finally:
@@ -368,7 +384,9 @@ async def import_asset(slug: str, upload: UploadFile, title: str | None = None) 
         createdAt=now,
         updatedAt=now,
     )
-    return write_asset_metadata(slug, metadata)
+    summary = write_asset_metadata(slug, metadata)
+    logger.debug("import asset complete slug=%s asset_id=%s hash=%s", slug, asset_id, content_hash)
+    return summary
 
 
 def thumbnail_path(slug: str, asset_id: str) -> Path:
@@ -401,10 +419,32 @@ def create_generated_assets(
     aspect_ratio = payload.aspectRatio or gemini.default_aspect_ratio()
     image_size = payload.imageSize or gemini.default_image_size()
 
+    logger.debug(
+        "create generation run slug=%s run_id=%s canvas_node=%s refs=%s parent_paths=%s model=%s aspect_ratio=%s image_size=%s base_seed=%s batch_count=%s",
+        slug,
+        run_id,
+        payload.canvasNodeId,
+        payload.refs,
+        [str(path) for path in parent_paths],
+        model,
+        aspect_ratio,
+        image_size,
+        base_seed,
+        payload.batchCount,
+    )
     for index in range(payload.batchCount):
         asset_id = new_ulid()
         seed = base_seed + index if payload.batchCount > 1 else base_seed
         out_png = asset_png_path(slug, asset_id)
+        logger.debug(
+            "generating asset slug=%s run_id=%s index=%s asset_id=%s seed=%s output=%s",
+            slug,
+            run_id,
+            index,
+            asset_id,
+            seed,
+            out_png,
+        )
         try:
             result = generate_one(
                 prompt_text=payload.prompt,
@@ -416,6 +456,7 @@ def create_generated_assets(
                 image_size=image_size,
             )
         except Exception as exc:
+            logger.exception("generation failed slug=%s run_id=%s index=%s asset_id=%s", slug, run_id, index, asset_id)
             out_png.unlink(missing_ok=True)
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -443,8 +484,10 @@ def create_generated_assets(
             ),
         )
         created.append(write_asset_metadata(slug, metadata))
+        logger.debug("generated asset metadata written slug=%s asset_id=%s", slug, asset_id)
     if payload.canvasNodeId:
         attach_generated_assets_to_canvas(slug, payload.canvasNodeId, created)
+    logger.debug("generation run complete slug=%s run_id=%s created=%s", slug, run_id, [asset.id for asset in created])
     return GenerateResponse(assets=created)
 
 
@@ -454,6 +497,14 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
     asset_ids = [asset.id for asset in assets]
     active_asset_id = asset_ids[0] if asset_ids else None
     target_node_id = matching_variant_group_node_id(slug, canvas, assets)
+    logger.debug(
+        "attach generated assets slug=%s requested_node=%s existing_type=%s target_node=%s asset_ids=%s",
+        slug,
+        node_id,
+        type(existing).__name__ if existing is not None else None,
+        target_node_id,
+        asset_ids,
+    )
     if target_node_id and target_node_id != node_id:
         target = canvas.nodes[target_node_id]
         if isinstance(target, ImageGroupCanvasNode):

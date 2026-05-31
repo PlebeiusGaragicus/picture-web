@@ -275,7 +275,7 @@ Validate in `api/` and `webui/` (JSON Schema / Zod).
 | `draft` | Persistent note with `refs`, `prompt`, and generation `params`, but no image asset yet. |
 | `imageGroup` | One visible canvas node containing one or more saved image asset ids. When more than one asset is present, the UI renders a stacked-paper treatment and variant navigation. |
 
-Variants are stored explicitly as `assetIds` on an `imageGroup`. The default grouping rule is same prompt text + same ordered parent refs, with generation parameters allowed to vary. Siblings share parent refs but have different prompt text, so they remain separate `imageGroup` nodes.
+Variants are stored explicitly as `assetIds` on an `imageGroup`. The default grouping rule is same prompt text + same ordered parent refs, with generation parameters allowed to vary. Siblings share parent refs but have different prompt text, so they remain separate `imageGroup` nodes. `displayName` is the human name for the image group / variant stack, not for an individual variant.
 
 ### React Flow Edges (Derived, Not Stored)
 
