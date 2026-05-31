@@ -886,6 +886,15 @@ pre {
   box-shadow: 0 0 0 3px rgb(37 99 235 / 0.22);
 }
 
+.image-group-node .react-flow__handle.output-handle {
+  opacity: 0;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.image-group-node:hover .react-flow__handle.output-handle {
+  opacity: 1;
+}
+
 .react-flow__handle.output-handle:hover {
   transform: translateY(-50%) scale(1.15);
 }
