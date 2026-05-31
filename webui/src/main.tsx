@@ -45,6 +45,20 @@ const emptyCanvas: CanvasDocument = {
 };
 
 const defaultDraftParams: GenerationParams = { model: 'gemini-3.1-flash-image', aspectRatio: '16:9', imageSize: '1K', seed: null, batchCount: 1 };
+const modelCapabilities: Record<string, { aspectRatios: string[]; imageSizes: string[] }> = {
+  'gemini-2.5-flash-image': {
+    aspectRatios: ['1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+    imageSizes: ['1K', '2K', '4K'],
+  },
+  'gemini-3.1-flash-image': {
+    aspectRatios: ['1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9'],
+    imageSizes: ['512', '1K', '2K', '4K'],
+  },
+  'gemini-3-pro-image': {
+    aspectRatios: ['1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+    imageSizes: ['1K', '2K', '4K'],
+  },
+};
 const minZoom = 0.2;
 const maxZoom = 2;
 
@@ -99,6 +113,24 @@ function assetLabel(asset: Asset | null | undefined, fallback = 'Untitled image'
   return asset?.title?.trim() || fallback;
 }
 
+function uniqueOptions(options: string[], current: string | null | undefined) {
+  return Array.from(new Set(current ? [...options, current] : options));
+}
+
+function capabilitiesForModel(model: string | null | undefined) {
+  return modelCapabilities[model ?? ''] ?? modelCapabilities[defaultDraftParams.model ?? 'gemini-3.1-flash-image'];
+}
+
+function normalizedParamsForModel(params: GenerationParams, model: string) {
+  const capabilities = capabilitiesForModel(model);
+  return {
+    ...params,
+    model,
+    aspectRatio: capabilities.aspectRatios.includes(params.aspectRatio ?? '') ? params.aspectRatio : capabilities.aspectRatios[0],
+    imageSize: capabilities.imageSizes.includes(params.imageSize ?? '') ? params.imageSize : capabilities.imageSizes[0],
+  };
+}
+
 function toFlowNodes(
   canvas: CanvasDocument,
   assets: Asset[],
@@ -149,6 +181,7 @@ function App() {
   const [pendingConnectionSource, setPendingConnectionSource] = useState<string | null>(null);
   const [zoomPercent, setZoomPercent] = useState(zoomToPercent(1));
   const [viewerNodeId, setViewerNodeId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ nodeId: string; assetId?: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const reactFlowRef = useRef<ReactFlowInstance<PhotoNodeData> | null>(null);
@@ -267,15 +300,11 @@ function App() {
 
   const reload = async () => loadProject(openProjectSlug);
 
-  const deleteNodeById = useCallback((nodeId: string, assetId?: string) => {
+  const performDeleteNodeById = useCallback((nodeId: string, assetId?: string) => {
     const nodeToDelete = nodes.find((node) => node.id === nodeId);
     const assetIdsToDelete = nodeToDelete?.data.kind === 'imageGroup'
       ? [assetId ?? nodeToDelete.data.activeAsset?.id ?? nodeToDelete.data.activeAssetId ?? nodeToDelete.data.assetIds[0]].filter((id): id is string => Boolean(id))
       : [];
-    const message = nodeToDelete?.data.kind === 'imageGroup'
-      ? `Delete this variant and move its files to the system Trash?`
-      : 'Delete this draft?';
-    if (!window.confirm(message)) return;
     if (nodeToDelete?.data.kind === 'imageGroup') {
       void Promise.all(assetIdsToDelete.map((assetId) => api.deleteAsset(openProjectSlug, assetId)))
         .then(() => loadProject(openProjectSlug))
@@ -304,6 +333,10 @@ function App() {
     setSelectedNodeIds((current) => current.filter((id) => id !== nodeId));
     setPopoverNodeId((current) => (current === nodeId ? null : current));
   }, [loadProject, nodes, openProjectSlug]);
+
+  const deleteNodeById = useCallback((nodeId: string, assetId?: string) => {
+    setPendingDelete({ nodeId, assetId });
+  }, []);
 
   const openProject = async (projectSlug: string) => {
     setOpenProjectSlug(projectSlug);
@@ -424,7 +457,11 @@ function App() {
     return () => window.removeEventListener('keydown', deleteOnKey);
   }, [deleteSelectedNodes]);
 
-  const createDraftAt = async (refs: string[], position: { x: number; y: number }) => {
+  const createDraftAt = async (
+    refs: string[],
+    position: { x: number; y: number },
+    options: { prompt?: string; params?: GenerationParams; displayName?: string } = {},
+  ) => {
     const nodeId = `draft_${Date.now()}`;
     const node: Node<PhotoNodeData> = {
       id: nodeId,
@@ -438,8 +475,8 @@ function App() {
         x: position.x,
         y: position.y,
         refs: Array.from(new Set(refs)),
-        prompt: '',
-        params: defaultDraftParams,
+        prompt: options.prompt ?? '',
+        params: options.params ?? defaultDraftParams,
         onDetails: openDetails,
       },
     };
@@ -458,6 +495,24 @@ function App() {
         : { x: 160, y: 160 },
     );
     setContextMenu(null);
+  };
+
+  const createSiblingDraft = async (group: ImageGroupNodeData, sourceAsset: Asset) => {
+    const refs = sourceAsset.generation?.refs ?? [];
+    const params = sourceAsset.generation
+      ? {
+          model: sourceAsset.generation.model,
+          aspectRatio: sourceAsset.generation.aspectRatio,
+          imageSize: sourceAsset.generation.imageSize,
+          seed: null,
+          batchCount: 1,
+        }
+      : defaultDraftParams;
+    const sourceNode = nodes.find((node) => node.id === group.nodeId);
+    const position = sourceNode
+      ? { x: sourceNode.position.x + 220, y: sourceNode.position.y }
+      : { x: 180, y: 160 };
+    await createDraftAt(refs, position, { prompt: sourceAsset.prompt?.text ?? '', params });
   };
 
   const generateDraft = async (id: string, draft: DraftNodeData) => {
@@ -654,6 +709,7 @@ function App() {
           onGenerate={generateDraft}
           onGenerateVariants={generateImageVariants}
           onVariant={changeVariant}
+          onCreateSibling={createSiblingDraft}
           onDelete={deleteNodeById}
         />
       )}
@@ -665,6 +721,30 @@ function App() {
           onVariant={changeVariant}
           onDelete={deleteNodeById}
         />
+      )}
+      {pendingDelete && (
+        <div className="confirm-backdrop" onClick={() => setPendingDelete(null)}>
+          <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
+            <h2>Confirm delete</h2>
+            <p>
+              {nodes.find((node) => node.id === pendingDelete.nodeId)?.data.kind === 'imageGroup'
+                ? 'Delete this variant and move its files to the system Trash?'
+                : 'Delete this draft?'}
+            </p>
+            <div className="row">
+              <button
+                className="danger"
+                onClick={() => {
+                  performDeleteNodeById(pendingDelete.nodeId, pendingDelete.assetId);
+                  setPendingDelete(null);
+                }}
+              >
+                Delete
+              </button>
+              <button className="secondary" onClick={() => setPendingDelete(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -725,6 +805,7 @@ function NodeSidebar({
   onGenerate,
   onGenerateVariants,
   onVariant,
+  onCreateSibling,
   onDelete,
 }: {
   node: Node<PhotoNodeData>;
@@ -734,6 +815,7 @@ function NodeSidebar({
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
+  onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
   onDelete: (id: string, assetId?: string) => void;
 }) {
   if (node.data.kind === 'draft') {
@@ -766,6 +848,7 @@ function NodeSidebar({
       onDelete={onDelete}
       onNodeChange={onImageGroupChange}
       onVariant={onVariant}
+      onCreateSibling={onCreateSibling}
       onGenerateVariants={onGenerateVariants}
     />
   );
@@ -789,6 +872,8 @@ function DraftSidebar({
   const [isParentPickerOpen, setIsParentPickerOpen] = useState(false);
   const parents = draft.refs.map((ref) => assets.find((asset) => asset.id === ref) ?? null);
   const availableParents = assets.filter((asset) => !draft.refs.includes(asset.id));
+  const draftModel = draft.params.model ?? defaultDraftParams.model;
+  const draftCapabilities = capabilitiesForModel(draftModel);
   useEffect(() => {
     const textarea = promptRef.current;
     if (!textarea) return;
@@ -845,7 +930,28 @@ function DraftSidebar({
           </div>
         )}
       </section>
+      <section className="sidebar-section">
+        <label className="field-label">
+          Prompt
+          <textarea
+            ref={promptRef}
+            className="prompt-textarea"
+            autoFocus
+            value={draft.prompt}
+            onChange={(event) => onDraftChange(node.id, { prompt: event.target.value })}
+            placeholder="Prompt"
+          />
+        </label>
+      </section>
+      <section className="sidebar-section generation-section">
+        <h3>Parameters</h3>
       <div className="row">
+        <select
+          value={draftModel ?? ''}
+          onChange={(event) => onDraftChange(node.id, { params: normalizedParamsForModel(draft.params, event.target.value) })}
+        >
+          {Object.keys(modelCapabilities).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
         <input
           value={draft.params.seed ?? ''}
           onChange={(event) =>
@@ -856,27 +962,12 @@ function DraftSidebar({
       </div>
       <div className="row">
         <select value={draft.params.aspectRatio ?? '16:9'} onChange={(event) => onDraftChange(node.id, { params: { ...draft.params, aspectRatio: event.target.value } })}>
-          <option value="16:9">16:9</option>
-          <option value="4:3">4:3</option>
-          <option value="1:1">1:1</option>
-          <option value="3:4">3:4</option>
-          <option value="9:16">9:16</option>
+          {draftCapabilities.aspectRatios.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
         <select value={draft.params.imageSize ?? '1K'} onChange={(event) => onDraftChange(node.id, { params: { ...draft.params, imageSize: event.target.value } })}>
-          <option value="512">512</option>
-          <option value="1K">1K</option>
-          <option value="2K">2K</option>
-          <option value="4K">4K</option>
+          {draftCapabilities.imageSizes.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
       </div>
-      <textarea
-        ref={promptRef}
-        className="prompt-textarea"
-        autoFocus
-        value={draft.prompt}
-        onChange={(event) => onDraftChange(node.id, { prompt: event.target.value })}
-        placeholder="Prompt"
-      />
       <div className="generate-control">
         <button onClick={() => onGenerate(node.id, draft)} disabled={!draft.prompt.trim()}>
           Generate
@@ -892,6 +983,7 @@ function DraftSidebar({
           />
         </label>
       </div>
+      </section>
     </aside>
   );
 }
@@ -903,6 +995,7 @@ function ImageSidebar({
   onDelete,
   onNodeChange,
   onVariant,
+  onCreateSibling,
   onGenerateVariants,
 }: {
   node: Node<ImageGroupNodeData>;
@@ -911,6 +1004,7 @@ function ImageSidebar({
   onDelete: (id: string, assetId?: string) => void;
   onNodeChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
+  onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
 }) {
   const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
@@ -919,6 +1013,11 @@ function ImageSidebar({
   const refs = asset.generation?.refs ?? [];
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const activeVariantIndex = Math.max(0, node.data.assetIds.indexOf(asset.id));
+  const activeModel = isVariantPanelOpen ? variantParams.model ?? asset.generation?.model : asset.generation?.model;
+  const activeCapabilities = capabilitiesForModel(activeModel);
+  const modelOptions = uniqueOptions(Object.keys(modelCapabilities), asset.generation?.model);
+  const aspectRatioOptions = isVariantPanelOpen ? activeCapabilities.aspectRatios : uniqueOptions(activeCapabilities.aspectRatios, asset.generation?.aspectRatio);
+  const imageSizeOptions = isVariantPanelOpen ? activeCapabilities.imageSizes : uniqueOptions(activeCapabilities.imageSizes, asset.generation?.imageSize);
   const changeSidebarVariantByClickSide = (event: React.MouseEvent<HTMLDivElement>) => {
     if (node.data.assetIds.length < 2) return;
     const rect = event.currentTarget.getBoundingClientRect();
@@ -936,10 +1035,7 @@ function ImageSidebar({
   }, [asset]);
   return (
     <aside className="details-sidebar">
-      <div className="popover-header">
-        <h2>{node.data.displayName}</h2>
-        <button className="danger" onClick={() => onDelete(node.id, asset.id)}>Delete Variant</button>
-      </div>
+      <button className="danger" onClick={() => onDelete(node.id, asset.id)}>Delete</button>
       <label className="field-label">
         Name
         <input value={node.data.displayName} onChange={(event) => onNodeChange(node.id, { displayName: event.target.value })} />
@@ -972,12 +1068,29 @@ function ImageSidebar({
           </>
         )}
       </div>
+      {asset.generation && (
+        <section className="sidebar-section parent-section">
+          <h3>Parents</h3>
+          {refs.length === 0 && <p className="muted">None</p>}
+          {refs.length > 0 && (
+            <div className="parent-list">
+              {refs.map((ref) => (
+                <div className="parent-item" key={ref}>
+                  {assetById.get(ref)?.thumbnailUrl ? <img src={assetById.get(ref)?.thumbnailUrl ?? ''} alt="" /> : <div className="parent-thumb-placeholder" />}
+                  <span>{assetLabel(assetById.get(ref), 'Parent image')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
       {prompt && (
         <section className="sidebar-section">
           <label className="field-label">
             Prompt
             <textarea className="prompt-textarea locked-field prompt-preview" value={prompt} readOnly />
           </label>
+          <button className="secondary" onClick={() => onCreateSibling(node.data, asset)}>Create sibling</button>
         </section>
       )}
       {asset.generation && (
@@ -988,12 +1101,9 @@ function ImageSidebar({
             <select
               value={isVariantPanelOpen ? variantParams.model ?? asset.generation.model : asset.generation.model}
               disabled={!isVariantPanelOpen}
-              onChange={(event) => setVariantParams((current) => ({ ...current, model: event.target.value }))}
+              onChange={(event) => setVariantParams((current) => normalizedParamsForModel(current, event.target.value))}
             >
-              <option value="gemini-2.5-flash-image">gemini-2.5-flash-image</option>
-              <option value="gemini-3.1-flash-image">gemini-3.1-flash-image</option>
-              <option value="gemini-3-pro-image">gemini-3-pro-image</option>
-              <option value={asset.generation.model}>{asset.generation.model}</option>
+              {modelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
             </select>
           </label>
           <div className="row">
@@ -1004,12 +1114,7 @@ function ImageSidebar({
                 disabled={!isVariantPanelOpen}
                 onChange={(event) => setVariantParams((current) => ({ ...current, aspectRatio: event.target.value }))}
               >
-                <option value="16:9">16:9</option>
-                <option value="4:3">4:3</option>
-                <option value="1:1">1:1</option>
-                <option value="3:4">3:4</option>
-                <option value="9:16">9:16</option>
-                <option value={asset.generation.aspectRatio}>{asset.generation.aspectRatio}</option>
+                {aspectRatioOptions.map((option) => <option key={option} value={option}>{option}</option>)}
               </select>
             </label>
             <label className="field-label">
@@ -1019,11 +1124,7 @@ function ImageSidebar({
                 disabled={!isVariantPanelOpen}
                 onChange={(event) => setVariantParams((current) => ({ ...current, imageSize: event.target.value }))}
               >
-                <option value="512">512</option>
-                <option value="1K">1K</option>
-                <option value="2K">2K</option>
-                <option value="4K">4K</option>
-                <option value={asset.generation.imageSize}>{asset.generation.imageSize}</option>
+                {imageSizeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
               </select>
             </label>
           </div>
@@ -1039,20 +1140,6 @@ function ImageSidebar({
                 placeholder="Seed optional"
               />
             </label>
-          </div>
-          <div>
-            <h3>Parents</h3>
-            {refs.length === 0 && <p className="muted">None</p>}
-            {refs.length > 0 && (
-              <div className="parent-list">
-                {refs.map((ref) => (
-                  <div className="parent-item" key={ref}>
-                    {assetById.get(ref)?.thumbnailUrl ? <img src={assetById.get(ref)?.thumbnailUrl ?? ''} alt="" /> : <div className="parent-thumb-placeholder" />}
-                    <span>{assetLabel(assetById.get(ref), 'Parent image')}</span>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
           {isVariantPanelOpen ? (
             <div className="generate-control">

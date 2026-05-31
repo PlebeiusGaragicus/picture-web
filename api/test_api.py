@@ -195,6 +195,26 @@ def test_import_duplicate_file_returns_conflict(tmp_path, monkeypatch):
     assert len(client.get("/api/projects/farm-comic/assets").json()) == 1
 
 
+def test_generate_rejects_unsupported_model_image_size(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    response = client.post(
+        "/api/projects/farm-comic/generate",
+        json={
+            "prompt": "blue square",
+            "refs": [],
+            "model": "gemini-3-pro-image",
+            "aspectRatio": "16:9",
+            "imageSize": "512",
+            "batchCount": 1,
+            "tags": [],
+        },
+    )
+    assert response.status_code == 422
+    assert "Unsupported image size" in response.text
+
+
 def test_generate_with_mocked_boundary_persists_receipt(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)

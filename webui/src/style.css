@@ -329,6 +329,32 @@ pre {
   pointer-events: none;
 }
 
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgb(2 6 23 / 0.72);
+}
+
+.confirm-dialog {
+  display: grid;
+  gap: 14px;
+  width: min(380px, calc(100vw - 32px));
+  padding: 18px;
+  color: #e5e7eb;
+  background: #0f172a;
+  border: 1px solid #475569;
+  border-radius: 16px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.5);
+}
+
+.confirm-dialog h2,
+.confirm-dialog p {
+  margin: 0;
+}
+
 .context-menu {
   position: fixed;
   z-index: 30;

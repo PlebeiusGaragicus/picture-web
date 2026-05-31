@@ -161,10 +161,11 @@ Image = { id, metadata, pixels }
 - **Canvas edges** = directed **parent → child**, one edge per parent id in `generation.refs` or draft `refs`, derived at render time.
 - **Every saved output has a unique id.** A generate action never overwrites an existing PNG by default.
 - **Variants / stacks:** canvas image nodes can display multiple saved asset ids as a single stack. Variants share the same prompt and input images, but differ by generation parameters such as seed, model, aspect ratio, image size, or future provider controls.
+- **Siblings:** sibling image groups share the same parent refs but use a different prompt. Siblings are separate child nodes, not variants in the same stack.
 
 **Draft workflow:** A draft is a persistent canvas node with prompt, parent refs, and generation parameters, but no image pixels yet. Users create drafts by right-clicking the canvas and choosing Generate, or by dragging from a node’s output side and releasing on the canvas. Drafts survive reloads because they are stored in `canvas.json`.
 
-**Generate workflow:** User creates or edits a draft → Generate → API writes one or more `{child}.json` + `{child}.png` assets → the draft becomes or updates an image stack node. A generate action can add variants to an existing node instead of creating visually separate sibling nodes.
+**Generate workflow:** User creates or edits a draft → Generate → API writes one or more `{child}.json` + `{child}.png` assets → the draft becomes or updates an image stack node. A generate action can add variants to an existing node when prompt and parents stay the same. To change prompt while keeping parents, create a sibling draft from the image sidebar and generate it as a separate child node.
 
 **Immutability rule:** Generated asset metadata is a historical receipt. Do not edit a generated asset’s prompt, parent refs, model, seed, or generation settings in place. To iterate, select any image(s), open **Generate / Refine**, adjust prompt/settings/inputs in the form, and save the result as new child asset(s). Editable fields after save are limited to display-only organization such as `title` and `tags`.
 
@@ -274,7 +275,7 @@ Validate in `api/` and `webui/` (JSON Schema / Zod).
 | `draft` | Persistent note with `refs`, `prompt`, and generation `params`, but no image asset yet. |
 | `imageGroup` | One visible canvas node containing one or more saved image asset ids. When more than one asset is present, the UI renders a stacked-paper treatment and variant navigation. |
 
-Variants are stored explicitly as `assetIds` on an `imageGroup`. The default grouping rule is same prompt text + same ordered parent refs, with generation parameters allowed to vary. Users can later regroup variants if the UI exposes that control.
+Variants are stored explicitly as `assetIds` on an `imageGroup`. The default grouping rule is same prompt text + same ordered parent refs, with generation parameters allowed to vary. Siblings share parent refs but have different prompt text, so they remain separate `imageGroup` nodes.
 
 ### React Flow Edges (Derived, Not Stored)
 

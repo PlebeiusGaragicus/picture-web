@@ -11,6 +11,20 @@ TAG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 SLUG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 
 AssetKind = Literal["imported", "generated"]
+MODEL_CAPABILITIES = {
+    "gemini-2.5-flash-image": {
+        "aspectRatios": {"1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"},
+        "imageSizes": {"1K", "2K", "4K"},
+    },
+    "gemini-3.1-flash-image": {
+        "aspectRatios": {"1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"},
+        "imageSizes": {"512", "1K", "2K", "4K"},
+    },
+    "gemini-3-pro-image": {
+        "aspectRatios": {"1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"},
+        "imageSizes": {"1K", "2K", "4K"},
+    },
+}
 
 
 def utc_now() -> str:
@@ -196,6 +210,19 @@ class GenerateRequest(BaseModel):
             if not re.match(TAG_RE, tag):
                 raise ValueError(f"Invalid tag slug: {tag}")
         return tags
+
+    @model_validator(mode="after")
+    def validate_model_capabilities(self) -> "GenerateRequest":
+        if self.model is None:
+            return self
+        capabilities = MODEL_CAPABILITIES.get(self.model)
+        if capabilities is None:
+            raise ValueError(f"Unsupported model: {self.model}")
+        if self.aspectRatio is not None and self.aspectRatio not in capabilities["aspectRatios"]:
+            raise ValueError(f"Unsupported aspect ratio {self.aspectRatio} for model {self.model}")
+        if self.imageSize is not None and self.imageSize not in capabilities["imageSizes"]:
+            raise ValueError(f"Unsupported image size {self.imageSize} for model {self.model}")
+        return self
 
 
 class GenerateResponse(BaseModel):
