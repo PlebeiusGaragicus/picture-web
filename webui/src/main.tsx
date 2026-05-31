@@ -981,70 +981,101 @@ function ImageSidebar({
         </section>
       )}
       {asset.generation && (
-        <section className="sidebar-section">
-          <button className="secondary" onClick={() => setIsVariantPanelOpen((current) => !current)}>
-            {isVariantPanelOpen ? 'Hide variant options' : 'Create variants'}
-          </button>
-          {isVariantPanelOpen && (
-            <div className="variant-panel">
-              <div>
-                <h3>Parents</h3>
-                {refs.length === 0 && <p className="muted">None</p>}
-                {refs.length > 0 && (
-                  <div className="parent-list">
-                    {refs.map((ref) => (
-                      <div className="parent-item" key={ref}>
-                        {assetById.get(ref)?.thumbnailUrl ? <img src={assetById.get(ref)?.thumbnailUrl ?? ''} alt="" /> : <div className="parent-thumb-placeholder" />}
-                        <span>{assetLabel(assetById.get(ref), 'Parent image')}</span>
-                      </div>
-                    ))}
+        <section className="sidebar-section generation-section">
+          <h3>Generation</h3>
+          <label className="field-label">
+            Model
+            <select
+              value={isVariantPanelOpen ? variantParams.model ?? asset.generation.model : asset.generation.model}
+              disabled={!isVariantPanelOpen}
+              onChange={(event) => setVariantParams((current) => ({ ...current, model: event.target.value }))}
+            >
+              <option value="gemini-2.5-flash-image">gemini-2.5-flash-image</option>
+              <option value="gemini-3.1-flash-image">gemini-3.1-flash-image</option>
+              <option value="gemini-3-pro-image">gemini-3-pro-image</option>
+              <option value={asset.generation.model}>{asset.generation.model}</option>
+            </select>
+          </label>
+          <div className="row">
+            <label className="field-label">
+              Aspect Ratio
+              <select
+                value={isVariantPanelOpen ? variantParams.aspectRatio ?? asset.generation.aspectRatio : asset.generation.aspectRatio}
+                disabled={!isVariantPanelOpen}
+                onChange={(event) => setVariantParams((current) => ({ ...current, aspectRatio: event.target.value }))}
+              >
+                <option value="16:9">16:9</option>
+                <option value="4:3">4:3</option>
+                <option value="1:1">1:1</option>
+                <option value="3:4">3:4</option>
+                <option value="9:16">9:16</option>
+                <option value={asset.generation.aspectRatio}>{asset.generation.aspectRatio}</option>
+              </select>
+            </label>
+            <label className="field-label">
+              Image Size
+              <select
+                value={isVariantPanelOpen ? variantParams.imageSize ?? asset.generation.imageSize : asset.generation.imageSize}
+                disabled={!isVariantPanelOpen}
+                onChange={(event) => setVariantParams((current) => ({ ...current, imageSize: event.target.value }))}
+              >
+                <option value="512">512</option>
+                <option value="1K">1K</option>
+                <option value="2K">2K</option>
+                <option value="4K">4K</option>
+                <option value={asset.generation.imageSize}>{asset.generation.imageSize}</option>
+              </select>
+            </label>
+          </div>
+          <div className="row">
+            <label className="field-label">
+              Seed
+              <input
+                value={isVariantPanelOpen ? variantParams.seed ?? '' : asset.generation.seed ?? 'auto'}
+                readOnly={!isVariantPanelOpen}
+                onChange={(event) =>
+                  setVariantParams((current) => ({ ...current, seed: event.target.value ? Number(event.target.value) : null }))
+                }
+                placeholder="Seed optional"
+              />
+            </label>
+          </div>
+          <div>
+            <h3>Parents</h3>
+            {refs.length === 0 && <p className="muted">None</p>}
+            {refs.length > 0 && (
+              <div className="parent-list">
+                {refs.map((ref) => (
+                  <div className="parent-item" key={ref}>
+                    {assetById.get(ref)?.thumbnailUrl ? <img src={assetById.get(ref)?.thumbnailUrl ?? ''} alt="" /> : <div className="parent-thumb-placeholder" />}
+                    <span>{assetLabel(assetById.get(ref), 'Parent image')}</span>
                   </div>
-                )}
+                ))}
               </div>
-              <div className="row">
+            )}
+          </div>
+          {isVariantPanelOpen ? (
+            <div className="generate-control">
+              <button onClick={() => onGenerateVariants(node.id, node.data, variantParams)} disabled={!prompt.trim()}>
+                Generate variants
+              </button>
+              <button className="secondary" onClick={() => setIsVariantPanelOpen(false)}>Cancel</button>
+              <label>
+                Candidates
                 <input
-                  value={variantParams.seed ?? ''}
-                  onChange={(event) =>
-                    setVariantParams((current) => ({ ...current, seed: event.target.value ? Number(event.target.value) : null }))
-                  }
-                  placeholder="Seed optional"
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={variantParams.batchCount}
+                  onChange={(event) => setVariantParams((current) => ({ ...current, batchCount: Number(event.target.value) }))}
                 />
-              </div>
-              <div className="row">
-                <select value={variantParams.aspectRatio ?? '16:9'} onChange={(event) => setVariantParams((current) => ({ ...current, aspectRatio: event.target.value }))}>
-                  <option value="16:9">16:9</option>
-                  <option value="4:3">4:3</option>
-                  <option value="1:1">1:1</option>
-                  <option value="3:4">3:4</option>
-                  <option value="9:16">9:16</option>
-                </select>
-                <select value={variantParams.imageSize ?? '1K'} onChange={(event) => setVariantParams((current) => ({ ...current, imageSize: event.target.value }))}>
-                  <option value="512">512</option>
-                  <option value="1K">1K</option>
-                  <option value="2K">2K</option>
-                  <option value="4K">4K</option>
-                </select>
-              </div>
-              <div className="generate-control">
-                <button onClick={() => onGenerateVariants(node.id, node.data, variantParams)} disabled={!prompt.trim()}>
-                  Generate variants
-                </button>
-                <label>
-                  Candidates
-                  <input
-                    type="number"
-                    min={1}
-                    max={8}
-                    value={variantParams.batchCount}
-                    onChange={(event) => setVariantParams((current) => ({ ...current, batchCount: Number(event.target.value) }))}
-                  />
-                </label>
-              </div>
+              </label>
             </div>
+          ) : (
+            <button className="secondary" onClick={() => setIsVariantPanelOpen(true)}>Create variants</button>
           )}
         </section>
       )}
-      {asset.generation && <pre>{JSON.stringify({ prompt: asset.prompt, generation: asset.generation }, null, 2)}</pre>}
     </aside>
   );
 }
