@@ -242,6 +242,21 @@ function App() {
     setViewerNodeId(nodeId);
   }, []);
 
+  const openAssetInViewer = useCallback((assetId: string) => {
+    setNodes((current) => {
+      const targetNode = current.find((node) => node.data.kind === 'imageGroup' && node.data.assetIds.includes(assetId)) as Node<ImageGroupNodeData> | undefined;
+      if (!targetNode) return current;
+      setViewerNodeId(targetNode.id);
+      const next = current.map((node) => {
+        if (node.id !== targetNode.id || node.data.kind !== 'imageGroup') return node;
+        const activeAsset = node.data.assets.find((asset) => asset.id === assetId) ?? node.data.activeAsset;
+        return { ...node, data: { ...node.data, activeAssetId: assetId, activeAsset } };
+      });
+      void persistNodes(next);
+      return next;
+    });
+  }, []);
+
   const openDetails = useCallback((nodeId: string) => {
     setPopoverNodeId(nodeId);
   }, []);
@@ -786,9 +801,11 @@ function App() {
       {viewerNodeId && (
         <ImageViewer
           node={nodes.find((node) => node.id === viewerNodeId && node.data.kind === 'imageGroup') as Node<ImageGroupNodeData> | undefined}
+          assets={assets}
           projectSlug={openProjectSlug}
           onClose={() => setViewerNodeId(null)}
           onVariant={changeVariant}
+          onViewAsset={openAssetInViewer}
           onDelete={deleteNodeById}
         />
       )}
@@ -1381,15 +1398,19 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
 
 function ImageViewer({
   node,
+  assets,
   projectSlug,
   onClose,
   onVariant,
+  onViewAsset,
   onDelete,
 }: {
   node?: Node<ImageGroupNodeData>;
+  assets: Asset[];
   projectSlug: string;
   onClose: () => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
+  onViewAsset: (assetId: string) => void;
   onDelete: (nodeId: string, assetId?: string) => void;
 }) {
   useEffect(() => {
@@ -1406,6 +1427,9 @@ function ImageViewer({
   const asset = node.data.activeAsset;
   const currentIndex = Math.max(0, node.data.assetIds.indexOf(asset.id));
   const imageUrl = `/api/projects/${projectSlug}/assets/${asset.id}/image`;
+  const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+  const parentAssets = (asset.generation?.refs ?? []).map((ref) => assetById.get(ref)).filter((asset): asset is Asset => Boolean(asset));
+  const childAssets = assets.filter((candidate) => candidate.generation?.refs.includes(asset.id));
   const changeByClickSide = (event: React.MouseEvent<HTMLImageElement>) => {
     event.stopPropagation();
     if (node.data.assetIds.length < 2) return;
@@ -1416,19 +1440,36 @@ function ImageViewer({
   return (
     <div className="image-viewer" onClick={onClose}>
       <div className="image-viewer-toolbar" onClick={(event) => event.stopPropagation()}>
-        <strong>{node.data.displayName}</strong>
-        <span>{currentIndex + 1} / {node.data.assetIds.length}</span>
-        <button
-          className="danger"
-          onClick={(event) => {
-            event.stopPropagation();
-            onDelete(node.id, asset.id);
-          }}
-        >
-          Delete Variant
-        </button>
-        <button className="secondary" onClick={onClose}>Close</button>
+        <div className="image-viewer-toolbar-main">
+          <strong>{node.data.displayName}</strong>
+          <span>{currentIndex + 1} / {node.data.assetIds.length}</span>
+          <button
+            className="danger"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete(node.id, asset.id);
+            }}
+          >
+            Delete Variant
+          </button>
+          <button className="secondary" onClick={onClose}>Close</button>
+        </div>
       </div>
+      {parentAssets.length > 0 && (
+        <div className="image-viewer-parents-rail" onClick={(event) => event.stopPropagation()} aria-label="Parent images">
+          <span>Parents</span>
+          {parentAssets.map((parent) => (
+            <button
+              key={parent.id}
+              className="image-viewer-thumb-button"
+              onClick={() => onViewAsset(parent.id)}
+              title={assetLabel(parent)}
+            >
+              <img src={parent.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${parent.id}/thumb`} alt={assetLabel(parent)} />
+            </button>
+          ))}
+        </div>
+      )}
       {node.data.assetIds.length > 1 && (
         <button
           className="image-viewer-nav previous"
@@ -1441,7 +1482,7 @@ function ImageViewer({
           &lt;
         </button>
       )}
-      <img src={imageUrl} alt={node.data.displayName} onClick={changeByClickSide} />
+      <img className="image-viewer-main-image" src={imageUrl} alt={node.data.displayName} onClick={changeByClickSide} />
       {node.data.assetIds.length > 1 && (
         <button
           className="image-viewer-nav next"
@@ -1453,6 +1494,21 @@ function ImageViewer({
         >
           &gt;
         </button>
+      )}
+      {childAssets.length > 0 && (
+        <div className="image-viewer-children-rail" onClick={(event) => event.stopPropagation()} aria-label="Child images">
+          <span>Children</span>
+          {childAssets.map((child) => (
+            <button
+              key={child.id}
+              className="image-viewer-thumb-button"
+              onClick={() => onViewAsset(child.id)}
+              title={assetLabel(child)}
+            >
+              <img src={child.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${child.id}/thumb`} alt={assetLabel(child)} />
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
