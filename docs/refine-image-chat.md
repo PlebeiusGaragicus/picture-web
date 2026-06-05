@@ -233,12 +233,54 @@ Add `archivedAt` as a top-level optional field on `AssetMetadata`, not inside `g
 
 Chat-generated images should be grouped with the parent/chat branch to use canvas space efficiently.
 
+### Vocabulary
+
+- **Candidate:** one image returned by a single Gemini request or chat turn.
+- **Variant:** a candidate displayed inside the same image group as other candidates from the same generation intent. The current left/right image stack controls navigate variants.
+- **Sibling:** a separate image group with the same parent refs but a different prompt, reference set, or generation intent.
+- **Refinement:** a child image generated through a chat turn.
+- **Chat branch:** the ordered set of refinements produced by one chat session.
+- **Fork:** a new chat branch started from an existing source image or chat turn output, usually to intentionally drop old context/references or try a different model.
+
+Batch outputs from the same request should be treated as candidates/variants, not siblings. For example, a normal generate request with `batchCount: 2` creates one image group with two variants. A chat turn that returns two final image candidates also creates one turn output group with two variants.
+
+### Canvas Axes
+
+Treat the canvas axes as orthogonal concepts:
+
+```text
+horizontal: alternate prompts, reference sets, and branches
+vertical: chat refinement timeline
+stack depth: variants/candidates from one request or turn
+```
+
+Example:
+
+```text
+Parent Image
+  |- Draft prompt A -> [candidate 1 <-> candidate 2]
+  |- Draft prompt B -> [candidate 1]
+  `- Chat session
+       v turn 1 refinement -> [candidate 1 <-> candidate 2]
+       v turn 2 refinement -> [candidate 1]
+       v turn 3 refinement -> [candidate 1 <-> candidate 2]
+```
+
+This means chat-generated assets are still parent/child lineage, but with a provenance subtype:
+
+- **Generation child:** created from selected reference images plus a prompt.
+- **Chat refinement:** created from a chat session, turn history, and the current/source image.
+
+The underlying lineage can still use `generation.refs`, but the UI should draw or label chat refinement edges differently so the user understands that the child came from conversational state, not only a fresh reference-image prompt.
+
 Two viable UI representations:
 
 1. **Session rail beside the parent.** The source image group shows a small "chat" branch control. Opening it reveals a vertical rail of turn cards beside the parent. Each card displays the generated image group for that assistant turn, with variants stacked inside the card. This is probably the clearest first implementation because it maps directly to chat order and keeps the main graph compact.
 2. **Collapsible chat container node.** A chat session appears as one larger canvas container connected to the source image. Inside it, generated turn outputs are shown as compact thumbnails or mini-stacks. Collapsing the container leaves one node labeled with the session title and latest output. This is more spatially efficient for long chats, but requires a richer canvas node type.
 
 Recommended v1: implement the session rail. It uses the existing image group concept for turn outputs and can evolve into a collapsible container later.
+
+Do not add generic up/down buttons directly to every image stack in v1. Up/down controls on an image could ambiguously mean parent/child navigation, chat turns, or other branch choices. Instead, expose a clear "Refinements" affordance on image groups with chat output. Opening that affordance reveals the vertical chat rail. Inside each rail turn card, keep left/right controls for variants from that turn.
 
 Shared behavior:
 
