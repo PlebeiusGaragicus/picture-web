@@ -21,7 +21,7 @@ Variations should be modeled explicitly. A character, location, or prop may have
 The workflow produces the following major artifacts:
 
 - A named, forkable Pi session created immediately after the book is loaded.
-- A complete character roster for the entire story.
+- A complete `character-list.txt` for the entire story.
 - A complete scene manifest in story order.
 - A play-by-play outline of the story's major acts and beats.
 - A story bible containing characters, locations, props, factions, motifs, timeline notes, and continuity rules.
@@ -45,7 +45,7 @@ comic-adaptation/
     book-load-session.md
     fork-log.md
   planning/
-    character-roster.md
+    character-list.txt
     scene-manifest.md
     play-by-play.md
     story-bible.md
@@ -99,18 +99,29 @@ Do not reuse identifiers for meaningfully different visual states. If a visual d
 
 ## Step 1: Load The Entire Book
 
-Use the Pi coding agent and start a named session for the book load. Pi supports `--name` / `-n` at startup, `/name` inside an interactive session, `--session` to resume a specific saved session, and `--fork` to fork a saved session into a new one.
+Use the Pi coding agent from the command line. Pi supports `--name` / `-n` at startup, `-p` / `--print` for non-interactive runs, `--session` to resume a specific saved session, and `--fork` to fork a saved session into a new one.
 
-Example:
+Assume a fresh project directory containing only `./book.txt`. Run pi from that directory.
+
+Create the clean book-load session, then capture its id while this is still the only session file for the project:
 
 ```bash
-pi --name "comic book load"
+pi --name "read book" -p '/skill:read-book ./book.txt' < /dev/null
+BOOK_LOAD_ID=$(
+  jq -r 'select(.type=="session") | .id' \
+    ~/.pi/agent/sessions/--$(pwd | sed 's|^/||' | tr '/:' '-')--/*.jsonl
+)
 ```
 
-Then run the `read-book` skill on the single canonical book `.txt` file:
+`jq -r .id` alone prints every tree-entry id in the JSONL, not just the session uuid. `select(.type=="session")` keeps the header line only. Run this before any forks so the glob still matches one file.
 
-```text
-/skill:read-book /path/to/book.txt
+To recover the book-load id later (oldest session file for this project):
+
+```bash
+BOOK_LOAD_ID=$(
+  jq -r 'select(.type=="session") | .id' \
+    "$(ls -t ~/.pi/agent/sessions/--$(pwd | sed 's|^/||' | tr '/:' '-')--/*.jsonl | tail -1)"
+)
 ```
 
 After the skill completes, stop adding unrelated discussion to that session. Treat it as the clean book-load session. Use `--session` to return to it, or `--fork` to create new focused sessions for each major artifact.
@@ -118,16 +129,57 @@ After the skill completes, stop adding unrelated discussion to that session. Tre
 Example:
 
 ```bash
-pi --fork <book-load-session-id> --name "character roster"
-pi --fork <book-load-session-id> --name "scene manifest"
-pi --fork <book-load-session-id> --name "play by play"
+pi --fork "$BOOK_LOAD_ID" --name "character list" -p '/skill:character-list' > character-list.txt
+pi --fork "$BOOK_LOAD_ID" --name "scene manifest" -p '/skill:scene-manifest' > scene-manifest.md
+pi --fork "$BOOK_LOAD_ID" --name "play by play" -p '/skill:play-by-play' > play-by-play.md
 ```
+
+Then generate one plain markdown character artifact per line of `character-list.txt`. Each character artifact should be created from a fresh fork of the original book-load session, not from the character-list session:
+
+```bash
+mkdir -p characters
+[ -n "$BOOK_LOAD_ID" ] || { echo "BOOK_LOAD_ID not set"; exit 1; }
+
+total=$(grep -cvE '^[[:space:]]*$|See ' character-list.txt)
+n=0
+
+while IFS= read -r character_line; do
+  [ -z "$character_line" ] && continue
+  case "$character_line" in *": See "*) continue ;; esac
+
+  slug="$(
+    printf '%s\n' "$character_line" |
+      cut -d: -f1 |
+      tr '[:upper:]' '[:lower:]' |
+      tr -cs 'a-z0-9' '-' |
+      sed 's/^-//; s/-$//'
+  )"
+  out="characters/${slug}.md"
+  n=$((n + 1))
+
+  if [ -f "$out" ]; then
+    echo "[$n/$total] → ${slug} (skip)"
+    continue
+  fi
+  echo "[$n/$total] → ${slug}"
+
+  quoted=$(printf '%s' "$character_line" | sed "s/'/'\"'\"'/g")
+  pi --fork "$BOOK_LOAD_ID" \
+    --name "character ${slug}" \
+    -p "/skill:character-artifact '${quoted}'" \
+    < /dev/null \
+    > "$out"
+done < character-list.txt
+```
+
+Works on macOS `/bin/bash` 3.2. `pi -p` reads stdin in print mode; `< /dev/null` on each call prevents it from consuming the rest of `character-list.txt`.
 
 The preferred operating model is:
 
 - Load the full book once with `read-book`.
 - Name that loaded session clearly.
 - Fork from that loaded session for global artifacts and focused prompt generation.
+- Redirect `-p` output to durable files whenever an artifact should be saved.
 - Save each fork's output as a durable project artifact.
 
 Only fall back to chapter or chunk processing when the book truly cannot fit in context or when the model becomes unreliable with the full text.
@@ -188,7 +240,7 @@ After the named book-load session is created, run separate fresh-context passes 
 
 Recommended first passes:
 
-- Complete character roster.
+- Complete character list.
 - Complete scene manifest in story order.
 - Play-by-play outline of major acts and dramatic beats.
 - Complete reusable visual asset inventory.
@@ -198,60 +250,49 @@ Do not ask one pass to do all of this at once. The model may have the whole book
 Use a simple fork log:
 
 ```text
-fork_id: character-roster-pass
+fork_id: character-list-pass
 started_from: comic book load session
-task: List every character and character variant in the full story.
-output: planning/character-roster.md
+task: List every character in the full story, one character per line.
+output: planning/character-list.txt
 status: complete
 ```
 
 Each fork should return source-supported observations only. When the text is ambiguous, record the ambiguity rather than inventing design details.
 
-## Step 5: Create The Full Character Roster
+## Step 5: Create The Character List
 
-The character roster should be generated from the full book context, not accumulated chapter by chapter.
+The character list should be generated from a fresh fork of the book-load session, not accumulated chapter by chapter.
 
-The roster should identify:
+This first pass should be strict and easy to parse. It should produce only one character per line, with a colon separating the character name from a short description.
 
-- Every named character.
-- Important unnamed characters.
-- Groups or crowds that need recurring visual treatment.
-- Each character's role in the story.
-- Physical descriptions stated by the text.
-- Personality and posture cues that affect visual design.
-- Age ranges and time-period variants.
-- Transformations, disguises, injuries, costumes, or species/form changes.
-- First and major source appearances.
-- Relationships to other characters.
+Rules:
+
+- No heading.
+- No bullets.
+- No numbering.
+- No markdown.
+- No dialogue.
+- No commentary before or after the list.
+- Exactly one character per line.
+- Exactly one colon separator per line.
+- Use the most canonical name first.
+- Put aliases in parentheses after the canonical name when useful.
+- Include major recurring unnamed characters only if they function like characters.
+- Do not include locations, factions, props, companies, or concepts unless they are personified characters.
+- One logical character per line. Merge alternate identities, disguises, age states, transformed or alternate forms, and other visual variants into the same line instead of splitting them.
+- Do not split one person into separate lines such as `Dr Jekyll` and `Mr Hyde`, or `Anna` and `Anna as a child`.
+- Do not emit cross-reference lines such as `See Character Name`.
 
 Example:
 
 ```text
-character_id: james
-display_name: James
-role: protagonist
-variants:
-  - james-human
-  - james-pony
-source_appearances:
-  first:
-    source_lines: L42-L47
-    supporting_quote: "James kept his eyes on the floor as the carriage door opened."
-  major:
-    - source_lines: L42-L96
-      supporting_quote: "The school house rose above him at the end of the path."
-    - source_lines: L1840-L1862
-      supporting_quote: "The change had left him trembling on four unfamiliar legs."
-visual_facts:
-  - thin teenage boy
-  - unruly brown hair
-  - hazel eyes
-continuity_notes:
-  - Pony form should preserve eye color and nervous expression.
-status: ready-for-character-sheet-fork
+Henry Dorsett Case: The protagonist, a legendary console cowboy whose damaged nervous system keeps him from jacking into cyberspace until he is recruited for the Straylight run.
+Molly Millions: A street samurai and razorgirl hired as Case's bodyguard, defined by mirrored lenses, retractable blades, professionalism, cynicism, and independence.
+Dixie Flatline (McCoy Pauley): A ROM personality construct of a legendary cowboy who guides Case through the run and wants his own stored existence ended.
+Dr Jekyll (Mr Hyde): A respectable Victorian doctor whose self-experiments release the violent alter ego Mr Hyde; both forms belong to one character with distinct visual states.
 ```
 
-After the roster is approved, fork from the book-load session once per character or per small group of minor characters. Inject the roster entry for that character into the prompt and ask the model to create that character's reference sheet prompt and all needed variation prompts.
+After the list is approved, fork from the book-load session once per character or per small group of minor characters. Inject exactly one character-list line into the character artifact skill and ask the model to create a plain markdown file with the full character description, visual facts, variations, source line references, and supporting quotes.
 
 ## Step 6: Build The Story Bible
 
@@ -406,7 +447,7 @@ notes: Must preserve James's eye color and nervous expression from human form.
 
 ## Step 9: Draft Reference Image Prompts
 
-Once the character roster, scene manifest, play-by-play, and asset catalog are stable enough, create prompts for each base asset. Character prompts should usually be generated in focused forks: start from the book-load session, inject one character roster entry, and ask for that character's sheet prompt and all required variation prompts.
+Once the character artifacts, scene manifest, play-by-play, and asset catalog are stable enough, create prompts for each base asset. Character prompts should usually be generated in focused forks: start from the book-load session, inject one character artifact or character-list line, and ask for that character's sheet prompt and all required variation prompts.
 
 Reference prompts should be descriptive, controlled, and reusable. They should avoid scene-specific action unless the asset is specifically a scene state.
 
@@ -622,7 +663,7 @@ The key efficiency gain is to separate full-book reading from artifact generatio
 
 Use the book-load session for:
 
-- Complete character roster.
+- Complete character list.
 - Complete scene manifest.
 - Play-by-play major act outline.
 - Global asset inventory.
@@ -636,12 +677,12 @@ Use focused forks or fresh reduced contexts for:
 - One scene storyboard.
 - One page or short sequence of final panel prompts.
 
-This avoids context drift. The character roster pass does not need the scene storyboard output in context. The scene storyboard pass should receive only the approved scene entry, relevant asset entries, and any needed source line ranges and quotes.
+This avoids context drift. The character-list pass does not need the scene storyboard output in context. The scene storyboard pass should receive only the approved scene entry, relevant asset entries, and any needed source line ranges and quotes.
 
 When a later pass depends on earlier artifacts, inject the saved artifact explicitly rather than relying on conversational memory. For example, the `james` character sheet fork should receive:
 
 - A fork of the book-load session.
-- The approved `james` roster entry.
+- The approved `james` character artifact or character-list line.
 - The shared visual style block.
 - The reference prompt output schema.
 
@@ -655,44 +696,46 @@ Use the following order for a full adaptation:
 2. Load the full book with the read-book skill.
 3. Preserve the named book-load session immediately after the book is loaded.
 4. Define visual style and production rules.
-5. From a fresh fork of the book-load session, generate the complete character roster.
+5. From a fresh fork of the book-load session, generate `character-list.txt`.
 6. From a fresh fork of the book-load session, generate the complete scene manifest.
 7. From a fresh fork of the book-load session, generate the play-by-play act outline.
 8. From a fresh fork of the book-load session, generate the reusable visual asset inventory.
-9. Merge the approved roster, scene list, play-by-play, and asset inventory into the story bible and asset catalog.
-10. Fork once per major character to draft character sheet prompts and variation prompts.
-11. Fork once per major location, prop, costume, or object group to draft reference prompts and variation prompts.
-12. Generate base reference images.
-13. Generate variant reference images with conversational edits where useful.
-14. For each scene, create a focused storyboard with panel-by-panel beats and required references.
-15. Create the master panel prompt list.
-16. Generate panels.
-17. Review continuity and regenerate failed images.
-18. Assemble pages and perform final comic layout.
+9. Generate one plain markdown character artifact per line of `character-list.txt`.
+10. Merge the approved character artifacts, scene list, play-by-play, and asset inventory into the story bible and asset catalog.
+11. Fork once per major character to draft character sheet prompts and variation prompts.
+12. Fork once per major location, prop, costume, or object group to draft reference prompts and variation prompts.
+13. Generate base reference images.
+14. Generate variant reference images with conversational edits where useful.
+15. For each scene, create a focused storyboard with panel-by-panel beats and required references.
+16. Create the master panel prompt list.
+17. Generate panels.
+18. Review continuity and regenerate failed images.
+19. Assemble pages and perform final comic layout.
 
 ## Prompt Templates
 
-### Full Character Roster Prompt
+### Character List Prompt
 
 ```text
 You are adapting a novel into a comic book.
 
-The full book is already loaded in context. Create a complete character roster for the entire story.
+The full book is already loaded in context. Create a complete character list for the entire story.
 
-Do not invent unsupported details. If the text is ambiguous, record the ambiguity.
+Output only the character list. Do not include headings, bullets, numbering, markdown, dialogue, commentary, or extra text.
 
-Return:
-1. Every named character.
-2. Important unnamed characters or recurring groups.
-3. Character ids.
-4. Role in the story.
-5. Source-supported visual facts.
-6. Personality, posture, and expression cues useful for visual design.
-7. Required visual variants, such as age, disguise, injury, outfit, species, or transformation.
-8. First appearance and major appearances by source line range and short supporting quote.
-9. Relationships and continuity notes.
+Format:
+Character Name (optional alias): Short description.
 
-Use stable lowercase ids. Return the roster in story-relevant order.
+Rules:
+- Exactly one character per line.
+- Exactly one colon separator per line.
+- Use the most canonical name first.
+- Include aliases in parentheses when useful.
+- Include major recurring unnamed characters only if they function like characters.
+- Do not include locations, factions, props, companies, or concepts unless they are personified characters.
+- One logical character per line. Merge alternate identities, disguises, age states, transformed or alternate forms, and other visual variants into the same line instead of splitting them.
+- Do not split one person into separate lines such as `Dr Jekyll` and `Mr Hyde`, or `Anna` and `Anna as a child`.
+- Do not emit cross-reference lines such as `See Character Name`.
 ```
 
 ### Full Scene Manifest Prompt
@@ -705,7 +748,7 @@ The full book is already loaded in context. Create a numbered scene manifest for
 Each scene must:
 - Have a stable numbered id.
 - Have a short descriptive title.
-- Include source file, start and end line numbers, and a short supporting quote.
+- Include start and end line numbers and a short supporting quote.
 - Include a concise summary.
 - List primary characters, locations, props, and visual assets.
 - Identify the major act or story movement it belongs to.
@@ -753,21 +796,28 @@ Each prompt must:
 For variants, specify whether the image should be generated from scratch or as an edit from a base asset.
 ```
 
-### Character Sheet Fork Prompt
+### Character Artifact Prompt
 
 ```text
 The full book is already loaded in context.
 
-Using only the approved character entry below and source-supported details from the book, create reusable reference image prompts for this character.
+Using the character-list line below and source-supported details from the book, create a plain markdown character artifact for this character.
 
-Character entry:
-[insert one character roster entry]
+Character-list line:
+[insert one line from character-list.txt]
 
 Return:
-1. Base character sheet prompt.
-2. One prompt or edit instruction for each required variant.
-3. Notes about which traits must remain consistent across variants.
-4. Any ambiguity that should be resolved before image generation.
+1. Character name and aliases.
+2. Role in the story.
+3. Full prose description.
+4. Visual facts.
+5. Personality, posture, and expression cues.
+6. Important relationships.
+7. Required visual variants, such as age, disguise, injury, outfit, species, or transformation.
+8. Source line references and short supporting quotes.
+9. Notes about ambiguity that should be resolved before image generation.
+
+Write plain markdown only. Do not use YAML frontmatter.
 ```
 
 ### Scene Storyboard Prompt
@@ -778,7 +828,7 @@ Adapt the provided scene into comic panels.
 Inputs:
 - Scene manifest entry.
 - Relevant source line ranges and short supporting quotes.
-- Relevant character roster entries.
+- Relevant character artifacts or character-list entries.
 - Relevant reference asset catalog entries.
 - Shared visual style block.
 
