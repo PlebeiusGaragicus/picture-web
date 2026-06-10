@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import logging
+from io import BytesIO
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -96,7 +97,7 @@ def _safe_json(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _safe_json(item) for key, item in value.items()}
     if hasattr(value, "model_dump"):
-        return _safe_json(value.model_dump(mode="json", exclude_none=True))
+        return _safe_json(value.model_dump(mode="python", exclude_none=True))
     if hasattr(value, "to_json_dict"):
         return _safe_json(value.to_json_dict())
     if hasattr(value, "__dict__"):
@@ -156,6 +157,93 @@ def _part_value(part: Any, snake: str, camel: str | None = None) -> Any:
     return None
 
 
+def _response_parts(response: Any) -> list[Any]:
+    if isinstance(response, dict):
+        candidates = response.get("candidates") or []
+        content = (
+            candidates[0].get("content", {})
+            if candidates and isinstance(candidates[0], dict)
+            else {}
+        )
+        parts = content.get("parts") or response.get("parts") or []
+        return parts if isinstance(parts, list) else []
+    parts = getattr(response, "parts", None)
+    if parts is not None:
+        return list(parts)
+    candidates = getattr(response, "candidates", None) or []
+    if candidates:
+        content = getattr(candidates[0], "content", None)
+        parts = getattr(content, "parts", None)
+        if parts is not None:
+            return list(parts)
+    return []
+
+
+def _response_model_content(response: Any) -> dict[str, Any]:
+    if isinstance(response, dict):
+        candidates = response.get("candidates") or []
+        content = (
+            candidates[0].get("content", {})
+            if candidates and isinstance(candidates[0], dict)
+            else {}
+        )
+        parts = content.get("parts") or response.get("parts") or []
+        return {"role": content.get("role", "model"), "parts": _safe_json(parts)}
+
+    candidates = getattr(response, "candidates", None) or []
+    if candidates:
+        content = getattr(candidates[0], "content", None)
+        role = getattr(content, "role", "model")
+    else:
+        role = "model"
+    return {"role": role, "parts": [_model_history_part(part) for part in _response_parts(response)]}
+
+
+def _image_bytes_from_part(part: Any) -> tuple[bytes | None, str]:
+    inline_data = _part_value(part, "inline_data", "inlineData")
+    data, mime_type = _inline_data_bytes(inline_data)
+    if data is not None:
+        return data, mime_type
+
+    as_image = getattr(part, "as_image", None)
+    if callable(as_image):
+        try:
+            image = as_image()
+        except Exception:
+            image = None
+        if image is not None:
+            buffer = BytesIO()
+            try:
+                image.save(buffer, format="PNG")
+            except TypeError:
+                image.save(buffer)
+            return buffer.getvalue(), "image/png"
+    return None, "image/png"
+
+
+def _model_history_part(part: Any) -> dict[str, Any]:
+    import base64
+
+    history_part = _safe_json(part)
+    if not isinstance(history_part, dict):
+        return {"text": str(history_part)}
+
+    data, mime_type = _image_bytes_from_part(part)
+    if data is None or not mime_type.startswith("image/"):
+        return history_part
+
+    key = "inline_data" if "inline_data" in history_part else "inlineData"
+    inline_data = history_part.get(key)
+    if not isinstance(inline_data, dict):
+        inline_data = {}
+    history_part[key] = {
+        **inline_data,
+        "mime_type": mime_type,
+        "data": base64.b64encode(data).decode("ascii"),
+    }
+    return history_part
+
+
 def _inline_data_bytes(inline_data: Any) -> tuple[bytes | None, str]:
     if inline_data is None:
         return None, "image/png"
@@ -172,7 +260,10 @@ def _inline_data_bytes(inline_data: Any) -> tuple[bytes | None, str]:
     if isinstance(data, str):
         import base64
 
-        return base64.b64decode(data), mime_type
+        try:
+            return base64.b64decode(data, validate=True), mime_type
+        except ValueError:
+            return None, mime_type
     if isinstance(data, (bytes, bytearray)):
         return bytes(data), mime_type
     return None, mime_type
@@ -180,18 +271,8 @@ def _inline_data_bytes(inline_data: Any) -> tuple[bytes | None, str]:
 
 def chat_turn_result_from_response(response: Any) -> ChatTurnResult:
     raw = _safe_json(response)
-    if isinstance(raw, dict):
-        candidates = raw.get("candidates") or []
-        content = (
-            candidates[0].get("content", {})
-            if candidates and isinstance(candidates[0], dict)
-            else {}
-        )
-        parts = content.get("parts") or raw.get("parts") or []
-        model_content = {"role": content.get("role", "model"), "parts": parts}
-    else:
-        parts = _safe_json(getattr(response, "parts", []))
-        model_content = {"role": "model", "parts": parts}
+    parts = _response_parts(response)
+    model_content = _response_model_content(response)
 
     text_parts: list[str] = []
     images: list[ChatImagePart] = []
@@ -199,8 +280,7 @@ def chat_turn_result_from_response(response: Any) -> ChatTurnResult:
         text = _part_value(part, "text")
         if isinstance(text, str):
             text_parts.append(text)
-        inline_data = _part_value(part, "inline_data", "inlineData")
-        data, mime_type = _inline_data_bytes(inline_data)
+        data, mime_type = _image_bytes_from_part(part)
         if data is not None and mime_type.startswith("image/"):
             thought_signature = _part_value(part, "thought_signature", "thoughtSignature")
             images.append(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,8 @@ from models import (
     ProviderCapture,
     utc_now,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _library():
@@ -343,6 +346,7 @@ def append_turn(
             include_thoughts=settings.includeThoughts,
         )
     except Exception as exc:
+        logger.exception("chat turn provider call failed slug=%s session_id=%s", slug, session_id)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     user_turn_id = new_ulid()
@@ -383,6 +387,12 @@ def append_turn(
             ),
         )
         created_assets.append(library.write_asset_metadata(slug, metadata))
+    if not created_assets:
+        raise HTTPException(
+            status_code=502,
+            detail=result.text
+            or "Gemini returned no image for this refinement. Try a more explicit edit instruction.",
+        )
 
     user_turn = ChatTurn(
         id=user_turn_id,

@@ -597,6 +597,29 @@ pre {
   }
 }
 
+.chat-generation-status,
+.inline-error {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.chat-generation-status {
+  color: #dbeafe;
+  background: rgb(30 64 175 / 0.32);
+  border: 1px solid #2563eb;
+}
+
+.inline-error {
+  color: #fecaca;
+  background: rgb(127 29 29 / 0.45);
+  border: 1px solid #ef4444;
+}
+
 .generate-control label {
   display: grid;
   gap: 4px;

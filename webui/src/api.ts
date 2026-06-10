@@ -27,9 +27,20 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   }
   debugLog(`response ${response.status} ${method} ${url}`, { ms: Math.round(performance.now() - started) });
   if (!response.ok) {
-    const detail = await response.text();
-    console.error(`[photo-web] request failed ${method} ${url}`, { status: response.status, detail });
-    throw new Error(detail || response.statusText);
+    const body = await response.text();
+    let message = body || response.statusText;
+    try {
+      const parsed = JSON.parse(body) as { detail?: unknown };
+      if (typeof parsed.detail === 'string') {
+        message = parsed.detail;
+      } else if (parsed.detail !== undefined) {
+        message = JSON.stringify(parsed.detail);
+      }
+    } catch {
+      // Keep the raw response text when the server did not return JSON.
+    }
+    console.error(`[photo-web] request failed ${method} ${url}`, { status: response.status, detail: message });
+    throw new Error(message);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

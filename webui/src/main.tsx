@@ -450,14 +450,30 @@ function App() {
 
   const sendChatMessage = async (session: ChatSession, text: string, settings: ChatTurnSettings, attachmentAssetIds: string[]) => {
     if (!openProjectSlug) return;
+    const sourceNodeId = session.source.canvasNodeId;
     setError(null);
     try {
+      if (sourceNodeId) {
+        setGeneratingNodeIds((current) => new Set(current).add(sourceNodeId));
+        setNodes((current) => current.map((node) => (node.id === sourceNodeId ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
+      }
       const response = await api.sendChatTurn(openProjectSlug, session.id, { text, settings, attachmentAssetIds });
       setChatSessions((current) => current.map((item) => (item.id === response.session.id ? response.session : item)));
       await loadProject(openProjectSlug);
       setActiveChatSessionId(response.session.id);
     } catch (err) {
-      setError(String(err));
+      const message = String(err);
+      setError(message);
+      throw err;
+    } finally {
+      if (sourceNodeId) {
+        setGeneratingNodeIds((current) => {
+          const next = new Set(current);
+          next.delete(sourceNodeId);
+          return next;
+        });
+        setNodes((current) => current.map((node) => (node.id === sourceNodeId ? { ...node, data: { ...node.data, isGenerating: false } } : node)));
+      }
     }
   };
 
@@ -1373,7 +1389,7 @@ function ChatRefinementPanel({
   assets: Asset[];
   projectSlug: string;
   onClose: () => void;
-  onSend: (session: ChatSession, text: string, settings: ChatTurnSettings, attachmentAssetIds: string[]) => void;
+  onSend: (session: ChatSession, text: string, settings: ChatTurnSettings, attachmentAssetIds: string[]) => Promise<void>;
   onArchive: (session: ChatSession) => void;
   onViewAsset: (assetId: string) => void;
 }) {
@@ -1382,18 +1398,31 @@ function ChatRefinementPanel({
   const [settings, setSettings] = useState<ChatTurnSettings>(session.defaults);
   const [attachmentAssetIds, setAttachmentAssetIds] = useState<string[]>([]);
   const [isReferencePickerOpen, setIsReferencePickerOpen] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const capabilities = capabilitiesForModel(settings.model);
   const availableReferences = assets.filter((asset) => asset.id !== session.source.assetId && !attachmentAssetIds.includes(asset.id) && !asset.archivedAt);
   useEffect(() => {
     setSettings(session.defaults);
     setAttachmentAssetIds([]);
     setText('');
+    setSendError(null);
+    setIsSending(false);
   }, [session.id]);
-  const send = () => {
-    if (!text.trim()) return;
-    onSend(session, text.trim(), settings, attachmentAssetIds);
-    setText('');
-    setAttachmentAssetIds([]);
+  const send = async () => {
+    if (!text.trim() || isSending) return;
+    setIsSending(true);
+    setSendError(null);
+    try {
+      await onSend(session, text.trim(), settings, attachmentAssetIds);
+      setText('');
+      setAttachmentAssetIds([]);
+      setIsReferencePickerOpen(false);
+    } catch (err) {
+      setSendError(String(err));
+    } finally {
+      setIsSending(false);
+    }
   };
   return (
     <aside className="details-sidebar chat-refinement-panel">
@@ -1449,28 +1478,24 @@ function ChatRefinementPanel({
       </section>
       <section className="sidebar-section generation-section">
         <h3>Turn settings</h3>
-        <select value={settings.model} onChange={(event) => setSettings((current) => ({ ...normalizedParamsForModel({ ...defaultDraftParams, ...current, batchCount: 1, seed: null }, event.target.value), thinkingLevel: current.thinkingLevel, includeThoughts: current.includeThoughts } as ChatTurnSettings))}>
+        <select value={settings.model} disabled={isSending} onChange={(event) => setSettings((current) => ({ ...normalizedParamsForModel({ ...defaultDraftParams, ...current, batchCount: 1, seed: null }, event.target.value), thinkingLevel: current.thinkingLevel, includeThoughts: false } as ChatTurnSettings))}>
           {Object.keys(modelCapabilities).map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
         <div className="row">
-          <select value={settings.aspectRatio} onChange={(event) => setSettings((current) => ({ ...current, aspectRatio: event.target.value }))}>
+          <select value={settings.aspectRatio} disabled={isSending} onChange={(event) => setSettings((current) => ({ ...current, aspectRatio: event.target.value }))}>
             {capabilities.aspectRatios.map((option) => <option key={option} value={option}>{option}</option>)}
           </select>
-          <select value={settings.imageSize} onChange={(event) => setSettings((current) => ({ ...current, imageSize: event.target.value }))}>
+          <select value={settings.imageSize} disabled={isSending} onChange={(event) => setSettings((current) => ({ ...current, imageSize: event.target.value }))}>
             {capabilities.imageSizes.map((option) => <option key={option} value={option}>{option}</option>)}
           </select>
         </div>
         <label className="field-label">
           Thinking
-          <select value={settings.thinkingLevel ?? ''} onChange={(event) => setSettings((current) => ({ ...current, thinkingLevel: event.target.value || null }))}>
+          <select value={settings.thinkingLevel ?? ''} disabled={isSending} onChange={(event) => setSettings((current) => ({ ...current, thinkingLevel: event.target.value || null }))}>
             <option value="">Default</option>
             <option value="minimal">Minimal</option>
             <option value="high">High</option>
           </select>
-        </label>
-        <label className="checkbox-row">
-          <input type="checkbox" checked={settings.includeThoughts} onChange={(event) => setSettings((current) => ({ ...current, includeThoughts: event.target.checked }))} />
-          Include thoughts for debugging
         </label>
       </section>
       <section className="sidebar-section">
@@ -1483,18 +1508,19 @@ function ChatRefinementPanel({
               <div className="parent-item" key={assetId}>
                 <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${assetId}/thumb`} alt="" />
                 <span>{assetLabel(asset)}</span>
-                <button className="parent-remove" onClick={() => setAttachmentAssetIds((current) => current.filter((id) => id !== assetId))}>×</button>
+                <button className="parent-remove" disabled={isSending} onClick={() => setAttachmentAssetIds((current) => current.filter((id) => id !== assetId))}>×</button>
               </div>
             ) : null;
           })}
         </div>
-        <button className="add-parent-button" onClick={() => setIsReferencePickerOpen((current) => !current)}>+</button>
+        <button className="add-parent-button" disabled={isSending} onClick={() => setIsReferencePickerOpen((current) => !current)}>+</button>
         {isReferencePickerOpen && (
           <div className="asset-picker-popover">
             {availableReferences.map((asset) => (
               <button
                 className="asset-picker-row"
                 key={asset.id}
+                disabled={isSending}
                 onClick={() => {
                   setAttachmentAssetIds((current) => [...current, asset.id]);
                   setIsReferencePickerOpen(false);
@@ -1508,9 +1534,19 @@ function ChatRefinementPanel({
         )}
       </section>
       <section className="sidebar-section">
-        <textarea className="prompt-textarea" value={text} onChange={(event) => setText(event.target.value)} placeholder="Describe the refinement..." />
-        <button className="generate-button" onClick={send} disabled={!text.trim()}>Send refinement</button>
-        <button className="secondary" onClick={() => onArchive(session)}>Archive chat</button>
+        <textarea className="prompt-textarea" value={text} disabled={isSending} onChange={(event) => setText(event.target.value)} placeholder="Describe the refinement..." />
+        {isSending && (
+          <div className="chat-generation-status" role="status">
+            <span className="spinner" aria-hidden="true" />
+            Generating refinement...
+          </div>
+        )}
+        {sendError && <div className="inline-error">Refinement failed: {sendError}</div>}
+        <button className="generate-button" onClick={send} disabled={!text.trim() || isSending}>
+          {isSending && <span className="spinner" aria-hidden="true" />}
+          {isSending ? 'Generating...' : 'Send refinement'}
+        </button>
+        <button className="secondary" disabled={isSending} onClick={() => onArchive(session)}>Archive chat</button>
       </section>
     </aside>
   );

@@ -62,6 +62,51 @@ def test_provider_metadata_strips_large_payloads(tmp_path):
     assert part["thought_signature"] == "<thought-signature:1800 chars>"
 
 
+def test_chat_turn_response_preserves_sdk_image_bytes_for_history():
+    class InlineData:
+        def __init__(self):
+            self.data = png_bytes("blue")
+            self.mime_type = "image/png"
+
+    class Part:
+        def __init__(self):
+            self.text = None
+            self.inline_data = InlineData()
+            self.thought_signature = "sig-image"
+
+    class Response:
+        def __init__(self):
+            self.parts = [Part()]
+
+    result = gemini.chat_turn_result_from_response(Response())
+
+    assert result.images[0].data.startswith(b"\x89PNG")
+    assert result.model_content["parts"][0]["inline_data"]["data"].startswith("iVBOR")
+    assert result.provider_response["parts"][0]["inline_data"]["data"].startswith("<inline-image-data:")
+
+
+def test_chat_turn_response_handles_sdk_image_save_without_format():
+    class SdkImage:
+        def save(self, buffer):
+            buffer.write(png_bytes("blue"))
+
+    class Part:
+        text = None
+        inline_data = None
+        thought_signature = "sig-image"
+
+        def as_image(self):
+            return SdkImage()
+
+    class Response:
+        parts = [Part()]
+
+    result = gemini.chat_turn_result_from_response(Response())
+
+    assert result.images[0].data.startswith(b"\x89PNG")
+    assert result.model_content["parts"][0]["inlineData"]["data"].startswith("iVBOR")
+
+
 def test_project_and_canvas_round_trip(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
