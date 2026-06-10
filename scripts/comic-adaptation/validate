@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  scripts/comic-adaptation/validate books/<book-id>
+
+Validates generated comic-adaptation text artifacts without invoking Pi.
+EOF
+}
+
+failures=0
+
+fail() {
+  echo "FAIL: $*"
+  failures=$((failures + 1))
+}
+
+pass() {
+  echo "OK:   $*"
+}
+
+slugify_name() {
+  printf '%s\n' "$1" |
+    tr '[:upper:]' '[:lower:]' |
+    tr -cs 'a-z0-9' '-' |
+    sed 's/^-//; s/-$//'
+}
+
+file_has() {
+  local path="$1"
+  local text="$2"
+  awk -v text="$text" 'index($0, text) { found=1 } END { exit found ? 0 : 1 }' "$path"
+}
+
+nonempty() {
+  local path="$1"
+  [[ -s "$path" ]]
+}
+
+has_chat_wrapper() {
+  local path="$1"
+  awk 'BEGIN { bad=0 } /^(Sure|Here is|Here'\''s|I wrote|Done\.|```|Apologies|I'\''m sorry)/ { bad=1 } END { exit bad ? 0 : 1 }' "$path"
+}
+
+validate_common_file() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    fail "$path missing"
+    return 1
+  fi
+  if ! nonempty "$path"; then
+    fail "$path empty"
+    return 1
+  fi
+  if has_chat_wrapper "$path"; then
+    fail "$path contains chat wrapper text"
+    return 1
+  fi
+  return 0
+}
+
+validate_style_refs() {
+  echo
+  echo "Style refs"
+
+  validate_common_file "$BOOK_ROOT/style-refs/visual-style.md" || true
+  for label in "Style:" "Color palette:" "Realism:" "Lighting:"; do
+    if [[ -f "$BOOK_ROOT/style-refs/visual-style.md" ]] && file_has "$BOOK_ROOT/style-refs/visual-style.md" "$label"; then
+      pass "visual-style.md has $label"
+    else
+      fail "visual-style.md missing $label"
+    fi
+  done
+
+  validate_common_file "$BOOK_ROOT/style-refs/archetype-character.md" && pass "archetype-character.md present" || true
+  validate_common_file "$BOOK_ROOT/style-refs/archetype-scene.md" && pass "archetype-scene.md present" || true
+}
+
+validate_character_list() {
+  echo
+  echo "Characters"
+
+  if ! validate_common_file "$BOOK_ROOT/characters/list.txt"; then
+    return
+  fi
+
+  expected_characters=0
+  while IFS= read -r character_line; do
+    [[ -n "$character_line" ]] || continue
+    expected_characters=$((expected_characters + 1))
+    if [[ "$character_line" != *:* ]]; then
+      fail "character list line missing colon: $character_line"
+    fi
+    if [[ "$character_line" == *:*:* ]]; then
+      fail "character list line has more than one colon: $character_line"
+    fi
+
+    character_name="${character_line%%:*}"
+    slug="$(slugify_name "$character_name")"
+    artifact="$BOOK_ROOT/characters/artifacts/$slug.md"
+    sheet="$BOOK_ROOT/characters/sheets/$slug.md"
+
+    validate_character_artifact "$artifact"
+    validate_character_sheet "$sheet"
+  done < "$BOOK_ROOT/characters/list.txt"
+
+  pass "checked $expected_characters character list entries"
+}
+
+validate_character_artifact() {
+  local path="$1"
+  validate_common_file "$path" || return 0
+
+  for required in "## Summary" "## Visual Description" "## Visual Variants" "## Source References"; do
+    if file_has "$path" "$required"; then
+      :
+    else
+      fail "$path missing $required"
+    fi
+  done
+}
+
+validate_character_sheet() {
+  local path="$1"
+  validate_common_file "$path" || return 0
+
+  for required in "mode:" "style_ref:" "Layout: top row" "Expressions:"; do
+    if file_has "$path" "$required"; then
+      :
+    else
+      fail "$path missing $required"
+    fi
+  done
+}
+
+extract_sections() {
+  local input="$1"
+  local out_dir="$2"
+
+  rm -rf "$out_dir"
+  mkdir -p "$out_dir"
+  awk -v out_dir="$out_dir" '
+    /^##[[:space:]]+/ {
+      if (out) {
+        close(out)
+      }
+      slug=$0
+      sub(/^##[[:space:]]+/, "", slug)
+      sub(/[[:space:]].*$/, "", slug)
+      gsub(/[^A-Za-z0-9_-]/, "-", slug)
+      out=out_dir "/" slug ".md"
+    }
+    out {
+      print > out
+    }
+  ' "$input"
+}
+
+validate_locations() {
+  echo
+  echo "Locations"
+
+  if ! validate_common_file "$BOOK_ROOT/locations/index.md"; then
+    return
+  fi
+
+  tmp_dir="$BOOK_ROOT/locations/.validate-entries"
+  extract_sections "$BOOK_ROOT/locations/index.md" "$tmp_dir"
+
+  entries=()
+  while IFS= read -r entry; do
+    entries+=("$entry")
+  done < <(ls "$tmp_dir"/*.md 2>/dev/null || true)
+
+  if [[ "${#entries[@]}" -eq 0 ]]; then
+    fail "locations/index.md has no ## location sections"
+    return
+  fi
+
+  for entry in "${entries[@]}"; do
+    slug="$(basename "$entry" .md)"
+    for required in "Name:" "Type:" "Source References:" "Visual Traits:"; do
+      if file_has "$entry" "$required"; then
+        :
+      else
+        fail "locations/index.md section $slug missing $required"
+      fi
+    done
+
+    prompt="$BOOK_ROOT/locations/prompts/$slug.md"
+    validate_location_prompt "$prompt"
+  done
+
+  pass "checked ${#entries[@]} location entries"
+}
+
+validate_location_prompt() {
+  local path="$1"
+  validate_common_file "$path" || return 0
+
+  for required in "mode:" "style_ref:" "No characters, no text, no labels, no watermarks."; do
+    if file_has "$path" "$required"; then
+      :
+    else
+      fail "$path missing $required"
+    fi
+  done
+
+  if awk '/Environment reference for|Location prompt for/ { bad=1 } END { exit bad ? 0 : 1 }' "$path"; then
+    fail "$path contains metadata-style opener"
+  fi
+
+  if awk '/`L[0-9][0-9][0-9]|LINE-VERIFY/ { bad=1 } END { exit bad ? 0 : 1 }' "$path"; then
+    fail "$path contains source citation text"
+  fi
+}
+
+if [[ $# -ne 1 ]]; then
+  usage
+  exit 2
+fi
+
+[[ "$PWD" == "$ROOT_DIR" ]] || {
+  echo "error: Run from repo root: $ROOT_DIR" >&2
+  exit 1
+}
+
+BOOK_ROOT="${1%/}"
+[[ "$BOOK_ROOT" == books/* ]] || {
+  echo "error: Book root must be under books/, got: $BOOK_ROOT" >&2
+  exit 1
+}
+[[ -d "$BOOK_ROOT" ]] || {
+  echo "error: Missing book root: $BOOK_ROOT" >&2
+  exit 1
+}
+
+validate_style_refs
+validate_character_list
+validate_common_file "$BOOK_ROOT/scenes/manifest.md" && pass "scenes/manifest.md present" || true
+validate_locations
+
+echo
+if [[ "$failures" -eq 0 ]]; then
+  echo "Validation passed."
+else
+  echo "Validation failed with $failures issue(s)."
+  exit 1
+fi

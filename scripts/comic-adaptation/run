@@ -21,6 +21,10 @@ need_command() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
 }
 
+warn() {
+  echo "warning: $*" >&2
+}
+
 slugify_name() {
   printf '%s\n' "$1" |
     tr '[:upper:]' '[:lower:]' |
@@ -67,6 +71,58 @@ read_file_payload() {
 
   payload="$(<"$path")"
   printf '%s' "$payload"
+}
+
+validate_nonempty_file() {
+  local path="$1"
+  [[ -s "$path" ]] || die "Expected non-empty file was not written: $path"
+}
+
+validate_no_chat_wrappers() {
+  local path="$1"
+  if awk 'BEGIN { bad=0 } /^(Sure|Here is|Here'\''s|I wrote|Done\.|```|Apologies|I'\''m sorry)/ { bad=1 } END { exit bad ? 0 : 1 }' "$path"; then
+    die "File appears to contain chat wrapper text: $path"
+  fi
+}
+
+validate_contains() {
+  local path="$1"
+  local text="$2"
+  if ! awk -v text="$text" 'index($0, text) { found=1 } END { exit found ? 0 : 1 }' "$path"; then
+    die "File is missing required text '$text': $path"
+  fi
+}
+
+validate_character_artifact() {
+  local path="$1"
+  validate_nonempty_file "$path"
+  validate_no_chat_wrappers "$path"
+  validate_contains "$path" "## Summary"
+  validate_contains "$path" "## Visual Description"
+  validate_contains "$path" "## Visual Variants"
+  validate_contains "$path" "## Source References"
+}
+
+validate_character_sheet() {
+  local path="$1"
+  validate_nonempty_file "$path"
+  validate_no_chat_wrappers "$path"
+  validate_contains "$path" "mode:"
+  validate_contains "$path" "style_ref:"
+  validate_contains "$path" "Layout: top row"
+  validate_contains "$path" "Expressions:"
+}
+
+validate_location_prompt() {
+  local path="$1"
+  validate_nonempty_file "$path"
+  validate_no_chat_wrappers "$path"
+  validate_contains "$path" "mode:"
+  validate_contains "$path" "style_ref:"
+  validate_contains "$path" "No characters, no text, no labels, no watermarks."
+  if awk '/Environment reference for|Location prompt for/ { bad=1 } END { exit bad ? 0 : 1 }' "$path"; then
+    die "Location prompt contains metadata-style opener: $path"
+  fi
 }
 
 extract_sections() {
@@ -179,8 +235,9 @@ while IFS= read -r character_line; do
     continue
   fi
 
-  prompt="$(write_multiline_prompt "/skill:character-artifact $BOOK_ROOT" "$character_line")"
+  prompt="$(write_multiline_prompt "/skill:character-artifact $BOOK_ROOT $out" "$character_line")"
   run_pi_step "3/7" "character artifact $slug" "$out" "$prompt"
+  validate_character_artifact "$out"
 done < "$BOOK_ROOT/characters/list.txt"
 
 mapfile_supported=false
@@ -212,7 +269,8 @@ for artifact in "${artifacts[@]}"; do
     continue
   fi
 
-  run_pi_step "4/7" "character sheet $slug" "$out" "/skill:character-sheet $BOOK_ROOT @$artifact"
+  run_pi_step "4/7" "character sheet $slug" "$out" "/skill:character-sheet $BOOK_ROOT $out @$artifact"
+  validate_character_sheet "$out"
 done
 
 if [[ -f "$BOOK_ROOT/scenes/manifest.md" ]]; then
@@ -261,8 +319,9 @@ for entry in "${entries[@]}"; do
     continue
   fi
 
-  prompt="$(write_multiline_prompt "/skill:location-prompt $BOOK_ROOT" "$(read_file_payload "$entry")")"
+  prompt="$(write_multiline_prompt "/skill:location-prompt $BOOK_ROOT $out" "$(read_file_payload "$entry")")"
   run_pi_step "7/7" "location prompt $slug" "$out" "$prompt"
+  validate_location_prompt "$out"
 done
 
 echo

@@ -9,7 +9,11 @@ disable-model-invocation: false
 
 # Character Artifact
 
-The full book is already loaded in context. The user provides a book root path, usually `books/<book-id>`, and exactly one line from `<book-root>/characters/list.txt`.
+The full book is already loaded in context. The user provides:
+
+1. A book root path, usually `books/<book-id>`.
+2. An exact output path under `<book-root>/characters/artifacts/`.
+3. Exactly one line from `<book-root>/characters/list.txt`.
 
 Create a plain markdown character artifact for that character.
 
@@ -23,19 +27,15 @@ Character Name (optional alias): Short description.
 
 Use the input line to identify the character, then use the full book context to gather source-supported details.
 
-Derive the output slug from the canonical character name before the colon:
-
-1. Lowercase it.
-2. Replace any run of non-alphanumeric characters with one hyphen.
-3. Trim leading and trailing hyphens.
-
-Write the artifact with the **`write` tool** to:
+Write the artifact with the **`write` tool** to the exact output path provided by the user:
 
 ```text
-<book-root>/characters/artifacts/<slug>.md
+<output-path>
 ```
 
 Create `<book-root>/characters/artifacts/` if needed.
+
+Do not derive, shorten, rename, canonicalize, or choose a different output filename. The runner owns the path.
 
 ## Output Contract
 
@@ -49,7 +49,7 @@ Do not use:
 - Code fences
 - Commentary outside the artifact
 
-After writing, reply with exactly `Wrote <book-root>/characters/artifacts/<slug>.md.` and nothing else.
+After writing, reply with exactly `Wrote <output-path>.` and nothing else.
 
 ## Required Structure
 
@@ -97,7 +97,7 @@ Use this structure:
 - Do not fabricate line numbers.
 - Do not invent visual details that are not supported by the book. If a needed design detail is unspecified, record it under `Continuity Notes` as an open design choice.
 
-## Slug Rules
+## Variant Slug Rules
 
 Use lowercase asset ids with hyphens:
 

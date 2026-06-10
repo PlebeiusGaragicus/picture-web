@@ -9,7 +9,11 @@ disable-model-invocation: false
 
 # Location Prompt
 
-The full book is already loaded in context. The user provides a book root path, usually `books/<book-id>`, and one location entry from `<book-root>/locations/index.md`.
+The full book is already loaded in context. The user provides:
+
+1. A book root path, usually `books/<book-id>`.
+2. An exact output path under `<book-root>/locations/prompts/`.
+3. One location entry from `<book-root>/locations/index.md`.
 
 Create one reusable image-generation prompt for that location or location variant.
 
@@ -27,21 +31,25 @@ The location entry should include:
 - Base Location, if any.
 - Source references.
 - Visual traits.
+- Spatial composition, when available.
+- Prompt-critical details, when available.
 - Variant notes.
 
-Use the slug from the heading as the output filename.
+Use the slug from the heading inside the written file, but write to the exact output path provided by the user.
 
 ## Delivery
 
 Use the **`write` tool** to save exactly:
 
 ```text
-<book-root>/locations/prompts/<location-slug>.md
+<output-path>
 ```
 
 Create `<book-root>/locations/prompts/` if needed.
 
-After writing, reply with exactly `Wrote <book-root>/locations/prompts/<location-slug>.md.` and nothing else.
+Do not derive, shorten, rename, canonicalize, or choose a different output filename. The runner owns the path.
+
+After writing, reply with exactly `Wrote <output-path>.` and nothing else.
 
 ## Written File Format
 
@@ -67,15 +75,21 @@ style_ref: <book-root>/locations/images/<base-location-slug>.png
 
 ## Prompt Rules
 
-- Keep the prompt short: 2-4 sentences.
-- Start with `Environment reference for <location-slug>.`
-- Describe durable architecture, geography, materials, layout, lighting baseline, scale, mood, and important visible details.
-- For variants, state only the visual delta and what must remain consistent with the base image.
+- Write the prompt as direct image-generation instructions, not metadata. Do not start with labels such as `Environment reference for`, `Location prompt for`, or the raw slug.
+- Write one focused paragraph of 5-8 sentences for `mode: new-image`.
+- For `mode: edit-reference`, write 3-6 sentences focused on the visible delta from the base image and what must remain consistent.
+- Use every source-supported visual detail from the location entry when it helps the image.
+- Translate the location name into natural prose only when useful, such as `the Canterlot throne room` or `a corporate conference room`.
+- Describe architecture or terrain, foreground/midground/background relationships, materials, surfaces, fixed environmental objects, lighting, atmosphere, scale, and color only when supported by the entry.
+- Add connective spatial language only when directly implied by the entry or necessary to compose the listed traits into one coherent scene.
+- For sparse entries, stay honest: create a clean, usable prompt from the known facts without inventing decorations.
+- For variants, state only the source-supported visual delta and what must remain consistent with the base image.
 - Include this sentence once for `mode: new-image`: `Match the reference image's environmental rendering, palette, lighting, and detail level.`
 - End every prompt with `No characters, no text, no labels, no watermarks.`
 - Do not paste `<book-root>/style-refs/visual-style.md`; later image-generation tooling may append that file separately, and the style reference image carries the final rendering style.
 - Do not include source line numbers or supporting quotes in the prompt file.
-- Do not include panel composition, storyboard beats, character action, dialogue, captions, speech bubbles, or plot spoilers unless the location state itself requires the detail.
+- Do not include storyboard beats, character action, dialogue, captions, speech bubbles, or plot spoilers unless the location state itself requires the detail.
+- Do not invent named landmarks, architecture, objects, vegetation, weather, time of day, materials, lighting, or background elements not supported by the location entry.
 
 ## Mode Rules
 
@@ -90,6 +104,6 @@ Use `mode: edit-reference` when the entry is a visible state change of a base lo
 
 # User Request
 
-Read the provided location entry and write one reusable location prompt under the provided book root.
+Read the provided location entry and write one reusable location prompt to the exact provided output path.
 
 **User:** `@$`

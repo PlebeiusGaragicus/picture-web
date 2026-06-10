@@ -13,6 +13,8 @@ Run Pi from the repo root so project-local `.pi/skills/` are available. Keep all
 
 The runner loads the full book once, stores the resulting Pi session id, then creates fresh forks for each artifact. Skills write files directly with the write tool; `pi -p` stdout is used only for terse progress replies.
 
+The runner owns deterministic output paths. Skills must write to the exact path passed by the runner and must not choose their own filenames.
+
 ```bash
 mkdir -p books/my-story
 cp /path/to/book.txt books/my-story/book.txt
@@ -220,7 +222,9 @@ Each location or environment variant should include:
 - Base location, if any.
 - Scenes where it appears.
 - Source references and short supporting quotes.
-- Durable visual traits.
+- Durable visual traits: architecture, geography, terrain, room layout, materials, surfaces, vegetation, fixed environmental objects, visible technology, lighting, color, atmosphere, and scale when source-supported.
+- Spatial composition: foreground, midground, background, layout, or relationships between major environmental elements when the source implies them.
+- Prompt-critical details that must appear in an image prompt.
 - Variant notes.
 - Prompt status.
 
@@ -255,7 +259,11 @@ mode: edit-reference
 style_ref: books/<book-id>/locations/images/<base-location-slug>.png
 ```
 
-Location prompts should be reusable environment references, not scene panels. They should avoid characters, dialogue, captions, speech bubbles, storyboarding, and panel-specific action. They do not paste `visual-style.md`; that user-filled file can be appended later by image-generation tooling.
+Location prompts should be reusable environment prompts, not scene panels. They should be direct image-generation prose, not metadata; do not start them with phrases like `Environment reference for`.
+
+High-quality location prompts should use every source-supported visual detail from the location entry, but should not invent named landmarks, architecture, objects, vegetation, weather, time of day, materials, lighting, or background elements that are not supported by the story. It is acceptable to add minimal connective spatial language when needed to turn source-supported traits into one coherent scene.
+
+They should avoid characters, dialogue, captions, speech bubbles, storyboarding, and panel-specific action. They do not paste `visual-style.md`; that user-filled file can be appended later by image-generation tooling.
 
 ## Runner Behavior
 
@@ -266,6 +274,14 @@ The runner is resumable:
 - Progress is printed before each Pi skill invocation.
 
 Run it again whenever you add or remove generated text artifacts.
+
+The runner validates newly generated files before continuing. If a model writes to the wrong path, emits chat wrapper text, omits required sections, or produces malformed prompt files, the run fails so the missing or bad artifact can be regenerated.
+
+You can validate an existing book workspace without invoking Pi:
+
+```bash
+scripts/comic-adaptation/validate books/<book-id>
+```
 
 ## First Milestone Completion Criteria
 
@@ -278,6 +294,7 @@ This milestone is complete when:
 - Every location index entry has a location prompt file.
 - Character and location prompt files reference the correct book-scoped style images.
 - Continuity problems are either fixed in the artifacts or recorded clearly.
+- `scripts/comic-adaptation/validate books/<book-id>` passes.
 
 Before generating images, also create and approve:
 

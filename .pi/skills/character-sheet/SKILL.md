@@ -9,7 +9,11 @@ disable-model-invocation: false
 
 # Character Sheet Prompts
 
-The full book is already loaded in context. The user provides a book root path, usually `books/<book-id>`, and one approved character artifact from `<book-root>/characters/artifacts/<slug>.md`.
+The full book is already loaded in context. The user provides:
+
+1. A book root path, usually `books/<book-id>`.
+2. An exact output path under `<book-root>/characters/sheets/`.
+3. One approved character artifact from `<book-root>/characters/artifacts/<slug>.md`.
 
 Read **Visual Description**, **Visual Variants**, **Personality And Performance Notes**, and **Continuity Notes**. Decide how many reference sheets this character needs.
 
@@ -22,14 +26,14 @@ The user-filled `<book-root>/style-refs/visual-style.md` may be appended by late
 Use the **`write` tool** to save exactly:
 
 ```text
-<book-root>/characters/sheets/<slug>.md
+<output-path>
 ```
-
-where `<slug>` matches the character artifact basename.
 
 Create `<book-root>/characters/sheets/` if needed.
 
-Do **not** paste sheet prompts in the assistant reply. After writing, reply with exactly `Wrote <book-root>/characters/sheets/<slug>.md.` and nothing else.
+Do not derive, shorten, rename, canonicalize, or choose a different output filename. The runner owns the path.
+
+Do **not** paste sheet prompts in the assistant reply. After writing, reply with exactly `Wrote <output-path>.` and nothing else.
 
 ## When To Use Multiple Sheets
 
@@ -141,6 +145,6 @@ Character sheet for this character. Same design as reference. Transform into Mr 
 
 # User Request
 
-Read the attached character artifact, then write `<book-root>/characters/sheets/<slug>.md`.
+Read the attached character artifact, then write the character sheet prompt file to the exact provided output path.
 
 **User:** `@$`
