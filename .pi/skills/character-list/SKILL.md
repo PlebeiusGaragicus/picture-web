@@ -2,8 +2,8 @@
 name: character-list
 description: >-
   Generate a strict one-line-per-character list from a full book already loaded
-  in context. Use for comic adaptation workflows before creating per-character
-  artifacts.
+  in context and write it under a book workspace. Use before creating
+  per-character artifacts.
 disable-model-invocation: false
 ---
 
@@ -11,11 +11,23 @@ disable-model-invocation: false
 
 The full book is already loaded in context. Produce a complete character list for the entire story.
 
+## Input
+
+The user provides a book root path, usually `books/<book-id>`.
+
 ## Output Contract
 
-Output only the character list.
+Use the **`write` tool** to save the character list exactly here:
 
-Do not include:
+```text
+<book-root>/characters/list.txt
+```
+
+Create `<book-root>/characters/` if needed.
+
+The written file contains only the character list.
+
+Do not include these in the written file:
 
 - Headings
 - Bullets
@@ -26,6 +38,8 @@ Do not include:
 - Explanations
 - Blank lines
 - Text before or after the list
+
+After writing, reply with exactly `Wrote <book-root>/characters/list.txt.` and nothing else.
 
 ## Line Format
 
@@ -58,3 +72,8 @@ Molly Millions: A street samurai and razorgirl hired as Case's bodyguard, define
 Dixie Flatline (McCoy Pauley): A ROM personality construct of a legendary cowboy who guides Case through the run and wants his own stored existence ended.
 Dr Jekyll (Mr Hyde): A respectable Victorian doctor whose self-experiments release the violent alter ego Mr Hyde; both forms belong to one character with distinct visual states.
 ```
+
+## Forbidden In Assistant Reply
+
+- Pasting the character list after `write`
+- Summaries, explanations, bullets, or code fences

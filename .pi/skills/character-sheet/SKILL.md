@@ -1,31 +1,35 @@
 ---
 name: character-sheet
 description: >-
-  Write character-sheets/<slug>.md with short image-generation prompts from a
-  character artifact. Assumes style-refs/archetype-character.png exists. Agent
-  uses write tool; do not dump prompts in chat.
+  Write book-scoped character sheet prompt files from character artifacts.
+  References the planned archetype character image path for later image
+  generation. Agent uses write tool; do not dump prompts in chat.
 disable-model-invocation: false
 ---
 
 # Character Sheet Prompts
 
-The full book is already loaded in context. The user will provide one approved character artifact from `characters/<slug>.md`.
+The full book is already loaded in context. The user provides a book root path, usually `books/<book-id>`, and one approved character artifact from `<book-root>/characters/artifacts/<slug>.md`.
 
 Read **Visual Description**, **Visual Variants**, **Personality And Performance Notes**, and **Continuity Notes**. Decide how many reference sheets this character needs.
 
-Style rendering comes from the **style anchor image** `style-refs/archetype-character.png` attached at generation time — **not** from prose in the prompt.
+Style rendering comes from the **style anchor image** `<book-root>/style-refs/archetype-character.png` attached at image generation time. The PNG does not need to exist when drafting this prompt file.
+
+The user-filled `<book-root>/style-refs/visual-style.md` may be appended by later image-generation tooling. Do not paste it into this file.
 
 ## Delivery
 
 Use the **`write` tool** to save exactly:
 
 ```text
-character-sheets/<slug>.md
+<book-root>/characters/sheets/<slug>.md
 ```
 
 where `<slug>` matches the character artifact basename.
 
-Do **not** paste sheet prompts in the assistant reply. After writing, reply with at most one short line such as `Wrote character-sheets/butterscotch.md.`
+Create `<book-root>/characters/sheets/` if needed.
+
+Do **not** paste sheet prompts in the assistant reply. After writing, reply with exactly `Wrote <book-root>/characters/sheets/<slug>.md.` and nothing else.
 
 ## When To Use Multiple Sheets
 
@@ -46,13 +50,13 @@ Plain markdown only. No YAML frontmatter, JSON, tables, or code fences.
 ```markdown
 ## variant-slug
 mode: new-image
-style_ref: style-refs/archetype-character.png
+style_ref: <book-root>/style-refs/archetype-character.png
 
 [prompt]
 
 ## other-variant-slug
 mode: edit-reference
-style_ref: character-sheets/images/<base-variant-slug>.png
+style_ref: <book-root>/characters/images/<base-variant-slug>.png
 
 [prompt]
 ```
@@ -61,7 +65,7 @@ Do not add a `# Character Sheets: …` title line.
 
 Use variant slugs from **Visual Variants** when present; otherwise `character-slug-base`.
 
-For `edit-reference`, `style_ref` is the **approved base character sheet image** for this character (user saves generated PNGs under `character-sheets/images/`).
+For `edit-reference`, `style_ref` is the **approved base character sheet image** for this character (user saves generated PNGs under `<book-root>/characters/images/`).
 
 ## Layout Block
 
@@ -93,7 +97,7 @@ Short strings for Nano Banana — **2–3 sentences** per section.
 2. `Match the reference image's rendering, palette, line weight, shadows, and sheet layout exactly.`
 3. The layout block and `Expressions:` line.
 
-Do **not** describe watercolor, palette, or mood from `style-refs/visual-style.md` — the reference image carries style.
+Do **not** describe watercolor, palette, or mood from `<book-root>/style-refs/visual-style.md` — later image-generation tooling may append that file separately, and the reference image carries the final rendering style.
 
 ### `mode: edit-reference`
 
@@ -111,7 +115,7 @@ Do **not** repeat full character description or style prose.
 
 ## Forbidden In The Written File
 
-- Preamble, style paragraphs, pasted `style-refs/visual-style.md`
+- Preamble, style paragraphs, pasted `<book-root>/style-refs/visual-style.md`
 - Repeating "match reference" more than once per prompt
 - Trailing commentary after the last prompt
 
@@ -124,19 +128,19 @@ Do **not** repeat full character description or style prose.
 ```markdown
 ## jekyll-base
 mode: new-image
-style_ref: style-refs/archetype-character.png
+style_ref: books/example/style-refs/archetype-character.png
 
 Character reference sheet for Dr Jekyll, respectable middle-aged Victorian doctor, neat beard, tired eyes, conservative dark clothing. Match the reference image's rendering, palette, line weight, shadows, and sheet layout exactly. Layout: top row — front full-body, three-quarter full-body, back full-body, same neutral standing pose, consistent scale. Bottom row — four head close-ups. White background. No text, no labels, no watermarks. Expressions: calm neutral, tired concern, restrained unease, quiet determination.
 
 ## hyde-variant
 mode: edit-reference
-style_ref: character-sheets/images/jekyll-base.png
+style_ref: books/example/characters/images/jekyll-base.png
 
 Character sheet for this character. Same design as reference. Transform into Mr Hyde: bulkier frame, cruel expression, disheveled hair, more violent posture. Layout: top row — front full-body, three-quarter full-body, back full-body, same neutral standing pose, consistent scale. Bottom row — four head close-ups. White background. No text, no labels, no watermarks. Expressions: neutral, cruel sneer, rage, contempt.
 ```
 
 # User Request
 
-Read the attached character artifact, then write `character-sheets/<slug>.md`.
+Read the attached character artifact, then write `<book-root>/characters/sheets/<slug>.md`.
 
 **User:** `@$`

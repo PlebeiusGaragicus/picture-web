@@ -2,8 +2,8 @@
 name: scene-manifest
 description: >-
   Generate a complete numbered scene manifest from a full book already loaded in
-  context. Use for comic adaptation workflows that need ordered scenes with line
-  references and supporting quotes.
+  context and write it under a book workspace. Use for location extraction and
+  later comic adaptation planning.
 disable-model-invocation: false
 ---
 
@@ -11,9 +11,21 @@ disable-model-invocation: false
 
 The full book is already loaded in context. Create a complete numbered scene manifest for the entire story as it plays out.
 
+## Input
+
+The user provides a book root path, usually `books/<book-id>`.
+
 ## Output Contract
 
-Write plain markdown only.
+Use the **`write` tool** to save exactly:
+
+```text
+<book-root>/scenes/manifest.md
+```
+
+Create `<book-root>/scenes/` if needed.
+
+The written file must be plain markdown only.
 
 Do not use YAML frontmatter, JSON, or tables.
 
@@ -23,6 +35,8 @@ Scenes must be:
 - Non-overlapping.
 - Complete across the story.
 - Anchored to source line ranges and short supporting quotes.
+
+After writing, reply with exactly `Wrote <book-root>/scenes/manifest.md.` and nothing else.
 
 ## Scene Boundary Rules
 
@@ -69,3 +83,8 @@ Continuity Notes: Brief notes, or `None`.
 - Use three-digit scene numbers: `001`, `002`, `003`.
 - Use lowercase hyphenated scene ids in headings.
 - Keep titles short and descriptive.
+
+## Forbidden In Assistant Reply
+
+- Pasting the scene manifest after `write`
+- Summaries, explanations, bullets, or code fences

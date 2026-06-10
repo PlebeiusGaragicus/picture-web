@@ -2,14 +2,14 @@
 name: character-artifact
 description: >-
   Create a plain markdown character artifact from one character-list line using
-  a full book already loaded in context. Includes visual details, variants,
-  source line references, and supporting quotes for comic adaptation.
+  a full book already loaded in context. Write the artifact under a book
+  workspace with visual details, variants, source line references, and quotes.
 disable-model-invocation: false
 ---
 
 # Character Artifact
 
-The full book is already loaded in context. The user will provide exactly one line from `character-list.txt`.
+The full book is already loaded in context. The user provides a book root path, usually `books/<book-id>`, and exactly one line from `<book-root>/characters/list.txt`.
 
 Create a plain markdown character artifact for that character.
 
@@ -23,9 +23,23 @@ Character Name (optional alias): Short description.
 
 Use the input line to identify the character, then use the full book context to gather source-supported details.
 
+Derive the output slug from the canonical character name before the colon:
+
+1. Lowercase it.
+2. Replace any run of non-alphanumeric characters with one hyphen.
+3. Trim leading and trailing hyphens.
+
+Write the artifact with the **`write` tool** to:
+
+```text
+<book-root>/characters/artifacts/<slug>.md
+```
+
+Create `<book-root>/characters/artifacts/` if needed.
+
 ## Output Contract
 
-Write plain markdown only.
+The written artifact must be plain markdown only.
 
 Do not use:
 
@@ -34,6 +48,8 @@ Do not use:
 - Tables
 - Code fences
 - Commentary outside the artifact
+
+After writing, reply with exactly `Wrote <book-root>/characters/artifacts/<slug>.md.` and nothing else.
 
 ## Required Structure
 
@@ -90,3 +106,8 @@ Use lowercase asset ids with hyphens:
 - `henry-dorsett-case-base`
 
 Create variants only when the character has a meaningful visual state change, such as age, disguise, injury, outfit, species, transformation, or major time-period change.
+
+## Forbidden In Assistant Reply
+
+- Pasting the artifact after `write`
+- Summaries, explanations, bullets, or code fences
