@@ -6,7 +6,7 @@ The goal is to transform a complete written story into a structured set of reusa
 
 ## Core Principles
 
-The preferred workflow starts by loading the entire book into model context using a reliable full-book reading skill. In practice, many locally hosted models can fit a full novel while still using only part of the available context window, which makes global extraction more reliable than chapter-by-chapter accumulation.
+The preferred workflow loads the entire book into model context first using a reliable full-book reading skill, then extracts `style-refs/` (visual-style prose and archetype prompts) from the story. In practice, many locally hosted models can fit a full novel while still using only part of the available context window, which makes global extraction more reliable than chapter-by-chapter accumulation.
 
 The process should use fresh context for each major reasoning pass. After the book is loaded, preserve that named Pi session as the clean book-load session. Generate the character list, scene list, play-by-play, reference prompt plan, and storyboard from fresh forks of that session rather than from one long drifting conversation.
 
@@ -27,7 +27,9 @@ The workflow produces the following major artifacts:
 - A story bible containing characters, locations, props, factions, motifs, timeline notes, and continuity rules.
 - A reference asset catalog listing every reusable visual element and its variants.
 - Reference image generation prompts for each asset and variant.
-- Character sheet prompts generated in separate focused forks for each character.
+- `style-refs/` — `visual-style.md`, archetype prompts, and locked anchor PNGs, derived from the loaded book.
+- Locked style-anchor images (`archetype-character.png`, `archetype-scene.png`) used for rendering consistency.
+- Character sheet prompts in `character-sheets/`, generated in separate focused forks per character artifact.
 - Location, prop, costume, and item reference prompts generated from focused forks.
 - A storyboard for each scene, panel by panel.
 - A master panel prompt list combining each panel prompt with required reference images.
@@ -39,8 +41,18 @@ This workflow is independent from any application code, but a project using it m
 
 ```text
 comic-adaptation/
-  source/
-    book.txt
+  book.txt
+  style-refs/
+    visual-style.md
+    archetype-character.md
+    archetype-character.png
+    archetype-scene.md
+    archetype-scene.png
+  character-list.txt
+  scene-manifest.md
+  play-by-play.md
+  characters/
+  character-sheets/
   sessions/
     book-load-session.md
     fork-log.md
@@ -101,7 +113,7 @@ Do not reuse identifiers for meaningfully different visual states. If a visual d
 
 Use the Pi coding agent from the command line. Pi supports `--name` / `-n` at startup, `-p` / `--print` for non-interactive runs, `--session` to resume a specific saved session, and `--fork` to fork a saved session into a new one.
 
-Assume a fresh project directory containing only `./book.txt`. Run pi from that directory.
+Assume a project directory containing `./book.txt`. Run pi from that directory.
 
 Create the clean book-load session, then capture its id while this is still the only session file for the project:
 
@@ -134,7 +146,108 @@ pi --fork "$BOOK_LOAD_ID" --name "scene manifest" -p '/skill:scene-manifest' > s
 pi --fork "$BOOK_LOAD_ID" --name "play by play" -p '/skill:play-by-play' > play-by-play.md
 ```
 
-Then generate one plain markdown character artifact per line of `character-list.txt`. Each character artifact should be created from a fresh fork of the original book-load session, not from the character-list session:
+The preferred operating model is:
+
+- Load the full book once with `read-book`.
+- Name that loaded session clearly.
+- Fork from that loaded session for global artifacts and focused prompt generation.
+- Redirect `-p` output to durable files whenever an artifact should be saved.
+- Save each fork's output as a durable project artifact.
+
+Only fall back to chapter or chunk processing when the book truly cannot fit in context or when the model becomes unreliable with the full text.
+
+Source line references belong in generated artifacts. The `character-artifact` skill defines citation rules. To audit or resolve line numbers manually, use `rg -n -F "exact phrase" book.txt`.
+
+## Step 2: Extract Visual Style And Style Anchor Prompts
+
+Fork from the book-load session and run the `visual-style` skill. The book is already in context. The skill infers how this story should look as a comic and uses the **`write` tool** to save:
+
+- `style-refs/visual-style.md` — terse labeled lines for human editing.
+- `style-refs/archetype-character.md` — one image prompt for an original inhabitant of the story world (not a named cast member).
+- `style-refs/archetype-scene.md` — one image prompt for a representative environment type.
+
+```bash
+mkdir -p style-refs
+pi --fork "$BOOK_LOAD_ID" --name "visual style" -p '/skill:visual-style'
+```
+
+Optional steering notes:
+
+```bash
+pi --fork "$BOOK_LOAD_ID" --name "visual style" -p '/skill:visual-style brighter palette, less grime' < /dev/null
+```
+
+Do not redirect `pi -p` stdout to these files.
+
+**Human gate before batch character-sheet work:**
+
+1. Edit `style-refs/visual-style.md` if needed.
+2. Generate `style-refs/archetype-character.png` from `archetype-character.md` in Nano Banana; iterate until the rendering, palette, line weight, and sheet layout are locked.
+3. Generate `style-refs/archetype-scene.png` from `archetype-scene.md` the same way.
+
+Later character and location prompts attach these anchor images instead of pasting style prose.
+
+## Step 3: Create Fresh-Context Extraction Passes
+
+After the named book-load session is created, run separate fresh-context passes by forking from that session. Each pass should ask for one global artifact and should save its output before starting the next pass.
+
+Recommended first passes:
+
+- Complete character list.
+- Complete scene manifest in story order.
+- Play-by-play outline of major acts and dramatic beats.
+- Complete reusable visual asset inventory.
+
+Do not ask one pass to do all of this at once. The model may have the whole book available, but each output is easier to validate when the task is narrow.
+
+Use a simple fork log:
+
+```text
+fork_id: character-list-pass
+started_from: comic book load session
+task: List every character in the full story, one character per line.
+output: planning/character-list.txt
+status: complete
+```
+
+Each fork should return source-supported observations only. When the text is ambiguous, record the ambiguity rather than inventing design details.
+
+## Step 4: Create The Character List
+
+The character list should be generated from a fresh fork of the book-load session, not accumulated chapter by chapter.
+
+This first pass should be strict and easy to parse. It should produce only one character per line, with a colon separating the character name from a short description.
+
+Rules:
+
+- No heading.
+- No bullets.
+- No numbering.
+- No markdown.
+- No dialogue.
+- No commentary before or after the list.
+- Exactly one character per line.
+- Exactly one colon separator per line.
+- Use the most canonical name first.
+- Put aliases in parentheses after the canonical name when useful.
+- Include major recurring unnamed characters only if they function like characters.
+- Do not include locations, factions, props, companies, or concepts unless they are personified characters.
+- One logical character per line. Merge alternate identities, disguises, age states, transformed or alternate forms, and other visual variants into the same line instead of splitting them.
+- Do not split one person into separate lines such as `Dr Jekyll` and `Mr Hyde`, or `Anna` and `Anna as a child`.
+- Do not emit cross-reference lines such as `See Character Name`.
+
+Example:
+
+```text
+Henry Dorsett Case: The protagonist, a legendary console cowboy whose damaged nervous system keeps him from jacking into cyberspace until he is recruited for the Straylight run.
+Molly Millions: A street samurai and razorgirl hired as Case's bodyguard, defined by mirrored lenses, retractable blades, professionalism, cynicism, and independence.
+Dixie Flatline (McCoy Pauley): A ROM personality construct of a legendary cowboy who guides Case through the run and wants his own stored existence ended.
+Dr Jekyll (Mr Hyde): A respectable Victorian doctor whose self-experiments release the violent alter ego Mr Hyde; both forms belong to one character with distinct visual states.
+```
+
+## Step 5: Generate Character Artifacts
+
+Generate one plain markdown character artifact per line of `character-list.txt`. Each artifact should come from a fresh fork of the book-load session, not from the character-list session. The `character-artifact` skill defines structure and source reference rules.
 
 ```bash
 mkdir -p characters
@@ -174,127 +287,46 @@ done < character-list.txt
 
 Works on macOS `/bin/bash` 3.2. `pi -p` reads stdin in print mode; `< /dev/null` on each call prevents it from consuming the rest of `character-list.txt`.
 
-The preferred operating model is:
+## Step 6: Generate Character Sheet Prompts
 
-- Load the full book once with `read-book`.
-- Name that loaded session clearly.
-- Fork from that loaded session for global artifacts and focused prompt generation.
-- Redirect `-p` output to durable files whenever an artifact should be saved.
-- Save each fork's output as a durable project artifact.
+Requires locked `style-refs/archetype-character.png` from Step 2.
 
-Only fall back to chapter or chunk processing when the book truly cannot fit in context or when the model becomes unreliable with the full text.
+For each file in `characters/`, fork from the book-load session and run the `character-sheet` skill with the character artifact. The skill decides whether one reference sheet is enough or whether multiple variant sections are needed based on **visible** differences in **Visual Variants**.
 
-## Step 2: Use Immutable Source Line References
+The skill uses the **`write` tool** to save `character-sheets/<slug>.md` with short image prompts. Each `mode: new-image` section references `style-refs/archetype-character.png`; rendering style comes from that anchor image, not from prose in the prompt. Expressions are chosen from **Personality And Performance Notes**, not a generic happy/sad set.
 
-Even when the full book fits in context, every artifact still needs stable source anchors so characters, settings, props, scenes, and panels can be traced back to the prose.
-
-Do not modify the source text to insert paragraph ids. The project assumes one canonical book `.txt` file, so artifacts do not need to repeat the source filename. Instead, cite line ranges from that single immutable file. Every generated artifact should include:
-
-- `source_lines`, such as `L1245-L1268`.
-- `supporting_quote`, a short exact quote from the cited line range.
-- Optional `source_note`, explaining what the quote supports.
-
-Example:
-
-```text
-source_lines: L1245-L1268
-supporting_quote: "James stood before the ruined school house, unable to look away from the blackened east wing."
-source_note: Supports the fire-damaged school house variant and James's reaction to it.
-```
-
-Use shell commands to verify or discover line references outside the model. For example:
+Do not redirect `pi -p` stdout to those files.
 
 ```bash
-rg -n -F "exact phrase from the book" "book.txt"
-rg -n -C 3 -F "exact phrase from the book" "book.txt"
+mkdir -p character-sheets character-sheets/images
+[ -n "$BOOK_LOAD_ID" ] || { echo "BOOK_LOAD_ID not set"; exit 1; }
+[ -f style-refs/archetype-character.png ] || { echo "style-refs/archetype-character.png not found — complete Step 2 human gate first"; exit 1; }
+
+total=$(ls characters/*.md 2>/dev/null | wc -l | tr -d ' ')
+n=0
+
+for artifact in characters/*.md; do
+  [ -f "$artifact" ] || continue
+  slug=$(basename "$artifact" .md)
+  out="character-sheets/${slug}.md"
+  n=$((n + 1))
+
+  if [ -f "$out" ]; then
+    echo "[$n/$total] → ${slug} (skip)"
+    continue
+  fi
+  echo "[$n/$total] → ${slug}"
+
+  pi --fork "$BOOK_LOAD_ID" \
+    --name "character sheet ${slug}" \
+    -p "/skill:character-sheet @${artifact}" \
+    < /dev/null
+done
 ```
 
-The model should not be trusted to count line numbers from memory. It can propose distinctive supporting quotes, then those quotes should be resolved to exact line ranges with `rg -n`. If a quote appears multiple times, use more surrounding text or context until the reference is unambiguous.
+At image generation time, attach `style-refs/archetype-character.png` for every `mode: new-image` prompt. Variant sheets with `mode: edit-reference` attach the character's approved base sheet image from `character-sheets/images/`.
 
-## Step 3: Establish Style And Production Rules
-
-Before extracting story elements, define the comic's visual target. This should be short enough to reuse across all prompts.
-
-Include:
-
-- Comic format, such as western comic, manga, bande dessinee, webtoon, or graphic novel.
-- Rendering style, such as painterly, cel-shaded, inked, ligne claire, cinematic, or watercolor.
-- Aspect ratio and panel conventions.
-- Color palette.
-- Level of realism.
-- Lighting tendencies.
-- Rules for character consistency.
-- Rules for avoiding unwanted text, logos, watermarks, or speech bubbles in generated images.
-
-Example:
-
-```text
-Visual style: cinematic all-ages fantasy graphic novel, clean ink lines, expressive faces, richly painted backgrounds, warm natural lighting, consistent character proportions, no text, no speech bubbles, no captions, no watermarks.
-```
-
-This style block should be used in reference prompts and panel prompts unless a specific scene requires a controlled exception.
-
-## Step 4: Create Fresh-Context Extraction Passes
-
-After the named book-load session is created, run separate fresh-context passes by forking from that session. Each pass should ask for one global artifact and should save its output before starting the next pass.
-
-Recommended first passes:
-
-- Complete character list.
-- Complete scene manifest in story order.
-- Play-by-play outline of major acts and dramatic beats.
-- Complete reusable visual asset inventory.
-
-Do not ask one pass to do all of this at once. The model may have the whole book available, but each output is easier to validate when the task is narrow.
-
-Use a simple fork log:
-
-```text
-fork_id: character-list-pass
-started_from: comic book load session
-task: List every character in the full story, one character per line.
-output: planning/character-list.txt
-status: complete
-```
-
-Each fork should return source-supported observations only. When the text is ambiguous, record the ambiguity rather than inventing design details.
-
-## Step 5: Create The Character List
-
-The character list should be generated from a fresh fork of the book-load session, not accumulated chapter by chapter.
-
-This first pass should be strict and easy to parse. It should produce only one character per line, with a colon separating the character name from a short description.
-
-Rules:
-
-- No heading.
-- No bullets.
-- No numbering.
-- No markdown.
-- No dialogue.
-- No commentary before or after the list.
-- Exactly one character per line.
-- Exactly one colon separator per line.
-- Use the most canonical name first.
-- Put aliases in parentheses after the canonical name when useful.
-- Include major recurring unnamed characters only if they function like characters.
-- Do not include locations, factions, props, companies, or concepts unless they are personified characters.
-- One logical character per line. Merge alternate identities, disguises, age states, transformed or alternate forms, and other visual variants into the same line instead of splitting them.
-- Do not split one person into separate lines such as `Dr Jekyll` and `Mr Hyde`, or `Anna` and `Anna as a child`.
-- Do not emit cross-reference lines such as `See Character Name`.
-
-Example:
-
-```text
-Henry Dorsett Case: The protagonist, a legendary console cowboy whose damaged nervous system keeps him from jacking into cyberspace until he is recruited for the Straylight run.
-Molly Millions: A street samurai and razorgirl hired as Case's bodyguard, defined by mirrored lenses, retractable blades, professionalism, cynicism, and independence.
-Dixie Flatline (McCoy Pauley): A ROM personality construct of a legendary cowboy who guides Case through the run and wants his own stored existence ended.
-Dr Jekyll (Mr Hyde): A respectable Victorian doctor whose self-experiments release the violent alter ego Mr Hyde; both forms belong to one character with distinct visual states.
-```
-
-After the list is approved, fork from the book-load session once per character or per small group of minor characters. Inject exactly one character-list line into the character artifact skill and ask the model to create a plain markdown file with the full character description, visual facts, variations, source line references, and supporting quotes.
-
-## Step 6: Build The Story Bible
+## Step 7: Build The Story Bible
 
 The story bible is the compact source of continuity truth for the adaptation.
 
@@ -350,7 +382,7 @@ related_assets:
 status: needs-reference-prompt
 ```
 
-## Step 7: Create The Scene Manifest And Play-By-Play
+## Step 8: Create The Scene Manifest And Play-By-Play
 
 Create the scene manifest from a fresh full-book fork. Models are often good at listing every scene in story order when they have the whole book in context, so use that ability directly.
 
@@ -397,7 +429,7 @@ visual_priorities:
   - Introduce the brass locket as a recurring object.
 ```
 
-## Step 8: Create The Reference Asset Catalog
+## Step 9: Create The Reference Asset Catalog
 
 The reference asset catalog is a production checklist for all reusable visual assets.
 
@@ -445,48 +477,13 @@ reference_image: none
 notes: Must preserve James's eye color and nervous expression from human form.
 ```
 
-## Step 9: Draft Reference Image Prompts
+## Step 10: Draft Location And Prop Reference Prompts
 
-Once the character artifacts, scene manifest, play-by-play, and asset catalog are stable enough, create prompts for each base asset. Character prompts should usually be generated in focused forks: start from the book-load session, inject one character artifact or character-list line, and ask for that character's sheet prompt and all required variation prompts.
+Requires locked `style-refs/archetype-scene.png` from Step 2.
 
-Reference prompts should be descriptive, controlled, and reusable. They should avoid scene-specific action unless the asset is specifically a scene state.
+Once the scene manifest, play-by-play, and asset catalog are stable enough, create prompts for each non-character asset. Character sheet prompts are produced in Step 6.
 
-For a character reference prompt, include:
-
-- Character id.
-- Variant id, when applicable.
-- Age and apparent age.
-- Body type.
-- Face shape.
-- Hair.
-- Eye color.
-- Clothing.
-- Posture.
-- Personality cues visible in expression.
-- Front, side, and three-quarter views if the image service supports character sheets.
-- The shared visual style.
-
-Example:
-
-```text
-Create a clean character reference sheet for james-human in a cinematic all-ages fantasy graphic novel style. Show front view, side view, and three-quarter view. James is a thin teenage boy with unruly brown hair, hazel eyes, a narrow face, and a guarded expression. He wears a worn gray school jacket, patched trousers, and scuffed brown boots. His posture is slightly tense, with shoulders drawn inward. Use consistent proportions, neutral studio lighting, plain background, no text, no labels, no watermark.
-```
-
-The character fork should also identify needed variations:
-
-```text
-character_id: james
-base_reference_prompt: references/prompts/characters/james-human.md
-variation_prompts:
-  - asset_id: james-pony
-    generation_mode: edit-reference
-    base_asset: james-human
-    instruction: Preserve James's hazel eyes, guarded expression, and nervous posture while transforming him into his pony form.
-  - asset_id: james-human-injured
-    generation_mode: edit-reference
-    base_asset: james-human
-    instruction: Keep the same character design and clothing, but add a bruised cheek, torn sleeve, and exhausted posture.
-```
+Reference prompts should be descriptive, controlled, and reusable. They should avoid scene-specific action unless the asset is specifically a scene state. Attach `style-refs/archetype-scene.png` at generation time for environmental rendering consistency — do not paste `style-refs/visual-style.md` or long style essays into the prompt.
 
 For a location reference prompt, include:
 
@@ -495,17 +492,16 @@ For a location reference prompt, include:
 - Important layout details.
 - Materials.
 - Lighting baseline.
-- Mood.
-- Scale references.
-- The shared visual style.
+- Mood and scale references.
+- `Match the reference image's environmental rendering, palette, lighting, and detail level.`
 
 Example:
 
 ```text
-Create an exterior environment reference for school-house in a cinematic all-ages fantasy graphic novel style. A two-story rural school house built from pale stone and dark timber, with tall narrow windows, a steep slate roof, an old bell tower, and a gravel path leading to heavy wooden doors. The building sits at the edge of a wind-bent field with low hills in the background. Warm afternoon light, clear readable architecture, no people, no text, no watermark.
+Exterior environment reference for school-house. A two-story rural school house built from pale stone and dark timber, with tall narrow windows, a steep slate roof, an old bell tower, and a gravel path leading to heavy wooden doors. The building sits at the edge of a wind-bent field with low hills in the background. Warm afternoon light, clear readable architecture. Match the reference image's environmental rendering, palette, lighting, and detail level. No characters, no text, no watermark.
 ```
 
-## Step 10: Create Variant Images With Conversational Edits
+## Step 11: Create Variant Images With Conversational Edits
 
 When a variant is closely related to a base asset, generate the base image first and then create the variant through image editing.
 
@@ -525,9 +521,9 @@ Edit instruction: Create a childhood version of the same person. Preserve the re
 
 Each generated variant should be saved as its own reference image and linked in the asset catalog.
 
-## Step 11: Plan Panels For Each Scene
+## Step 12: Plan Panels For Each Scene
 
-For each scene, generate a storyboard that adapts the prose into a panel-by-panel visual sequence. This should usually happen in a focused scene fork. Start from the book-load session or from a fresh context containing the scene text, then inject the approved scene manifest entry, relevant character entries, relevant asset catalog entries, and the visual style block.
+For each scene, generate a storyboard that adapts the prose into a panel-by-panel visual sequence. This should usually happen in a focused scene fork. Start from the book-load session or from a fresh context containing the scene text, then inject the approved scene manifest entry, relevant character entries, relevant asset catalog entries, and `style-refs/visual-style.md` for planning tone (attach style-anchor images at final image generation, not as pasted prose in panel prompts).
 
 The panel plan should not attempt to illustrate every sentence. It should select the clearest visual beats needed to preserve:
 
@@ -575,7 +571,7 @@ lighting: Late afternoon sun with long shadows.
 prompt_status: ready
 ```
 
-## Step 12: Use Conversational Panel Edits When Appropriate
+## Step 13: Use Conversational Panel Edits When Appropriate
 
 Some panels can be more consistent if created as edits from earlier panels rather than generated from scratch.
 
@@ -601,7 +597,7 @@ edit_instruction: Keep the same camera angle, school house, lighting, and compos
 
 Use new image generation when the composition, location, or camera angle changes substantially.
 
-## Step 13: Create The Master Panel Prompt List
+## Step 14: Create The Master Panel Prompt List
 
 The master panel prompt list is the final production document for generating comic panels.
 
@@ -634,7 +630,7 @@ prompt: Wide establishing comic panel in cinematic all-ages fantasy graphic nove
 status: ready-to-generate
 ```
 
-## Step 14: Review And Regenerate
+## Step 15: Review And Regenerate
 
 After generating reference images and panels, review them for continuity before moving on.
 
@@ -683,7 +679,7 @@ When a later pass depends on earlier artifacts, inject the saved artifact explic
 
 - A fork of the book-load session.
 - The approved `james` character artifact or character-list line.
-- The shared visual style block.
+- Locked style-anchor images attached at image generation time (`archetype-character.png` for sheets, `archetype-scene.png` for locations).
 - The reference prompt output schema.
 
 If the book cannot fit reliably in context, use the older fallback approach: split by chapter or chunk, extract structured updates in story order, and merge them into the same artifact set.
@@ -692,25 +688,23 @@ If the book cannot fit reliably in context, use the older fallback approach: spl
 
 Use the following order for a full adaptation:
 
-1. Preserve one immutable source text file for the book.
-2. Load the full book with the read-book skill.
+1. Preserve one immutable source text file for the book as `book.txt`.
+2. Load the full book with the read-book skill and capture `BOOK_LOAD_ID`.
 3. Preserve the named book-load session immediately after the book is loaded.
-4. Define visual style and production rules.
-5. From a fresh fork of the book-load session, generate `character-list.txt`.
-6. From a fresh fork of the book-load session, generate the complete scene manifest.
-7. From a fresh fork of the book-load session, generate the play-by-play act outline.
-8. From a fresh fork of the book-load session, generate the reusable visual asset inventory.
-9. Generate one plain markdown character artifact per line of `character-list.txt`.
-10. Merge the approved character artifacts, scene list, play-by-play, and asset inventory into the story bible and asset catalog.
-11. Fork once per major character to draft character sheet prompts and variation prompts.
-12. Fork once per major location, prop, costume, or object group to draft reference prompts and variation prompts.
-13. Generate base reference images.
-14. Generate variant reference images with conversational edits where useful.
-15. For each scene, create a focused storyboard with panel-by-panel beats and required references.
-16. Create the master panel prompt list.
-17. Generate panels.
-18. Review continuity and regenerate failed images.
-19. Assemble pages and perform final comic layout.
+4. Fork visual-style to write `style-refs/`; edit `visual-style.md` and lock `archetype-character.png` and `archetype-scene.png` (Step 2).
+5. From fresh forks of the book-load session, generate `character-list.txt`, the scene manifest, and play-by-play.
+6. From a fresh fork of the book-load session, generate the reusable visual asset inventory when needed.
+7. Generate one plain markdown character artifact per line of `character-list.txt` (Step 5).
+8. Generate character sheet prompts in `character-sheets/` (Step 6).
+9. Merge the approved character artifacts, scene list, play-by-play, and asset inventory into the story bible and asset catalog.
+10. Fork once per major location, prop, costume, or object group to draft reference prompts and variation prompts.
+11. Generate base reference images from character sheets and location/prop prompts.
+12. Generate variant reference images with conversational edits where useful.
+13. For each scene, create a focused storyboard with panel-by-panel beats and required references.
+14. Create the master panel prompt list.
+15. Generate panels.
+16. Review continuity and regenerate failed images.
+17. Assemble pages and perform final comic layout.
 
 ## Prompt Templates
 
@@ -780,7 +774,7 @@ Return:
 Create image generation prompts for the following reference assets.
 
 Inputs:
-- Shared visual style block.
+- Style-anchor reference images (`archetype-character.png` or `archetype-scene.png`) attached at generation time.
 - Approved character, location, or prop entry.
 - Required variants for that asset.
 - Source-supported visual facts.
@@ -789,12 +783,22 @@ Each prompt must:
 - Preserve the asset id.
 - Be visually specific.
 - Avoid unsupported story details.
-- Use the shared comic visual style.
+- Match the attached style-anchor image's rendering; do not paste `style-refs/visual-style.md` prose.
 - Avoid text, labels, speech bubbles, and watermarks.
 - Be suitable for generating reusable reference images.
 
 For variants, specify whether the image should be generated from scratch or as an edit from a base asset.
 ```
+
+### Character Sheet Prompt
+
+Handled by the `character-sheet` skill. Fork from the book-load session with:
+
+```text
+/skill:character-sheet @characters/<slug>.md
+```
+
+The skill **writes** `character-sheets/<slug>.md` via the `write` tool with short prompts per visible variant. Attach `style-refs/archetype-character.png` when generating images. Do not capture `pi -p` stdout to that path.
 
 ### Character Artifact Prompt
 
@@ -830,7 +834,7 @@ Inputs:
 - Relevant source line ranges and short supporting quotes.
 - Relevant character artifacts or character-list entries.
 - Relevant reference asset catalog entries.
-- Shared visual style block.
+- `style-refs/visual-style.md` for adaptation tone.
 
 Do not illustrate every sentence. Choose the visual beats needed for clear storytelling.
 
