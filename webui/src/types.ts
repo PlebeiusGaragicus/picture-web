@@ -12,6 +12,8 @@ export interface GenerationReceipt {
   aspectRatio: string;
   imageSize: string;
   seed?: number | null;
+  chatSessionId?: string | null;
+  chatTurnId?: string | null;
 }
 
 export interface ProviderCapture {
@@ -27,11 +29,13 @@ export interface Asset {
   contentHash?: string | null;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string | null;
   prompt?: Prompt | null;
   generation?: GenerationReceipt | null;
   provider?: ProviderCapture | null;
   hasPixels: boolean;
   thumbnailUrl?: string | null;
+  isProtected?: boolean;
 }
 
 export interface Project {
@@ -93,4 +97,60 @@ export interface GeneratePayload {
   title?: string | null;
   tags: string[];
   canvasNodeId?: string | null;
+}
+
+export interface ChatTurnSettings {
+  model: string;
+  aspectRatio: string;
+  imageSize: string;
+  thinkingLevel?: string | null;
+  includeThoughts: boolean;
+}
+
+export interface ChatAttachment {
+  kind: 'asset';
+  assetId: string;
+  purpose: 'source' | 'reference';
+}
+
+export interface ChatTurn {
+  id: string;
+  role: 'user' | 'model';
+  createdAt: string;
+  text: string;
+  settings: ChatTurnSettings;
+  attachments: ChatAttachment[];
+  generatedAssetIds: string[];
+}
+
+export interface ChatSession {
+  version: 1;
+  id: string;
+  projectSlug: string;
+  status: 'active' | 'archived';
+  title: string;
+  source: { assetId: string; canvasNodeId?: string | null };
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+  defaults: ChatTurnSettings;
+  protectedAssetIds: string[];
+  turns: ChatTurn[];
+}
+
+export interface CreateChatSessionPayload {
+  sourceAssetId: string;
+  canvasNodeId?: string | null;
+  title?: string | null;
+}
+
+export interface ChatTurnPayload {
+  text: string;
+  attachmentAssetIds: string[];
+  settings?: ChatTurnSettings | null;
+}
+
+export interface ChatTurnResponse {
+  session: ChatSession;
+  assets: Asset[];
 }

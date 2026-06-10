@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette import status
 
 import library
+import chat_sessions
 from models import (
+    ArchivePatch,
     AssetSummary,
     CanvasDocument,
+    ChatSessionCreate,
+    ChatSessionDocument,
+    ChatSessionPatch,
+    ChatTurnRequest,
+    ChatTurnResponse,
     DisplayPatch,
     GenerateRequest,
     GenerateResponse,
@@ -54,13 +61,15 @@ def create_project(payload: ProjectCreate) -> ProjectMetadata:
 
 
 @app.get("/api/projects/{slug}", response_model=ProjectDetail)
-def get_project(slug: str) -> ProjectDetail:
+def get_project(slug: str, includeArchived: bool = Query(default=False)) -> ProjectDetail:
+    if includeArchived:
+        return ProjectDetail(project=library.get_project(slug), assets=library.list_assets(slug, include_archived=True))
     return library.get_project_detail(slug)
 
 
 @app.get("/api/projects/{slug}/assets", response_model=list[AssetSummary])
-def list_assets(slug: str) -> list[AssetSummary]:
-    return library.list_assets(slug)
+def list_assets(slug: str, includeArchived: bool = Query(default=False)) -> list[AssetSummary]:
+    return library.list_assets(slug, include_archived=includeArchived)
 
 
 @app.get("/api/projects/{slug}/assets/{asset_id}", response_model=AssetSummary)
@@ -71,6 +80,11 @@ def get_asset(slug: str, asset_id: str) -> AssetSummary:
 @app.patch("/api/projects/{slug}/assets/{asset_id}/display", response_model=AssetSummary)
 def patch_display(slug: str, asset_id: str, payload: DisplayPatch) -> AssetSummary:
     return library.patch_display(slug, asset_id, payload)
+
+
+@app.patch("/api/projects/{slug}/assets/{asset_id}/archive", response_model=AssetSummary)
+def patch_archive(slug: str, asset_id: str, payload: ArchivePatch) -> AssetSummary:
+    return library.patch_archive(slug, asset_id, payload)
 
 
 @app.delete("/api/projects/{slug}/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -95,6 +109,40 @@ def get_canvas(slug: str) -> CanvasDocument:
 @app.put("/api/projects/{slug}/canvas", response_model=CanvasDocument)
 def put_canvas(slug: str, canvas: CanvasDocument) -> CanvasDocument:
     return library.write_canvas(slug, canvas)
+
+
+@app.get("/api/projects/{slug}/chat-sessions", response_model=list[ChatSessionDocument])
+def list_chat_sessions(
+    slug: str, includeArchived: bool = Query(default=False)
+) -> list[ChatSessionDocument]:
+    return chat_sessions.list_sessions(slug, include_archived=includeArchived)
+
+
+@app.post("/api/projects/{slug}/chat-sessions", response_model=ChatSessionDocument)
+def create_chat_session(slug: str, payload: ChatSessionCreate) -> ChatSessionDocument:
+    return chat_sessions.create_session(slug, payload)
+
+
+@app.get("/api/projects/{slug}/chat-sessions/{session_id}", response_model=ChatSessionDocument)
+def get_chat_session(slug: str, session_id: str) -> ChatSessionDocument:
+    return chat_sessions.read_session(slug, session_id)
+
+
+@app.patch("/api/projects/{slug}/chat-sessions/{session_id}", response_model=ChatSessionDocument)
+def patch_chat_session(
+    slug: str, session_id: str, payload: ChatSessionPatch
+) -> ChatSessionDocument:
+    return chat_sessions.patch_session(slug, session_id, payload)
+
+
+@app.post("/api/projects/{slug}/chat-sessions/{session_id}/fork", response_model=ChatSessionDocument)
+def fork_chat_session(slug: str, session_id: str, sourceAssetId: str | None = None) -> ChatSessionDocument:
+    return chat_sessions.fork_session(slug, session_id, source_asset_id=sourceAssetId)
+
+
+@app.post("/api/projects/{slug}/chat-sessions/{session_id}/turns", response_model=ChatTurnResponse)
+def send_chat_turn(slug: str, session_id: str, payload: ChatTurnRequest) -> ChatTurnResponse:
+    return chat_sessions.append_turn_with_gemini(slug, session_id, payload)
 
 
 @app.get("/api/projects/{slug}/assets/{asset_id}/thumb")

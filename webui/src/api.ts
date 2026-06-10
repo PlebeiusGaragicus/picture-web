@@ -1,4 +1,4 @@
-import type { Asset, CanvasDocument, GeneratePayload, Project, ProjectDetail } from './types';
+import type { Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail } from './types';
 
 const DEBUG = true;
 
@@ -42,7 +42,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ slug, name }),
     }),
-  getProject: (slug: string) => request<ProjectDetail>(`/api/projects/${slug}`),
+  getProject: (slug: string, includeArchived = false) => request<ProjectDetail>(`/api/projects/${slug}${includeArchived ? '?includeArchived=true' : ''}`),
   getCanvas: (slug: string) => request<CanvasDocument>(`/api/projects/${slug}/canvas`),
   saveCanvas: (slug: string, canvas: CanvasDocument) =>
     request<CanvasDocument>(`/api/projects/${slug}/canvas`, {
@@ -59,9 +59,35 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ title, tags }),
     }),
+  archiveAsset: (slug: string, assetId: string, archived = true) =>
+    request<Asset>(`/api/projects/${slug}/assets/${assetId}/archive`, {
+      method: 'PATCH',
+      body: JSON.stringify({ archived }),
+    }),
   deleteAsset: (slug: string, assetId: string) =>
     request<void>(`/api/projects/${slug}/assets/${assetId}`, {
       method: 'DELETE',
+    }),
+  listChatSessions: (slug: string, includeArchived = false) =>
+    request<ChatSession[]>(`/api/projects/${slug}/chat-sessions${includeArchived ? '?includeArchived=true' : ''}`),
+  createChatSession: (slug: string, payload: CreateChatSessionPayload) =>
+    request<ChatSession>(`/api/projects/${slug}/chat-sessions`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  patchChatSession: (slug: string, sessionId: string, payload: { title?: string | null; archived?: boolean | null }) =>
+    request<ChatSession>(`/api/projects/${slug}/chat-sessions/${sessionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  sendChatTurn: (slug: string, sessionId: string, payload: ChatTurnPayload) =>
+    request<ChatTurnResponse>(`/api/projects/${slug}/chat-sessions/${sessionId}/turns`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  forkChatSession: (slug: string, sessionId: string, sourceAssetId?: string | null) =>
+    request<ChatSession>(`/api/projects/${slug}/chat-sessions/${sessionId}/fork${sourceAssetId ? `?sourceAssetId=${encodeURIComponent(sourceAssetId)}` : ''}`, {
+      method: 'POST',
     }),
   importAsset: (slug: string, file: File) => {
     const data = new FormData();

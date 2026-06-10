@@ -14,9 +14,12 @@ from PIL import Image
 
 from ids import new_seed, new_ulid
 from models import (
+    ArchivePatch,
     AssetMetadata,
     AssetSummary,
     CanvasDocument,
+    ChatSessionDocument,
+    ChatTurn,
     DraftCanvasNode,
     DisplayPatch,
     GenerateRequest,
@@ -125,14 +128,22 @@ def metadata_to_summary(slug: str, metadata: AssetMetadata) -> AssetSummary:
     data = metadata.model_dump(mode="json")
     data["hasPixels"] = asset_png_path(slug, metadata.id).is_file()
     data["thumbnailUrl"] = f"/api/projects/{slug}/assets/{metadata.id}/thumb"
+    try:
+        import chat_sessions
+
+        data["isProtected"] = metadata.id in chat_sessions.protected_asset_ids(slug)
+    except Exception:
+        data["isProtected"] = False
     return AssetSummary.model_validate(data)
 
 
-def list_assets(slug: str) -> list[AssetSummary]:
+def list_assets(slug: str, include_archived: bool = False) -> list[AssetSummary]:
     require_project(slug)
     items: list[AssetSummary] = []
     for path in sorted(assets_dir(slug).glob("*.json")):
         metadata = AssetMetadata.model_validate(read_json(path))
+        if metadata.archivedAt is not None and not include_archived:
+            continue
         items.append(metadata_to_summary(slug, metadata))
     return items
 
@@ -187,6 +198,17 @@ def delete_asset(slug: str, asset_id: str) -> None:
     require_project(slug)
     if not asset_json_path(slug, asset_id).is_file():
         raise HTTPException(status_code=404, detail=f"Asset not found: {asset_id}")
+    import chat_sessions
+
+    blockers = chat_sessions.blocking_session_ids(slug, asset_id)
+    if blockers:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Asset is protected by chat session history. Archive it instead.",
+                "chatSessionIds": blockers,
+            },
+        )
     logger.debug("delete asset slug=%s asset_id=%s", slug, asset_id)
     move_to_trash(asset_json_path(slug, asset_id))
     move_to_trash(asset_png_path(slug, asset_id))
@@ -221,6 +243,13 @@ def patch_display(slug: str, asset_id: str, payload: DisplayPatch) -> AssetSumma
         metadata.title = updates["title"]
     if "tags" in updates and updates["tags"] is not None:
         metadata.tags = updates["tags"]
+    metadata.updatedAt = utc_now()
+    return write_asset_metadata(slug, metadata)
+
+
+def patch_archive(slug: str, asset_id: str, payload: ArchivePatch) -> AssetSummary:
+    metadata = read_asset_metadata(slug, asset_id)
+    metadata.archivedAt = utc_now() if payload.archived else None
     metadata.updatedAt = utc_now()
     return write_asset_metadata(slug, metadata)
 
@@ -530,6 +559,37 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
         existing.assetIds = merged
         existing.activeAssetId = active_asset_id or existing.activeAssetId
         canvas.nodes[node_id] = existing
+    write_canvas(slug, canvas)
+
+
+def attach_chat_assets_to_canvas(
+    slug: str,
+    session: ChatSessionDocument,
+    turn: ChatTurn,
+    assets: list[AssetSummary],
+) -> None:
+    if not assets:
+        return
+    canvas = read_stored_canvas(slug)
+    source_node_id = session.source.canvasNodeId
+    source_node = canvas.nodes.get(source_node_id or "") if source_node_id else None
+    source_x = source_node.x if source_node is not None else 120
+    source_y = source_node.y if source_node is not None else 120
+    turn_index = max(
+        0,
+        len([current for current in session.turns if current.role == "model"]) - 1,
+    )
+    node_id = f"chat_{session.id}_{turn.id}"
+    while node_id in canvas.nodes:
+        node_id = f"{node_id}_{new_ulid()}"
+    canvas.nodes[node_id] = ImageGroupCanvasNode(
+        displayName=f"{session.title} turn {turn_index + 1}",
+        x=source_x + 260,
+        y=source_y + 220 + turn_index * 260,
+        width=None,
+        assetIds=[asset.id for asset in assets],
+        activeAssetId=assets[0].id,
+    )
     write_canvas(slug, canvas)
 
 

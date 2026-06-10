@@ -320,14 +320,25 @@ Implemented in `api/` (FastAPI). Base: `http://127.0.0.1:<port>/api`
 | GET | `/projects/:slug/assets` | List metadata (+ hasPixels flag) |
 | GET | `/projects/:slug/assets/:id` | One metadata + image URL |
 | PATCH | `/projects/:slug/assets/:id/display` | Update display metadata only (`title`, `tags`) |
-| DELETE | `/projects/:slug/assets/:id` | Delete asset pixels/metadata and remove canvas refs |
+| PATCH | `/projects/:slug/assets/:id/archive` | Archive/unarchive an asset without deleting pixels or metadata |
+| DELETE | `/projects/:slug/assets/:id` | Delete unprotected asset pixels/metadata and remove canvas refs |
 | POST | `/projects/:slug/assets/import` | Multipart image → `imported` + file; duplicate imports are rejected by content hash |
 | POST | `/projects/:slug/generate` | Generate one or more new `generated` assets from prompt/settings/parent refs |
 | GET | `/projects/:slug/canvas` | Load `canvas.json` |
 | PUT | `/projects/:slug/canvas` | Save layout |
+| GET | `/projects/:slug/chat-sessions` | List image refinement chat sessions |
+| POST | `/projects/:slug/chat-sessions` | Create a persistent refinement chat session from a source asset |
+| GET | `/projects/:slug/chat-sessions/:id` | Read a chat session and user-visible turns |
+| PATCH | `/projects/:slug/chat-sessions/:id` | Rename or archive a chat session |
+| POST | `/projects/:slug/chat-sessions/:id/turns` | Send a refinement turn and create generated assets from returned images |
+| POST | `/projects/:slug/chat-sessions/:id/fork` | Start a fresh chat branch from the same or selected source asset |
 | GET | `/projects/:slug/assets/:id/thumb` | Canvas image URL; currently returns original PNG |
 
 **Generate:** Accept prompt text, same-project parent refs, settings, optional seed, and optional batch count. Create a `runId`, allocate one ULID per output, choose/pass/store explicit seeds, resolve `assets/{parent}.png` paths, call the Gemini SDK through a rewritten `api/gemini.py`, then write each `assets/{id}.json` + `assets/{id}.png`. Persist the full serializable response metadata for each output under `provider.response`, excluding duplicated inline image bytes. Return created assets in the response body.
+
+**Refinement chat:** Persistent Gemini image chat sessions live under `photo-library/projects/<slug>/chat-sessions/<session_id>/`. `session.json` stores user-visible turns plus provider history with `thought_signature` values preserved; large provider image parts are stored in session `blobs/`. Chat-generated assets are normal generated assets with `generation.chatSessionId` and `generation.chatTurnId`, while ordinary asset provider metadata remains compact.
+
+**Archive:** Chat sessions, chat-generated assets, and assets referenced by chat history are archive-first in the UI. Protected assets cannot be destructively deleted through the API because doing so could break chat resumability.
 
 **Errors:** Return API message + error detail; node shows failed state, no partial PNG.
 
@@ -464,7 +475,7 @@ These choices are now part of the v1 shape:
 4. **FastAPI backend:** Python FastAPI is the only backend; Gemini integration stays in `api/gemini.py`.
 5. **Image serving:** The canvas currently uses original PNGs through the image endpoint. Add cached thumbnails only if performance suffers.
 6. **Project boundary:** Parent refs are same-project only in v1.
-7. **Visibility:** Generated images stay visible by default. Keep visibility simple; no archive or automatic `superseded` tagging.
+7. **Visibility:** Generated images stay visible by default. Archive exists for chat-linked data and user hiding, but it preserves files and metadata.
 8. **Repo boundary:** App code and `photo-library/` live in this repo. Legacy migration remains optional and deferred.
 
 ---

@@ -67,6 +67,21 @@ class GeneratedImage:
     provider_response: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ChatImagePart:
+    data: bytes
+    mime_type: str = "image/png"
+    thought_signature: str | None = None
+
+
+@dataclass(frozen=True)
+class ChatTurnResult:
+    model_content: dict[str, Any]
+    text: str
+    images: list[ChatImagePart]
+    provider_response: dict[str, Any]
+
+
 def _safe_json(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -125,6 +140,115 @@ def serialize_response_metadata(response: Any, output_png: Path) -> dict[str, An
         "imageFile": output_png.name,
         "response": _strip_provider_payloads(raw),
     }
+
+
+def _part_value(part: Any, snake: str, camel: str | None = None) -> Any:
+    if isinstance(part, dict):
+        if snake in part:
+            return part[snake]
+        if camel is not None and camel in part:
+            return part[camel]
+        return None
+    if hasattr(part, snake):
+        return getattr(part, snake)
+    if camel is not None and hasattr(part, camel):
+        return getattr(part, camel)
+    return None
+
+
+def _inline_data_bytes(inline_data: Any) -> tuple[bytes | None, str]:
+    if inline_data is None:
+        return None, "image/png"
+    if isinstance(inline_data, dict):
+        data = inline_data.get("data")
+        mime_type = inline_data.get("mime_type") or inline_data.get("mimeType") or "image/png"
+    else:
+        data = getattr(inline_data, "data", None)
+        mime_type = (
+            getattr(inline_data, "mime_type", None)
+            or getattr(inline_data, "mimeType", None)
+            or "image/png"
+        )
+    if isinstance(data, str):
+        import base64
+
+        return base64.b64decode(data), mime_type
+    if isinstance(data, (bytes, bytearray)):
+        return bytes(data), mime_type
+    return None, mime_type
+
+
+def chat_turn_result_from_response(response: Any) -> ChatTurnResult:
+    raw = _safe_json(response)
+    if isinstance(raw, dict):
+        candidates = raw.get("candidates") or []
+        content = (
+            candidates[0].get("content", {})
+            if candidates and isinstance(candidates[0], dict)
+            else {}
+        )
+        parts = content.get("parts") or raw.get("parts") or []
+        model_content = {"role": content.get("role", "model"), "parts": parts}
+    else:
+        parts = _safe_json(getattr(response, "parts", []))
+        model_content = {"role": "model", "parts": parts}
+
+    text_parts: list[str] = []
+    images: list[ChatImagePart] = []
+    for part in parts:
+        text = _part_value(part, "text")
+        if isinstance(text, str):
+            text_parts.append(text)
+        inline_data = _part_value(part, "inline_data", "inlineData")
+        data, mime_type = _inline_data_bytes(inline_data)
+        if data is not None and mime_type.startswith("image/"):
+            thought_signature = _part_value(part, "thought_signature", "thoughtSignature")
+            images.append(
+                ChatImagePart(
+                    data=data,
+                    mime_type=mime_type,
+                    thought_signature=thought_signature if isinstance(thought_signature, str) else None,
+                )
+            )
+    return ChatTurnResult(
+        model_content=model_content,
+        text="\n".join(text_parts).strip(),
+        images=images,
+        provider_response=_strip_provider_payloads(raw),
+    )
+
+
+def send_chat_turn(
+    *,
+    history: list[dict[str, Any]],
+    message_parts: list[Any],
+    model: str,
+    aspect_ratio: str,
+    image_size: str,
+    thinking_level: str | None = None,
+    include_thoughts: bool = False,
+) -> ChatTurnResult:
+    """Send one Gemini chat turn using persisted history plus new user parts."""
+    client = load_client()
+    contents = [*history, {"role": "user", "parts": message_parts}]
+    config_kwargs: dict[str, Any] = {
+        "response_modalities": ["TEXT", "IMAGE"],
+        "image_config": types.ImageConfig(
+            aspect_ratio=aspect_ratio,
+            image_size=image_size,
+        ),
+    }
+    if thinking_level is not None or include_thoughts:
+        config_kwargs["thinking_config"] = types.ThinkingConfig(
+            thinking_level=thinking_level,
+            include_thoughts=include_thoughts,
+        )
+    response = client.models.generate_content(
+        model=model,
+        contents=contents,
+        config=types.GenerateContentConfig(**config_kwargs),
+    )
+    return chat_turn_result_from_response(response)
 
 
 def generate_image(

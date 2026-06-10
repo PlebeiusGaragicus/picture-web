@@ -43,6 +43,8 @@ class GenerationReceipt(BaseModel):
     aspectRatio: str = Field(min_length=1)
     imageSize: str = Field(min_length=1)
     seed: int | None = Field(default=None, ge=0)
+    chatSessionId: str | None = None
+    chatTurnId: str | None = None
 
 
 class ProviderCapture(BaseModel):
@@ -60,6 +62,7 @@ class AssetMetadata(BaseModel):
     contentHash: str | None = None
     createdAt: str
     updatedAt: str
+    archivedAt: str | None = None
     prompt: Prompt | None = None
     generation: GenerationReceipt | None = None
     provider: ProviderCapture | None = None
@@ -110,6 +113,7 @@ class AssetMetadata(BaseModel):
 class AssetSummary(AssetMetadata):
     hasPixels: bool = True
     thumbnailUrl: str | None = None
+    isProtected: bool = False
 
 
 class ProjectCreate(BaseModel):
@@ -157,6 +161,83 @@ class GenerationParams(BaseModel):
     imageSize: str | None = None
     seed: int | None = Field(default=None, ge=0)
     batchCount: int = Field(default=1, ge=1, le=8)
+
+
+class ChatTurnSettings(BaseModel):
+    model: str
+    aspectRatio: str
+    imageSize: str
+    thinkingLevel: str | None = None
+    includeThoughts: bool = False
+
+
+class ChatAttachment(BaseModel):
+    kind: Literal["asset"] = "asset"
+    assetId: str
+    purpose: Literal["source", "reference"] = "reference"
+
+
+class ChatTurn(BaseModel):
+    id: str
+    role: Literal["user", "model"]
+    createdAt: str
+    text: str = ""
+    settings: ChatTurnSettings
+    attachments: list[ChatAttachment] = Field(default_factory=list)
+    generatedAssetIds: list[str] = Field(default_factory=list)
+
+
+class ChatSource(BaseModel):
+    assetId: str
+    canvasNodeId: str | None = None
+
+
+class ChatProviderState(BaseModel):
+    name: str = "google-genai"
+    model: str
+    history: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ChatSessionDocument(BaseModel):
+    version: int = 1
+    id: str
+    projectSlug: str
+    status: Literal["active", "archived"] = "active"
+    title: str
+    source: ChatSource
+    createdAt: str
+    updatedAt: str
+    archivedAt: str | None = None
+    defaults: ChatTurnSettings
+    protectedAssetIds: list[str] = Field(default_factory=list)
+    turns: list[ChatTurn] = Field(default_factory=list)
+    provider: ChatProviderState
+
+
+class ChatSessionCreate(BaseModel):
+    sourceAssetId: str
+    canvasNodeId: str | None = None
+    title: str | None = Field(default=None, min_length=1)
+
+
+class ChatSessionPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1)
+    archived: bool | None = None
+
+
+class ChatTurnRequest(BaseModel):
+    text: str = Field(min_length=1)
+    attachmentAssetIds: list[str] = Field(default_factory=list)
+    settings: ChatTurnSettings | None = None
+
+
+class ChatTurnResponse(BaseModel):
+    session: ChatSessionDocument
+    assets: list[AssetSummary]
+
+
+class ArchivePatch(BaseModel):
+    archived: bool = True
 
 
 class DraftCanvasNode(CanvasNodeLayout):

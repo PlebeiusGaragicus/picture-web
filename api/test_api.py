@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from io import BytesIO
+import base64
 
 import library
 import gemini
+import chat_sessions
 from fastapi.testclient import TestClient
 from main import app
 from PIL import Image
@@ -15,6 +17,7 @@ def setup_tmp_library(tmp_path, monkeypatch):
     monkeypatch.setattr(library, "LIBRARY_ROOT", root)
     monkeypatch.setattr(library, "PROJECTS_ROOT", root / "projects")
     monkeypatch.setattr(library, "SYSTEM_TRASH", tmp_path / "system-trash")
+    monkeypatch.setattr(gemini, "LIBRARY_ROOT", root)
     return TestClient(app)
 
 
@@ -219,6 +222,153 @@ def test_import_duplicate_file_returns_conflict(tmp_path, monkeypatch):
     assert second.status_code == 409
     assert "Already imported" in second.text
     assert len(client.get("/api/projects/farm-comic/assets").json()) == 1
+
+
+def test_chat_session_create_list_archive_and_protect_source(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    asset_id = "01HSOURCE"
+    make_png(library.asset_png_path("farm-comic", asset_id), color="green")
+    library.write_json(
+        library.asset_json_path("farm-comic", asset_id),
+        {
+            "id": asset_id,
+            "kind": "imported",
+            "title": "Source",
+            "tags": [],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+
+    response = client.post(
+        "/api/projects/farm-comic/chat-sessions",
+        json={"sourceAssetId": asset_id, "canvasNodeId": "node_source", "title": "Jacket refinements"},
+    )
+    assert response.status_code == 200
+    session = response.json()
+    assert session["source"]["assetId"] == asset_id
+    assert session["protectedAssetIds"] == [asset_id]
+    assert session["provider"]["history"] == []
+    assert chat_sessions.session_json_path("farm-comic", session["id"]).is_file()
+
+    assets = client.get("/api/projects/farm-comic/assets").json()
+    assert assets[0]["isProtected"] is True
+    delete_response = client.delete(f"/api/projects/farm-comic/assets/{asset_id}")
+    assert delete_response.status_code == 409
+    assert session["id"] in delete_response.text
+
+    archive_response = client.patch(
+        f"/api/projects/farm-comic/chat-sessions/{session['id']}",
+        json={"archived": True},
+    )
+    assert archive_response.status_code == 200
+    assert archive_response.json()["archivedAt"] is not None
+    assert client.get("/api/projects/farm-comic/chat-sessions").json() == []
+    assert len(client.get("/api/projects/farm-comic/chat-sessions?includeArchived=true").json()) == 1
+
+
+def test_asset_archive_hides_from_default_lists_and_canvas(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    asset_id = "01HARCHIVE"
+    make_png(library.asset_png_path("farm-comic", asset_id), color="red")
+    library.write_json(
+        library.asset_json_path("farm-comic", asset_id),
+        {
+            "id": asset_id,
+            "kind": "imported",
+            "title": "Archive me",
+            "tags": [],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+
+    response = client.patch(
+        f"/api/projects/farm-comic/assets/{asset_id}/archive",
+        json={"archived": True},
+    )
+    assert response.status_code == 200
+    assert response.json()["archivedAt"] is not None
+    assert client.get("/api/projects/farm-comic/assets").json() == []
+    assert len(client.get("/api/projects/farm-comic/assets?includeArchived=true").json()) == 1
+    assert client.get("/api/projects/farm-comic/canvas").json()["nodes"] == {}
+
+
+def test_chat_turn_persists_history_blobs_and_generated_asset(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    source_id = "01HSOURCE"
+    make_png(library.asset_png_path("farm-comic", source_id), color="green")
+    library.write_json(
+        library.asset_json_path("farm-comic", source_id),
+        {
+            "id": source_id,
+            "kind": "imported",
+            "title": "Source",
+            "tags": [],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    canvas = client.get("/api/projects/farm-comic/canvas").json()
+    source_node_id = next(iter(canvas["nodes"]))
+    session = client.post(
+        "/api/projects/farm-comic/chat-sessions",
+        json={"sourceAssetId": source_id, "canvasNodeId": source_node_id},
+    ).json()
+
+    def fake_chat(**kwargs):
+        assert kwargs["history"] == []
+        assert kwargs["message_parts"][0]["text"] == "make it cinematic"
+        assert "data" in kwargs["message_parts"][1]["inline_data"]
+        image_data = png_bytes("blue")
+        encoded = base64.b64encode(image_data).decode("ascii")
+        response = {
+            "candidates": [
+                {
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            {"text": "Done", "thought_signature": "sig-text"},
+                            {
+                                "inline_data": {
+                                    "mime_type": "image/png",
+                                    "data": encoded,
+                                },
+                                "thought_signature": "sig-image",
+                            },
+                        ],
+                    }
+                }
+            ]
+        }
+        return gemini.chat_turn_result_from_response(response)
+
+    monkeypatch.setattr(gemini, "send_chat_turn", fake_chat)
+    response = client.post(
+        f"/api/projects/farm-comic/chat-sessions/{session['id']}/turns",
+        json={"text": "make it cinematic"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["assets"]) == 1
+    asset = payload["assets"][0]
+    assert asset["generation"]["chatSessionId"] == session["id"]
+    assert asset["generation"]["chatTurnId"] == payload["session"]["turns"][1]["id"]
+    stripped_data = asset["provider"]["response"]["response"]["candidates"][0]["content"]["parts"][1]["inline_data"]["data"]
+    assert stripped_data.startswith("<inline-image-data:")
+    assert stripped_data.endswith(" chars>")
+    stored = chat_sessions.read_session("farm-comic", session["id"])
+    assert stored.provider.history[1]["parts"][0]["thought_signature"] == "sig-text"
+    image_part = stored.provider.history[1]["parts"][1]
+    assert image_part["thought_signature"] == "sig-image"
+    assert image_part["inline_data"]["data_ref"].startswith("blobs/")
+    assert chat_sessions.read_blob("farm-comic", session["id"], image_part["inline_data"]["data_ref"]).startswith(b"\x89PNG")
+    canvas_after = client.get("/api/projects/farm-comic/canvas").json()
+    chat_nodes = [node for node in canvas_after["nodes"].values() if node["type"] == "imageGroup" and asset["id"] in node["assetIds"]]
+    assert len(chat_nodes) == 1
 
 
 def test_generate_rejects_unsupported_model_image_size(tmp_path, monkeypatch):

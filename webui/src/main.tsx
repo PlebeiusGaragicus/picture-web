@@ -16,7 +16,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import './style.css';
 import { api } from './api';
-import type { Asset, CanvasDocument, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project } from './types';
+import type { Asset, CanvasDocument, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project } from './types';
 
 interface DraftNodeData extends DraftCanvasNode {
   kind: 'draft';
@@ -35,6 +35,8 @@ interface ImageGroupNodeData extends ImageGroupCanvasNode {
   onView: (nodeId: string) => void;
   onDetails: (nodeId: string) => void;
   onDisplayNameChange: (nodeId: string, displayName: string) => void;
+  onRefineChat: (nodeId: string, assetId: string) => void;
+  hasRefinements?: boolean;
   isGenerating?: boolean;
 }
 
@@ -141,8 +143,11 @@ function toFlowNodes(
   onView: (nodeId: string) => void = () => undefined,
   onDetails: (nodeId: string) => void = () => undefined,
   onDisplayNameChange: (nodeId: string, displayName: string) => void = () => undefined,
+  onRefineChat: (nodeId: string, assetId: string) => void = () => undefined,
+  chatSessions: ChatSession[] = [],
 ): Node<PhotoNodeData>[] {
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+  const sourceAssetIdsWithSessions = new Set(chatSessions.map((session) => session.source.assetId));
   const displayNameByAssetId = new Map<string, string>();
   Object.values(canvas.nodes).forEach((canvasNode) => {
     if (canvasNode.type === 'imageGroup') {
@@ -164,7 +169,7 @@ function toFlowNodes(
       id,
       position: { x: canvasNode.x, y: canvasNode.y },
       type: 'imageGroup',
-      data: { ...canvasNode, kind: 'imageGroup', nodeId: id, assets: groupAssets, activeAsset, onVariant, onView, onDetails, onDisplayNameChange, isGenerating: generatingNodeIds.has(id) },
+      data: { ...canvasNode, kind: 'imageGroup', nodeId: id, assets: groupAssets, activeAsset, onVariant, onView, onDetails, onDisplayNameChange, onRefineChat, hasRefinements: Boolean(activeAsset && sourceAssetIdsWithSessions.has(activeAsset.id)), isGenerating: generatingNodeIds.has(id) },
     };
   });
 }
@@ -173,6 +178,8 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [openProjectSlug, setOpenProjectSlug] = useState('');
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
   const [canvas, setCanvas] = useState<CanvasDocument>(emptyCanvas);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
@@ -185,15 +192,21 @@ function App() {
   const [zoomPercent, setZoomPercent] = useState(zoomToPercent(1));
   const [viewerNodeId, setViewerNodeId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ nodeId: string; assetId?: string } | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const reactFlowRef = useRef<ReactFlowInstance<PhotoNodeData> | null>(null);
   const generatingNodeIdsRef = useRef<Set<string>>(new Set());
+  const chatSessionsRef = useRef<ChatSession[]>([]);
 
   useEffect(() => {
     generatingNodeIdsRef.current = generatingNodeIds;
   }, [generatingNodeIds]);
+
+  useEffect(() => {
+    chatSessionsRef.current = chatSessions;
+  }, [chatSessions]);
 
   const updateImageGroupDisplayName = useCallback((nodeId: string, displayName: string) => {
     setNodes((current) => {
@@ -258,6 +271,7 @@ function App() {
   }, []);
 
   const openDetails = useCallback((nodeId: string) => {
+    setActiveChatSessionId(null);
     setPopoverNodeId(nodeId);
   }, []);
 
@@ -270,13 +284,30 @@ function App() {
     setProjects(await api.listProjects());
   }, []);
 
+  const openChatForAsset = useCallback(async (nodeId: string, assetId: string) => {
+    if (!openProjectSlug) return;
+    setError(null);
+    try {
+      const existing = chatSessionsRef.current.find((session) => session.source.assetId === assetId && !session.archivedAt);
+      const session = existing ?? await api.createChatSession(openProjectSlug, { sourceAssetId: assetId, canvasNodeId: nodeId });
+      setActiveChatSessionId(session.id);
+      setPopoverNodeId(null);
+      if (!existing) {
+        setChatSessions((current) => [...current, session]);
+      }
+    } catch (err) {
+      setError(String(err));
+    }
+  }, [openProjectSlug]);
+
   const loadProject = useCallback(async (projectSlug: string) => {
     if (!projectSlug) return;
-    const [detail, layout] = await Promise.all([api.getProject(projectSlug), api.getCanvas(projectSlug)]);
+    const [detail, layout, sessions] = await Promise.all([api.getProject(projectSlug, showArchived), api.getCanvas(projectSlug), api.listChatSessions(projectSlug, showArchived)]);
     setAssets(detail.assets);
+    setChatSessions(sessions);
     setCanvas(layout);
-    setNodes(toFlowNodes(layout, detail.assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, updateImageGroupDisplayName));
-  }, [changeVariant, openDetails, openViewer, updateImageGroupDisplayName]);
+    setNodes(toFlowNodes(layout, detail.assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, updateImageGroupDisplayName, openChatForAsset, sessions));
+  }, [changeVariant, openChatForAsset, openDetails, openViewer, showArchived, updateImageGroupDisplayName]);
 
   useEffect(() => {
     loadProjects().catch((err) => setError(String(err)));
@@ -321,7 +352,7 @@ function App() {
         source: sourceNode.id,
         target: childNode.id,
         animated: childNode.data.kind === 'draft',
-        className: isVisibleLineage ? 'lineage-edge-visible' : 'lineage-edge-hidden',
+        className: `${isVisibleLineage ? 'lineage-edge-visible' : 'lineage-edge-hidden'}${childAssetId && childNode.data.kind === 'imageGroup' && childNode.data.assets.find((asset) => asset.id === childAssetId)?.generation?.chatSessionId ? ' lineage-edge-chat-refinement' : ''}`,
         style: isVisibleLineage ? undefined : { strokeDasharray: '5 5', opacity: 0.35 },
       };
     };
@@ -339,6 +370,10 @@ function App() {
   }, [nodes]);
 
   const selectedNode = useMemo(() => nodes.find((node) => node.id === popoverNodeId) ?? null, [nodes, popoverNodeId]);
+  const activeChatSession = useMemo(
+    () => chatSessions.find((session) => session.id === activeChatSessionId) ?? null,
+    [activeChatSessionId, chatSessions],
+  );
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     setNodes((current) => applyNodeChanges(changes, current));
@@ -403,12 +438,39 @@ function App() {
   const closeProject = () => {
     setOpenProjectSlug('');
     setAssets([]);
+    setChatSessions([]);
+    setActiveChatSessionId(null);
     setNodes([]);
     setSelectedIds([]);
     setSelectedNodeIds([]);
     setCanvas(emptyCanvas);
     setContextMenu(null);
     setPopoverNodeId(null);
+  };
+
+  const sendChatMessage = async (session: ChatSession, text: string, settings: ChatTurnSettings, attachmentAssetIds: string[]) => {
+    if (!openProjectSlug) return;
+    setError(null);
+    try {
+      const response = await api.sendChatTurn(openProjectSlug, session.id, { text, settings, attachmentAssetIds });
+      setChatSessions((current) => current.map((item) => (item.id === response.session.id ? response.session : item)));
+      await loadProject(openProjectSlug);
+      setActiveChatSessionId(response.session.id);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const archiveChatSession = async (session: ChatSession) => {
+    if (!openProjectSlug) return;
+    try {
+      const archived = await api.patchChatSession(openProjectSlug, session.id, { archived: true });
+      setChatSessions((current) => current.map((item) => (item.id === archived.id ? archived : item)));
+      setActiveChatSessionId(null);
+      await loadProject(openProjectSlug);
+    } catch (err) {
+      setError(String(err));
+    }
   };
 
   const importFiles = async (files: FileList | File[]) => {
@@ -490,7 +552,7 @@ function App() {
     const saved = await api.saveCanvas(openProjectSlug, next);
     setCanvas(saved);
     if (options.refresh ?? true) {
-      setNodes(toFlowNodes(saved, assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, updateImageGroupDisplayName));
+      setNodes(toFlowNodes(saved, assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, updateImageGroupDisplayName, openChatForAsset, chatSessionsRef.current));
     }
   };
 
@@ -708,6 +770,14 @@ function App() {
           <button className="project-back-button" onClick={closeProject} title="Back to projects">
             {currentProject?.name ?? openProjectSlug}
           </button>
+          <label className="toolbar-toggle">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(event) => setShowArchived(event.target.checked)}
+            />
+            Show archived
+          </label>
           {error && <span className="error">{error}</span>}
         </div>
         <ReactFlow
@@ -801,6 +871,18 @@ function App() {
           onVariant={changeVariant}
           onCreateSibling={createSiblingDraft}
           onDelete={deleteNodeById}
+          onRefineChat={openChatForAsset}
+        />
+      )}
+      {activeChatSession && (
+        <ChatRefinementPanel
+          session={activeChatSession}
+          assets={assets}
+          projectSlug={openProjectSlug}
+          onClose={() => setActiveChatSessionId(null)}
+          onSend={sendChatMessage}
+          onArchive={archiveChatSession}
+          onViewAsset={openAssetInViewer}
         />
       )}
       {viewerNodeId && (
@@ -900,6 +982,7 @@ function NodeSidebar({
   onVariant,
   onCreateSibling,
   onDelete,
+  onRefineChat,
 }: {
   node: Node<PhotoNodeData>;
   assets: Asset[];
@@ -910,6 +993,7 @@ function NodeSidebar({
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
   onDelete: (id: string, assetId?: string) => void;
+  onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
   if (node.data.kind === 'draft') {
     const draftNode: Node<DraftNodeData> = { ...node, data: node.data };
@@ -943,6 +1027,7 @@ function NodeSidebar({
       onVariant={onVariant}
       onCreateSibling={onCreateSibling}
       onGenerateVariants={onGenerateVariants}
+      onRefineChat={onRefineChat}
     />
   );
 }
@@ -1091,6 +1176,7 @@ function ImageSidebar({
   onVariant,
   onCreateSibling,
   onGenerateVariants,
+  onRefineChat,
 }: {
   node: Node<ImageGroupNodeData>;
   asset: Asset;
@@ -1100,6 +1186,7 @@ function ImageSidebar({
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
+  onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
   const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
   const [variantParams, setVariantParams] = useState(defaultDraftParams);
@@ -1194,6 +1281,7 @@ function ImageSidebar({
             Prompt
             <textarea className="prompt-textarea locked-field prompt-preview" value={prompt} readOnly />
           </label>
+          <button className="generate-button" onClick={() => onRefineChat(node.id, asset.id)}>Refine in chat</button>
           <button className="secondary" onClick={() => onCreateSibling(node.data, asset)}>Create sibling</button>
         </section>
       )}
@@ -1268,6 +1356,162 @@ function ImageSidebar({
           )}
         </section>
       )}
+    </aside>
+  );
+}
+
+function ChatRefinementPanel({
+  session,
+  assets,
+  projectSlug,
+  onClose,
+  onSend,
+  onArchive,
+  onViewAsset,
+}: {
+  session: ChatSession;
+  assets: Asset[];
+  projectSlug: string;
+  onClose: () => void;
+  onSend: (session: ChatSession, text: string, settings: ChatTurnSettings, attachmentAssetIds: string[]) => void;
+  onArchive: (session: ChatSession) => void;
+  onViewAsset: (assetId: string) => void;
+}) {
+  const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
+  const [text, setText] = useState('');
+  const [settings, setSettings] = useState<ChatTurnSettings>(session.defaults);
+  const [attachmentAssetIds, setAttachmentAssetIds] = useState<string[]>([]);
+  const [isReferencePickerOpen, setIsReferencePickerOpen] = useState(false);
+  const capabilities = capabilitiesForModel(settings.model);
+  const availableReferences = assets.filter((asset) => asset.id !== session.source.assetId && !attachmentAssetIds.includes(asset.id) && !asset.archivedAt);
+  useEffect(() => {
+    setSettings(session.defaults);
+    setAttachmentAssetIds([]);
+    setText('');
+  }, [session.id]);
+  const send = () => {
+    if (!text.trim()) return;
+    onSend(session, text.trim(), settings, attachmentAssetIds);
+    setText('');
+    setAttachmentAssetIds([]);
+  };
+  return (
+    <aside className="details-sidebar chat-refinement-panel">
+      <div className="popover-header">
+        <div>
+          <h2>{session.title}</h2>
+          <p className="muted">Image refinement chat</p>
+        </div>
+        <button className="secondary" onClick={onClose}>Close</button>
+      </div>
+      <section className="sidebar-section">
+        <h3>Source</h3>
+        {assetById.get(session.source.assetId) && (
+          <button className="asset-picker-row" onClick={() => onViewAsset(session.source.assetId)}>
+            <img src={assetById.get(session.source.assetId)?.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${session.source.assetId}/thumb`} alt="" />
+            <span>{assetLabel(assetById.get(session.source.assetId))}</span>
+          </button>
+        )}
+      </section>
+      <section className="sidebar-section chat-message-list">
+        <h3>History</h3>
+        {session.turns.length === 0 && <p className="muted">No turns yet. Send an instruction to create the first refinement.</p>}
+        {session.turns.map((turn) => (
+          <div key={turn.id} className={`chat-turn ${turn.role}`}>
+            <strong>{turn.role === 'user' ? 'You' : 'Gemini'}</strong>
+            {turn.text && <p>{turn.text}</p>}
+            {turn.attachments.length > 0 && (
+              <div className="chat-thumb-row">
+                {turn.attachments.map((attachment) => {
+                  const asset = assetById.get(attachment.assetId);
+                  return asset ? (
+                    <button key={attachment.assetId} className="chat-thumb" onClick={() => onViewAsset(asset.id)} title={assetLabel(asset)}>
+                      <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb`} alt="" />
+                    </button>
+                  ) : null;
+                })}
+              </div>
+            )}
+            {turn.generatedAssetIds.length > 0 && (
+              <div className="chat-thumb-row">
+                {turn.generatedAssetIds.map((assetId) => {
+                  const asset = assetById.get(assetId);
+                  return asset ? (
+                    <button key={assetId} className="chat-thumb generated" onClick={() => onViewAsset(assetId)} title={assetLabel(asset)}>
+                      <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${assetId}/thumb`} alt="" />
+                    </button>
+                  ) : null;
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </section>
+      <section className="sidebar-section generation-section">
+        <h3>Turn settings</h3>
+        <select value={settings.model} onChange={(event) => setSettings((current) => ({ ...normalizedParamsForModel({ ...defaultDraftParams, ...current, batchCount: 1, seed: null }, event.target.value), thinkingLevel: current.thinkingLevel, includeThoughts: current.includeThoughts } as ChatTurnSettings))}>
+          {Object.keys(modelCapabilities).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+        <div className="row">
+          <select value={settings.aspectRatio} onChange={(event) => setSettings((current) => ({ ...current, aspectRatio: event.target.value }))}>
+            {capabilities.aspectRatios.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+          <select value={settings.imageSize} onChange={(event) => setSettings((current) => ({ ...current, imageSize: event.target.value }))}>
+            {capabilities.imageSizes.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </div>
+        <label className="field-label">
+          Thinking
+          <select value={settings.thinkingLevel ?? ''} onChange={(event) => setSettings((current) => ({ ...current, thinkingLevel: event.target.value || null }))}>
+            <option value="">Default</option>
+            <option value="minimal">Minimal</option>
+            <option value="high">High</option>
+          </select>
+        </label>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={settings.includeThoughts} onChange={(event) => setSettings((current) => ({ ...current, includeThoughts: event.target.checked }))} />
+          Include thoughts for debugging
+        </label>
+      </section>
+      <section className="sidebar-section">
+        <h3>References for next turn</h3>
+        {attachmentAssetIds.length === 0 && <p className="muted">Only the source image will be attached.</p>}
+        <div className="parent-list">
+          {attachmentAssetIds.map((assetId) => {
+            const asset = assetById.get(assetId);
+            return asset ? (
+              <div className="parent-item" key={assetId}>
+                <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${assetId}/thumb`} alt="" />
+                <span>{assetLabel(asset)}</span>
+                <button className="parent-remove" onClick={() => setAttachmentAssetIds((current) => current.filter((id) => id !== assetId))}>×</button>
+              </div>
+            ) : null;
+          })}
+        </div>
+        <button className="add-parent-button" onClick={() => setIsReferencePickerOpen((current) => !current)}>+</button>
+        {isReferencePickerOpen && (
+          <div className="asset-picker-popover">
+            {availableReferences.map((asset) => (
+              <button
+                className="asset-picker-row"
+                key={asset.id}
+                onClick={() => {
+                  setAttachmentAssetIds((current) => [...current, asset.id]);
+                  setIsReferencePickerOpen(false);
+                }}
+              >
+                {asset.thumbnailUrl ? <img src={asset.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
+                <span>{assetLabel(asset)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="sidebar-section">
+        <textarea className="prompt-textarea" value={text} onChange={(event) => setText(event.target.value)} placeholder="Describe the refinement..." />
+        <button className="generate-button" onClick={send} disabled={!text.trim()}>Send refinement</button>
+        <button className="secondary" onClick={() => onArchive(session)}>Archive chat</button>
+      </section>
     </aside>
   );
 }
@@ -1390,6 +1634,30 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
         >
           i
         </button>
+        <button
+          className="node-action-button chat-button nodrag nopan"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            data.onRefineChat(data.nodeId, asset.id);
+          }}
+          title="Refine in chat"
+        >
+          C
+        </button>
+        {data.hasRefinements && (
+          <button
+            className="node-action-button refinements-button nodrag nopan"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              data.onRefineChat(data.nodeId, asset.id);
+            }}
+            title="Open refinements"
+          >
+            R
+          </button>
+        )}
         {data.isGenerating && (
           <div className="node-generating-overlay">
             <span className="spinner" aria-hidden="true" />
