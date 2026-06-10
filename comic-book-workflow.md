@@ -152,7 +152,11 @@ Each skill call writes:
 books/<book-id>/characters/artifacts/<character-slug>.md
 ```
 
-Artifacts contain visual description, personality/performance notes, relationships, visible variants, continuity notes, source line references, and supporting quotes.
+Artifacts contain visual description, personality/performance notes, relationships, durable visual variants, continuity notes, source line references, and supporting quotes.
+
+Character variants are only for major lasting visual changes that need separate reference sheets: age jumps, species or body transformations, lost limbs, prosthetics or cyborg implants, ghost or magical forms, disguises, armor, uniforms, major outfit states, lasting injuries, or other durable changes to silhouette, anatomy, scale, materials, or markings.
+
+Do not create character variants for temporary performance states such as blushing, crying, smiling, anger, fear, poses, gestures, eye direction, posture, nuzzling, levitating an object, dirt, sweat, tears, lighting, mood, or scene-specific emotion. Those belong in `Personality And Performance Notes` and expression choices.
 
 ## Step 5: Create Character Sheet Prompts
 
@@ -181,6 +185,8 @@ books/<book-id>/characters/images/
 ```
 
 The prompts do not paste `visual-style.md`; that user-filled file can be appended later by image-generation tooling. Rendering comes from the approved reference image when images are generated.
+
+The character sheet skill should ignore expression-only or momentary variants even if an older artifact lists them.
 
 ## Step 6: Create Scene Manifest
 

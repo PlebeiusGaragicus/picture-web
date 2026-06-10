@@ -97,6 +97,31 @@ Use this structure:
 - Do not fabricate line numbers.
 - Do not invent visual details that are not supported by the book. If a needed design detail is unspecified, record it under `Continuity Notes` as an open design choice.
 
+## Visual Variant Rules
+
+Create variants only for durable, major visual state changes that require a separate reference sheet.
+
+Good reasons to create a variant:
+
+- A different age band or large time jump.
+- A major species or body transformation.
+- Loss of a limb, prosthetic, cyborg implant, visible scar, or lasting injury.
+- Ghost, undead, magical, simulated, or other visibly altered form.
+- Disguise, uniform, armor, or major costume state that changes the silhouette or identity.
+- A major outfit, occupation, or era change that needs its own reference.
+- A form that differs in body shape, anatomy, scale, material, or permanent markings.
+
+Do **not** create variants for temporary performance states:
+
+- Blushing, crying, smiling, frowning, anger, fear, surprise, embarrassment, affection, or other expressions.
+- Poses, gestures, eye direction, posture changes, nuzzling, levitating an object, or momentary action.
+- Dirt, sweat, tears, minor lighting, mood, or scene-specific emotional state.
+- Narrative-only differences such as conscious vs simulated unless the body visibly changes.
+
+Temporary performance states belong in `Personality And Performance Notes`, not `Visual Variants`.
+
+If there are no durable major visual changes, include only one base variant.
+
 ## Variant Slug Rules
 
 Use lowercase asset ids with hyphens:
@@ -105,7 +130,7 @@ Use lowercase asset ids with hyphens:
 - `molly-millions-mission-gear`
 - `henry-dorsett-case-base`
 
-Create variants only when the character has a meaningful visual state change, such as age, disguise, injury, outfit, species, transformation, or major time-period change.
+Variant slugs should describe durable visual forms, not emotions or momentary actions.
 
 ## Forbidden In Assistant Reply
 

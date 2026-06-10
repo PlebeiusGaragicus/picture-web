@@ -47,6 +47,16 @@ Create **multiple `##` sections** only when variants differ in **visible** desig
 
 Do **not** create sheets for narrative-only differences (conscious vs simulated, mood, backstory).
 
+Also do **not** create separate sheets for temporary performance states, even if they appear under **Visual Variants** in the artifact:
+
+- Blushing, crying, smiling, frowning, anger, fear, surprise, embarrassment, affection, or other expressions.
+- Poses, gestures, eye direction, posture changes, nuzzling, levitating an object, or momentary action.
+- Dirt, sweat, tears, minor lighting, mood, or scene-specific emotional state.
+
+Represent those states through the four expression choices or through normal prompt wording in the base sheet.
+
+If a listed variant is only an expression, emotion, pose, or momentary behavior, ignore it and create no section for it.
+
 ## File Format
 
 Plain markdown only. No YAML frontmatter, JSON, tables, or code fences.
