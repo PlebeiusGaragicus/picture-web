@@ -71,12 +71,33 @@ button {
 
 .project-card {
   display: grid;
-  gap: 4px;
-  justify-items: start;
-  padding: 14px;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: stretch;
+  padding: 8px;
   color: #e5e7eb;
   background: #1e293b;
   border: 1px solid #475569;
+  border-radius: 10px;
+}
+
+.project-open-button {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 6px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  text-align: left;
+}
+
+.project-open-button small {
+  color: #94a3b8;
+}
+
+.project-delete-button {
+  align-self: center;
 }
 
 .sidebar {
@@ -123,6 +144,137 @@ button {
   border: 1px solid #334155;
   border-radius: 14px;
   backdrop-filter: blur(8px);
+}
+
+.adaptation-panel {
+  position: absolute;
+  z-index: 12;
+  top: 76px;
+  left: 12px;
+  width: 390px;
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  padding: 14px;
+  background: rgb(15 23 42 / 0.94);
+  border: 1px solid #334155;
+  border-radius: 16px;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.32);
+  backdrop-filter: blur(8px);
+}
+
+.adaptation-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.adaptation-checklist span,
+.adaptation-status {
+  padding: 4px 8px;
+  color: #cbd5e1;
+  background: #1f2937;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.adaptation-checklist .ok,
+.adaptation-status.generated {
+  color: #bbf7d0;
+  background: #14532d;
+  border-color: #166534;
+}
+
+.file-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.book-upload-section {
+  padding: 12px;
+  background: rgb(30 64 175 / 0.18);
+  border: 1px solid #2563eb;
+  border-radius: 14px;
+}
+
+.book-upload-button {
+  min-height: 48px;
+  padding: 12px 16px;
+  color: #eff6ff;
+  background: #2563eb;
+  border: 1px solid #60a5fa;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 900;
+  box-shadow: 0 12px 30px rgb(37 99 235 / 0.28);
+}
+
+.book-upload-button:hover {
+  background: #1d4ed8;
+}
+
+.adaptation-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.adaptation-section-heading h3 {
+  margin: 0;
+}
+
+.adaptation-section-heading span,
+.adaptation-prompt-row small {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.adaptation-prompt-list {
+  display: grid;
+  gap: 8px;
+}
+
+.adaptation-prompt-row {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px;
+  background: #111827;
+  border: 1px solid #334155;
+  border-radius: 12px;
+}
+
+.adaptation-prompt-row strong,
+.adaptation-prompt-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adaptation-thumb {
+  overflow: hidden;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  background: #020617;
+  border: 1px solid #334155;
+  border-radius: 8px;
+}
+
+.adaptation-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.adaptation-thumb.placeholder {
+  background: repeating-linear-gradient(135deg, #0f172a, #0f172a 6px, #111827 6px, #111827 12px);
 }
 
 .toolbar-toggle,
@@ -773,6 +925,71 @@ pre {
   border-radius: 6px;
 }
 
+.story-artifact-node {
+  gap: 6px;
+  padding: 10px;
+  color: #fef3c7;
+  background: #422006;
+  border: 2px solid #f59e0b;
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgb(0 0 0 / 0.28);
+}
+
+.story-artifact-node.generated {
+  border-color: #22c55e;
+}
+
+.story-artifact-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 116px;
+  overflow: hidden;
+  color: #fde68a;
+  background:
+    linear-gradient(90deg, rgb(251 191 36 / 0.08) 1px, transparent 1px) 0 0 / 16px 16px,
+    linear-gradient(0deg, rgb(251 191 36 / 0.08) 1px, transparent 1px) 0 0 / 16px 16px,
+    #1c1917;
+  border: 1px solid rgb(251 191 36 / 0.55);
+  border-radius: 8px;
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.story-artifact-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.story-artifact-badge {
+  justify-self: start;
+  padding: 3px 7px;
+  color: #451a03;
+  background: #fbbf24;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.story-artifact-node strong,
+.story-artifact-node small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-artifact-node small {
+  color: #fed7aa;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .image-group-node {
   padding: 1px;
   overflow: visible;
@@ -902,7 +1119,8 @@ pre {
 
 .image-group-node:hover .node-action-button,
 .image-group-node:hover .variant-controls,
-.draft-node:hover .details-button {
+.draft-node:hover .details-button,
+.story-artifact-node:hover .details-button {
   opacity: 1;
 }
 

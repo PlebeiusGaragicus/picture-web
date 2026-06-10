@@ -16,7 +16,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import './style.css';
 import { api } from './api';
-import type { Asset, CanvasDocument, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project } from './types';
+import type { AdaptationStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode } from './types';
 
 interface DraftNodeData extends DraftCanvasNode {
   kind: 'draft';
@@ -40,7 +40,16 @@ interface ImageGroupNodeData extends ImageGroupCanvasNode {
   isGenerating?: boolean;
 }
 
-type PhotoNodeData = DraftNodeData | ImageGroupNodeData;
+interface StoryArtifactNodeData extends StoryArtifactCanvasNode {
+  kind: 'storyArtifact';
+  nodeId: string;
+  generatedAsset: Asset | null;
+  isGenerating?: boolean;
+  onDetails: (nodeId: string) => void;
+  onViewAsset: (assetId: string) => void;
+}
+
+type PhotoNodeData = DraftNodeData | StoryArtifactNodeData | ImageGroupNodeData;
 
 const emptyCanvas: CanvasDocument = {
   version: 2,
@@ -89,6 +98,25 @@ function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): Ca
               refs: node.data.refs,
               prompt: node.data.prompt,
               params: node.data.params,
+            },
+          ];
+        }
+        if (node.data.kind === 'storyArtifact') {
+          return [
+            node.id,
+            {
+              type: 'storyArtifact',
+              displayName: node.data.displayName,
+              x: node.position.x,
+              y: node.position.y,
+              width: existing?.width ?? node.data.width ?? null,
+              artifactKind: node.data.artifactKind,
+              artifactKey: node.data.artifactKey,
+              promptPath: node.data.promptPath,
+              prompt: node.data.prompt,
+              refs: node.data.refs,
+              params: node.data.params,
+              generatedAssetId: node.data.generatedAssetId ?? null,
             },
           ];
         }
@@ -142,6 +170,7 @@ function toFlowNodes(
   onVariant: (nodeId: string, direction: -1 | 1) => void = () => undefined,
   onView: (nodeId: string) => void = () => undefined,
   onDetails: (nodeId: string) => void = () => undefined,
+  onViewAsset: (assetId: string) => void = () => undefined,
   onDisplayNameChange: (nodeId: string, displayName: string) => void = () => undefined,
   onRefineChat: (nodeId: string, assetId: string) => void = () => undefined,
   chatSessions: ChatSession[] = [],
@@ -161,6 +190,15 @@ function toFlowNodes(
         position: { x: canvasNode.x, y: canvasNode.y },
         type: 'draft',
         data: { ...canvasNode, kind: 'draft', nodeId: id, parentDisplayNames: displayNameByAssetId, isGenerating: generatingNodeIds.has(id), onDetails },
+      };
+    }
+    if (canvasNode.type === 'storyArtifact') {
+      const generatedAsset = assetById.get(canvasNode.generatedAssetId ?? '') ?? null;
+      return {
+        id,
+        position: { x: canvasNode.x, y: canvasNode.y },
+        type: 'storyArtifact',
+        data: { ...canvasNode, kind: 'storyArtifact', nodeId: id, generatedAsset, isGenerating: generatingNodeIds.has(id), onDetails, onViewAsset },
       };
     }
     const groupAssets = canvasNode.assetIds.map((assetId) => assetById.get(assetId)).filter((asset): asset is Asset => Boolean(asset));
@@ -194,6 +232,8 @@ function App() {
   const [pendingDelete, setPendingDelete] = useState<{ nodeId: string; assetId?: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
+  const [adaptation, setAdaptation] = useState<AdaptationStatus | null>(null);
+  const [isGeneratingAdaptation, setIsGeneratingAdaptation] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const reactFlowRef = useRef<ReactFlowInstance<PhotoNodeData> | null>(null);
@@ -306,8 +346,8 @@ function App() {
     setAssets(detail.assets);
     setChatSessions(sessions);
     setCanvas(layout);
-    setNodes(toFlowNodes(layout, detail.assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, updateImageGroupDisplayName, openChatForAsset, sessions));
-  }, [changeVariant, openChatForAsset, openDetails, openViewer, showArchived, updateImageGroupDisplayName]);
+    setNodes(toFlowNodes(layout, detail.assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, openAssetInViewer, updateImageGroupDisplayName, openChatForAsset, sessions));
+  }, [changeVariant, openAssetInViewer, openChatForAsset, openDetails, openViewer, showArchived, updateImageGroupDisplayName]);
 
   useEffect(() => {
     loadProjects().catch((err) => setError(String(err)));
@@ -341,11 +381,11 @@ function App() {
         node.data.assetIds.forEach((assetId) => nodeForAsset.set(assetId, imageNode));
       }
     });
-    const edgeForAssetRef = (childNode: Node<ImageGroupNodeData> | Node<DraftNodeData>, childAssetId: string | null, ref: string): Edge | null => {
+    const edgeForAssetRef = (childNode: Node<ImageGroupNodeData> | Node<DraftNodeData> | Node<StoryArtifactNodeData>, childAssetId: string | null, ref: string): Edge | null => {
       const sourceNode = nodeForAsset.get(ref);
       if (!sourceNode || sourceNode.id === childNode.id) return null;
       const sourceVisible = sourceNode.data.activeAsset?.id === ref;
-      const childVisible = childNode.data.kind === 'draft' || childNode.data.activeAsset?.id === childAssetId;
+      const childVisible = childNode.data.kind === 'draft' || childNode.data.kind === 'storyArtifact' || childNode.data.activeAsset?.id === childAssetId;
       const isVisibleLineage = sourceVisible && childVisible;
       return {
         id: `${sourceNode.id}-${childNode.id}-${childAssetId ?? 'draft'}-${ref}`,
@@ -366,7 +406,24 @@ function App() {
       const draftNode: Node<DraftNodeData> = { ...node, data: node.data };
       return node.data.refs.flatMap((ref) => edgeForAssetRef(draftNode, null, ref) ?? []);
     });
-    return [...assetEdges, ...draftEdges];
+    const artifactRefEdges = nodes.flatMap((node) => {
+      if (node.data.kind !== 'storyArtifact') return [];
+      const artifactNode: Node<StoryArtifactNodeData> = { ...node, data: node.data };
+      return node.data.refs.flatMap((ref) => edgeForAssetRef(artifactNode, null, ref) ?? []);
+    });
+    const artifactGeneratedEdges = nodes.flatMap((node): Edge[] => {
+      if (node.data.kind !== 'storyArtifact' || !node.data.generatedAssetId) return [];
+      const targetNode = nodeForAsset.get(node.data.generatedAssetId);
+      if (!targetNode) return [];
+      return [{
+        id: `${node.id}-${targetNode.id}-${node.data.generatedAssetId}`,
+        source: node.id,
+        target: targetNode.id,
+        animated: false,
+        className: 'lineage-edge-visible',
+      }];
+    });
+    return [...assetEdges, ...draftEdges, ...artifactRefEdges, ...artifactGeneratedEdges];
   }, [nodes]);
 
   const selectedNode = useMemo(() => nodes.find((node) => node.id === popoverNodeId) ?? null, [nodes, popoverNodeId]);
@@ -568,7 +625,7 @@ function App() {
     const saved = await api.saveCanvas(openProjectSlug, next);
     setCanvas(saved);
     if (options.refresh ?? true) {
-      setNodes(toFlowNodes(saved, assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, updateImageGroupDisplayName, openChatForAsset, chatSessionsRef.current));
+      setNodes(toFlowNodes(saved, assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, openAssetInViewer, updateImageGroupDisplayName, openChatForAsset, chatSessionsRef.current));
     }
   };
 
@@ -734,6 +791,77 @@ function App() {
   };
 
   const currentProject = projects.find((project) => project.slug === openProjectSlug);
+  const isComicAdaptationProject = currentProject?.settings?.projectType === 'comic-adaptation';
+
+  const loadAdaptation = useCallback(async () => {
+    if (!openProjectSlug || !isComicAdaptationProject) {
+      setAdaptation(null);
+      return;
+    }
+    try {
+      setAdaptation(await api.getAdaptation(openProjectSlug));
+    } catch (err) {
+      setError(String(err));
+    }
+  }, [openProjectSlug, isComicAdaptationProject]);
+
+  useEffect(() => {
+    void loadAdaptation();
+  }, [loadAdaptation, assets]);
+
+  const saveAdaptationStyle = async (visualStyle: string) => {
+    if (!openProjectSlug) return;
+    setAdaptation(await api.saveAdaptationStyle(openProjectSlug, visualStyle));
+  };
+
+  const importAdaptationBook = async (file: File) => {
+    if (!openProjectSlug) return;
+    setAdaptation(await api.importAdaptationBook(openProjectSlug, file));
+  };
+
+  const importAdaptationStyleRef = async (kind: 'archetype-character' | 'archetype-scene', file: File) => {
+    if (!openProjectSlug) return;
+    setAdaptation(await api.importAdaptationStyleRef(openProjectSlug, kind, file));
+    await reload();
+  };
+
+  const generateNextAdaptationCharacter = async () => {
+    if (!openProjectSlug || isGeneratingAdaptation) return;
+    setIsGeneratingAdaptation(true);
+    try {
+      const result = await api.generateNextAdaptationCharacterSheet(openProjectSlug);
+      await reload();
+      await loadAdaptation();
+      if (!result.generated) setError(result.message);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setIsGeneratingAdaptation(false);
+    }
+  };
+
+  const generateStoryArtifact = async (id: string, artifact: StoryArtifactNodeData) => {
+    if (!openProjectSlug || isGeneratingAdaptation) return;
+    setIsGeneratingAdaptation(true);
+    setGeneratingNodeIds((current) => new Set(current).add(id));
+    setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
+    try {
+      setError(null);
+      const result = await api.generateAdaptationArtifact(openProjectSlug, artifact.artifactKind, artifact.artifactKey);
+      if (result.status) setAdaptation(result.status);
+      await reload();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setIsGeneratingAdaptation(false);
+      setGeneratingNodeIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+      setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: false } } : node)));
+    }
+  };
 
   if (!openProjectSlug) {
     return (
@@ -741,6 +869,10 @@ function App() {
         projects={projects}
         error={error}
         onOpen={openProject}
+        onDelete={async (slug) => {
+          await api.deleteProject(slug);
+          await loadProjects();
+        }}
         onCreated={async (nextSlug) => {
           await loadProjects();
           await openProject(nextSlug);
@@ -796,6 +928,19 @@ function App() {
           </label>
           {error && <span className="error">{error}</span>}
         </div>
+        {isComicAdaptationProject && adaptation && (
+          <AdaptationPanel
+            adaptation={adaptation}
+            assets={assets}
+            projectSlug={openProjectSlug}
+            isGenerating={isGeneratingAdaptation}
+            onSaveStyle={saveAdaptationStyle}
+            onImportBook={importAdaptationBook}
+            onImportStyleRef={importAdaptationStyleRef}
+            onGenerateNextCharacter={generateNextAdaptationCharacter}
+            onViewAsset={openAssetInViewer}
+          />
+        )}
         <ReactFlow
           nodeTypes={nodeTypes}
           nodes={nodes}
@@ -880,9 +1025,11 @@ function App() {
         <NodeSidebar
           node={selectedNode}
           assets={assets}
+          projectSlug={openProjectSlug}
           onDraftChange={updateDraft}
           onImageGroupChange={updateImageGroup}
           onGenerate={generateDraft}
+          onGenerateArtifact={generateStoryArtifact}
           onGenerateVariants={generateImageVariants}
           onVariant={changeVariant}
           onCreateSibling={createSiblingDraft}
@@ -945,19 +1092,25 @@ function ProjectLanding({
   projects,
   error,
   onOpen,
+  onDelete,
   onCreated,
 }: {
   projects: Project[];
   error: string | null;
   onOpen: (slug: string) => void;
+  onDelete: (slug: string) => Promise<void>;
   onCreated: (slug: string) => void;
 }) {
   const [name, setName] = useState('');
+  const [isComicAdaptation, setIsComicAdaptation] = useState(false);
+  const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
+  const [pendingProjectDelete, setPendingProjectDelete] = useState<Project | null>(null);
   const create = async () => {
     const nextSlug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     if (!nextSlug) return;
-    await api.createProject(nextSlug, name);
+    await api.createProject(nextSlug, name, isComicAdaptation ? { projectType: 'comic-adaptation' } : {});
     setName('');
+    setIsComicAdaptation(false);
     onCreated(nextSlug);
   };
   return (
@@ -970,20 +1123,201 @@ function ProjectLanding({
           {projects.length === 0 && <p className="muted">No projects yet.</p>}
           <div className="project-list">
             {projects.map((project) => (
-              <button key={project.slug} className="project-card" onClick={() => onOpen(project.slug)}>
-                <strong>{project.name}</strong>
-              </button>
+              <div key={project.slug} className="project-card">
+                <button className="project-open-button" onClick={() => onOpen(project.slug)}>
+                  <strong>{project.name}</strong>
+                  {project.settings.projectType === 'comic-adaptation' && <small>Comic adaptation</small>}
+                </button>
+                <button
+                  className="danger project-delete-button"
+                  disabled={deletingSlug === project.slug}
+                  onClick={() => setPendingProjectDelete(project)}
+                >
+                  {deletingSlug === project.slug ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
             ))}
           </div>
         </section>
         <section>
           <h2>Create project</h2>
+          <label className="checkbox-row">
+            <input type="checkbox" checked={isComicAdaptation} onChange={(event) => setIsComicAdaptation(event.target.checked)} />
+            Comic adaptation project
+          </label>
           <div className="row">
             <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Project name" />
             <button onClick={create}>Create</button>
           </div>
         </section>
+        {pendingProjectDelete && (
+          <div className="confirm-backdrop" onClick={() => setPendingProjectDelete(null)}>
+            <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
+              <h2>Delete project?</h2>
+              <p>
+                Move <strong>{pendingProjectDelete.name}</strong> to the system Trash? This removes its canvas,
+                assets, and adaptation files from photo-web.
+              </p>
+              <div className="row">
+                <button
+                  className="danger"
+                  disabled={deletingSlug === pendingProjectDelete.slug}
+                  onClick={async () => {
+                    setDeletingSlug(pendingProjectDelete.slug);
+                    try {
+                      await onDelete(pendingProjectDelete.slug);
+                      setPendingProjectDelete(null);
+                    } finally {
+                      setDeletingSlug(null);
+                    }
+                  }}
+                >
+                  {deletingSlug === pendingProjectDelete.slug ? 'Deleting...' : 'Delete project'}
+                </button>
+                <button className="secondary" disabled={Boolean(deletingSlug)} onClick={() => setPendingProjectDelete(null)}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+function AdaptationPanel({
+  adaptation,
+  assets,
+  projectSlug,
+  isGenerating,
+  onSaveStyle,
+  onImportBook,
+  onImportStyleRef,
+  onGenerateNextCharacter,
+  onViewAsset,
+}: {
+  adaptation: AdaptationStatus;
+  assets: Asset[];
+  projectSlug: string;
+  isGenerating: boolean;
+  onSaveStyle: (visualStyle: string) => Promise<void>;
+  onImportBook: (file: File) => Promise<void>;
+  onImportStyleRef: (kind: 'archetype-character' | 'archetype-scene', file: File) => Promise<void>;
+  onGenerateNextCharacter: () => Promise<void>;
+  onViewAsset: (assetId: string) => void;
+}) {
+  const [visualStyle, setVisualStyle] = useState(adaptation.visualStyle);
+  const [isSavingStyle, setIsSavingStyle] = useState(false);
+  const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
+  const generatedCharacters = Object.values(adaptation.characters).filter((entry) => entry.assetId).length;
+  const generatedLocations = Object.values(adaptation.locations).filter((entry) => entry.assetId).length;
+  useEffect(() => {
+    setVisualStyle(adaptation.visualStyle);
+  }, [adaptation.visualStyle]);
+  const save = async () => {
+    setIsSavingStyle(true);
+    try {
+      await onSaveStyle(visualStyle);
+    } finally {
+      setIsSavingStyle(false);
+    }
+  };
+  return (
+    <aside className="adaptation-panel">
+      <div className="popover-header">
+        <div>
+          <h2>Comic Adaptation</h2>
+          <p className="muted">Project checklist and prompt outputs</p>
+        </div>
+      </div>
+      <section>
+        <h3>Status</h3>
+        <div className="adaptation-checklist">
+          <span className={adaptation.hasBook ? 'ok' : ''}>Book text</span>
+          <span className={adaptation.hasBookSession ? 'ok' : ''}>Book session</span>
+          <span className={adaptation.styleRefs.visualStyle ? 'ok' : ''}>Visual style</span>
+          <span className={adaptation.styleRefs.archetypeCharacterAsset ? 'ok' : ''}>Character style ref</span>
+          <span>{adaptation.counts.characterArtifacts ?? 0} artifacts</span>
+          <span>{adaptation.counts.characterSheets ?? 0} sheets</span>
+          <span>{adaptation.counts.locationPrompts ?? 0} location prompts</span>
+        </div>
+      </section>
+      <section className="book-upload-section">
+        <h3>Book Source</h3>
+        <p className="muted">
+          {adaptation.hasBook ? 'book.txt is present in this project.' : 'Upload a plain text book file to start the adaptation workflow.'}
+        </p>
+        <label className="generate-button file-button book-upload-button">
+          {adaptation.hasBook ? 'Replace book.txt' : 'Upload book.txt'}
+          <input type="file" accept=".txt,text/plain" hidden onChange={(event) => event.target.files?.[0] && void onImportBook(event.target.files[0])} />
+        </label>
+        <label className="secondary file-button">
+          Import character style reference
+          <input type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => event.target.files?.[0] && void onImportStyleRef('archetype-character', event.target.files[0])} />
+        </label>
+      </section>
+      <section>
+        <h3>Visual Style</h3>
+        <textarea value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)} />
+        <button className="secondary" onClick={save} disabled={isSavingStyle}>
+          {isSavingStyle ? 'Saving...' : 'Save style'}
+        </button>
+      </section>
+      <section>
+        <div className="adaptation-section-heading">
+          <h3>Character Sheets</h3>
+          <span>{generatedCharacters}/{Object.keys(adaptation.characters).length} generated</span>
+        </div>
+        <button className="generate-button" onClick={onGenerateNextCharacter} disabled={isGenerating}>
+          {isGenerating && <span className="spinner" aria-hidden="true" />}
+          {isGenerating ? 'Generating...' : 'Generate next base sheet'}
+        </button>
+        <AdaptationPromptList entries={adaptation.characters} assetById={assetById} projectSlug={projectSlug} onViewAsset={onViewAsset} />
+      </section>
+      <section>
+        <div className="adaptation-section-heading">
+          <h3>Location Prompts</h3>
+          <span>{generatedLocations}/{Object.keys(adaptation.locations).length} generated</span>
+        </div>
+        <AdaptationPromptList entries={adaptation.locations} assetById={assetById} projectSlug={projectSlug} onViewAsset={onViewAsset} />
+      </section>
+    </aside>
+  );
+}
+
+function AdaptationPromptList({
+  entries,
+  assetById,
+  projectSlug,
+  onViewAsset,
+}: {
+  entries: Record<string, { promptPath: string; assetId?: string | null; status: string }>;
+  assetById: Map<string, Asset>;
+  projectSlug: string;
+  onViewAsset: (assetId: string) => void;
+}) {
+  const rows = Object.entries(entries);
+  if (rows.length === 0) return <p className="muted">No prompts generated yet. Run the Pi adaptation script for this project.</p>;
+  return (
+    <div className="adaptation-prompt-list">
+      {rows.map(([key, entry]) => {
+        const asset = entry.assetId ? assetById.get(entry.assetId) : null;
+        return (
+          <div className="adaptation-prompt-row" key={key}>
+            {asset ? (
+              <button className="adaptation-thumb" onClick={() => onViewAsset(asset.id)} title="View generated image">
+                <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb`} alt="" />
+              </button>
+            ) : (
+              <div className="adaptation-thumb placeholder" />
+            )}
+            <div>
+              <strong>{key}</strong>
+              <small>{entry.promptPath}</small>
+            </div>
+            <span className={`adaptation-status ${entry.status}`}>{entry.status}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -991,9 +1325,11 @@ function ProjectLanding({
 function NodeSidebar({
   node,
   assets,
+  projectSlug,
   onDraftChange,
   onImageGroupChange,
   onGenerate,
+  onGenerateArtifact,
   onGenerateVariants,
   onVariant,
   onCreateSibling,
@@ -1002,9 +1338,11 @@ function NodeSidebar({
 }: {
   node: Node<PhotoNodeData>;
   assets: Asset[];
+  projectSlug: string;
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onImageGroupChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
+  onGenerateArtifact: (id: string, artifact: StoryArtifactNodeData) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
@@ -1019,6 +1357,18 @@ function NodeSidebar({
         assets={assets}
         onDraftChange={onDraftChange}
         onGenerate={onGenerate}
+        onDelete={onDelete}
+      />
+    );
+  }
+
+  if (node.data.kind === 'storyArtifact') {
+    const artifactNode: Node<StoryArtifactNodeData> = { ...node, data: node.data };
+    return (
+      <StoryArtifactSidebar
+        node={artifactNode}
+        projectSlug={projectSlug}
+        onGenerate={onGenerateArtifact}
         onDelete={onDelete}
       />
     );
@@ -1178,6 +1528,65 @@ function DraftSidebar({
           />
         </label>
       </div>
+      </section>
+    </aside>
+  );
+}
+
+function artifactKindLabel(kind: ArtifactKind) {
+  return kind === 'character-sheet' ? 'Character Sheet' : 'Location Prompt';
+}
+
+function StoryArtifactSidebar({
+  node,
+  projectSlug,
+  onGenerate,
+  onDelete,
+}: {
+  node: Node<StoryArtifactNodeData>;
+  projectSlug: string;
+  onGenerate: (id: string, artifact: StoryArtifactNodeData) => void;
+  onDelete: (id: string, assetId?: string) => void;
+}) {
+  const artifact = node.data;
+  const generated = artifact.generatedAsset;
+  return (
+    <aside className="details-sidebar story-artifact-sidebar">
+      <div className="popover-header">
+        <div>
+          <h2>{artifact.displayName || artifact.artifactKey}</h2>
+          <p className="muted">{artifactKindLabel(artifact.artifactKind)}</p>
+        </div>
+        <button className="danger" onClick={() => onDelete(node.id)}>Delete</button>
+      </div>
+      <section className="sidebar-section">
+        <h3>Source</h3>
+        <code className="path-code">{artifact.promptPath}</code>
+      </section>
+      {generated && (
+        <section className="sidebar-section">
+          <h3>Generated Image</h3>
+          <button className="asset-picker-row" onClick={() => artifact.onViewAsset(generated.id)}>
+            <img src={generated.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${generated.id}/thumb`} alt="" />
+            <span>{assetLabel(generated)}</span>
+          </button>
+        </section>
+      )}
+      <section className="sidebar-section">
+        <h3>Prompt</h3>
+        <textarea className="prompt-textarea prompt-preview locked-field" value={artifact.prompt} readOnly />
+      </section>
+      <section className="sidebar-section generation-section">
+        <h3>Parameters</h3>
+        <div className="row">
+          <input value={artifact.params.model ?? defaultDraftParams.model ?? ''} readOnly />
+          <input value={artifact.params.aspectRatio ?? defaultDraftParams.aspectRatio ?? ''} readOnly />
+          <input value={artifact.params.imageSize ?? defaultDraftParams.imageSize ?? ''} readOnly />
+        </div>
+        <button className="generate-button" onClick={() => onGenerate(node.id, artifact)} disabled={!artifact.prompt.trim() || artifact.isGenerating}>
+          {artifact.isGenerating && <span className="spinner" aria-hidden="true" />}
+          {artifact.isGenerating ? 'Generating...' : generated ? 'Regenerate artifact' : 'Generate artifact'}
+        </button>
       </section>
     </aside>
   );
@@ -1872,8 +2281,48 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
   );
 }
 
+function StoryArtifactNode({ data }: NodeProps<StoryArtifactNodeData>) {
+  const tooltip = [
+    data.prompt || 'Story artifact prompt not set',
+    `source: ${data.promptPath}`,
+    `artifact: ${data.artifactKind}`,
+    data.generatedAssetId ? `generated: ${data.generatedAssetId}` : 'not generated',
+  ].join('\n');
+  return (
+    <div className={`node story-artifact-node ${data.generatedAssetId ? 'generated' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
+      <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
+      <button
+        className="node-action-button details-button"
+        onClick={(event) => {
+          event.stopPropagation();
+          data.onDetails(data.nodeId);
+        }}
+        title="Show details"
+      >
+        i
+      </button>
+      <div className="story-artifact-icon" aria-hidden="true">
+        {data.generatedAsset?.thumbnailUrl ? (
+          <img src={data.generatedAsset.thumbnailUrl} alt="" />
+        ) : data.isGenerating ? (
+          <div className="node-generating-overlay">
+            <span className="spinner" aria-hidden="true" />
+            <span>Generating</span>
+          </div>
+        ) : (
+          <span>{data.artifactKind === 'character-sheet' ? 'CS' : 'LP'}</span>
+        )}
+      </div>
+      <span className="story-artifact-badge">{artifactKindLabel(data.artifactKind)}</span>
+      <strong>{data.displayName || data.artifactKey}</strong>
+      <small>{data.generatedAssetId ? 'generated' : 'ready'}</small>
+    </div>
+  );
+}
+
 const nodeTypes = {
   imageGroup: ImageGroupNode,
+  storyArtifact: StoryArtifactNode,
   draft: DraftNode,
 };
 

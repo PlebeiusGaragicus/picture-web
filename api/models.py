@@ -11,6 +11,7 @@ TAG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 SLUG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 
 AssetKind = Literal["imported", "generated"]
+ArtifactKind = Literal["character-sheet", "location-prompt"]
 MODEL_CAPABILITIES = {
     "gemini-2.5-flash-image": {
         "aspectRatios": {"1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"},
@@ -119,11 +120,62 @@ class AssetSummary(AssetMetadata):
 class ProjectCreate(BaseModel):
     slug: str = Field(pattern=SLUG_RE)
     name: str = Field(min_length=1)
+    settings: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProjectMetadata(ProjectCreate):
     createdAt: str
-    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class AdaptationAssetLink(BaseModel):
+    artifactKind: ArtifactKind
+    promptPath: str
+    mode: str = ""
+    styleRef: str = ""
+    prompt: str = ""
+    assetId: str | None = None
+    status: Literal["missing", "ready", "generated"] = "missing"
+
+
+class AdaptationStyleRefs(BaseModel):
+    archetypeCharacterAssetId: str | None = None
+    archetypeSceneAssetId: str | None = None
+
+
+class AdaptationMetadata(BaseModel):
+    version: int = 1
+    styleRefs: AdaptationStyleRefs = Field(default_factory=AdaptationStyleRefs)
+    characters: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
+    locations: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
+
+
+class AdaptationStatus(BaseModel):
+    projectSlug: str
+    hasBook: bool
+    hasBookSession: bool
+    styleRefs: dict[str, bool]
+    counts: dict[str, int]
+    visualStyle: str
+    characters: dict[str, AdaptationAssetLink]
+    locations: dict[str, AdaptationAssetLink]
+
+
+class AdaptationStylePatch(BaseModel):
+    visualStyle: str
+
+
+class AdaptationGenerateArtifactRequest(BaseModel):
+    artifactKind: ArtifactKind
+    artifactKey: str = Field(min_length=1)
+
+
+class AdaptationGenerateResponse(BaseModel):
+    generated: bool
+    kind: Literal["character", "artifact"]
+    key: str | None = None
+    asset: AssetSummary | None = None
+    status: AdaptationStatus | None = None
+    message: str
 
 
 class ProjectDetail(BaseModel):
@@ -247,6 +299,17 @@ class DraftCanvasNode(CanvasNodeLayout):
     params: GenerationParams = Field(default_factory=GenerationParams)
 
 
+class StoryArtifactCanvasNode(CanvasNodeLayout):
+    type: Literal["storyArtifact"] = "storyArtifact"
+    artifactKind: ArtifactKind
+    artifactKey: str
+    promptPath: str
+    prompt: str = ""
+    refs: list[str] = Field(default_factory=list)
+    params: GenerationParams = Field(default_factory=GenerationParams)
+    generatedAssetId: str | None = None
+
+
 class ImageGroupCanvasNode(CanvasNodeLayout):
     type: Literal["imageGroup"] = "imageGroup"
     assetIds: list[str] = Field(default_factory=list, min_length=1)
@@ -259,7 +322,7 @@ class ImageGroupCanvasNode(CanvasNodeLayout):
         return self
 
 
-CanvasNode = DraftCanvasNode | ImageGroupCanvasNode
+CanvasNode = DraftCanvasNode | StoryArtifactCanvasNode | ImageGroupCanvasNode
 
 
 class CanvasDocument(BaseModel):

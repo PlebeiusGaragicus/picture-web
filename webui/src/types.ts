@@ -78,13 +78,26 @@ export interface DraftCanvasNode extends CanvasNodeLayout {
   params: GenerationParams;
 }
 
+export type ArtifactKind = 'character-sheet' | 'location-prompt';
+
+export interface StoryArtifactCanvasNode extends CanvasNodeLayout {
+  type: 'storyArtifact';
+  artifactKind: ArtifactKind;
+  artifactKey: string;
+  promptPath: string;
+  prompt: string;
+  refs: string[];
+  params: GenerationParams;
+  generatedAssetId?: string | null;
+}
+
 export interface ImageGroupCanvasNode extends CanvasNodeLayout {
   type: 'imageGroup';
   assetIds: string[];
   activeAssetId?: string | null;
 }
 
-export type CanvasNode = DraftCanvasNode | ImageGroupCanvasNode;
+export type CanvasNode = DraftCanvasNode | StoryArtifactCanvasNode | ImageGroupCanvasNode;
 
 export interface GeneratePayload {
   prompt: string;
@@ -97,6 +110,36 @@ export interface GeneratePayload {
   title?: string | null;
   tags: string[];
   canvasNodeId?: string | null;
+}
+
+export interface AdaptationAssetLink {
+  artifactKind: ArtifactKind;
+  promptPath: string;
+  mode: string;
+  styleRef: string;
+  prompt: string;
+  assetId?: string | null;
+  status: 'missing' | 'ready' | 'generated';
+}
+
+export interface AdaptationStatus {
+  projectSlug: string;
+  hasBook: boolean;
+  hasBookSession: boolean;
+  styleRefs: Record<string, boolean>;
+  counts: Record<string, number>;
+  visualStyle: string;
+  characters: Record<string, AdaptationAssetLink>;
+  locations: Record<string, AdaptationAssetLink>;
+}
+
+export interface AdaptationGenerateResponse {
+  generated: boolean;
+  kind: 'character' | 'artifact';
+  key?: string | null;
+  asset?: Asset | null;
+  status?: AdaptationStatus | null;
+  message: string;
 }
 
 export interface ChatTurnSettings {

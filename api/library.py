@@ -31,6 +31,7 @@ from models import (
     ProjectCreate,
     ProjectDetail,
     ProjectMetadata,
+    StoryArtifactCanvasNode,
     utc_now,
 )
 
@@ -107,12 +108,18 @@ def create_project(payload: ProjectCreate) -> ProjectMetadata:
         slug=payload.slug,
         name=payload.name,
         createdAt=now,
-        settings={},
+        settings=payload.settings,
     )
     assets_dir(payload.slug).mkdir(parents=True, exist_ok=True)
     write_json(project_json_path(payload.slug), project.model_dump(mode="json"))
     write_json(canvas_json_path(payload.slug), CanvasDocument().model_dump(mode="json"))
     return project
+
+
+def delete_project(slug: str) -> None:
+    require_project(slug)
+    logger.debug("delete project slug=%s", slug)
+    move_to_trash(project_dir(slug))
 
 
 def get_project(slug: str) -> ProjectMetadata:
@@ -256,7 +263,9 @@ def patch_archive(slug: str, asset_id: str, payload: ArchivePatch) -> AssetSumma
 
 def read_canvas(slug: str) -> CanvasDocument:
     require_project(slug)
-    return normalize_variant_groups(slug, default_canvas_for_assets(slug, read_stored_canvas(slug)))
+    canvas = default_canvas_for_story_artifacts(slug, read_stored_canvas(slug))
+    canvas = default_canvas_for_assets(slug, canvas)
+    return normalize_variant_groups(slug, canvas)
 
 
 def read_stored_canvas(slug: str) -> CanvasDocument:
@@ -277,7 +286,7 @@ def write_canvas(slug: str, canvas: CanvasDocument) -> CanvasDocument:
 def validate_canvas(slug: str, canvas: CanvasDocument) -> None:
     require_project(slug)
     for node_id, node in canvas.nodes.items():
-        if isinstance(node, DraftCanvasNode):
+        if isinstance(node, DraftCanvasNode | StoryArtifactCanvasNode):
             validate_refs(slug, node.refs)
         elif isinstance(node, ImageGroupCanvasNode):
             for asset_id in node.assetIds:
@@ -287,6 +296,58 @@ def validate_canvas(slug: str, canvas: CanvasDocument) -> None:
 
 def canvas_node_id(asset_id: str) -> str:
     return f"node_{asset_id}"
+
+
+def story_artifact_node_id(kind: str, key: str) -> str:
+    safe_kind = kind.replace("-", "_")
+    safe_key = "".join(char if char.isalnum() else "_" for char in key.lower()).strip("_")
+    return f"artifact_{safe_kind}_{safe_key}"
+
+
+def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> CanvasDocument:
+    project = get_project(slug)
+    if project.settings.get("projectType") != "comic-adaptation":
+        return canvas
+    import adaptation
+
+    status = adaptation.status(slug)
+    next_canvas = canvas.model_copy(deep=True)
+    existing_artifacts = {
+        (node.artifactKind, node.artifactKey)
+        for node in next_canvas.nodes.values()
+        if isinstance(node, StoryArtifactCanvasNode)
+    }
+    artifact_groups = [
+        ("character-sheet", status.characters, 80, 80),
+        ("location-prompt", status.locations, 80, 420),
+    ]
+    for kind, entries, start_x, start_y in artifact_groups:
+        for index, (key, entry) in enumerate(entries.items()):
+            for node_id, node in list(next_canvas.nodes.items()):
+                if isinstance(node, StoryArtifactCanvasNode) and node.artifactKind == kind and node.artifactKey == key:
+                    node.promptPath = entry.promptPath
+                    node.prompt = entry.prompt
+                    node.generatedAssetId = entry.assetId
+                    next_canvas.nodes[node_id] = node
+                    break
+            if (kind, key) in existing_artifacts:
+                continue
+            node_id = story_artifact_node_id(kind, key)
+            while node_id in next_canvas.nodes:
+                node_id = f"{node_id}_{index}"
+            next_canvas.nodes[node_id] = StoryArtifactCanvasNode(
+                displayName=key,
+                x=start_x + (index % 4) * 260,
+                y=start_y + (index // 4) * 190,
+                width=220,
+                artifactKind=kind,
+                artifactKey=key,
+                promptPath=entry.promptPath,
+                prompt=entry.prompt,
+                refs=[],
+                generatedAssetId=entry.assetId,
+            )
+    return next_canvas
 
 
 def default_canvas_for_assets(slug: str, canvas: CanvasDocument) -> CanvasDocument:
@@ -416,6 +477,32 @@ async def import_asset(slug: str, upload: UploadFile, title: str | None = None) 
     summary = write_asset_metadata(slug, metadata)
     logger.debug("import asset complete slug=%s asset_id=%s hash=%s", slug, asset_id, content_hash)
     return summary
+
+
+def import_asset_file(slug: str, source_path: Path, title: str) -> AssetSummary:
+    require_project(slug)
+    asset_id = new_ulid()
+    out_png = asset_png_path(slug, asset_id)
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(source_path) as image:
+        image.save(out_png, format="PNG")
+    content_hash = file_sha256(out_png)
+    duplicate = matching_import_by_hash(slug, content_hash)
+    if duplicate is not None:
+        out_png.unlink(missing_ok=True)
+        return duplicate
+    now = utc_now()
+    metadata = AssetMetadata(
+        id=asset_id,
+        kind="imported",
+        title=title,
+        tags=[],
+        contentHash=content_hash,
+        createdAt=now,
+        updatedAt=now,
+    )
+    logger.debug("import asset file complete slug=%s asset_id=%s source=%s hash=%s", slug, asset_id, source_path, content_hash)
+    return write_asset_metadata(slug, metadata)
 
 
 def thumbnail_path(slug: str, asset_id: str) -> Path:

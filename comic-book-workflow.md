@@ -9,25 +9,36 @@ Story bibles, panel storyboards, master panel prompt lists, page layout, and fin
 
 ## Operating Model
 
-Run Pi from the repo root so project-local `.pi/skills/` are available. Keep all book inputs and generated outputs under an ignored `books/<book-id>/` workspace.
+Run Pi from the repo root so project-local `.pi/skills/` are available. Keep book inputs and generated text artifacts inside the adaptation workspace of a normal `photo-web` project:
+
+```text
+photo-library/projects/<project-slug>/adaptation/
+```
+
+Set `project.settings.projectType` to `comic-adaptation` for projects that should show the adaptation UI.
 
 The runner loads the full book once, stores the resulting Pi session id, then creates fresh forks for each artifact. Skills write files directly with the write tool; `pi -p` stdout is used only for terse progress replies.
 
 The runner owns deterministic output paths. Skills must write to the exact path passed by the runner and must not choose their own filenames.
 
 ```bash
-mkdir -p books/my-story
-cp /path/to/book.txt books/my-story/book.txt
-scripts/comic-adaptation/run books/my-story
+mkdir -p photo-library/projects/my-story/adaptation
+cp /path/to/book.txt photo-library/projects/my-story/adaptation/book.txt
+scripts/comic-adaptation/run my-story
 ```
 
-`books/` is ignored by git because it may contain source texts, generated prompts, images, and session metadata.
+`books/` is deprecated staging storage. The scripts still accept `books/<book-id>` for old workspaces, but new work should use project-backed adaptation directories.
 
-## Book Workspace Layout
+## Project Adaptation Layout
 
 ```text
-books/my-story/
+photo-library/projects/my-story/
+  project.json
+  canvas.json
+  assets/
+  adaptation/
   book.txt
+  adaptation.json
   sessions/
     book-load.env
   style-refs/
@@ -42,32 +53,30 @@ books/my-story/
       <character-slug>.md
     sheets/
       <character-slug>.md
-      <variant-slug>.png
   scenes/
     manifest.md
   locations/
     index.md
     prompts/
       <location-slug>.md
-      <location-slug>.png
 ```
 
-Use stable lowercase hyphenated ids. If a visible state matters for image generation, give it its own id, such as `school-house-fire-damage` or `anna-child`.
+Generated images are normal project assets under `assets/`. `adaptation/adaptation.json` links prompt ids to generated asset ids. Use stable lowercase hyphenated ids. If a visible state matters for image generation, give it its own id, such as `school-house-fire-damage` or `anna-child`.
 
 ## Step 1: Load The Book
 
-The runner creates a clean book-load session when `books/<book-id>/sessions/book-load.env` does not exist.
+The runner creates a clean book-load session when `photo-library/projects/<project-slug>/adaptation/sessions/book-load.env` does not exist.
 
 Internally it runs:
 
 ```bash
-pi --name "read book <book-id>" -p "/skill:read-book ./books/<book-id>/book.txt" < /dev/null
+pi --name "read book <project-slug>" -p "/skill:read-book ./photo-library/projects/<project-slug>/adaptation/book.txt" < /dev/null
 ```
 
 The captured `BOOK_LOAD_ID` is saved to:
 
 ```text
-books/<book-id>/sessions/book-load.env
+photo-library/projects/<project-slug>/adaptation/sessions/book-load.env
 ```
 
 On later runs, the runner reuses that id and forks from it. Do not continue unrelated discussion in the book-load session; it is the clean source context.
@@ -77,15 +86,15 @@ On later runs, the runner reuses that id and forks from it. Do not continue unre
 The runner forks the book-load session and invokes:
 
 ```text
-/skill:visual-style books/<book-id>
+/skill:visual-style photo-library/projects/<project-slug>/adaptation
 ```
 
 The skill writes:
 
 ```text
-books/<book-id>/style-refs/visual-style.md
-books/<book-id>/style-refs/archetype-character.md
-books/<book-id>/style-refs/archetype-scene.md
+photo-library/projects/<project-slug>/adaptation/style-refs/visual-style.md
+photo-library/projects/<project-slug>/adaptation/style-refs/archetype-character.md
+photo-library/projects/<project-slug>/adaptation/style-refs/archetype-scene.md
 ```
 
 `visual-style.md` is the only user-edited input file. It is written as a blank template:
@@ -111,13 +120,13 @@ Character sheet and location prompt files can be drafted before these PNGs exist
 The runner invokes:
 
 ```text
-/skill:character-list books/<book-id>
+/skill:character-list photo-library/projects/<project-slug>/adaptation
 ```
 
 The skill writes:
 
 ```text
-books/<book-id>/characters/list.txt
+photo-library/projects/<project-slug>/adaptation/characters/list.txt
 ```
 
 The file is strict and parseable:
@@ -139,7 +148,7 @@ Rules:
 For each line in `characters/list.txt`, the runner forks from the book-load session and invokes:
 
 ```text
-/skill:character-artifact books/<book-id>
+/skill:character-artifact photo-library/projects/<project-slug>/adaptation
 
 Character Name: Short description.
 ```
@@ -147,7 +156,7 @@ Character Name: Short description.
 Each skill call writes:
 
 ```text
-books/<book-id>/characters/artifacts/<character-slug>.md
+photo-library/projects/<project-slug>/adaptation/characters/artifacts/<character-slug>.md
 ```
 
 Artifacts contain visual description, personality/performance notes, relationships, durable visual variants, continuity notes, source line references, and supporting quotes.
@@ -161,25 +170,25 @@ Do not create character variants for temporary performance states such as blushi
 The runner invokes:
 
 ```text
-/skill:character-sheet books/<book-id> @books/<book-id>/characters/artifacts/<character-slug>.md
+/skill:character-sheet photo-library/projects/<project-slug>/adaptation @photo-library/projects/<project-slug>/adaptation/characters/artifacts/<character-slug>.md
 ```
 
 Each skill call writes:
 
 ```text
-books/<book-id>/characters/sheets/<character-slug>.md
+photo-library/projects/<project-slug>/adaptation/characters/sheets/<character-slug>.md
 ```
 
 Each sheet section is a short image-generation prompt. `mode: new-image` sections reference the planned image-generation input:
 
 ```text
-books/<book-id>/style-refs/archetype-character.png
+photo-library/projects/<project-slug>/adaptation/style-refs/archetype-character.png
 ```
 
 `mode: edit-reference` sections reference approved base images beside the sheet prompt files:
 
 ```text
-books/<book-id>/characters/sheets/<base-variant-slug>.png
+photo-library/projects/<project-slug>/adaptation/characters/sheets/<base-variant-slug>.png
 ```
 
 The prompts do not paste `visual-style.md`; that user-filled file can be appended later by image-generation tooling. Rendering comes from the approved reference image when images are generated.
@@ -191,13 +200,13 @@ The character sheet skill should ignore expression-only or momentary variants ev
 The runner invokes:
 
 ```text
-/skill:scene-manifest books/<book-id>
+/skill:scene-manifest photo-library/projects/<project-slug>/adaptation
 ```
 
 The skill writes:
 
 ```text
-books/<book-id>/scenes/manifest.md
+photo-library/projects/<project-slug>/adaptation/scenes/manifest.md
 ```
 
 The scene manifest is used for location extraction in this milestone. It should still cover the full story in order, with no overlaps, and include source line ranges, supporting quotes, primary location, visible characters, and continuity notes.
@@ -207,13 +216,13 @@ The scene manifest is used for location extraction in this milestone. It should 
 The runner invokes:
 
 ```text
-/skill:location-index books/<book-id>
+/skill:location-index photo-library/projects/<project-slug>/adaptation
 ```
 
 The skill reads `scenes/manifest.md` and writes:
 
 ```text
-books/<book-id>/locations/index.md
+photo-library/projects/<project-slug>/adaptation/locations/index.md
 ```
 
 The index lists reusable visual environments only. It excludes characters, props by themselves, pure emotional beats, one-off camera angles, and panel action.
@@ -237,7 +246,7 @@ Each location or environment variant should include:
 The runner splits `locations/index.md` into entries and invokes:
 
 ```text
-/skill:location-prompt books/<book-id>
+/skill:location-prompt photo-library/projects/<project-slug>/adaptation
 
 ## location-slug
 ...
@@ -246,21 +255,21 @@ The runner splits `locations/index.md` into entries and invokes:
 Each skill call writes:
 
 ```text
-books/<book-id>/locations/prompts/<location-slug>.md
+photo-library/projects/<project-slug>/adaptation/locations/prompts/<location-slug>.md
 ```
 
 Base location prompts use the planned image-generation input:
 
 ```text
 mode: new-image
-style_ref: books/<book-id>/style-refs/archetype-scene.png
+style_ref: photo-library/projects/<project-slug>/adaptation/style-refs/archetype-scene.png
 ```
 
 Variant prompts may use:
 
 ```text
 mode: edit-reference
-style_ref: books/<book-id>/locations/prompts/<base-location-slug>.png
+style_ref: photo-library/projects/<project-slug>/adaptation/locations/prompts/<base-location-slug>.png
 ```
 
 Location prompts should be reusable environment prompts, not scene panels. They should be direct image-generation prose, not metadata; do not start them with phrases like `Environment reference for`.
@@ -274,7 +283,7 @@ They should avoid characters, dialogue, captions, speech bubbles, storyboarding,
 Start image generation small. The first image-generation helper calls the existing photo-web API and generates exactly one missing base character sheet PNG, then exits:
 
 ```bash
-scripts/comic-adaptation/generate-character-sheet books/<book-id>
+scripts/comic-adaptation/generate-character-sheet <project-slug>
 ```
 
 The API server must already be running, usually with:
@@ -285,7 +294,7 @@ The API server must already be running, usually with:
 
 The script:
 
-- Uses `books/<book-id>/style-refs/archetype-character.png` as the reference image.
+- Uses `photo-library/projects/<project-slug>/adaptation/style-refs/archetype-character.png` as the reference image.
 - Appends the user-filled `style-refs/visual-style.md` to the sheet prompt.
 - Calls `POST /api/projects/{slug}/generate`.
 - Skips existing PNGs.
@@ -308,7 +317,7 @@ The runner validates newly generated files before continuing. If a model writes 
 You can validate an existing book workspace without invoking Pi:
 
 ```bash
-scripts/comic-adaptation/validate books/<book-id>
+scripts/comic-adaptation/validate <project-slug>
 ```
 
 ## First Milestone Completion Criteria
@@ -322,7 +331,7 @@ This milestone is complete when:
 - Every location index entry has a location prompt file.
 - Character and location prompt files reference the correct book-scoped style images.
 - Continuity problems are either fixed in the artifacts or recorded clearly.
-- `scripts/comic-adaptation/validate books/<book-id>` passes.
+- `scripts/comic-adaptation/validate <project-slug>` passes.
 
 Before generating images, also create and approve:
 

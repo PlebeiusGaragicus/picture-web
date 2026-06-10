@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette import status
 
+import adaptation
 import library
 import chat_sessions
 from models import (
@@ -20,6 +21,10 @@ from models import (
     ChatSessionPatch,
     ChatTurnRequest,
     ChatTurnResponse,
+    AdaptationGenerateArtifactRequest,
+    AdaptationGenerateResponse,
+    AdaptationStatus,
+    AdaptationStylePatch,
     DisplayPatch,
     GenerateRequest,
     GenerateResponse,
@@ -67,6 +72,11 @@ def get_project(slug: str, includeArchived: bool = Query(default=False)) -> Proj
     return library.get_project_detail(slug)
 
 
+@app.delete("/api/projects/{slug}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_project(slug: str) -> None:
+    library.delete_project(slug)
+
+
 @app.get("/api/projects/{slug}/assets", response_model=list[AssetSummary])
 def list_assets(slug: str, includeArchived: bool = Query(default=False)) -> list[AssetSummary]:
     return library.list_assets(slug, include_archived=includeArchived)
@@ -109,6 +119,40 @@ def get_canvas(slug: str) -> CanvasDocument:
 @app.put("/api/projects/{slug}/canvas", response_model=CanvasDocument)
 def put_canvas(slug: str, canvas: CanvasDocument) -> CanvasDocument:
     return library.write_canvas(slug, canvas)
+
+
+@app.get("/api/projects/{slug}/adaptation", response_model=AdaptationStatus)
+def get_adaptation(slug: str) -> AdaptationStatus:
+    return adaptation.status(slug)
+
+
+@app.put("/api/projects/{slug}/adaptation/style", response_model=AdaptationStatus)
+def put_adaptation_style(slug: str, payload: AdaptationStylePatch) -> AdaptationStatus:
+    return adaptation.write_visual_style(slug, payload.visualStyle)
+
+
+@app.post("/api/projects/{slug}/adaptation/import-book", response_model=AdaptationStatus)
+async def import_adaptation_book(slug: str, file: UploadFile = File(...)) -> AdaptationStatus:
+    return await adaptation.import_book(slug, file)
+
+
+@app.post("/api/projects/{slug}/adaptation/import-style-ref", response_model=AdaptationStatus)
+async def import_adaptation_style_ref(
+    slug: str,
+    kind: str = Form(...),
+    file: UploadFile = File(...),
+) -> AdaptationStatus:
+    return await adaptation.import_style_ref(slug, kind, file)
+
+
+@app.post("/api/projects/{slug}/adaptation/generate-next-character-sheet", response_model=AdaptationGenerateResponse)
+def generate_next_adaptation_character_sheet(slug: str) -> AdaptationGenerateResponse:
+    return adaptation.generate_next_character_sheet(slug)
+
+
+@app.post("/api/projects/{slug}/adaptation/generate-artifact", response_model=AdaptationGenerateResponse)
+def generate_adaptation_artifact(slug: str, payload: AdaptationGenerateArtifactRequest) -> AdaptationGenerateResponse:
+    return adaptation.generate_artifact(slug, payload)
 
 
 @app.get("/api/projects/{slug}/chat-sessions", response_model=list[ChatSessionDocument])

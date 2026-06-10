@@ -1,4 +1,4 @@
-import type { Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail } from './types';
+import type { AdaptationGenerateResponse, AdaptationStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail } from './types';
 
 const DEBUG = true;
 
@@ -48,12 +48,16 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listProjects: () => request<Project[]>('/api/projects'),
-  createProject: (slug: string, name: string) =>
+  createProject: (slug: string, name: string, settings: Record<string, unknown> = {}) =>
     request<Project>('/api/projects', {
       method: 'POST',
-      body: JSON.stringify({ slug, name }),
+      body: JSON.stringify({ slug, name, settings }),
     }),
   getProject: (slug: string, includeArchived = false) => request<ProjectDetail>(`/api/projects/${slug}${includeArchived ? '?includeArchived=true' : ''}`),
+  deleteProject: (slug: string) =>
+    request<void>(`/api/projects/${slug}`, {
+      method: 'DELETE',
+    }),
   getCanvas: (slug: string) => request<CanvasDocument>(`/api/projects/${slug}/canvas`),
   saveCanvas: (slug: string, canvas: CanvasDocument) =>
     request<CanvasDocument>(`/api/projects/${slug}/canvas`, {
@@ -64,6 +68,38 @@ export const api = {
     request<{ assets: Asset[] }>(`/api/projects/${slug}/generate`, {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+  getAdaptation: (slug: string) => request<AdaptationStatus>(`/api/projects/${slug}/adaptation`),
+  saveAdaptationStyle: (slug: string, visualStyle: string) =>
+    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/style`, {
+      method: 'PUT',
+      body: JSON.stringify({ visualStyle }),
+    }),
+  importAdaptationBook: (slug: string, file: File) => {
+    const data = new FormData();
+    data.append('file', file);
+    return request<AdaptationStatus>(`/api/projects/${slug}/adaptation/import-book`, {
+      method: 'POST',
+      body: data,
+    });
+  },
+  importAdaptationStyleRef: (slug: string, kind: 'archetype-character' | 'archetype-scene', file: File) => {
+    const data = new FormData();
+    data.append('kind', kind);
+    data.append('file', file);
+    return request<AdaptationStatus>(`/api/projects/${slug}/adaptation/import-style-ref`, {
+      method: 'POST',
+      body: data,
+    });
+  },
+  generateNextAdaptationCharacterSheet: (slug: string) =>
+    request<AdaptationGenerateResponse>(`/api/projects/${slug}/adaptation/generate-next-character-sheet`, {
+      method: 'POST',
+    }),
+  generateAdaptationArtifact: (slug: string, artifactKind: ArtifactKind, artifactKey: string) =>
+    request<AdaptationGenerateResponse>(`/api/projects/${slug}/adaptation/generate-artifact`, {
+      method: 'POST',
+      body: JSON.stringify({ artifactKind, artifactKey }),
     }),
   patchDisplay: (slug: string, assetId: string, title: string, tags: string[]) =>
     request<Asset>(`/api/projects/${slug}/assets/${assetId}/display`, {

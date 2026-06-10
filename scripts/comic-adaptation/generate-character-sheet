@@ -2,14 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT_DIR/scripts/comic-adaptation/lib.sh"
 API_BASE="${API_BASE:-http://127.0.0.1:8787}"
 
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/comic-adaptation/generate-character-sheet books/<book-id>
+  scripts/comic-adaptation/generate-character-sheet <project-slug>
 
-Generates one missing base character sheet PNG and stops.
+Generates one missing base character sheet asset and records it in adaptation.json.
 
 Environment:
   API_BASE  API server URL (default: http://127.0.0.1:8787)
@@ -47,118 +48,16 @@ api_post_json() {
     "$API_BASE$path"
 }
 
-ensure_project() {
-  local slug="$1"
-  local name="$2"
-
-  if curl -fsS "$API_BASE/api/projects/$slug" >/dev/null 2>&1; then
-    return
-  fi
-
-  echo "Creating photo-web project: $slug"
-  api_post_json "/api/projects" "$(jq -n --arg slug "$slug" --arg name "$name" '{slug: $slug, name: $name}')" >/dev/null
-}
-
-asset_id_by_title() {
-  local project_slug="$1"
-  local title="$2"
-
-  api_get "/api/projects/$project_slug/assets?includeArchived=false" |
-    jq -r --arg title "$title" '.[] | select(.title == $title) | .id' |
-    head -n 1
-}
-
 import_reference_if_needed() {
   local project_slug="$1"
   local image_path="$2"
-  local title="$3"
-  local existing
-
-  existing="$(asset_id_by_title "$project_slug" "$title")"
-  if [[ -n "$existing" ]]; then
-    printf '%s\n' "$existing"
-    return
-  fi
 
   echo "Importing reference image: $image_path" >&2
   curl -fsS \
     -X POST \
     -F "file=@${image_path};type=image/png" \
-    -F "title=${title}" \
-    "$API_BASE/api/projects/$project_slug/assets/import" |
-    jq -r '.id'
-}
-
-extract_first_base_section() {
-  local sheet="$1"
-  local out="$2"
-
-  awk '
-    /^##[[:space:]]+/ {
-      if (in_section && mode == "new-image") {
-        exit
-      }
-      in_section=1
-      slug=$0
-      sub(/^##[[:space:]]+/, "", slug)
-      mode=""
-      style_ref=""
-      prompt=""
-      in_prompt=0
-      next
-    }
-    in_section && /^mode:[[:space:]]*/ {
-      mode=$0
-      sub(/^mode:[[:space:]]*/, "", mode)
-      next
-    }
-    in_section && /^style_ref:[[:space:]]*/ {
-      style_ref=$0
-      sub(/^style_ref:[[:space:]]*/, "", style_ref)
-      next
-    }
-    in_section && mode == "new-image" && /^$/ && style_ref != "" {
-      in_prompt=1
-      next
-    }
-    in_section && mode == "new-image" && in_prompt {
-      prompt = prompt $0 "\n"
-    }
-    END {
-      if (mode != "new-image" || slug == "" || prompt == "") {
-        exit 1
-      }
-      print "slug=" slug > out
-      print "style_ref=" style_ref >> out
-      print "prompt<<EOF" >> out
-      printf "%s", prompt >> out
-      print "EOF" >> out
-    }
-  ' out="$out" "$sheet"
-}
-
-read_section_data() {
-  local path="$1"
-  local key="$2"
-
-  awk -v key="$key" '
-    $0 == key "<<EOF" {
-      capture=1
-      next
-    }
-    capture && $0 == "EOF" {
-      exit
-    }
-    capture {
-      print
-      next
-    }
-    index($0, key "=") == 1 {
-      sub("^[^=]+=", "")
-      print
-      exit
-    }
-  ' "$path"
+    -F "kind=archetype-character" \
+    "$API_BASE/api/projects/$project_slug/adaptation/import-style-ref" >/dev/null
 }
 
 if [[ $# -ne 1 ]]; then
@@ -168,9 +67,10 @@ fi
 
 [[ "$PWD" == "$ROOT_DIR" ]] || die "Run from repo root: $ROOT_DIR"
 
-BOOK_ROOT="${1%/}"
-[[ "$BOOK_ROOT" == books/* ]] || die "Book root must be under books/, got: $BOOK_ROOT"
-[[ -d "$BOOK_ROOT" ]] || die "Missing book root: $BOOK_ROOT"
+resolve_adaptation_target "$1"
+BOOK_ROOT="$ADAPTATION_ROOT"
+[[ -d "$BOOK_ROOT" ]] || die "Missing adaptation root: $BOOK_ROOT"
+[[ -z "$LEGACY_BOOK_ROOT" ]] || die "Image generation now requires a project slug, not deprecated books/ input"
 
 need_command curl
 need_command jq
@@ -180,66 +80,23 @@ need_command tr
 
 api_get "/api/health" >/dev/null || die "API is not reachable at $API_BASE"
 
-PROJECT_SLUG="$(slugify_name "$(basename "$BOOK_ROOT")")"
-PROJECT_NAME="Comic adaptation: $(basename "$BOOK_ROOT")"
 STYLE_REF="$BOOK_ROOT/style-refs/archetype-character.png"
 VISUAL_STYLE="$BOOK_ROOT/style-refs/visual-style.md"
 
 [[ -f "$STYLE_REF" ]] || die "Missing character style reference: $STYLE_REF"
 [[ -f "$VISUAL_STYLE" ]] || die "Missing visual style file: $VISUAL_STYLE"
+[[ -f "photo-library/projects/$PROJECT_SLUG/project.json" ]] || die "Project not found: $PROJECT_SLUG"
 
-ensure_project "$PROJECT_SLUG" "$PROJECT_NAME"
-REF_ASSET_ID="$(import_reference_if_needed "$PROJECT_SLUG" "$STYLE_REF" "comic-adaptation archetype character")"
+if ! api_get "/api/projects/$PROJECT_SLUG/adaptation" | jq -e '.styleRefs.archetypeCharacterAsset' >/dev/null; then
+  import_reference_if_needed "$PROJECT_SLUG" "$STYLE_REF"
+fi
 
-for sheet in "$BOOK_ROOT"/characters/sheets/*.md; do
-  [[ -f "$sheet" ]] || continue
+response="$(api_post_json "/api/projects/$PROJECT_SLUG/adaptation/generate-next-character-sheet" '{}')"
+message="$(printf '%s' "$response" | jq -r '.message')"
+asset_id="$(printf '%s' "$response" | jq -r '.asset.id // empty')"
 
-  tmp="$(mktemp)"
-  if ! extract_first_base_section "$sheet" "$tmp"; then
-    rm -f "$tmp"
-    continue
-  fi
-
-  variant_slug="$(read_section_data "$tmp" "slug")"
-  out_png="$(dirname "$sheet")/${variant_slug}.png"
-
-  if [[ -f "$out_png" ]]; then
-    echo "skip existing: $out_png"
-    rm -f "$tmp"
-    continue
-  fi
-
-  prompt_body="$(read_section_data "$tmp" "prompt")"
-  visual_style_body="$(<"$VISUAL_STYLE")"
-  full_prompt="$(printf '%s\n\n%s\n' "$prompt_body" "$visual_style_body")"
-  title="character sheet ${variant_slug}"
-
-  echo "Generating: $out_png"
-  response="$(
-    api_post_json "/api/projects/$PROJECT_SLUG/generate" "$(
-      jq -n \
-        --arg prompt "$full_prompt" \
-        --arg ref "$REF_ASSET_ID" \
-        --arg title "$title" \
-        '{
-          prompt: $prompt,
-          refs: [$ref],
-          aspectRatio: "16:9",
-          imageSize: "1K",
-          batchCount: 1,
-          title: $title,
-          tags: ["comic-adaptation", "character-sheet"]
-        }'
-    )"
-  )"
-  asset_id="$(printf '%s' "$response" | jq -r '.assets[0].id')"
-  [[ -n "$asset_id" && "$asset_id" != "null" ]] || die "Generate response did not include an asset id"
-
-  curl -fsS "$API_BASE/api/projects/$PROJECT_SLUG/assets/$asset_id/image" -o "$out_png"
-  [[ -s "$out_png" ]] || die "Generated image download was empty: $out_png"
-  echo "Wrote $out_png"
-  rm -f "$tmp"
-  exit 0
-done
-
-echo "No missing base character sheet PNGs found."
+if [[ -n "$asset_id" ]]; then
+  echo "$message asset=$asset_id"
+else
+  echo "$message"
+fi

@@ -2,11 +2,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT_DIR/scripts/comic-adaptation/lib.sh"
 
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/comic-adaptation/validate books/<book-id>
+  scripts/comic-adaptation/validate <project-slug>
+  scripts/comic-adaptation/validate books/<book-id>  # deprecated
 
 Validates generated comic-adaptation text artifacts without invoking Pi.
 EOF
@@ -229,13 +231,10 @@ fi
   exit 1
 }
 
-BOOK_ROOT="${1%/}"
-[[ "$BOOK_ROOT" == books/* ]] || {
-  echo "error: Book root must be under books/, got: $BOOK_ROOT" >&2
-  exit 1
-}
+resolve_adaptation_target "$1"
+BOOK_ROOT="$ADAPTATION_ROOT"
 [[ -d "$BOOK_ROOT" ]] || {
-  echo "error: Missing book root: $BOOK_ROOT" >&2
+  echo "error: Missing adaptation root: $BOOK_ROOT" >&2
   exit 1
 }
 

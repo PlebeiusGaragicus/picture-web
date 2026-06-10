@@ -2,13 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT_DIR/scripts/comic-adaptation/lib.sh"
 
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/comic-adaptation/run books/<book-id>
+  scripts/comic-adaptation/run <project-slug>
+  scripts/comic-adaptation/run books/<book-id>  # deprecated
 
-The book workspace must contain book.txt. Run this command from the repo root.
+The canonical project workspace is photo-library/projects/<project-slug>/adaptation.
+It must contain book.txt. Run this command from the repo root.
 EOF
 }
 
@@ -156,8 +159,11 @@ fi
 [[ "$PWD" == "$ROOT_DIR" ]] || die "Run from repo root: $ROOT_DIR"
 [[ -d "$ROOT_DIR/.pi/skills" ]] || die "Missing .pi/skills; run from the project with local Pi skills"
 
-BOOK_ROOT="${1%/}"
-[[ "$BOOK_ROOT" == books/* ]] || die "Book root must be under books/, got: $BOOK_ROOT"
+resolve_adaptation_target "$1"
+BOOK_ROOT="$ADAPTATION_ROOT"
+if [[ -z "$LEGACY_BOOK_ROOT" && ! -f "photo-library/projects/$PROJECT_SLUG/project.json" ]]; then
+  die "Project not found: $PROJECT_SLUG"
+fi
 [[ -f "$BOOK_ROOT/book.txt" ]] || die "Missing $BOOK_ROOT/book.txt"
 
 need_command pi
@@ -167,13 +173,7 @@ need_command sed
 need_command tr
 need_command ls
 
-mkdir -p \
-  "$BOOK_ROOT/sessions" \
-  "$BOOK_ROOT/style-refs" \
-  "$BOOK_ROOT/characters/artifacts" \
-  "$BOOK_ROOT/characters/sheets" \
-  "$BOOK_ROOT/scenes" \
-  "$BOOK_ROOT/locations/prompts"
+ensure_project_adaptation_dirs
 
 SESSION_ENV="$BOOK_ROOT/sessions/book-load.env"
 
@@ -195,6 +195,7 @@ fi
 
 echo
 echo "Book root: $BOOK_ROOT"
+echo "Project:   $PROJECT_SLUG"
 echo "Session:   $BOOK_LOAD_ID"
 
 if [[ -f "$BOOK_ROOT/style-refs/visual-style.md" && -f "$BOOK_ROOT/style-refs/archetype-character.md" && -f "$BOOK_ROOT/style-refs/archetype-scene.md" ]]; then
