@@ -42,7 +42,6 @@ books/my-story/
       <character-slug>.md
     sheets/
       <character-slug>.md
-    images/
       <variant-slug>.png
   scenes/
     manifest.md
@@ -50,7 +49,6 @@ books/my-story/
     index.md
     prompts/
       <location-slug>.md
-    images/
       <location-slug>.png
 ```
 
@@ -178,10 +176,10 @@ Each sheet section is a short image-generation prompt. `mode: new-image` section
 books/<book-id>/style-refs/archetype-character.png
 ```
 
-`mode: edit-reference` sections reference approved base images under:
+`mode: edit-reference` sections reference approved base images beside the sheet prompt files:
 
 ```text
-books/<book-id>/characters/images/
+books/<book-id>/characters/sheets/<base-variant-slug>.png
 ```
 
 The prompts do not paste `visual-style.md`; that user-filled file can be appended later by image-generation tooling. Rendering comes from the approved reference image when images are generated.
@@ -262,7 +260,7 @@ Variant prompts may use:
 
 ```text
 mode: edit-reference
-style_ref: books/<book-id>/locations/images/<base-location-slug>.png
+style_ref: books/<book-id>/locations/prompts/<base-location-slug>.png
 ```
 
 Location prompts should be reusable environment prompts, not scene panels. They should be direct image-generation prose, not metadata; do not start them with phrases like `Environment reference for`.
@@ -270,6 +268,30 @@ Location prompts should be reusable environment prompts, not scene panels. They 
 High-quality location prompts should use every source-supported visual detail from the location entry, but should not invent named landmarks, architecture, objects, vegetation, weather, time of day, materials, lighting, or background elements that are not supported by the story. It is acceptable to add minimal connective spatial language when needed to turn source-supported traits into one coherent scene.
 
 They should avoid characters, dialogue, captions, speech bubbles, storyboarding, and panel-specific action. They do not paste `visual-style.md`; that user-filled file can be appended later by image-generation tooling.
+
+## Step 9: Generate One Character Sheet Image
+
+Start image generation small. The first image-generation helper calls the existing photo-web API and generates exactly one missing base character sheet PNG, then exits:
+
+```bash
+scripts/comic-adaptation/generate-character-sheet books/<book-id>
+```
+
+The API server must already be running, usually with:
+
+```bash
+./run
+```
+
+The script:
+
+- Uses `books/<book-id>/style-refs/archetype-character.png` as the reference image.
+- Appends the user-filled `style-refs/visual-style.md` to the sheet prompt.
+- Calls `POST /api/projects/{slug}/generate`.
+- Skips existing PNGs.
+- Generates only `mode: new-image` base sheets.
+- Writes the generated PNG beside the source prompt file, for example `characters/sheets/butterscotch-base.png`.
+- Stops after one generated image.
 
 ## Runner Behavior
 

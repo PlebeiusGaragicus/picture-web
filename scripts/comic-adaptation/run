@@ -172,10 +172,8 @@ mkdir -p \
   "$BOOK_ROOT/style-refs" \
   "$BOOK_ROOT/characters/artifacts" \
   "$BOOK_ROOT/characters/sheets" \
-  "$BOOK_ROOT/characters/images" \
   "$BOOK_ROOT/scenes" \
-  "$BOOK_ROOT/locations/prompts" \
-  "$BOOK_ROOT/locations/images"
+  "$BOOK_ROOT/locations/prompts"
 
 SESSION_ENV="$BOOK_ROOT/sessions/book-load.env"
 

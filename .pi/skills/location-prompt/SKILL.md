@@ -68,7 +68,7 @@ For a variant that should be edited from an approved base location image, use:
 ```markdown
 ## location-slug-variant
 mode: edit-reference
-style_ref: <book-root>/locations/images/<base-location-slug>.png
+style_ref: <book-root>/locations/prompts/<base-location-slug>.png
 
 [prompt]
 ```
