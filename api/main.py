@@ -14,6 +14,7 @@ import library
 import chat_sessions
 from models import (
     ArchivePatch,
+    AdaptationCanvasImportResponse,
     AssetSummary,
     CanvasDocument,
     ChatSessionCreate,
@@ -24,7 +25,9 @@ from models import (
     AdaptationGenerateArtifactRequest,
     AdaptationGenerateResponse,
     AdaptationStatus,
+    AdaptationStyleRefAssetRequest,
     AdaptationStylePatch,
+    AdaptationWorkflowStatus,
     DisplayPatch,
     GenerateRequest,
     GenerateResponse,
@@ -107,8 +110,10 @@ async def import_asset(
     slug: str,
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
+    canvasX: float | None = Form(default=None),
+    canvasY: float | None = Form(default=None),
 ) -> AssetSummary:
-    return await library.import_asset(slug, file, title=title)
+    return await library.import_asset(slug, file, title=title, canvas_x=canvasX, canvas_y=canvasY)
 
 
 @app.get("/api/projects/{slug}/canvas", response_model=CanvasDocument)
@@ -131,6 +136,31 @@ def put_adaptation_style(slug: str, payload: AdaptationStylePatch) -> Adaptation
     return adaptation.write_visual_style(slug, payload.visualStyle)
 
 
+@app.get("/api/projects/{slug}/adaptation/workflow", response_model=AdaptationWorkflowStatus)
+def get_adaptation_workflow(slug: str) -> AdaptationWorkflowStatus:
+    return adaptation.workflow_status(slug)
+
+
+@app.post("/api/projects/{slug}/adaptation/workflow/start", response_model=AdaptationWorkflowStatus)
+def start_adaptation_workflow(slug: str) -> AdaptationWorkflowStatus:
+    return adaptation.start_workflow(slug)
+
+
+@app.get("/api/projects/{slug}/adaptation/validation", response_model=AdaptationWorkflowStatus)
+def get_adaptation_validation(slug: str) -> AdaptationWorkflowStatus:
+    return adaptation.validation_status(slug)
+
+
+@app.post("/api/projects/{slug}/adaptation/validation/start", response_model=AdaptationWorkflowStatus)
+def start_adaptation_validation(slug: str) -> AdaptationWorkflowStatus:
+    return adaptation.start_validation(slug)
+
+
+@app.post("/api/projects/{slug}/adaptation/import-drafts-to-canvas", response_model=AdaptationCanvasImportResponse)
+def import_adaptation_drafts_to_canvas(slug: str) -> AdaptationCanvasImportResponse:
+    return adaptation.import_drafts_to_canvas(slug)
+
+
 @app.post("/api/projects/{slug}/adaptation/import-book", response_model=AdaptationStatus)
 async def import_adaptation_book(slug: str, file: UploadFile = File(...)) -> AdaptationStatus:
     return await adaptation.import_book(slug, file)
@@ -143,6 +173,16 @@ async def import_adaptation_style_ref(
     file: UploadFile = File(...),
 ) -> AdaptationStatus:
     return await adaptation.import_style_ref(slug, kind, file)
+
+
+@app.post("/api/projects/{slug}/adaptation/import-existing-style-refs", response_model=AdaptationStatus)
+def import_existing_adaptation_style_refs(slug: str) -> AdaptationStatus:
+    return adaptation.import_existing_style_refs(slug)
+
+
+@app.post("/api/projects/{slug}/adaptation/style-ref-asset", response_model=AdaptationStatus)
+def set_adaptation_style_ref_asset(slug: str, payload: AdaptationStyleRefAssetRequest) -> AdaptationStatus:
+    return adaptation.set_style_ref_asset(slug, payload)
 
 
 @app.post("/api/projects/{slug}/adaptation/generate-next-character-sheet", response_model=AdaptationGenerateResponse)

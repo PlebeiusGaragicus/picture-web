@@ -263,8 +263,7 @@ def patch_archive(slug: str, asset_id: str, payload: ArchivePatch) -> AssetSumma
 
 def read_canvas(slug: str) -> CanvasDocument:
     require_project(slug)
-    canvas = default_canvas_for_story_artifacts(slug, read_stored_canvas(slug))
-    canvas = default_canvas_for_assets(slug, canvas)
+    canvas = default_canvas_for_assets(slug, read_stored_canvas(slug))
     return normalize_variant_groups(slug, canvas)
 
 
@@ -304,30 +303,82 @@ def story_artifact_node_id(kind: str, key: str) -> str:
     return f"artifact_{safe_kind}_{safe_key}"
 
 
+def archetype_node_id(kind: str) -> str:
+    return f"archetype_{kind.replace('-', '_')}"
+
+
+def node_tags(*tags: str) -> list[str]:
+    return list(dict.fromkeys(tags))
+
+
 def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> CanvasDocument:
-    project = get_project(slug)
-    if project.settings.get("projectType") != "comic-adaptation":
-        return canvas
     import adaptation
 
     status = adaptation.status(slug)
     next_canvas = canvas.model_copy(deep=True)
+    root = adaptation.adaptation_dir(slug)
+    archetypes = [
+        (
+            "archetype-character",
+            "Character Archetype",
+            root / "style-refs" / "archetype-character.md",
+            status.styleRefs.get("archetypeCharacterAsset"),
+            ["adaptation", "archetype", "character-style"],
+            80,
+            80,
+        ),
+        (
+            "archetype-scene",
+            "Scene Archetype",
+            root / "style-refs" / "archetype-scene.md",
+            status.styleRefs.get("archetypeSceneAsset"),
+            ["adaptation", "archetype", "scene-style"],
+            360,
+            80,
+        ),
+    ]
+    for kind, display_name, path, has_asset, tags, x, y in archetypes:
+        prompt = path.read_text() if path.is_file() else ""
+        node_id = archetype_node_id(kind)
+        existing = next_canvas.nodes.get(node_id)
+        if isinstance(existing, DraftCanvasNode):
+            existing.prompt = prompt
+            existing.tags = node_tags(*tags, "generated" if has_asset else "missing")
+            next_canvas.nodes[node_id] = existing
+            continue
+        if existing is None:
+            next_canvas.nodes[node_id] = DraftCanvasNode(
+                displayName=display_name,
+                x=x,
+                y=y,
+                width=240,
+                tags=node_tags(*tags, "generated" if has_asset else "missing"),
+                refs=[],
+                prompt=prompt,
+            )
     existing_artifacts = {
         (node.artifactKind, node.artifactKey)
         for node in next_canvas.nodes.values()
         if isinstance(node, StoryArtifactCanvasNode)
     }
+    columns = 5
+    x_gap = 310
+    y_gap = 230
+    character_start_y = 320
+    character_rows = max(1, (len(status.characters) + columns - 1) // columns)
+    location_start_y = character_start_y + character_rows * y_gap + 180
     artifact_groups = [
-        ("character-sheet", status.characters, 80, 80),
-        ("location-prompt", status.locations, 80, 420),
+        ("character-sheet", status.characters, 80, character_start_y, ["adaptation", "character-sheet"]),
+        ("location-prompt", status.locations, 80, location_start_y, ["adaptation", "location"]),
     ]
-    for kind, entries, start_x, start_y in artifact_groups:
+    for kind, entries, start_x, start_y, base_tags in artifact_groups:
         for index, (key, entry) in enumerate(entries.items()):
             for node_id, node in list(next_canvas.nodes.items()):
                 if isinstance(node, StoryArtifactCanvasNode) and node.artifactKind == kind and node.artifactKey == key:
                     node.promptPath = entry.promptPath
                     node.prompt = entry.prompt
                     node.generatedAssetId = entry.assetId
+                    node.tags = node_tags(*base_tags, "generated" if entry.assetId else "missing")
                     next_canvas.nodes[node_id] = node
                     break
             if (kind, key) in existing_artifacts:
@@ -337,9 +388,10 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
                 node_id = f"{node_id}_{index}"
             next_canvas.nodes[node_id] = StoryArtifactCanvasNode(
                 displayName=key,
-                x=start_x + (index % 4) * 260,
-                y=start_y + (index // 4) * 190,
-                width=220,
+                x=start_x + (index % columns) * x_gap,
+                y=start_y + (index // columns) * y_gap,
+                width=240,
+                tags=node_tags(*base_tags, "generated" if entry.assetId else "missing"),
                 artifactKind=kind,
                 artifactKey=key,
                 promptPath=entry.promptPath,
@@ -358,8 +410,18 @@ def default_canvas_for_assets(slug: str, canvas: CanvasDocument) -> CanvasDocume
         if isinstance(node, ImageGroupCanvasNode)
         for asset_id in node.assetIds
     }
+    represented.update(
+        node.generatedAssetId
+        for node in canvas.nodes.values()
+        if isinstance(node, StoryArtifactCanvasNode) and node.generatedAssetId
+    )
     next_canvas = canvas.model_copy(deep=True)
     index = len(next_canvas.nodes)
+    max_story_x = 80.0
+    for node in next_canvas.nodes.values():
+        if isinstance(node, DraftCanvasNode | StoryArtifactCanvasNode):
+            max_story_x = max(max_story_x, node.x + (node.width or 240) + 80)
+    asset_start_x = max(1500.0, max_story_x)
     for asset in list_assets(slug):
         if asset.id in represented:
             continue
@@ -369,8 +431,9 @@ def default_canvas_for_assets(slug: str, canvas: CanvasDocument) -> CanvasDocume
             index += 1
         next_canvas.nodes[node_id] = ImageGroupCanvasNode(
             displayName=asset.title,
-            x=80 + index * 40,
-            y=80 + index * 40,
+            x=asset_start_x + (index % 3) * 280,
+            y=80 + (index // 3) * 240,
+            tags=node_tags(*asset.tags, "generated-image" if asset.kind == "generated" else "imported-image"),
             assetIds=[asset.id],
             activeAssetId=asset.id,
         )
@@ -434,7 +497,13 @@ def parent_png_paths(slug: str, refs: list[str]) -> list[Path]:
     return [asset_png_path(slug, ref) for ref in refs]
 
 
-async def import_asset(slug: str, upload: UploadFile, title: str | None = None) -> AssetSummary:
+async def import_asset(
+    slug: str,
+    upload: UploadFile,
+    title: str | None = None,
+    canvas_x: float | None = None,
+    canvas_y: float | None = None,
+) -> AssetSummary:
     require_project(slug)
     if upload.content_type not in {"image/png", "image/jpeg", "image/webp"}:
         raise HTTPException(status_code=400, detail="Only PNG, JPEG, and WebP imports are supported")
@@ -475,6 +544,18 @@ async def import_asset(slug: str, upload: UploadFile, title: str | None = None) 
         updatedAt=now,
     )
     summary = write_asset_metadata(slug, metadata)
+    if canvas_x is not None and canvas_y is not None:
+        canvas = read_stored_canvas(slug)
+        node_id = canvas_node_id(asset_id)
+        canvas.nodes[node_id] = ImageGroupCanvasNode(
+            displayName=summary.title,
+            x=canvas_x,
+            y=canvas_y,
+            tags=node_tags("imported-image"),
+            assetIds=[asset_id],
+            activeAssetId=asset_id,
+        )
+        write_canvas(slug, canvas)
     logger.debug("import asset complete slug=%s asset_id=%s hash=%s", slug, asset_id, content_hash)
     return summary
 

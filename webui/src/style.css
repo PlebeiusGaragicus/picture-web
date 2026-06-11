@@ -134,32 +134,52 @@ button {
 
 .toolbar {
   position: absolute;
+  right: 12px;
+  left: 12px;
   z-index: 10;
   display: flex;
   gap: 12px;
   align-items: center;
   padding: 12px;
-  margin: 12px;
   background: rgb(15 23 42 / 0.88);
   border: 1px solid #334155;
   border-radius: 14px;
   backdrop-filter: blur(8px);
 }
 
-.adaptation-panel {
-  position: absolute;
-  z-index: 12;
-  top: 76px;
-  left: 12px;
-  width: 390px;
-  max-height: calc(100vh - 96px);
-  overflow: auto;
-  padding: 14px;
-  background: rgb(15 23 42 / 0.94);
+.toolbar-left {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.toolbar-right {
+  margin-left: auto;
+}
+
+.view-switcher {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  background: #020617;
   border: 1px solid #334155;
-  border-radius: 16px;
-  box-shadow: 0 18px 48px rgb(0 0 0 / 0.32);
-  backdrop-filter: blur(8px);
+  border-radius: 999px;
+}
+
+.view-switcher button {
+  padding: 6px 12px;
+  color: #cbd5e1;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.view-switcher button.active {
+  color: #0f172a;
+  background: #93c5fd;
 }
 
 .adaptation-checklist {
@@ -184,6 +204,19 @@ button {
   color: #bbf7d0;
   background: #14532d;
   border-color: #166534;
+}
+
+.adaptation-status.failed {
+  color: #fecaca;
+  background: #7f1d1d;
+  border-color: #991b1b;
+}
+
+.adaptation-status-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .file-button {
@@ -215,70 +248,162 @@ button {
   background: #1d4ed8;
 }
 
-.adaptation-section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.workflow-run-section {
+  padding: 12px;
+  background: rgb(15 23 42 / 0.8);
+  border: 1px solid #334155;
+  border-radius: 14px;
 }
 
-.adaptation-section-heading h3 {
+.workflow-run-button {
+  min-height: 44px;
+  font-weight: 900;
+}
+
+.story-adaptation-view {
+  overflow: auto;
+  background:
+    radial-gradient(circle at top left, rgb(37 99 235 / 0.12), transparent 34%),
+    #111827;
+}
+
+.story-adaptation-screen {
+  position: relative;
+  display: grid;
+  gap: 18px;
+  min-height: 100%;
+  padding: 96px 24px 260px;
+}
+
+.story-adaptation-header {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px;
+  background: rgb(15 23 42 / 0.9);
+  border: 1px solid #334155;
+  border-radius: 18px;
+}
+
+.story-adaptation-header h1 {
+  margin: 0 0 6px;
+}
+
+.story-adaptation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.story-card,
+.story-adaptation-grid .workflow-run-section,
+.story-adaptation-grid .book-upload-section {
+  margin: 0;
+  padding: 16px;
+  background: rgb(15 23 42 / 0.88);
+  border: 1px solid #334155;
+  border-radius: 16px;
+}
+
+.story-card h2,
+.story-adaptation-grid h2 {
   margin: 0;
 }
 
-.adaptation-section-heading span,
-.adaptation-prompt-row small {
-  color: #94a3b8;
-  font-size: 12px;
+.visual-style-card,
+.import-drafts-card {
+  grid-column: span 2;
 }
 
-.adaptation-prompt-list {
-  display: grid;
-  gap: 8px;
+@media (max-width: 900px) {
+  .visual-style-card,
+  .import-drafts-card {
+    grid-column: auto;
+  }
+
+  .story-adaptation-header {
+    display: grid;
+  }
 }
 
-.adaptation-prompt-row {
-  display: grid;
-  grid-template-columns: 44px 1fr auto;
-  gap: 10px;
-  align-items: center;
-  padding: 8px;
-  background: #111827;
-  border: 1px solid #334155;
-  border-radius: 12px;
+.validation-warning {
+  padding: 12px 14px;
+  color: #fde68a;
+  background: #422006;
+  border: 1px solid #a16207;
+  border-radius: 14px;
+  font-weight: 700;
 }
 
-.adaptation-prompt-row strong,
-.adaptation-prompt-row small {
-  display: block;
+.workflow-log-drawer {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  z-index: 18;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.adaptation-thumb {
-  overflow: hidden;
-  width: 44px;
-  height: 44px;
-  padding: 0;
   background: #020617;
-  border: 1px solid #334155;
-  border-radius: 8px;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
 }
 
-.adaptation-thumb img {
-  display: block;
+.workflow-log-panel {
+  overflow: hidden;
+  background: #020617;
+}
+
+.workflow-log-drawer.collapsed,
+.workflow-log-panel.collapsed {
+  max-height: 42px;
+}
+
+.story-log-card {
+  overflow: hidden;
+  background: #020617;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+}
+
+.workflow-log-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  padding: 10px 12px;
+  color: #93c5fd;
+  background: #0f172a;
+  border: 0;
+  border-bottom: 1px solid #1e293b;
+  text-align: left;
 }
 
-.adaptation-thumb.placeholder {
-  background: repeating-linear-gradient(135deg, #0f172a, #0f172a 6px, #111827 6px, #111827 12px);
+.workflow-log-toggle span {
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-.toolbar-toggle,
-.checkbox-row {
+.workflow-log-toggle span:last-child {
+  margin-left: auto;
+}
+
+.workflow-log-output {
+  height: min(42vh, 420px);
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  color: #d1fae5;
+  font: 12px/1.45 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+}
+
+.toolbar-toggle {
   display: inline-flex;
   gap: 6px;
   align-items: center;
@@ -287,9 +412,32 @@ button {
   font-weight: 700;
 }
 
-.toolbar-toggle input,
-.checkbox-row input {
+.toolbar-toggle input {
   width: auto;
+}
+
+.tag-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  max-width: 620px;
+}
+
+.tag-filter-bar button {
+  padding: 4px 8px;
+  color: #cbd5e1;
+  background: #1f2937;
+  border: 1px solid #475569;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.tag-filter-bar button.active {
+  color: #0f172a;
+  background: #93c5fd;
+  border-color: #bfdbfe;
 }
 
 .project-back-button {
@@ -912,6 +1060,21 @@ pre {
   border-radius: 12px;
 }
 
+.archetype-draft-node {
+  color: #f5d0fe;
+  background: #581c87;
+  border-color: #d946ef;
+}
+
+.archetype-draft-node .draft-placeholder {
+  background:
+    linear-gradient(135deg, rgb(216 180 254 / 0.18) 25%, transparent 25%) -8px 0 / 16px 16px,
+    linear-gradient(225deg, rgb(216 180 254 / 0.18) 25%, transparent 25%) -8px 0 / 16px 16px,
+    linear-gradient(315deg, rgb(216 180 254 / 0.18) 25%, transparent 25%) 0 0 / 16px 16px,
+    linear-gradient(45deg, rgb(216 180 254 / 0.18) 25%, #3b0764 25%) 0 0 / 16px 16px;
+  border-color: #e879f9;
+}
+
 .draft-placeholder {
   position: relative;
   width: 100%;
@@ -939,6 +1102,23 @@ pre {
   border-color: #22c55e;
 }
 
+.character-artifact-node {
+  color: #fef3c7;
+  background: #422006;
+  border-color: #f59e0b;
+}
+
+.location-artifact-node {
+  color: #ccfbf1;
+  background: #134e4a;
+  border-color: #2dd4bf;
+}
+
+.location-artifact-node .story-artifact-badge {
+  color: #042f2e;
+  background: #5eead4;
+}
+
 .story-artifact-icon {
   position: relative;
   display: grid;
@@ -963,6 +1143,41 @@ pre {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.story-artifact-sidebar-preview {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  color: #e5e7eb;
+  background: #020617;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  text-align: left;
+}
+
+.story-artifact-sidebar-preview img {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  background: #fff;
+}
+
+.story-artifact-sidebar-preview > span:not(.sidebar-preview-eye) {
+  padding: 0 10px 10px;
+  font-weight: 800;
+}
+
+.story-artifact-sidebar-preview .sidebar-preview-eye {
+  opacity: 0;
+}
+
+.story-artifact-sidebar-preview:hover .sidebar-preview-eye {
+  opacity: 1;
 }
 
 .story-artifact-badge {
@@ -1091,16 +1306,6 @@ pre {
   transition: opacity 120ms ease;
 }
 
-.details-button {
-  top: 6px;
-  right: 6px;
-  font-family: Georgia, serif;
-  font-size: 20px;
-  font-style: italic;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-
 .chat-button {
   top: 46px;
   right: 6px;
@@ -1119,8 +1324,7 @@ pre {
 
 .image-group-node:hover .node-action-button,
 .image-group-node:hover .variant-controls,
-.draft-node:hover .details-button,
-.story-artifact-node:hover .details-button {
+.story-artifact-node:hover .view-image-button {
   opacity: 1;
 }
 

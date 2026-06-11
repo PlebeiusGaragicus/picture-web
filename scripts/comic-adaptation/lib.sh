@@ -33,3 +33,20 @@ ensure_project_adaptation_dirs() {
     "$ADAPTATION_ROOT/scenes" \
     "$ADAPTATION_ROOT/locations/prompts"
 }
+
+ensure_pi_node_runtime() {
+  local node22_bin="/opt/homebrew/opt/node@22/bin"
+  if [[ -x "$node22_bin/node" ]]; then
+    export PATH="$node22_bin:$PATH"
+  fi
+
+  local node_version
+  node_version="$(node --version 2>/dev/null || true)"
+  local node_major="${node_version#v}"
+  node_major="${node_major%%.*}"
+  if [[ -z "$node_major" || "$node_major" -lt 22 ]]; then
+    echo "error: Pi requires Node 22+, but found ${node_version:-no node} at $(command -v node 2>/dev/null || echo missing)" >&2
+    echo "error: Install/link Node 22 or ensure /opt/homebrew/opt/node@22/bin is available." >&2
+    exit 1
+  fi
+}

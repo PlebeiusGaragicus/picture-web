@@ -15,7 +15,7 @@ Run Pi from the repo root so project-local `.pi/skills/` are available. Keep boo
 photo-library/projects/<project-slug>/adaptation/
 ```
 
-Set `project.settings.projectType` to `comic-adaptation` for projects that should show the adaptation UI.
+Every `photo-web` project can open the Story Adaptation screen. New projects do not need a special project type.
 
 The runner loads the full book once, stores the resulting Pi session id, then creates fresh forks for each artifact. Skills write files directly with the write tool; `pi -p` stdout is used only for terse progress replies.
 

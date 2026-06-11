@@ -158,6 +158,7 @@ fi
 
 [[ "$PWD" == "$ROOT_DIR" ]] || die "Run from repo root: $ROOT_DIR"
 [[ -d "$ROOT_DIR/.pi/skills" ]] || die "Missing .pi/skills; run from the project with local Pi skills"
+ensure_pi_node_runtime
 
 resolve_adaptation_target "$1"
 BOOK_ROOT="$ADAPTATION_ROOT"

@@ -69,6 +69,7 @@ export interface CanvasNodeLayout {
   x: number;
   y: number;
   width?: number | null;
+  tags: string[];
 }
 
 export interface DraftCanvasNode extends CanvasNodeLayout {
@@ -133,6 +134,14 @@ export interface AdaptationStatus {
   locations: Record<string, AdaptationAssetLink>;
 }
 
+export interface AdaptationWorkflowStatus {
+  running: boolean;
+  returnCode?: number | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  log: string;
+}
+
 export interface AdaptationGenerateResponse {
   generated: boolean;
   kind: 'character' | 'artifact';
@@ -140,6 +149,11 @@ export interface AdaptationGenerateResponse {
   asset?: Asset | null;
   status?: AdaptationStatus | null;
   message: string;
+}
+
+export interface AdaptationCanvasImportResponse {
+  canvas: CanvasDocument;
+  importedNodeCount: number;
 }
 
 export interface ChatTurnSettings {

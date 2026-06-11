@@ -16,7 +16,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import './style.css';
 import { api } from './api';
-import type { AdaptationStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode } from './types';
+import type { AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode } from './types';
 
 interface DraftNodeData extends DraftCanvasNode {
   kind: 'draft';
@@ -44,6 +44,8 @@ interface StoryArtifactNodeData extends StoryArtifactCanvasNode {
   kind: 'storyArtifact';
   nodeId: string;
   generatedAsset: Asset | null;
+  onRefineChat: (nodeId: string, assetId: string) => void;
+  onCreateChildDraft: (nodeId: string, assetId: string) => void;
   isGenerating?: boolean;
   onDetails: (nodeId: string) => void;
   onViewAsset: (assetId: string) => void;
@@ -95,6 +97,7 @@ function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): Ca
               x: node.position.x,
               y: node.position.y,
               width: existing?.width ?? null,
+              tags: node.data.tags ?? [],
               refs: node.data.refs,
               prompt: node.data.prompt,
               params: node.data.params,
@@ -110,6 +113,7 @@ function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): Ca
               x: node.position.x,
               y: node.position.y,
               width: existing?.width ?? node.data.width ?? null,
+              tags: node.data.tags ?? [],
               artifactKind: node.data.artifactKind,
               artifactKey: node.data.artifactKey,
               promptPath: node.data.promptPath,
@@ -128,6 +132,7 @@ function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): Ca
             x: node.position.x,
             y: node.position.y,
             width: existing?.width ?? null,
+            tags: node.data.tags ?? [],
             assetIds: node.data.assetIds,
             activeAssetId: node.data.activeAssetId ?? node.data.assetIds[0] ?? null,
           },
@@ -198,7 +203,7 @@ function toFlowNodes(
         id,
         position: { x: canvasNode.x, y: canvasNode.y },
         type: 'storyArtifact',
-        data: { ...canvasNode, kind: 'storyArtifact', nodeId: id, generatedAsset, isGenerating: generatingNodeIds.has(id), onDetails, onViewAsset },
+        data: { ...canvasNode, kind: 'storyArtifact', nodeId: id, generatedAsset, isGenerating: generatingNodeIds.has(id), onDetails, onViewAsset, onRefineChat, onCreateChildDraft: () => undefined },
       };
     }
     const groupAssets = canvasNode.assetIds.map((assetId) => assetById.get(assetId)).filter((asset): asset is Asset => Boolean(asset));
@@ -229,14 +234,21 @@ function App() {
   const [pendingConnectionSource, setPendingConnectionSource] = useState<string | null>(null);
   const [zoomPercent, setZoomPercent] = useState(zoomToPercent(1));
   const [viewerNodeId, setViewerNodeId] = useState<string | null>(null);
+  const [viewerAssetId, setViewerAssetId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ nodeId: string; assetId?: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
+  const [projectView, setProjectView] = useState<'canvas' | 'adaptation'>('canvas');
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const [adaptation, setAdaptation] = useState<AdaptationStatus | null>(null);
-  const [isGeneratingAdaptation, setIsGeneratingAdaptation] = useState(false);
+  const [adaptationWorkflow, setAdaptationWorkflow] = useState<AdaptationWorkflowStatus | null>(null);
+  const [adaptationValidation, setAdaptationValidation] = useState<AdaptationWorkflowStatus | null>(null);
+  const [isValidationLogExpanded, setIsValidationLogExpanded] = useState(false);
+  const [isWorkflowLogExpanded, setIsWorkflowLogExpanded] = useState(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const reactFlowRef = useRef<ReactFlowInstance<PhotoNodeData> | null>(null);
+  const pendingImportPositionRef = useRef<{ x: number; y: number } | undefined>(undefined);
   const generatingNodeIdsRef = useRef<Set<string>>(new Set());
   const chatSessionsRef = useRef<ChatSession[]>([]);
 
@@ -293,13 +305,19 @@ function App() {
 
   const openViewer = useCallback((nodeId: string) => {
     setViewerNodeId(nodeId);
+    setViewerAssetId(null);
   }, []);
 
   const openAssetInViewer = useCallback((assetId: string) => {
     setNodes((current) => {
       const targetNode = current.find((node) => node.data.kind === 'imageGroup' && node.data.assetIds.includes(assetId)) as Node<ImageGroupNodeData> | undefined;
-      if (!targetNode) return current;
+      if (!targetNode) {
+        setViewerAssetId(assetId);
+        setViewerNodeId(null);
+        return current;
+      }
       setViewerNodeId(targetNode.id);
+      setViewerAssetId(null);
       const next = current.map((node) => {
         if (node.id !== targetNode.id || node.data.kind !== 'imageGroup') return node;
         const activeAsset = node.data.assets.find((asset) => asset.id === assetId) ?? node.data.activeAsset;
@@ -373,9 +391,21 @@ function App() {
     };
   }, []);
 
+  const availableTagFilters = useMemo(() => {
+    const tags = new Set<string>();
+    nodes.forEach((node) => node.data.tags.forEach((tag) => tags.add(tag)));
+    return Array.from(tags).sort();
+  }, [nodes]);
+  const filteredNodes = useMemo(() => {
+    if (activeTagFilters.length === 0) return nodes;
+    const required = new Set(activeTagFilters);
+    return nodes.filter((node) => node.data.tags.some((tag) => required.has(tag)));
+  }, [activeTagFilters, nodes]);
+
   const edges: Edge[] = useMemo(() => {
+    const visibleNodeIds = new Set(filteredNodes.map((node) => node.id));
     const nodeForAsset = new Map<string, Node<ImageGroupNodeData>>();
-    nodes.forEach((node) => {
+    filteredNodes.forEach((node) => {
       if (node.data.kind === 'imageGroup') {
         const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
         node.data.assetIds.forEach((assetId) => nodeForAsset.set(assetId, imageNode));
@@ -396,25 +426,25 @@ function App() {
         style: isVisibleLineage ? undefined : { strokeDasharray: '5 5', opacity: 0.35 },
       };
     };
-    const assetEdges = nodes.flatMap((node) => {
+    const assetEdges = filteredNodes.flatMap((node) => {
       if (node.data.kind !== 'imageGroup') return [];
       const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
       return node.data.assets.flatMap((asset) => (asset.generation?.refs ?? []).flatMap((ref) => edgeForAssetRef(imageNode, asset.id, ref) ?? []));
     });
-    const draftEdges = nodes.flatMap((node) => {
+    const draftEdges = filteredNodes.flatMap((node) => {
       if (node.data.kind !== 'draft') return [];
       const draftNode: Node<DraftNodeData> = { ...node, data: node.data };
       return node.data.refs.flatMap((ref) => edgeForAssetRef(draftNode, null, ref) ?? []);
     });
-    const artifactRefEdges = nodes.flatMap((node) => {
+    const artifactRefEdges = filteredNodes.flatMap((node) => {
       if (node.data.kind !== 'storyArtifact') return [];
       const artifactNode: Node<StoryArtifactNodeData> = { ...node, data: node.data };
       return node.data.refs.flatMap((ref) => edgeForAssetRef(artifactNode, null, ref) ?? []);
     });
-    const artifactGeneratedEdges = nodes.flatMap((node): Edge[] => {
+    const artifactGeneratedEdges = filteredNodes.flatMap((node): Edge[] => {
       if (node.data.kind !== 'storyArtifact' || !node.data.generatedAssetId) return [];
       const targetNode = nodeForAsset.get(node.data.generatedAssetId);
-      if (!targetNode) return [];
+      if (!targetNode || !visibleNodeIds.has(targetNode.id)) return [];
       return [{
         id: `${node.id}-${targetNode.id}-${node.data.generatedAssetId}`,
         source: node.id,
@@ -424,7 +454,7 @@ function App() {
       }];
     });
     return [...assetEdges, ...draftEdges, ...artifactRefEdges, ...artifactGeneratedEdges];
-  }, [nodes]);
+  }, [filteredNodes]);
 
   const selectedNode = useMemo(() => nodes.find((node) => node.id === popoverNodeId) ?? null, [nodes, popoverNodeId]);
   const activeChatSession = useMemo(
@@ -487,6 +517,7 @@ function App() {
 
   const openProject = async (projectSlug: string) => {
     setOpenProjectSlug(projectSlug);
+    setProjectView('canvas');
     setSelectedIds([]);
     setSelectedNodeIds([]);
     setError(null);
@@ -494,6 +525,7 @@ function App() {
 
   const closeProject = () => {
     setOpenProjectSlug('');
+    setProjectView('canvas');
     setAssets([]);
     setChatSessions([]);
     setActiveChatSessionId(null);
@@ -546,15 +578,23 @@ function App() {
     }
   };
 
-  const importFiles = async (files: FileList | File[]) => {
+  const flowPositionFromClientPoint = (point: { x: number; y: number }) => {
+    const flowPosition = reactFlowRef.current?.screenToFlowPosition(point);
+    if (flowPosition) return flowPosition;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    return rect ? { x: point.x - rect.left, y: point.y - rect.top } : { x: point.x, y: point.y };
+  };
+
+  const importFiles = async (files: FileList | File[], position?: { x: number; y: number }) => {
     if (!openProjectSlug) return;
     const images = Array.from(files).filter((file) => file.type.startsWith('image/'));
     if (!images.length) return;
     try {
       setError(null);
-      for (const file of images) {
+      for (const [index, file] of images.entries()) {
         try {
-          await api.importAsset(openProjectSlug, file);
+          const nextPosition = position ? { x: position.x + (index % 3) * 280, y: position.y + Math.floor(index / 3) * 240 } : undefined;
+          await api.importAsset(openProjectSlug, file, nextPosition);
         } catch (err) {
           const message = String(err);
           if (message.includes('Already imported')) {
@@ -571,6 +611,7 @@ function App() {
   };
 
   const openImportPicker = () => {
+    pendingImportPositionRef.current = contextMenu ? flowPositionFromClientPoint({ x: contextMenu.x, y: contextMenu.y }) : undefined;
     setContextMenu(null);
     fileInputRef.current?.click();
   };
@@ -681,6 +722,7 @@ function App() {
         displayName: '',
         x: position.x,
         y: position.y,
+        tags: [],
         refs: Array.from(new Set(refs)),
         prompt: options.prompt ?? '',
         params: options.params ?? defaultDraftParams,
@@ -720,6 +762,17 @@ function App() {
       ? { x: sourceNode.position.x + 220, y: sourceNode.position.y }
       : { x: 180, y: 160 };
     await createDraftAt(refs, position, { prompt: sourceAsset.prompt?.text ?? '', params });
+  };
+
+  const createChildDraftFromAsset = async (sourceNodeId: string, sourceAssetId: string) => {
+    const sourceNode = nodes.find((node) => node.id === sourceNodeId);
+    const sourceAsset = assets.find((asset) => asset.id === sourceAssetId);
+    const position = sourceNode
+      ? { x: sourceNode.position.x + 260, y: sourceNode.position.y }
+      : { x: 180, y: 160 };
+    await createDraftAt([sourceAssetId], position, {
+      displayName: sourceAsset ? `${assetLabel(sourceAsset)} child` : 'Child draft',
+    });
   };
 
   const generateDraft = async (id: string, draft: DraftNodeData) => {
@@ -791,10 +844,9 @@ function App() {
   };
 
   const currentProject = projects.find((project) => project.slug === openProjectSlug);
-  const isComicAdaptationProject = currentProject?.settings?.projectType === 'comic-adaptation';
 
   const loadAdaptation = useCallback(async () => {
-    if (!openProjectSlug || !isComicAdaptationProject) {
+    if (!openProjectSlug) {
       setAdaptation(null);
       return;
     }
@@ -803,11 +855,64 @@ function App() {
     } catch (err) {
       setError(String(err));
     }
-  }, [openProjectSlug, isComicAdaptationProject]);
+  }, [openProjectSlug]);
 
   useEffect(() => {
     void loadAdaptation();
   }, [loadAdaptation, assets]);
+
+  const loadAdaptationWorkflow = useCallback(async () => {
+    if (!openProjectSlug) {
+      setAdaptationWorkflow(null);
+      return;
+    }
+    try {
+      setAdaptationWorkflow(await api.getAdaptationWorkflow(openProjectSlug));
+    } catch (err) {
+      setError(String(err));
+    }
+  }, [openProjectSlug]);
+
+  const loadAdaptationValidation = useCallback(async () => {
+    if (!openProjectSlug) {
+      setAdaptationValidation(null);
+      return;
+    }
+    try {
+      setAdaptationValidation(await api.getAdaptationValidation(openProjectSlug));
+    } catch (err) {
+      setError(String(err));
+    }
+  }, [openProjectSlug]);
+
+  useEffect(() => {
+    void loadAdaptationWorkflow();
+  }, [loadAdaptationWorkflow]);
+
+  useEffect(() => {
+    void loadAdaptationValidation();
+  }, [loadAdaptationValidation]);
+
+  useEffect(() => {
+    if (!openProjectSlug || !adaptationWorkflow?.running) return;
+    const timer = window.setInterval(async () => {
+      const next = await api.getAdaptationWorkflow(openProjectSlug);
+      setAdaptationWorkflow(next);
+      if (!next.running) {
+        await reload();
+        await loadAdaptation();
+      }
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [adaptationWorkflow?.running, loadAdaptation, openProjectSlug]);
+
+  useEffect(() => {
+    if (!openProjectSlug || !adaptationValidation?.running) return;
+    const timer = window.setInterval(async () => {
+      setAdaptationValidation(await api.getAdaptationValidation(openProjectSlug));
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [adaptationValidation?.running, openProjectSlug]);
 
   const saveAdaptationStyle = async (visualStyle: string) => {
     if (!openProjectSlug) return;
@@ -819,41 +924,47 @@ function App() {
     setAdaptation(await api.importAdaptationBook(openProjectSlug, file));
   };
 
-  const importAdaptationStyleRef = async (kind: 'archetype-character' | 'archetype-scene', file: File) => {
+  const setAdaptationStyleRefAsset = async (kind: 'archetype-character' | 'archetype-scene', assetId: string) => {
     if (!openProjectSlug) return;
-    setAdaptation(await api.importAdaptationStyleRef(openProjectSlug, kind, file));
+    setAdaptation(await api.setAdaptationStyleRefAsset(openProjectSlug, kind, assetId));
     await reload();
   };
 
-  const generateNextAdaptationCharacter = async () => {
-    if (!openProjectSlug || isGeneratingAdaptation) return;
-    setIsGeneratingAdaptation(true);
-    try {
-      const result = await api.generateNextAdaptationCharacterSheet(openProjectSlug);
-      await reload();
-      await loadAdaptation();
-      if (!result.generated) setError(result.message);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setIsGeneratingAdaptation(false);
-    }
+  const startAdaptationWorkflow = async () => {
+    if (!openProjectSlug) return;
+    setError(null);
+    setIsWorkflowLogExpanded(true);
+    setAdaptationWorkflow(await api.startAdaptationWorkflow(openProjectSlug));
+  };
+
+  const startAdaptationValidation = async () => {
+    if (!openProjectSlug) return;
+    setError(null);
+    setIsValidationLogExpanded(true);
+    setAdaptationValidation(await api.startAdaptationValidation(openProjectSlug));
+  };
+
+  const importAdaptationDraftsToCanvas = async () => {
+    if (!openProjectSlug) return;
+    setError(null);
+    const result = await api.importAdaptationDraftsToCanvas(openProjectSlug);
+    setCanvas(result.canvas);
+    await loadProject(openProjectSlug);
+    setProjectView('canvas');
   };
 
   const generateStoryArtifact = async (id: string, artifact: StoryArtifactNodeData) => {
-    if (!openProjectSlug || isGeneratingAdaptation) return;
-    setIsGeneratingAdaptation(true);
+    if (!openProjectSlug) return;
     setGeneratingNodeIds((current) => new Set(current).add(id));
     setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
     try {
       setError(null);
-      const result = await api.generateAdaptationArtifact(openProjectSlug, artifact.artifactKind, artifact.artifactKey);
+      const result = await api.generateAdaptationArtifact(openProjectSlug, artifact.artifactKind, artifact.artifactKey, id);
       if (result.status) setAdaptation(result.status);
       await reload();
     } catch (err) {
       setError(String(err));
     } finally {
-      setIsGeneratingAdaptation(false);
       setGeneratingNodeIds((current) => {
         const next = new Set(current);
         next.delete(id);
@@ -885,20 +996,24 @@ function App() {
     <div className="app">
       <main
         ref={canvasRef}
-        className={`canvas ${isDraggingFile ? 'dragging-file' : ''}`}
+        className={`canvas ${projectView === 'adaptation' ? 'story-adaptation-view' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
         onDragOver={(event) => {
+          if (projectView !== 'canvas') return;
           event.preventDefault();
           setIsDraggingFile(true);
         }}
         onDragLeave={(event) => {
+          if (projectView !== 'canvas') return;
           if (event.currentTarget === event.target) setIsDraggingFile(false);
         }}
         onDrop={async (event) => {
+          if (projectView !== 'canvas') return;
           event.preventDefault();
           setIsDraggingFile(false);
-          await importFiles(event.dataTransfer.files);
+          await importFiles(event.dataTransfer.files, flowPositionFromClientPoint({ x: event.clientX, y: event.clientY }));
         }}
         onContextMenu={(event) => {
+          if (projectView !== 'canvas') return;
           event.preventDefault();
           setContextMenu({ x: event.clientX, y: event.clientY });
         }}
@@ -910,118 +1025,170 @@ function App() {
           multiple
           hidden
           onChange={async (event) => {
-            if (event.target.files) await importFiles(event.target.files);
+            if (event.target.files) await importFiles(event.target.files, pendingImportPositionRef.current);
+            pendingImportPositionRef.current = undefined;
             event.currentTarget.value = '';
           }}
         />
         <div className="toolbar">
-          <button className="project-back-button" onClick={closeProject} title="Back to projects">
-            {currentProject?.name ?? openProjectSlug}
-          </button>
-          <label className="toolbar-toggle">
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(event) => setShowArchived(event.target.checked)}
-            />
-            Show archived
-          </label>
-          {error && <span className="error">{error}</span>}
+          <div className="toolbar-left">
+            <button className="project-back-button" onClick={closeProject} title="Back to projects">
+              {currentProject?.name ?? openProjectSlug}
+            </button>
+            <div className="view-switcher" role="tablist" aria-label="Project view">
+              <button className={projectView === 'canvas' ? 'active' : ''} onClick={() => setProjectView('canvas')}>Canvas</button>
+              <button className={projectView === 'adaptation' ? 'active' : ''} onClick={() => setProjectView('adaptation')}>Story Adaptation</button>
+            </div>
+            {projectView === 'canvas' && (
+              <label className="toolbar-toggle">
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={(event) => setShowArchived(event.target.checked)}
+                />
+                Show archived
+              </label>
+            )}
+            {error && <span className="error">{error}</span>}
+          </div>
+          {projectView === 'canvas' && (
+            <div className="tag-filter-bar">
+              <button className={activeTagFilters.length === 0 ? 'active' : ''} onClick={() => setActiveTagFilters([])}>All</button>
+              {['archetype', 'character-sheet', 'location', 'generated-image'].map((tag) => (
+                <button
+                  key={tag}
+                  className={activeTagFilters.includes(tag) ? 'active' : ''}
+                  onClick={() => setActiveTagFilters((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag])}
+                >
+                  {tag}
+                </button>
+              ))}
+              {availableTagFilters.filter((tag) => !['archetype', 'character-sheet', 'location', 'generated-image'].includes(tag)).slice(0, 6).map((tag) => (
+                <button
+                  key={tag}
+                  className={activeTagFilters.includes(tag) ? 'active' : ''}
+                  onClick={() => setActiveTagFilters((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag])}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        {isComicAdaptationProject && adaptation && (
-          <AdaptationPanel
+        {projectView === 'adaptation' && adaptation && (
+          <StoryAdaptationScreen
             adaptation={adaptation}
-            assets={assets}
-            projectSlug={openProjectSlug}
-            isGenerating={isGeneratingAdaptation}
+            workflow={adaptationWorkflow}
+            validation={adaptationValidation}
+            isWorkflowLogExpanded={isWorkflowLogExpanded}
+            isValidationLogExpanded={isValidationLogExpanded}
             onSaveStyle={saveAdaptationStyle}
             onImportBook={importAdaptationBook}
-            onImportStyleRef={importAdaptationStyleRef}
-            onGenerateNextCharacter={generateNextAdaptationCharacter}
-            onViewAsset={openAssetInViewer}
+            onStartWorkflow={startAdaptationWorkflow}
+            onStartValidation={startAdaptationValidation}
+            onImportDraftsToCanvas={importAdaptationDraftsToCanvas}
+            onToggleWorkflowLog={() => setIsWorkflowLogExpanded((current) => !current)}
+            onToggleValidationLog={() => setIsValidationLogExpanded((current) => !current)}
           />
         )}
-        <ReactFlow
-          nodeTypes={nodeTypes}
-          nodes={nodes}
-          edges={edges}
-          edgesFocusable={false}
-          edgesUpdatable={false}
-          selectNodesOnDrag={false}
-          elementsSelectable
-          minZoom={minZoom}
-          maxZoom={maxZoom}
-          onMove={(_, viewport) => setZoomPercent(zoomToPercent(viewport.zoom))}
-          onNodesChange={onNodesChange}
-          onNodeDragStop={saveLayout}
-          onInit={(instance) => {
-            reactFlowRef.current = instance;
-          }}
-          onConnectStart={(_, params) => {
-            const sourceNode = nodes.find((node) => node.id === params.nodeId);
-            setPendingConnectionSource(sourceNode?.data.kind === 'imageGroup' ? sourceNode.data.activeAsset?.id ?? null : null);
-          }}
-          onConnectEnd={(event) => {
-            if (!pendingConnectionSource || !(event instanceof MouseEvent)) return;
-            const target = event.target as HTMLElement | null;
-              const draftElement = target?.closest?.('[data-id^="draft_"]') as HTMLElement | null;
-            if (draftElement?.dataset.id) {
-              const nextNodes = nodes.map((node) =>
-                  node.id === draftElement.dataset.id && node.data.kind === 'draft'
-                    ? { ...node, data: { ...node.data, refs: Array.from(new Set([...node.data.refs, pendingConnectionSource])) } }
+        {projectView === 'canvas' && (
+          <>
+            <ReactFlow
+              nodeTypes={nodeTypes}
+              nodes={filteredNodes}
+              edges={edges}
+              edgesFocusable={false}
+              edgesUpdatable={false}
+              selectNodesOnDrag={false}
+              elementsSelectable
+              minZoom={minZoom}
+              maxZoom={maxZoom}
+              onMove={(_, viewport) => setZoomPercent(zoomToPercent(viewport.zoom))}
+              onNodesChange={onNodesChange}
+              onNodeDragStop={saveLayout}
+              onInit={(instance) => {
+                reactFlowRef.current = instance;
+              }}
+              onConnectStart={(_, params) => {
+                const sourceNode = nodes.find((node) => node.id === params.nodeId);
+                const sourceAssetId = sourceNode?.data.kind === 'imageGroup'
+                  ? sourceNode.data.activeAsset?.id ?? null
+                  : sourceNode?.data.kind === 'storyArtifact'
+                    ? sourceNode.data.generatedAssetId ?? null
+                    : null;
+                setPendingConnectionSource(sourceAssetId);
+              }}
+              onConnectEnd={(event) => {
+                if (!pendingConnectionSource || !(event instanceof MouseEvent)) return;
+                const target = event.target as HTMLElement | null;
+                const draftElement = target?.closest?.('[data-id^="draft_"]') as HTMLElement | null;
+                if (draftElement?.dataset.id) {
+                  const nextNodes = nodes.map((node) =>
+                    node.id === draftElement.dataset.id && node.data.kind === 'draft'
+                      ? { ...node, data: { ...node.data, refs: Array.from(new Set([...node.data.refs, pendingConnectionSource])) } }
+                      : node,
+                  );
+                  setNodes(nextNodes);
+                  void persistNodes(nextNodes);
+                  setPopoverNodeId(draftElement.dataset.id);
+                } else {
+                  const flowPosition = reactFlowRef.current?.screenToFlowPosition({
+                    x: event.clientX,
+                    y: event.clientY,
+                  });
+                  void createDraftAt(
+                    [pendingConnectionSource],
+                    flowPosition ?? { x: event.clientX, y: event.clientY },
+                  );
+                }
+                setPendingConnectionSource(null);
+              }}
+              onConnect={(connection: Connection) => {
+                if (!connection.source || !connection.target) return;
+                const sourceNode = nodes.find((node) => node.id === connection.source);
+                const sourceAssetId = sourceNode?.data.kind === 'imageGroup'
+                  ? sourceNode.data.activeAsset?.id
+                  : sourceNode?.data.kind === 'storyArtifact'
+                    ? sourceNode.data.generatedAssetId
+                    : null;
+                if (!sourceAssetId) return;
+                const nextNodes = nodes.map((node) =>
+                  node.id === connection.target && node.data.kind === 'draft'
+                    ? { ...node, data: { ...node.data, refs: Array.from(new Set([...node.data.refs, sourceAssetId])) } }
                     : node,
                 );
-              setNodes(nextNodes);
-              void persistNodes(nextNodes);
-              setPopoverNodeId(draftElement.dataset.id);
-            } else {
-              const flowPosition = reactFlowRef.current?.screenToFlowPosition({
-                x: event.clientX,
-                y: event.clientY,
-              });
-              void createDraftAt(
-                [pendingConnectionSource],
-                flowPosition ?? { x: event.clientX, y: event.clientY },
-              );
-            }
-            setPendingConnectionSource(null);
-          }}
-          onConnect={(connection: Connection) => {
-            if (!connection.source || !connection.target) return;
-            const sourceNode = nodes.find((node) => node.id === connection.source);
-            const sourceAssetId = sourceNode?.data.kind === 'imageGroup' ? sourceNode.data.activeAsset?.id : null;
-            if (!sourceAssetId) return;
-            const nextNodes = nodes.map((node) =>
-                node.id === connection.target && node.data.kind === 'draft'
-                  ? { ...node, data: { ...node.data, refs: Array.from(new Set([...node.data.refs, sourceAssetId])) } }
-                  : node,
-              );
-            setNodes(nextNodes);
-            void persistNodes(nextNodes);
-            setPopoverNodeId(connection.target);
-          }}
-          onPaneClick={() => setPopoverNodeId(null)}
-          onSelectionChange={({ nodes: selected }) => {
-            setSelectedNodeIds(selected.map((node) => node.id));
-            setSelectedIds(selected.flatMap((node) => (node.data.kind === 'imageGroup' && node.data.activeAsset ? [node.data.activeAsset.id] : [])));
-          }}
-          proOptions={{ hideAttribution: true }}
-          fitView
-        >
-          <Controls showZoom={false} showInteractive={false} />
-          <Panel position="bottom-left" className="zoom-panel">
-            Zoom {zoomPercent}%
-          </Panel>
-        </ReactFlow>
-        {isDraggingFile && <div className="drop-overlay">Drop photos to import</div>}
-        {contextMenu && (
+                setNodes(nextNodes);
+                void persistNodes(nextNodes);
+                setPopoverNodeId(connection.target);
+              }}
+              onNodeClick={(_, node) => {
+                setActiveChatSessionId(null);
+                setPopoverNodeId(node.id);
+              }}
+              onPaneClick={() => setPopoverNodeId(null)}
+              onSelectionChange={({ nodes: selected }) => {
+                setSelectedNodeIds(selected.map((node) => node.id));
+                setSelectedIds(selected.flatMap((node) => (node.data.kind === 'imageGroup' && node.data.activeAsset ? [node.data.activeAsset.id] : [])));
+              }}
+              proOptions={{ hideAttribution: true }}
+              fitView
+            >
+              <Controls showZoom={false} showInteractive={false} />
+              <Panel position="bottom-left" className="zoom-panel">
+                Zoom {zoomPercent}%
+              </Panel>
+            </ReactFlow>
+            {isDraggingFile && <div className="drop-overlay">Drop photos to import</div>}
+          </>
+        )}
+        {contextMenu && projectView === 'canvas' && (
           <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()}>
             <button onClick={openImportPicker}>Import</button>
             <button onClick={createLooseDraft}>Generate</button>
           </div>
         )}
       </main>
-      {selectedNode && (
+      {projectView === 'canvas' && selectedNode && (
         <NodeSidebar
           node={selectedNode}
           assets={assets}
@@ -1031,13 +1198,15 @@ function App() {
           onGenerate={generateDraft}
           onGenerateArtifact={generateStoryArtifact}
           onGenerateVariants={generateImageVariants}
+          onSetStyleRefAsset={setAdaptationStyleRefAsset}
           onVariant={changeVariant}
           onCreateSibling={createSiblingDraft}
+          onCreateChildDraft={createChildDraftFromAsset}
           onDelete={deleteNodeById}
           onRefineChat={openChatForAsset}
         />
       )}
-      {activeChatSession && (
+      {projectView === 'canvas' && activeChatSession && (
         <ChatRefinementPanel
           session={activeChatSession}
           assets={assets}
@@ -1048,19 +1217,23 @@ function App() {
           onViewAsset={openAssetInViewer}
         />
       )}
-      {viewerNodeId && (
+      {projectView === 'canvas' && (viewerNodeId || viewerAssetId) && (
         <ImageViewer
           node={nodes.find((node) => node.id === viewerNodeId && node.data.kind === 'imageGroup') as Node<ImageGroupNodeData> | undefined}
+          fallbackAsset={assets.find((asset) => asset.id === viewerAssetId)}
           assets={assets}
           projectSlug={openProjectSlug}
-          onClose={() => setViewerNodeId(null)}
+          onClose={() => {
+            setViewerNodeId(null);
+            setViewerAssetId(null);
+          }}
           onVariant={changeVariant}
           onViewAsset={openAssetInViewer}
           onDetails={openViewerDetails}
           onDelete={deleteNodeById}
         />
       )}
-      {pendingDelete && (
+      {projectView === 'canvas' && pendingDelete && (
         <div className="confirm-backdrop" onClick={() => setPendingDelete(null)}>
           <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
             <h2>Confirm delete</h2>
@@ -1102,15 +1275,13 @@ function ProjectLanding({
   onCreated: (slug: string) => void;
 }) {
   const [name, setName] = useState('');
-  const [isComicAdaptation, setIsComicAdaptation] = useState(false);
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
   const [pendingProjectDelete, setPendingProjectDelete] = useState<Project | null>(null);
   const create = async () => {
     const nextSlug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     if (!nextSlug) return;
-    await api.createProject(nextSlug, name, isComicAdaptation ? { projectType: 'comic-adaptation' } : {});
+    await api.createProject(nextSlug, name, {});
     setName('');
-    setIsComicAdaptation(false);
     onCreated(nextSlug);
   };
   return (
@@ -1126,7 +1297,6 @@ function ProjectLanding({
               <div key={project.slug} className="project-card">
                 <button className="project-open-button" onClick={() => onOpen(project.slug)}>
                   <strong>{project.name}</strong>
-                  {project.settings.projectType === 'comic-adaptation' && <small>Comic adaptation</small>}
                 </button>
                 <button
                   className="danger project-delete-button"
@@ -1141,10 +1311,6 @@ function ProjectLanding({
         </section>
         <section>
           <h2>Create project</h2>
-          <label className="checkbox-row">
-            <input type="checkbox" checked={isComicAdaptation} onChange={(event) => setIsComicAdaptation(event.target.checked)} />
-            Comic adaptation project
-          </label>
           <div className="row">
             <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Project name" />
             <button onClick={create}>Create</button>
@@ -1184,32 +1350,36 @@ function ProjectLanding({
   );
 }
 
-function AdaptationPanel({
+function StoryAdaptationScreen({
   adaptation,
-  assets,
-  projectSlug,
-  isGenerating,
+  workflow,
+  validation,
+  isWorkflowLogExpanded,
+  isValidationLogExpanded,
   onSaveStyle,
   onImportBook,
-  onImportStyleRef,
-  onGenerateNextCharacter,
-  onViewAsset,
+  onStartWorkflow,
+  onStartValidation,
+  onImportDraftsToCanvas,
+  onToggleWorkflowLog,
+  onToggleValidationLog,
 }: {
   adaptation: AdaptationStatus;
-  assets: Asset[];
-  projectSlug: string;
-  isGenerating: boolean;
+  workflow: AdaptationWorkflowStatus | null;
+  validation: AdaptationWorkflowStatus | null;
+  isWorkflowLogExpanded: boolean;
+  isValidationLogExpanded: boolean;
   onSaveStyle: (visualStyle: string) => Promise<void>;
   onImportBook: (file: File) => Promise<void>;
-  onImportStyleRef: (kind: 'archetype-character' | 'archetype-scene', file: File) => Promise<void>;
-  onGenerateNextCharacter: () => Promise<void>;
-  onViewAsset: (assetId: string) => void;
+  onStartWorkflow: () => Promise<void>;
+  onStartValidation: () => Promise<void>;
+  onImportDraftsToCanvas: () => Promise<void>;
+  onToggleWorkflowLog: () => void;
+  onToggleValidationLog: () => void;
 }) {
   const [visualStyle, setVisualStyle] = useState(adaptation.visualStyle);
   const [isSavingStyle, setIsSavingStyle] = useState(false);
-  const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
-  const generatedCharacters = Object.values(adaptation.characters).filter((entry) => entry.assetId).length;
-  const generatedLocations = Object.values(adaptation.locations).filter((entry) => entry.assetId).length;
+  const [isImportingDrafts, setIsImportingDrafts] = useState(false);
   useEffect(() => {
     setVisualStyle(adaptation.visualStyle);
   }, [adaptation.visualStyle]);
@@ -1221,103 +1391,168 @@ function AdaptationPanel({
       setIsSavingStyle(false);
     }
   };
+  const importDrafts = async () => {
+    setIsImportingDrafts(true);
+    try {
+      await onImportDraftsToCanvas();
+    } finally {
+      setIsImportingDrafts(false);
+    }
+  };
+  const validationFailed = validation?.returnCode !== null && validation?.returnCode !== undefined && validation.returnCode !== 0;
+  const validationStatus = validation?.running
+    ? 'Validation running'
+    : validation?.returnCode === 0
+      ? 'Validation passed'
+      : validationFailed
+        ? 'Validation failed'
+        : 'Validation not run yet';
+  const workflowStatus = workflow?.running
+    ? 'Workflow running'
+    : workflow?.returnCode === 0
+      ? 'Workflow complete'
+      : workflow?.returnCode
+        ? `Workflow exited ${workflow.returnCode}`
+        : 'Workflow not run yet';
+  const hasArtifacts = (adaptation.counts.characterSheets ?? 0) > 0 || (adaptation.counts.locationPrompts ?? 0) > 0;
   return (
-    <aside className="adaptation-panel">
-      <div className="popover-header">
+    <div className="story-adaptation-screen">
+      <div className="story-adaptation-header">
         <div>
-          <h2>Comic Adaptation</h2>
-          <p className="muted">Project checklist and prompt outputs</p>
+          <h1>Story Adaptation</h1>
+          <p className="muted">Import a book, extract visual planning artifacts, validate them, then publish draft nodes to the canvas.</p>
+        </div>
+        <div className="adaptation-status-stack">
+          <span className={`adaptation-status ${workflow?.returnCode === 0 ? 'generated' : ''}`}>{workflowStatus}</span>
+          <span className={`adaptation-status ${validation?.returnCode === 0 ? 'generated' : validationFailed ? 'failed' : ''}`}>{validationStatus}</span>
         </div>
       </div>
-      <section>
-        <h3>Status</h3>
-        <div className="adaptation-checklist">
-          <span className={adaptation.hasBook ? 'ok' : ''}>Book text</span>
-          <span className={adaptation.hasBookSession ? 'ok' : ''}>Book session</span>
-          <span className={adaptation.styleRefs.visualStyle ? 'ok' : ''}>Visual style</span>
-          <span className={adaptation.styleRefs.archetypeCharacterAsset ? 'ok' : ''}>Character style ref</span>
-          <span>{adaptation.counts.characterArtifacts ?? 0} artifacts</span>
-          <span>{adaptation.counts.characterSheets ?? 0} sheets</span>
-          <span>{adaptation.counts.locationPrompts ?? 0} location prompts</span>
+      {validationFailed && (
+        <div className="validation-warning">
+          Validation found issues in the adaptation artifacts. You can continue, but review the log before importing drafts to the canvas.
         </div>
-      </section>
-      <section className="book-upload-section">
-        <h3>Book Source</h3>
-        <p className="muted">
-          {adaptation.hasBook ? 'book.txt is present in this project.' : 'Upload a plain text book file to start the adaptation workflow.'}
-        </p>
-        <label className="generate-button file-button book-upload-button">
-          {adaptation.hasBook ? 'Replace book.txt' : 'Upload book.txt'}
-          <input type="file" accept=".txt,text/plain" hidden onChange={(event) => event.target.files?.[0] && void onImportBook(event.target.files[0])} />
-        </label>
-        <label className="secondary file-button">
-          Import character style reference
-          <input type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => event.target.files?.[0] && void onImportStyleRef('archetype-character', event.target.files[0])} />
-        </label>
-      </section>
-      <section>
-        <h3>Visual Style</h3>
-        <textarea value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)} />
-        <button className="secondary" onClick={save} disabled={isSavingStyle}>
-          {isSavingStyle ? 'Saving...' : 'Save style'}
-        </button>
-      </section>
-      <section>
-        <div className="adaptation-section-heading">
-          <h3>Character Sheets</h3>
-          <span>{generatedCharacters}/{Object.keys(adaptation.characters).length} generated</span>
+      )}
+      <div className="story-adaptation-grid">
+        <section className="book-upload-section">
+          <h2>Book Source</h2>
+          <p className="muted">
+            {adaptation.hasBook ? 'book.txt is present in this project.' : 'Upload a plain text book file to start the adaptation workflow.'}
+          </p>
+          <label className="generate-button file-button book-upload-button">
+            {adaptation.hasBook ? 'Replace book.txt' : 'Upload book.txt'}
+            <input type="file" accept=".txt,text/plain" hidden onChange={(event) => event.target.files?.[0] && void onImportBook(event.target.files[0])} />
+          </label>
+        </section>
+        <section className="story-card">
+          <h2>Artifact Status</h2>
+          <div className="adaptation-checklist">
+            <span className={adaptation.hasBook ? 'ok' : ''}>Book text</span>
+            <span className={adaptation.hasBookSession ? 'ok' : ''}>Book session</span>
+            <span className={adaptation.styleRefs.visualStyle ? 'ok' : ''}>Visual style</span>
+            <span className={adaptation.styleRefs.archetypeCharacterPrompt ? 'ok' : ''}>Character archetype draft</span>
+            <span className={adaptation.styleRefs.archetypeScenePrompt ? 'ok' : ''}>Scene archetype draft</span>
+            <span>{adaptation.counts.characterArtifacts ?? 0} artifacts</span>
+            <span>{adaptation.counts.characterSheets ?? 0} sheets</span>
+            <span>{adaptation.counts.locationPrompts ?? 0} location prompts</span>
+          </div>
+        </section>
+        <section className="story-card visual-style-card">
+          <h2>Visual Style</h2>
+          <textarea value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)} />
+          <button className="secondary" onClick={save} disabled={isSavingStyle}>
+            {isSavingStyle ? 'Saving...' : 'Save style'}
+          </button>
+        </section>
+        <section className="workflow-run-section">
+          <h2>Run Workflow</h2>
+          <p className="muted">Run Pi extraction to read the book, create character artifacts, character sheet prompts, scene manifest, location index, and location prompts.</p>
+          <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBook || workflow?.running}>
+            {workflow?.running && <span className="spinner" aria-hidden="true" />}
+            {workflow?.running ? 'Running adaptation...' : 'Run adaptation workflow'}
+          </button>
+        </section>
+        <section className="story-card">
+          <h2>Validate Artifacts</h2>
+          <p className="muted">Validation checks the extracted adaptation files and reports missing or malformed pieces without blocking the canvas workflow.</p>
+          <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>
+            {validation?.running ? 'Validating...' : validation?.startedAt ? 'Run validation again' : 'Run validation'}
+          </button>
+        </section>
+        <section className="story-card import-drafts-card">
+          <h2>Publish Drafts</h2>
+          <p className="muted">Create or update canvas nodes for archetype drafts, character sheets, and location prompts.</p>
+          <button className="generate-button" onClick={importDrafts} disabled={!hasArtifacts || isImportingDrafts}>
+            {isImportingDrafts ? 'Importing drafts...' : 'Import drafts to canvas'}
+          </button>
+        </section>
+      </div>
+      {workflow && (workflow.log || workflow.running || workflow.returnCode !== null) && (
+        <div className="story-log-card">
+          <WorkflowLogPanel
+            title="Workflow Output"
+            workflow={workflow}
+            isExpanded={isWorkflowLogExpanded}
+            onToggle={onToggleWorkflowLog}
+          />
         </div>
-        <button className="generate-button" onClick={onGenerateNextCharacter} disabled={isGenerating}>
-          {isGenerating && <span className="spinner" aria-hidden="true" />}
-          {isGenerating ? 'Generating...' : 'Generate next base sheet'}
-        </button>
-        <AdaptationPromptList entries={adaptation.characters} assetById={assetById} projectSlug={projectSlug} onViewAsset={onViewAsset} />
-      </section>
-      <section>
-        <div className="adaptation-section-heading">
-          <h3>Location Prompts</h3>
-          <span>{generatedLocations}/{Object.keys(adaptation.locations).length} generated</span>
+      )}
+      {validation && (validation.log || validation.running || validation.returnCode !== null) && (
+        <div className="story-log-card">
+          <WorkflowLogPanel
+            title="Validation Output"
+            workflow={validation}
+            isExpanded={isValidationLogExpanded}
+            onToggle={onToggleValidationLog}
+          />
         </div>
-        <AdaptationPromptList entries={adaptation.locations} assetById={assetById} projectSlug={projectSlug} onViewAsset={onViewAsset} />
-      </section>
-    </aside>
+      )}
+    </div>
   );
 }
 
-function AdaptationPromptList({
-  entries,
-  assetById,
-  projectSlug,
-  onViewAsset,
+function WorkflowLogPanel({
+  title = 'Adaptation Output',
+  workflow,
+  isExpanded,
+  onToggle,
 }: {
-  entries: Record<string, { promptPath: string; assetId?: string | null; status: string }>;
-  assetById: Map<string, Asset>;
-  projectSlug: string;
-  onViewAsset: (assetId: string) => void;
+  title?: string;
+  workflow: AdaptationWorkflowStatus;
+  isExpanded: boolean;
+  onToggle: () => void;
 }) {
-  const rows = Object.entries(entries);
-  if (rows.length === 0) return <p className="muted">No prompts generated yet. Run the Pi adaptation script for this project.</p>;
+  const logRef = useRef<HTMLPreElement | null>(null);
+  useEffect(() => {
+    const element = logRef.current;
+    if (!element || !isExpanded) return;
+    element.scrollTop = element.scrollHeight;
+  }, [workflow.log, isExpanded]);
+  const statusText = workflow.running ? 'running' : workflow.returnCode === 0 ? 'complete' : workflow.returnCode === null ? 'idle' : `exited ${workflow.returnCode}`;
   return (
-    <div className="adaptation-prompt-list">
-      {rows.map(([key, entry]) => {
-        const asset = entry.assetId ? assetById.get(entry.assetId) : null;
-        return (
-          <div className="adaptation-prompt-row" key={key}>
-            {asset ? (
-              <button className="adaptation-thumb" onClick={() => onViewAsset(asset.id)} title="View generated image">
-                <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb`} alt="" />
-              </button>
-            ) : (
-              <div className="adaptation-thumb placeholder" />
-            )}
-            <div>
-              <strong>{key}</strong>
-              <small>{entry.promptPath}</small>
-            </div>
-            <span className={`adaptation-status ${entry.status}`}>{entry.status}</span>
-          </div>
-        );
-      })}
+    <div className={`workflow-log-panel ${isExpanded ? 'expanded' : 'collapsed'}`}>
+      <button className="workflow-log-toggle" onClick={onToggle}>
+        <strong>{title}</strong>
+        <span>{statusText}</span>
+        <span>{isExpanded ? 'Collapse' : 'Expand'}</span>
+      </button>
+      {isExpanded && (
+        <pre ref={logRef} className="workflow-log-output" role="log" aria-live="polite">
+          {workflow.log || 'Waiting for output...'}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function WorkflowLogDrawer(props: {
+  title?: string;
+  workflow: AdaptationWorkflowStatus;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className={`workflow-log-drawer ${props.isExpanded ? 'expanded' : 'collapsed'}`}>
+      <WorkflowLogPanel {...props} />
     </div>
   );
 }
@@ -1331,8 +1566,10 @@ function NodeSidebar({
   onGenerate,
   onGenerateArtifact,
   onGenerateVariants,
+  onSetStyleRefAsset,
   onVariant,
   onCreateSibling,
+  onCreateChildDraft,
   onDelete,
   onRefineChat,
 }: {
@@ -1344,8 +1581,10 @@ function NodeSidebar({
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onGenerateArtifact: (id: string, artifact: StoryArtifactNodeData) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
+  onSetStyleRefAsset: (kind: 'archetype-character' | 'archetype-scene', assetId: string) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
+  onCreateChildDraft: (nodeId: string, sourceAssetId: string) => void;
   onDelete: (id: string, assetId?: string) => void;
   onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
@@ -1370,6 +1609,8 @@ function NodeSidebar({
         projectSlug={projectSlug}
         onGenerate={onGenerateArtifact}
         onDelete={onDelete}
+        onCreateChildDraft={onCreateChildDraft}
+        onRefineChat={onRefineChat}
       />
     );
   }
@@ -1393,6 +1634,7 @@ function NodeSidebar({
       onVariant={onVariant}
       onCreateSibling={onCreateSibling}
       onGenerateVariants={onGenerateVariants}
+      onSetStyleRefAsset={onSetStyleRefAsset}
       onRefineChat={onRefineChat}
     />
   );
@@ -1542,11 +1784,15 @@ function StoryArtifactSidebar({
   projectSlug,
   onGenerate,
   onDelete,
+  onCreateChildDraft,
+  onRefineChat,
 }: {
   node: Node<StoryArtifactNodeData>;
   projectSlug: string;
   onGenerate: (id: string, artifact: StoryArtifactNodeData) => void;
   onDelete: (id: string, assetId?: string) => void;
+  onCreateChildDraft: (nodeId: string, sourceAssetId: string) => void;
+  onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
   const artifact = node.data;
   const generated = artifact.generatedAsset;
@@ -1566,10 +1812,13 @@ function StoryArtifactSidebar({
       {generated && (
         <section className="sidebar-section">
           <h3>Generated Image</h3>
-          <button className="asset-picker-row" onClick={() => artifact.onViewAsset(generated.id)}>
+          <button className="story-artifact-sidebar-preview" onClick={() => artifact.onViewAsset(generated.id)}>
             <img src={generated.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${generated.id}/thumb`} alt="" />
+            <span className="sidebar-preview-eye story-preview-eye" aria-hidden="true">👁️</span>
             <span>{assetLabel(generated)}</span>
           </button>
+          <button className="generate-button" onClick={() => onRefineChat(node.id, generated.id)}>Refine in chat</button>
+          <button className="secondary" onClick={() => onCreateChildDraft(node.id, generated.id)}>Create child draft</button>
         </section>
       )}
       <section className="sidebar-section">
@@ -1601,6 +1850,7 @@ function ImageSidebar({
   onVariant,
   onCreateSibling,
   onGenerateVariants,
+  onSetStyleRefAsset,
   onRefineChat,
 }: {
   node: Node<ImageGroupNodeData>;
@@ -1611,6 +1861,7 @@ function ImageSidebar({
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
+  onSetStyleRefAsset: (kind: 'archetype-character' | 'archetype-scene', assetId: string) => void;
   onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
   const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
@@ -1684,6 +1935,11 @@ function ImageSidebar({
           </>
         )}
       </div>
+      <section className="sidebar-section canonical-reference-section">
+        <h3>Canonical Reference</h3>
+        <button className="secondary" onClick={() => onSetStyleRefAsset('archetype-character', asset.id)}>Set as character archetype</button>
+        <button className="secondary" onClick={() => onSetStyleRefAsset('archetype-scene', asset.id)}>Set as scene archetype</button>
+      </section>
       {asset.generation && (
         <section className="sidebar-section parent-section">
           <h3>Parents</h3>
@@ -2069,17 +2325,6 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
           👁️
         </button>
         <button
-          className="node-action-button details-button nodrag nopan"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            data.onDetails(data.nodeId);
-          }}
-          title="Show details"
-        >
-          i
-        </button>
-        <button
           className="node-action-button chat-button nodrag nopan"
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
@@ -2117,6 +2362,7 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
 
 function ImageViewer({
   node,
+  fallbackAsset,
   assets,
   projectSlug,
   onClose,
@@ -2126,6 +2372,7 @@ function ImageViewer({
   onDelete,
 }: {
   node?: Node<ImageGroupNodeData>;
+  fallbackAsset?: Asset;
   assets: Asset[];
   projectSlug: string;
   onClose: () => void;
@@ -2144,9 +2391,9 @@ function ImageViewer({
     return () => window.removeEventListener('keydown', onKey);
   }, [node, onClose, onVariant]);
 
-  if (!node || !node.data.activeAsset) return null;
-  const asset = node.data.activeAsset;
-  const currentIndex = Math.max(0, node.data.assetIds.indexOf(asset.id));
+  const asset = node?.data.activeAsset ?? fallbackAsset;
+  if (!asset) return null;
+  const currentIndex = node ? Math.max(0, node.data.assetIds.indexOf(asset.id)) : 0;
   const imageUrl = `/api/projects/${projectSlug}/assets/${asset.id}/image`;
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
   const parentAssets = (asset.generation?.refs ?? []).map((ref) => assetById.get(ref)).filter((asset): asset is Asset => Boolean(asset));
@@ -2160,6 +2407,7 @@ function ImageViewer({
     .join(' ');
   const changeByClickSide = (event: React.MouseEvent<HTMLImageElement>) => {
     event.stopPropagation();
+    if (!node) return;
     if (node.data.assetIds.length < 2) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const direction = event.clientX < rect.left + rect.width / 2 ? -1 : 1;
@@ -2171,19 +2419,22 @@ function ImageViewer({
         <div className="image-viewer-toolbar-main">
           <button
             className="danger"
+            disabled={!node}
             onClick={(event) => {
               event.stopPropagation();
-              onDelete(node.id, asset.id);
+              if (node) onDelete(node.id, asset.id);
             }}
           >
             Delete Variant
           </button>
-          <strong>{node.data.displayName}</strong>
+          <strong>{node?.data.displayName ?? assetLabel(asset)}</strong>
           <div className="image-viewer-toolbar-actions">
-            <span>{currentIndex + 1} / {node.data.assetIds.length}</span>
-            <button className="image-viewer-info-button secondary" onClick={() => onDetails(node.id)} title="Show details">
-              i
-            </button>
+            {node && <span>{currentIndex + 1} / {node.data.assetIds.length}</span>}
+            {node && (
+              <button className="image-viewer-info-button secondary" onClick={() => onDetails(node.id)} title="Show details">
+                i
+              </button>
+            )}
             <button className="secondary" onClick={onClose}>Close</button>
           </div>
         </div>
@@ -2203,7 +2454,7 @@ function ImageViewer({
           ))}
         </div>
       )}
-      {node.data.assetIds.length > 1 && (
+      {node && node.data.assetIds.length > 1 && (
         <button
           className="image-viewer-nav previous"
           onClick={(event) => {
@@ -2215,8 +2466,8 @@ function ImageViewer({
           &lt;
         </button>
       )}
-      <img className="image-viewer-main-image" src={imageUrl} alt={node.data.displayName} onClick={changeByClickSide} />
-      {node.data.assetIds.length > 1 && (
+      <img className="image-viewer-main-image" src={imageUrl} alt={node?.data.displayName ?? assetLabel(asset)} onClick={changeByClickSide} />
+      {node && node.data.assetIds.length > 1 && (
         <button
           className="image-viewer-nav next"
           onClick={(event) => {
@@ -2255,18 +2506,8 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
     `ratio: ${data.params.aspectRatio ?? 'default'}, size: ${data.params.imageSize ?? 'default'}, seed: ${data.params.seed ?? 'auto'}`,
   ].join('\n');
   return (
-    <div className={`node draft-node ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
+    <div className={`node draft-node ${data.tags.includes('archetype') ? 'archetype-draft-node' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
-      <button
-        className="node-action-button details-button"
-        onClick={(event) => {
-          event.stopPropagation();
-          data.onDetails(data.nodeId);
-        }}
-        title="Show details"
-      >
-        i
-      </button>
       <div className="draft-placeholder" aria-hidden="true">
         {data.isGenerating && (
           <div className="node-generating-overlay">
@@ -2282,25 +2523,16 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
 }
 
 function StoryArtifactNode({ data }: NodeProps<StoryArtifactNodeData>) {
+  const generatedAssetId = data.generatedAssetId;
   const tooltip = [
     data.prompt || 'Story artifact prompt not set',
     `source: ${data.promptPath}`,
     `artifact: ${data.artifactKind}`,
-    data.generatedAssetId ? `generated: ${data.generatedAssetId}` : 'not generated',
+    generatedAssetId ? `generated: ${generatedAssetId}` : 'not generated',
   ].join('\n');
   return (
-    <div className={`node story-artifact-node ${data.generatedAssetId ? 'generated' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
+    <div className={`node story-artifact-node ${data.artifactKind === 'location-prompt' ? 'location-artifact-node' : 'character-artifact-node'} ${data.generatedAssetId ? 'generated' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
-      <button
-        className="node-action-button details-button"
-        onClick={(event) => {
-          event.stopPropagation();
-          data.onDetails(data.nodeId);
-        }}
-        title="Show details"
-      >
-        i
-      </button>
       <div className="story-artifact-icon" aria-hidden="true">
         {data.generatedAsset?.thumbnailUrl ? (
           <img src={data.generatedAsset.thumbnailUrl} alt="" />
@@ -2313,9 +2545,23 @@ function StoryArtifactNode({ data }: NodeProps<StoryArtifactNodeData>) {
           <span>{data.artifactKind === 'character-sheet' ? 'CS' : 'LP'}</span>
         )}
       </div>
+      {generatedAssetId && (
+        <button
+          className="node-action-button view-image-button nodrag nopan"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            data.onViewAsset(generatedAssetId);
+          }}
+          title="View full image"
+        >
+          👁️
+        </button>
+      )}
       <span className="story-artifact-badge">{artifactKindLabel(data.artifactKind)}</span>
       <strong>{data.displayName || data.artifactKey}</strong>
       <small>{data.generatedAssetId ? 'generated' : 'ready'}</small>
+      {data.generatedAssetId && <Handle type="source" position={Position.Right} className="output-handle" />}
     </div>
   );
 }

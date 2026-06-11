@@ -160,13 +160,32 @@ class AdaptationStatus(BaseModel):
     locations: dict[str, AdaptationAssetLink]
 
 
+class AdaptationWorkflowStatus(BaseModel):
+    running: bool
+    returnCode: int | None = None
+    startedAt: str | None = None
+    completedAt: str | None = None
+    log: str = ""
+
+
+class AdaptationCanvasImportResponse(BaseModel):
+    canvas: CanvasDocument
+    importedNodeCount: int
+
+
 class AdaptationStylePatch(BaseModel):
     visualStyle: str
+
+
+class AdaptationStyleRefAssetRequest(BaseModel):
+    kind: Literal["archetype-character", "archetype-scene"]
+    assetId: str
 
 
 class AdaptationGenerateArtifactRequest(BaseModel):
     artifactKind: ArtifactKind
     artifactKey: str = Field(min_length=1)
+    canvasNodeId: str | None = None
 
 
 class AdaptationGenerateResponse(BaseModel):
@@ -205,6 +224,7 @@ class CanvasNodeLayout(BaseModel):
     x: float
     y: float
     width: float | None = None
+    tags: list[str] = Field(default_factory=list)
 
 
 class GenerationParams(BaseModel):
