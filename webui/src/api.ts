@@ -113,6 +113,8 @@ export const api = {
     request<AdaptationCanvasImportResponse>(`/api/projects/${slug}/adaptation/import-drafts-to-canvas`, {
       method: 'POST',
     }),
+  getAdaptationBook: (slug: string) =>
+    request<{ text: string }>(`/api/projects/${slug}/adaptation/book`),
   importAdaptationBook: (slug: string, file: File) => {
     const data = new FormData();
     data.append('file', file);

@@ -1667,10 +1667,15 @@ function StoryPhaseScreen({
       <div className={`story-adaptation-grid ${phase === 'phase-0-ingestion' ? 'is-ingest' : ''} ${phase === 'phase-1-characters' || phase === 'phase-2-locations' ? 'is-assets' : ''}`}>
         {phase === 'phase-0-ingestion' && (
           <PhaseIngestion
+            projectSlug={projectSlug}
             adaptation={adaptation}
             workflow={workflow}
             onImportBook={onImportBook}
             onStartWorkflow={() => onStartWorkflow('ingest')}
+            visualStyle={visualStyle}
+            isSavingStyle={isSavingStyle}
+            onVisualStyleChange={setVisualStyle}
+            onSaveStyle={save}
           />
         )}
         {phase === 'phase-1-characters' && (
@@ -1688,10 +1693,6 @@ function StoryPhaseScreen({
             onImportDraftsToCanvas={importDrafts}
             isImportingDrafts={isImportingDrafts}
             onReloadAdaptation={onReloadAdaptation}
-            visualStyle={visualStyle}
-            isSavingStyle={isSavingStyle}
-            onVisualStyleChange={setVisualStyle}
-            onSaveStyle={save}
           />
         )}
         {phase === 'phase-2-locations' && (
@@ -1930,42 +1931,86 @@ function AdaptationFileEditor({
 }
 
 function PhaseIngestion({
+  projectSlug,
   adaptation,
   workflow,
   onImportBook,
   onStartWorkflow,
+  visualStyle,
+  isSavingStyle,
+  onVisualStyleChange,
+  onSaveStyle,
 }: {
+  projectSlug: string;
   adaptation: AdaptationStatus;
   workflow: AdaptationWorkflowStatus | null;
   onImportBook: (file: File) => Promise<void>;
   onStartWorkflow: () => Promise<void>;
+  visualStyle: string;
+  isSavingStyle: boolean;
+  onVisualStyleChange: (value: string) => void;
+  onSaveStyle: (value: string) => Promise<void>;
 }) {
+  const [bookText, setBookText] = useState<string | null>(null);
+  const [isLoadingBook, setIsLoadingBook] = useState(false);
+  const [isBookOpen, setIsBookOpen] = useState(false);
+  const viewBook = async () => {
+    setIsBookOpen(true);
+    if (bookText === null) {
+      setIsLoadingBook(true);
+      try {
+        const result = await api.getAdaptationBook(projectSlug);
+        setBookText(result.text);
+      } finally {
+        setIsLoadingBook(false);
+      }
+    }
+  };
   return (
-    <section className="ingest-panel">
-      <ol className="ingest-steps">
-        <li className={`ingest-step ${adaptation.hasBook ? 'is-done' : ''}`}>
-          <span className="ingest-step-index">1</span>
-          <div className="ingest-step-content">
-            <h2>Book Source</h2>
-            <label className="generate-button file-button book-upload-button">
-              {adaptation.hasBook ? 'Replace book.txt' : 'Upload book.txt'}
-              <input type="file" accept=".txt,text/plain" hidden onChange={(event) => event.target.files?.[0] && void onImportBook(event.target.files[0])} />
-            </label>
-          </div>
-        </li>
-        <li className={`ingest-step ${adaptation.hasBookSession ? 'is-done' : ''}`}>
-          <span className="ingest-step-index">2</span>
-          <div className="ingest-step-content">
-            <h2>Read Book &amp; Build Style</h2>
-            <p className="muted">Creates the read-book session and generates the visual style and archetypes. Edit the visual style in Phase 1.</p>
-            <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBook || workflow?.running}>
-              {workflow?.running && <span className="spinner" aria-hidden="true" />}
-              {workflow?.running ? 'Loading book & style...' : adaptation.hasBookSession ? 'Rebuild session & style' : 'Load book & build style'}
-            </button>
-          </div>
-        </li>
-      </ol>
-    </section>
+    <>
+      <section className="ingest-panel">
+        <ol className="ingest-steps">
+          <li className={`ingest-step ${adaptation.hasBook ? 'is-done' : ''}`}>
+            <span className="ingest-step-index">1</span>
+            <div className="ingest-step-content">
+              <h2>Book Source</h2>
+              {adaptation.hasBook ? (
+                <button className="generate-button book-upload-button" onClick={viewBook}>View book</button>
+              ) : (
+                <label className="generate-button file-button book-upload-button">
+                  Upload book.txt
+                  <input type="file" accept=".txt,text/plain" hidden onChange={(event) => event.target.files?.[0] && void onImportBook(event.target.files[0])} />
+                </label>
+              )}
+            </div>
+          </li>
+          <li className={`ingest-step ${adaptation.hasBookSession ? 'is-done' : ''}`}>
+            <span className="ingest-step-index">2</span>
+            <div className="ingest-step-content">
+              <h2>Read Book &amp; Build Style</h2>
+              <p className="muted">Creates the read-book session and generates the visual style and archetypes.</p>
+              <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBook || workflow?.running}>
+                {workflow?.running && <span className="spinner" aria-hidden="true" />}
+                {workflow?.running ? 'Loading book & style...' : adaptation.hasBookSession ? 'Rebuild session & style' : 'Load book & build style'}
+              </button>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <VisualStyleCard
+        value={visualStyle}
+        isSaving={isSavingStyle}
+        onChange={onVisualStyleChange}
+        onSave={onSaveStyle}
+      />
+
+      {isBookOpen && (
+        <Modal title="Book" onClose={() => setIsBookOpen(false)}>
+          {isLoadingBook ? <p className="muted">Loading book...</p> : <pre className="book-text">{bookText}</pre>}
+        </Modal>
+      )}
+    </>
   );
 }
 
@@ -2113,10 +2158,6 @@ function PhaseAssetType({
   onImportDraftsToCanvas,
   isImportingDrafts,
   onReloadAdaptation,
-  visualStyle,
-  isSavingStyle,
-  onVisualStyleChange,
-  onSaveStyle,
 }: {
   kind: 'characters' | 'locations';
   projectSlug: string;
@@ -2131,28 +2172,14 @@ function PhaseAssetType({
   onImportDraftsToCanvas: () => Promise<void>;
   isImportingDrafts: boolean;
   onReloadAdaptation: () => Promise<void>;
-  visualStyle?: string;
-  isSavingStyle?: boolean;
-  onVisualStyleChange?: (value: string) => void;
-  onSaveStyle?: (value: string) => Promise<void>;
 }) {
   const isCharacters = kind === 'characters';
   const characterAsset = assets.find((asset) => asset.id === adaptation.archetypeCharacterAssetId) ?? null;
   const sceneAsset = assets.find((asset) => asset.id === adaptation.archetypeSceneAssetId) ?? null;
   const links = isCharacters ? adaptation.characters : adaptation.locations;
   const count = Object.keys(links).length;
-  const showVisualStyle = isCharacters && onVisualStyleChange && onSaveStyle;
   return (
     <>
-      {showVisualStyle && (
-        <VisualStyleCard
-          value={visualStyle ?? ''}
-          isSaving={Boolean(isSavingStyle)}
-          onChange={onVisualStyleChange!}
-          onSave={onSaveStyle!}
-        />
-      )}
-
       <div className="archetype-row">
         {isCharacters ? (
           <ArchetypeReferenceCard
@@ -2177,9 +2204,9 @@ function PhaseAssetType({
 
       <section className="story-card assets-extract-card">
         <div className="assets-extract-head">
-          <div>
+          <div className="archetype-card-title">
             <h2>Extract From Book</h2>
-            <p className="muted">Run Pi to populate {kind} files from the ingested book session.</p>
+            <HelpTip text={`Run Pi to populate ${kind} files from the ingested book session.`} />
           </div>
           <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBookSession || workflow?.running}>
             {workflow?.running && <span className="spinner" aria-hidden="true" />}
@@ -2195,15 +2222,19 @@ function PhaseAssetType({
 
       <div className="assets-row">
         <section className="story-card">
-          <h2>Publish To Canvas</h2>
-          <p className="muted">Send {kind} files to the canvas to generate references.</p>
+          <div className="archetype-card-title">
+            <h2>Publish To Canvas</h2>
+            <HelpTip text={`Send ${kind} files to the canvas to generate references.`} />
+          </div>
           <button className="generate-button" onClick={onImportDraftsToCanvas} disabled={!count || isImportingDrafts}>
             {isImportingDrafts ? 'Publishing...' : `Publish ${count} ${kind}`}
           </button>
         </section>
         <section className="story-card">
-          <h2>Validate</h2>
-          <p className="muted">Check that {kind} files are well-formed.</p>
+          <div className="archetype-card-title">
+            <h2>Validate</h2>
+            <HelpTip text={`Check that ${kind} files are well-formed.`} />
+          </div>
           <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
         </section>
       </div>

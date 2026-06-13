@@ -200,6 +200,11 @@ async def import_adaptation_book(slug: str, file: UploadFile = File(...)) -> Ada
     return await adaptation.import_book(slug, file)
 
 
+@app.get("/api/projects/{slug}/adaptation/book")
+def get_adaptation_book(slug: str) -> dict[str, str]:
+    return {"text": adaptation.read_book(slug)}
+
+
 @app.post("/api/projects/{slug}/adaptation/import-style-ref", response_model=AdaptationStatus)
 async def import_adaptation_style_ref(
     slug: str,

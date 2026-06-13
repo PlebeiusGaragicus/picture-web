@@ -607,6 +607,14 @@ def write_style_ref_prompt(slug: str, request: AdaptationStylePromptPatch) -> Ad
     return status(slug)
 
 
+def read_book(slug: str) -> str:
+    root = ensure_adaptation(slug)
+    book = root / "book.txt"
+    if not book.is_file():
+        raise HTTPException(status_code=404, detail="No book.txt uploaded")
+    return read_text(book)
+
+
 def write_settings(slug: str, patch: AdaptationSettingsPatch) -> AdaptationStatus:
     metadata = read_metadata(slug)
     metadata.settings.storyKind = patch.storyKind
