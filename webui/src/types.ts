@@ -138,6 +138,10 @@ export interface AdaptationStatus {
   hasBook: boolean;
   hasBookSession: boolean;
   styleRefs: Record<string, boolean>;
+  archetypeCharacterAssetId?: string | null;
+  archetypeSceneAssetId?: string | null;
+  archetypeCharacterPromptText?: string;
+  archetypeScenePromptText?: string;
   counts: Record<string, number>;
   visualStyle: string;
   characters: Record<string, AdaptationAssetLink>;
@@ -146,6 +150,8 @@ export interface AdaptationStatus {
   pages: Record<string, AdaptationAssetLink>;
   panels: Record<string, AdaptationAssetLink>;
 }
+
+export type AdaptationStage = 'ingest' | 'characters' | 'locations' | 'scenes' | 'moments' | 'all';
 
 export interface AdaptationWorkflowStatus {
   running: boolean;

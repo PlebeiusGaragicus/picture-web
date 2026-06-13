@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail, StoryKind } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail, StoryKind } from './types';
 
 const DEBUG = true;
 
@@ -75,6 +75,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ visualStyle }),
     }),
+  saveAdaptationStyleRefPrompt: (slug: string, kind: 'archetype-character' | 'archetype-scene', prompt: string) =>
+    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/style-ref-prompt`, {
+      method: 'PUT',
+      body: JSON.stringify({ kind, prompt }),
+    }),
   saveAdaptationSettings: (slug: string, storyKind: StoryKind) =>
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/settings`, {
       method: 'PATCH',
@@ -92,10 +97,12 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
-  getAdaptationWorkflow: (slug: string) => request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/workflow`),
-  startAdaptationWorkflow: (slug: string) =>
+  getAdaptationWorkflow: (slug: string, stage: AdaptationStage = 'all') =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/workflow?stage=${stage}`),
+  startAdaptationWorkflow: (slug: string, stage: AdaptationStage = 'all') =>
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/workflow/start`, {
       method: 'POST',
+      body: JSON.stringify({ stage }),
     }),
   getAdaptationValidation: (slug: string) => request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/validation`),
   startAdaptationValidation: (slug: string) =>
@@ -110,6 +117,15 @@ export const api = {
     const data = new FormData();
     data.append('file', file);
     return request<AdaptationStatus>(`/api/projects/${slug}/adaptation/import-book`, {
+      method: 'POST',
+      body: data,
+    });
+  },
+  importAdaptationStyleRef: (slug: string, kind: 'archetype-character' | 'archetype-scene', file: File) => {
+    const data = new FormData();
+    data.append('kind', kind);
+    data.append('file', file);
+    return request<AdaptationStatus>(`/api/projects/${slug}/adaptation/import-style-ref`, {
       method: 'POST',
       body: data,
     });

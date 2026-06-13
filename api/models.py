@@ -166,6 +166,10 @@ class AdaptationStatus(BaseModel):
     hasBook: bool
     hasBookSession: bool
     styleRefs: dict[str, bool]
+    archetypeCharacterAssetId: str | None = None
+    archetypeSceneAssetId: str | None = None
+    archetypeCharacterPromptText: str = ""
+    archetypeScenePromptText: str = ""
     counts: dict[str, int]
     visualStyle: str
     characters: dict[str, AdaptationAssetLink]
@@ -192,8 +196,17 @@ class AdaptationStylePatch(BaseModel):
     visualStyle: str
 
 
+class AdaptationStylePromptPatch(BaseModel):
+    kind: Literal["archetype-character", "archetype-scene"]
+    prompt: str
+
+
 class AdaptationSettingsPatch(BaseModel):
     storyKind: StoryKind
+
+
+class AdaptationWorkflowStartRequest(BaseModel):
+    stage: Literal["ingest", "characters", "locations", "scenes", "moments", "all"] = "all"
 
 
 class AdaptationFileBase(BaseModel):

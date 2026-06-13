@@ -1,9 +1,9 @@
 ---
 name: location-index
 description: >-
-  Extract reusable scene locations and environment variants from a full book and
-  its scene manifest, then write a book-scoped location index for image prompt
-  generation.
+  Extract reusable scene locations and environment variants from a full book
+  already loaded in context, then write a book-scoped location index for image
+  prompt generation.
 disable-model-invocation: false
 ---
 
@@ -11,7 +11,7 @@ disable-model-invocation: false
 
 The full book is already loaded in context. The user provides a book root path, usually `books/<book-id>`.
 
-Read `<book-root>/scenes/manifest.md`, then use the loaded book context to extract reusable scene locations and environment variants for reference image generation.
+Use the loaded book context to extract reusable scene locations and environment variants for reference image generation.
 
 The index must preserve enough source-grounded visual detail for high-quality image prompts. Do not summarize locations down to generic labels if the book gives concrete environmental facts.
 
@@ -52,7 +52,6 @@ Use one `##` section per location or location variant:
 Name: Human Readable Name
 Type: location
 Base Location: none
-Scenes: 001-scene-title, 004-other-scene
 Source References:
 - `L000-L000`: "Short exact quote." Brief note about what this supports.
 Visual Traits:
@@ -75,7 +74,6 @@ For meaningful visual state changes, create a separate section:
 Name: Human Readable Variant Name
 Type: location-variant
 Base Location: location-slug
-Scenes: 008-scene-title
 Source References:
 - `L000-L000`: "Short exact quote." Brief note about what this supports.
 Visual Traits:
@@ -98,7 +96,7 @@ Prompt Status: needs-prompt
 - Anchor important claims to source line ranges and short quotes.
 - If you know the quote but not the exact line number, use `LINE-VERIFY` instead of inventing a line number.
 - Do not fabricate line numbers.
-- Do not invent named landmarks, props, buildings, weather, time of day, materials, or decorative details that are not supported by the book or scene manifest.
+- Do not invent named landmarks, props, buildings, weather, time of day, materials, or decorative details that are not supported by the book.
 - If the source is sparse, explicitly preserve that sparsity with traits such as `unspecified modern apartment details` rather than inventing decoration.
 
 ## Forbidden In Assistant Reply
@@ -108,6 +106,6 @@ Prompt Status: needs-prompt
 
 # User Request
 
-Read the scene manifest and write the reusable location index under the provided book root.
+Write the reusable location index under the provided book root.
 
 **User:** `@$`

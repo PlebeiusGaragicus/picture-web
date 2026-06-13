@@ -16,7 +16,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import './style.css';
 import { api } from './api';
-import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StoryKind } from './types';
+import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StoryKind } from './types';
 
 interface DraftNodeData extends DraftCanvasNode {
   kind: 'draft';
@@ -55,16 +55,16 @@ type PhotoNodeData = DraftNodeData | StoryArtifactNodeData | ImageGroupNodeData;
 
 type ProjectPhase =
   | 'phase-0-ingestion'
-  | 'phase-1-assets'
-  | 'phase-2-canonical-canvas'
+  | 'phase-1-characters'
+  | 'phase-2-locations'
   | 'phase-3-scenes'
   | 'phase-4-moments'
   | 'phase-5-moment-canvas';
 
 const projectPhases: Array<{ id: ProjectPhase; number: string; title: string; shortTitle: string; description: string }> = [
-  { id: 'phase-0-ingestion', number: '0', title: 'Ingest', shortTitle: 'Ingest', description: 'Book' },
-  { id: 'phase-1-assets', number: '1', title: 'Assets', shortTitle: 'Assets', description: 'Cast & places' },
-  { id: 'phase-2-canonical-canvas', number: '2', title: 'Canon', shortTitle: 'Canon', description: 'References' },
+  { id: 'phase-0-ingestion', number: '0', title: 'Ingest', shortTitle: 'Ingest', description: 'Book & style' },
+  { id: 'phase-1-characters', number: '1', title: 'Characters', shortTitle: 'Cast', description: 'Cast & sheets' },
+  { id: 'phase-2-locations', number: '2', title: 'Locations', shortTitle: 'Places', description: 'Places & refs' },
   { id: 'phase-3-scenes', number: '3', title: 'Scenes', shortTitle: 'Scenes', description: 'Acts' },
   { id: 'phase-4-moments', number: '4', title: 'Moments', shortTitle: 'Moments', description: 'Beats' },
   { id: 'phase-5-moment-canvas', number: '5', title: 'Images', shortTitle: 'Images', description: 'Panels' },
@@ -72,15 +72,36 @@ const projectPhases: Array<{ id: ProjectPhase; number: string; title: string; sh
 
 const phaseDefaultTags: Record<ProjectPhase, string[]> = {
   'phase-0-ingestion': [],
-  'phase-1-assets': [],
-  'phase-2-canonical-canvas': ['archetype', 'character-sheet', 'location'],
+  'phase-1-characters': ['character-sheet', 'character-style'],
+  'phase-2-locations': ['location', 'scene-style'],
   'phase-3-scenes': [],
   'phase-4-moments': [],
   'phase-5-moment-canvas': ['page', 'panel'],
 };
 
-function isCanvasPhase(phase: ProjectPhase) {
-  return phase === 'phase-2-canonical-canvas' || phase === 'phase-5-moment-canvas';
+function phaseHasCanvas(phase: ProjectPhase) {
+  return phase === 'phase-1-characters' || phase === 'phase-2-locations' || phase === 'phase-5-moment-canvas';
+}
+
+function phaseHasList(phase: ProjectPhase) {
+  return phase !== 'phase-5-moment-canvas';
+}
+
+function phaseStage(phase: ProjectPhase): AdaptationStage | null {
+  switch (phase) {
+    case 'phase-0-ingestion':
+      return 'ingest';
+    case 'phase-1-characters':
+      return 'characters';
+    case 'phase-2-locations':
+      return 'locations';
+    case 'phase-3-scenes':
+      return 'scenes';
+    case 'phase-4-moments':
+      return 'moments';
+    default:
+      return null;
+  }
 }
 
 const emptyCanvas: CanvasDocument = {
@@ -272,13 +293,13 @@ function App() {
   const [hasManualTagFilters, setHasManualTagFilters] = useState(false);
   const [isTagFilterMenuOpen, setIsTagFilterMenuOpen] = useState(false);
   const [projectPhase, setProjectPhase] = useState<ProjectPhase>('phase-0-ingestion');
+  const [phaseViewMode, setPhaseViewMode] = useState<'list' | 'canvas'>('list');
+  const autoPublishingArchetypesRef = useRef(false);
   const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const [adaptation, setAdaptation] = useState<AdaptationStatus | null>(null);
   const [adaptationWorkflow, setAdaptationWorkflow] = useState<AdaptationWorkflowStatus | null>(null);
   const [adaptationValidation, setAdaptationValidation] = useState<AdaptationWorkflowStatus | null>(null);
-  const [isValidationLogExpanded, setIsValidationLogExpanded] = useState(false);
-  const [isWorkflowLogExpanded, setIsWorkflowLogExpanded] = useState(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const reactFlowRef = useRef<ReactFlowInstance<PhotoNodeData> | null>(null);
@@ -898,16 +919,17 @@ function App() {
   }, [loadAdaptation, assets]);
 
   const loadAdaptationWorkflow = useCallback(async () => {
-    if (!openProjectSlug) {
-      setAdaptationWorkflow(null);
+    const stage = phaseStage(projectPhase);
+    setAdaptationWorkflow(null);
+    if (!openProjectSlug || !stage) {
       return;
     }
     try {
-      setAdaptationWorkflow(await api.getAdaptationWorkflow(openProjectSlug));
+      setAdaptationWorkflow(await api.getAdaptationWorkflow(openProjectSlug, stage));
     } catch (err) {
       setError(String(err));
     }
-  }, [openProjectSlug]);
+  }, [openProjectSlug, projectPhase]);
 
   const loadAdaptationValidation = useCallback(async () => {
     if (!openProjectSlug) {
@@ -930,9 +952,10 @@ function App() {
   }, [loadAdaptationValidation]);
 
   useEffect(() => {
-    if (!openProjectSlug || !adaptationWorkflow?.running) return;
+    const stage = phaseStage(projectPhase);
+    if (!openProjectSlug || !stage || !adaptationWorkflow?.running) return;
     const timer = window.setInterval(async () => {
-      const next = await api.getAdaptationWorkflow(openProjectSlug);
+      const next = await api.getAdaptationWorkflow(openProjectSlug, stage);
       setAdaptationWorkflow(next);
       if (!next.running) {
         await reload();
@@ -940,7 +963,7 @@ function App() {
       }
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [adaptationWorkflow?.running, loadAdaptation, openProjectSlug]);
+  }, [adaptationWorkflow?.running, loadAdaptation, openProjectSlug, projectPhase]);
 
   useEffect(() => {
     if (!openProjectSlug || !adaptationValidation?.running) return;
@@ -949,6 +972,25 @@ function App() {
     }, 1500);
     return () => window.clearInterval(timer);
   }, [adaptationValidation?.running, openProjectSlug]);
+
+  const ensureAdaptationDraftsPublished = useCallback(async () => {
+    if (!openProjectSlug) return;
+    await api.importAdaptationDraftsToCanvas(openProjectSlug);
+    await loadProject(openProjectSlug);
+  }, [openProjectSlug, loadProject]);
+
+  useEffect(() => {
+    if (projectPhase !== 'phase-1-characters' || !adaptation) return;
+    if (!(adaptation.styleRefs.archetypeCharacterPrompt || adaptation.styleRefs.archetypeScenePrompt)) return;
+    const hasArchetypeNodes = Object.values(canvas.nodes).some((node) => node.tags.includes('character-style') || node.tags.includes('scene-style'));
+    if (hasArchetypeNodes || autoPublishingArchetypesRef.current) return;
+    autoPublishingArchetypesRef.current = true;
+    ensureAdaptationDraftsPublished()
+      .catch((err) => setError(String(err)))
+      .finally(() => {
+        autoPublishingArchetypesRef.current = false;
+      });
+  }, [projectPhase, adaptation, canvas, ensureAdaptationDraftsPublished]);
 
   const saveAdaptationStyle = async (visualStyle: string) => {
     if (!openProjectSlug) return;
@@ -965,23 +1007,33 @@ function App() {
     setAdaptation(await api.importAdaptationBook(openProjectSlug, file));
   };
 
+  const importAdaptationStyleRef = async (kind: 'archetype-character' | 'archetype-scene', file: File) => {
+    if (!openProjectSlug) return;
+    setAdaptation(await api.importAdaptationStyleRef(openProjectSlug, kind, file));
+    await reload();
+  };
+
+  const saveAdaptationStyleRefPrompt = async (kind: 'archetype-character' | 'archetype-scene', prompt: string) => {
+    if (!openProjectSlug) return;
+    setAdaptation(await api.saveAdaptationStyleRefPrompt(openProjectSlug, kind, prompt));
+    await reload();
+  };
+
   const setAdaptationStyleRefAsset = async (kind: 'archetype-character' | 'archetype-scene', assetId: string) => {
     if (!openProjectSlug) return;
     setAdaptation(await api.setAdaptationStyleRefAsset(openProjectSlug, kind, assetId));
     await reload();
   };
 
-  const startAdaptationWorkflow = async () => {
+  const startAdaptationWorkflow = async (stage: AdaptationStage = 'all') => {
     if (!openProjectSlug) return;
     setError(null);
-    setIsWorkflowLogExpanded(true);
-    setAdaptationWorkflow(await api.startAdaptationWorkflow(openProjectSlug));
+    setAdaptationWorkflow(await api.startAdaptationWorkflow(openProjectSlug, stage));
   };
 
   const startAdaptationValidation = async () => {
     if (!openProjectSlug) return;
     setError(null);
-    setIsValidationLogExpanded(true);
     setAdaptationValidation(await api.startAdaptationValidation(openProjectSlug));
   };
 
@@ -991,7 +1043,12 @@ function App() {
     const result = await api.importAdaptationDraftsToCanvas(openProjectSlug);
     setCanvas(result.canvas);
     await loadProject(openProjectSlug);
-    setProjectPhase((adaptation?.counts.panelPrompts ?? 0) > 0 || (adaptation?.counts.pagePlans ?? 0) > 0 ? 'phase-5-moment-canvas' : 'phase-2-canonical-canvas');
+    if (projectPhase === 'phase-4-moments') {
+      setProjectPhase('phase-5-moment-canvas');
+      setPhaseViewMode('list');
+    } else if (phaseHasCanvas(projectPhase)) {
+      setPhaseViewMode('canvas');
+    }
   };
 
   const generateStoryArtifact = async (id: string, artifact: StoryArtifactNodeData) => {
@@ -1033,7 +1090,8 @@ function App() {
     );
   }
 
-  const isCanvasActive = isCanvasPhase(projectPhase);
+  const showViewToggle = phaseHasCanvas(projectPhase) && phaseHasList(projectPhase);
+  const isCanvasActive = phaseHasCanvas(projectPhase) && (phaseHasList(projectPhase) ? phaseViewMode === 'canvas' : true);
 
   return (
     <div className="app">
@@ -1048,6 +1106,7 @@ function App() {
         onBack={closeProject}
         onPhaseChange={(phase) => {
           setProjectPhase(phase);
+          setPhaseViewMode('list');
           setIsTagFilterMenuOpen(false);
           setPopoverNodeId(null);
           setActiveChatSessionId(null);
@@ -1055,7 +1114,7 @@ function App() {
       />
       <main
         ref={canvasRef}
-        className={`canvas ${!isCanvasActive ? 'story-adaptation-view' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
+        className={`canvas ${!isCanvasActive ? 'story-adaptation-view' : ''} ${showViewToggle ? 'has-view-toggle' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
         onDragOver={(event) => {
           if (!isCanvasActive) return;
           event.preventDefault();
@@ -1077,6 +1136,12 @@ function App() {
           setContextMenu({ x: event.clientX, y: event.clientY });
         }}
       >
+        {showViewToggle && (
+          <div className="phase-view-toggle" role="tablist" aria-label="Phase view">
+            <button role="tab" aria-selected={phaseViewMode === 'list'} className={phaseViewMode === 'list' ? 'active' : ''} onClick={() => setPhaseViewMode('list')}>List</button>
+            <button role="tab" aria-selected={phaseViewMode === 'canvas'} className={phaseViewMode === 'canvas' ? 'active' : ''} onClick={() => setPhaseViewMode('canvas')}>Canvas</button>
+          </div>
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -1094,19 +1159,18 @@ function App() {
             phase={projectPhase}
             projectSlug={openProjectSlug}
             adaptation={adaptation}
+            assets={assets}
             workflow={adaptationWorkflow}
             validation={adaptationValidation}
-            isWorkflowLogExpanded={isWorkflowLogExpanded}
-            isValidationLogExpanded={isValidationLogExpanded}
             onSaveStyle={saveAdaptationStyle}
             onSaveSettings={saveAdaptationSettings}
             onImportBook={importAdaptationBook}
+            onImportStyleRef={importAdaptationStyleRef}
+            onSaveStylePrompt={saveAdaptationStyleRefPrompt}
             onStartWorkflow={startAdaptationWorkflow}
             onStartValidation={startAdaptationValidation}
             onImportDraftsToCanvas={importAdaptationDraftsToCanvas}
             onReloadAdaptation={loadAdaptation}
-            onToggleWorkflowLog={() => setIsWorkflowLogExpanded((current) => !current)}
-            onToggleValidationLog={() => setIsValidationLogExpanded((current) => !current)}
           />
         )}
         {isCanvasActive && (
@@ -1394,8 +1458,8 @@ function phaseStatus(adaptation: AdaptationStatus | null, phase: ProjectPhase) {
   if (!adaptation) return 'pending';
   const counts = adaptation.counts;
   if (phase === 'phase-0-ingestion') return adaptation.hasBookSession ? 'ready' : adaptation.hasBook ? 'active' : 'pending';
-  if (phase === 'phase-1-assets') return (counts.characterSheets ?? 0) > 0 || (counts.locationPrompts ?? 0) > 0 ? 'ready' : 'pending';
-  if (phase === 'phase-2-canonical-canvas') return adaptation.styleRefs.archetypeCharacterAsset || adaptation.styleRefs.archetypeSceneAsset ? 'ready' : 'active';
+  if (phase === 'phase-1-characters') return (counts.characterSheets ?? 0) > 0 ? 'ready' : (counts.characterListLines ?? 0) > 0 || (counts.characterArtifacts ?? 0) > 0 ? 'active' : 'pending';
+  if (phase === 'phase-2-locations') return (counts.locationPrompts ?? 0) > 0 ? 'ready' : 'pending';
   if (phase === 'phase-3-scenes') return (counts.sceneArtifacts ?? 0) > 0 ? 'ready' : (counts.sceneManifest ?? 0) > 0 ? 'active' : 'pending';
   if (phase === 'phase-4-moments') return (counts.panelPrompts ?? 0) > 0 || (counts.pagePlans ?? 0) > 0 ? 'ready' : 'pending';
   return (counts.panelPrompts ?? 0) > 0 || (counts.pagePlans ?? 0) > 0 ? 'active' : 'pending';
@@ -1422,34 +1486,54 @@ function ProjectPhaseSidebar({
   onBack: () => void;
   onPhaseChange: (phase: ProjectPhase) => void;
 }) {
+  if (isCollapsed) {
+    return (
+      <button
+        className="phase-sidebar-expand"
+        onClick={onToggleCollapsed}
+        title="Expand sidebar"
+        aria-label="Expand sidebar"
+      >
+        ›
+      </button>
+    );
+  }
   return (
-    <aside className={`project-phase-sidebar ${isCollapsed ? 'collapsed' : ''}`}>
-      <div className="phase-sidebar-project">
-        <button className="project-back-button" onClick={onBack} title="Back to projects">{isCollapsed ? '←' : 'All'}</button>
-        {!isCollapsed && (
-          <div className="phase-sidebar-project-title">
-            <span>Project</span>
-            <strong>{project?.name ?? projectSlug}</strong>
-          </div>
-        )}
-        <button className="phase-sidebar-collapse" onClick={onToggleCollapsed} title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-          {isCollapsed ? '›' : '‹'}
+    <aside className="project-phase-sidebar">
+      <div className="phase-sidebar-rail">
+        <button
+          className="phase-sidebar-collapse"
+          onClick={onToggleCollapsed}
+          title="Collapse sidebar"
+          aria-label="Collapse sidebar"
+        >
+          ‹
         </button>
       </div>
-      {error && !isCollapsed && <p className="error">{error}</p>}
+      <button className="project-back-button" onClick={onBack} title="Back to projects">
+        <span className="project-back-arrow" aria-hidden="true">←</span>
+        <span>All projects</span>
+      </button>
+      <div className="phase-sidebar-project-title">
+        <span>Project</span>
+        <strong>{project?.name ?? projectSlug}</strong>
+      </div>
+      {error && <p className="error">{error}</p>}
       <nav className="phase-nav" aria-label="Project phases">
         {projectPhases.map((phase) => {
           const status = phaseStatus(adaptation, phase.id);
+          const selected = activePhase === phase.id;
           return (
             <button
               key={phase.id}
-              className={`phase-nav-item ${activePhase === phase.id ? 'active' : ''} ${status}`}
+              className={`phase-nav-item status-${status} ${selected ? 'is-selected' : ''}`}
+              aria-current={selected ? 'page' : undefined}
               onClick={() => onPhaseChange(phase.id)}
               title={`${phase.number}. ${phase.title}: ${phase.description}`}
             >
               <span className="phase-number">{phase.number}</span>
-              <strong>{isCollapsed ? phase.shortTitle.slice(0, 1) : phase.title}</strong>
-              {!isCollapsed && <small>{phase.description}</small>}
+              <strong>{phase.title}</strong>
+              <small>{phase.description}</small>
             </button>
           );
         })}
@@ -1512,36 +1596,34 @@ function StoryPhaseScreen({
   phase,
   projectSlug,
   adaptation,
+  assets,
   workflow,
   validation,
-  isWorkflowLogExpanded,
-  isValidationLogExpanded,
   onSaveStyle,
   onSaveSettings,
   onImportBook,
+  onImportStyleRef,
+  onSaveStylePrompt,
   onStartWorkflow,
   onStartValidation,
   onImportDraftsToCanvas,
   onReloadAdaptation,
-  onToggleWorkflowLog,
-  onToggleValidationLog,
 }: {
   phase: ProjectPhase;
   projectSlug: string;
   adaptation: AdaptationStatus;
+  assets: Asset[];
   workflow: AdaptationWorkflowStatus | null;
   validation: AdaptationWorkflowStatus | null;
-  isWorkflowLogExpanded: boolean;
-  isValidationLogExpanded: boolean;
   onSaveStyle: (visualStyle: string) => Promise<void>;
   onSaveSettings: (storyKind: StoryKind) => Promise<void>;
   onImportBook: (file: File) => Promise<void>;
-  onStartWorkflow: () => Promise<void>;
+  onImportStyleRef: (kind: 'archetype-character' | 'archetype-scene', file: File) => Promise<void>;
+  onSaveStylePrompt: (kind: 'archetype-character' | 'archetype-scene', prompt: string) => Promise<void>;
+  onStartWorkflow: (stage: AdaptationStage) => Promise<void>;
   onStartValidation: () => Promise<void>;
   onImportDraftsToCanvas: () => Promise<void>;
   onReloadAdaptation: () => Promise<void>;
-  onToggleWorkflowLog: () => void;
-  onToggleValidationLog: () => void;
 }) {
   const [visualStyle, setVisualStyle] = useState(adaptation.visualStyle);
   const [isSavingStyle, setIsSavingStyle] = useState(false);
@@ -1550,10 +1632,10 @@ function StoryPhaseScreen({
   useEffect(() => {
     setVisualStyle(adaptation.visualStyle);
   }, [adaptation.visualStyle]);
-  const save = async () => {
+  const save = async (value: string = visualStyle) => {
     setIsSavingStyle(true);
     try {
-      await onSaveStyle(visualStyle);
+      await onSaveStyle(value);
     } finally {
       setIsSavingStyle(false);
     }
@@ -1575,84 +1657,72 @@ function StoryPhaseScreen({
     }
   };
   const validationFailed = validation?.returnCode !== null && validation?.returnCode !== undefined && validation.returnCode !== 0;
-  const validationStatus = validation?.running
-    ? 'Validation running'
-    : validation?.returnCode === 0
-      ? 'Validation passed'
-      : validationFailed
-        ? 'Validation failed'
-        : 'Validation not run yet';
-  const workflowStatus = workflow?.running
-    ? 'Workflow running'
-    : workflow?.returnCode === 0
-      ? 'Workflow complete'
-      : workflow?.returnCode
-        ? `Workflow exited ${workflow.returnCode}`
-        : 'Workflow not run yet';
-  const hasArtifacts = (adaptation.counts.characterSheets ?? 0) > 0
-    || (adaptation.counts.locationPrompts ?? 0) > 0
-    || (adaptation.counts.panelPrompts ?? 0) > 0
-    || (adaptation.counts.pagePlans ?? 0) > 0;
-  const phaseMeta = projectPhases.find((item) => item.id === phase) ?? projectPhases[0];
   return (
     <div className="story-adaptation-screen">
-      <div className="story-adaptation-header">
-        <div>
-          <h1>Phase {phaseMeta.number}: {phaseMeta.title}</h1>
-          <p className="muted">{phaseMeta.description}</p>
-        </div>
-        <div className="adaptation-status-stack">
-          <span className={`adaptation-status ${workflow?.returnCode === 0 ? 'generated' : ''}`}>{workflowStatus}</span>
-          <span className={`adaptation-status ${validation?.returnCode === 0 ? 'generated' : validationFailed ? 'failed' : ''}`}>{validationStatus}</span>
-        </div>
-      </div>
       {validationFailed && (
         <div className="validation-warning">
           Validation found issues in the adaptation artifacts. You can continue, but review the log before importing drafts to the canvas.
         </div>
       )}
-      <div className="story-adaptation-grid">
+      <div className={`story-adaptation-grid ${phase === 'phase-0-ingestion' ? 'is-ingest' : ''} ${phase === 'phase-1-characters' || phase === 'phase-2-locations' ? 'is-assets' : ''}`}>
         {phase === 'phase-0-ingestion' && (
-          <PhaseIngestion adaptation={adaptation} workflow={workflow} onImportBook={onImportBook} onStartWorkflow={onStartWorkflow} />
-        )}
-        {phase === 'phase-1-assets' && (
-          <PhaseAssets
-            projectSlug={projectSlug}
+          <PhaseIngestion
             adaptation={adaptation}
             workflow={workflow}
+            onImportBook={onImportBook}
+            onStartWorkflow={() => onStartWorkflow('ingest')}
+          />
+        )}
+        {phase === 'phase-1-characters' && (
+          <PhaseAssetType
+            kind="characters"
+            projectSlug={projectSlug}
+            adaptation={adaptation}
+            assets={assets}
+            workflow={workflow}
             validation={validation}
+            onImportStyleRef={onImportStyleRef}
+            onSaveStylePrompt={onSaveStylePrompt}
+            onStartWorkflow={() => onStartWorkflow('characters')}
+            onStartValidation={onStartValidation}
+            onImportDraftsToCanvas={importDrafts}
+            isImportingDrafts={isImportingDrafts}
+            onReloadAdaptation={onReloadAdaptation}
             visualStyle={visualStyle}
             isSavingStyle={isSavingStyle}
-            isSavingSettings={isSavingSettings}
             onVisualStyleChange={setVisualStyle}
             onSaveStyle={save}
-            onSaveStoryKind={saveStoryKind}
-            onStartWorkflow={onStartWorkflow}
+          />
+        )}
+        {phase === 'phase-2-locations' && (
+          <PhaseAssetType
+            kind="locations"
+            projectSlug={projectSlug}
+            adaptation={adaptation}
+            assets={assets}
+            workflow={workflow}
+            validation={validation}
+            onImportStyleRef={onImportStyleRef}
+            onSaveStylePrompt={onSaveStylePrompt}
+            onStartWorkflow={() => onStartWorkflow('locations')}
             onStartValidation={onStartValidation}
+            onImportDraftsToCanvas={importDrafts}
+            isImportingDrafts={isImportingDrafts}
             onReloadAdaptation={onReloadAdaptation}
           />
         )}
         {phase === 'phase-3-scenes' && (
-          <PhaseScenes projectSlug={projectSlug} adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={onStartWorkflow} onStartValidation={onStartValidation} onReloadAdaptation={onReloadAdaptation} />
+          <PhaseScenes projectSlug={projectSlug} adaptation={adaptation} workflow={workflow} validation={validation} isSavingSettings={isSavingSettings} onSaveStoryKind={saveStoryKind} onStartWorkflow={() => onStartWorkflow('scenes')} onStartValidation={onStartValidation} onImportDraftsToCanvas={importDrafts} isImportingDrafts={isImportingDrafts} onReloadAdaptation={onReloadAdaptation} />
         )}
         {phase === 'phase-4-moments' && (
-          <PhaseMoments adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={onStartWorkflow} onStartValidation={onStartValidation} />
+          <PhaseMoments adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={() => onStartWorkflow('moments')} onStartValidation={onStartValidation} onImportDraftsToCanvas={importDrafts} isImportingDrafts={isImportingDrafts} />
         )}
-        <section className="story-card import-drafts-card">
-          <h2>Publish Canvas Nodes</h2>
-          <p className="muted">Create or update canvas nodes for artifacts generated by this workflow.</p>
-          <button className="generate-button" onClick={importDrafts} disabled={!hasArtifacts || isImportingDrafts}>
-            {isImportingDrafts ? 'Publishing...' : 'Publish to canvas'}
-          </button>
-        </section>
       </div>
       {workflow && (workflow.log || workflow.running || workflow.returnCode !== null) && (
-        <div className="story-log-card">
+        <div className="story-log-card story-log-card-fill">
           <WorkflowLogPanel
             title="Workflow Output"
             workflow={workflow}
-            isExpanded={isWorkflowLogExpanded}
-            onToggle={onToggleWorkflowLog}
           />
         </div>
       )}
@@ -1661,24 +1731,9 @@ function StoryPhaseScreen({
           <WorkflowLogPanel
             title="Validation Output"
             workflow={validation}
-            isExpanded={isValidationLogExpanded}
-            onToggle={onToggleValidationLog}
           />
         </div>
       )}
-    </div>
-  );
-}
-
-function StatusPills({ adaptation, items }: { adaptation: AdaptationStatus; items: Array<{ label: string; ok?: boolean; value?: number }> }) {
-  return (
-    <div className="adaptation-checklist">
-      {items.map((item) => (
-        <span key={item.label} className={item.ok ? 'ok' : ''}>
-          {item.value !== undefined ? `${item.value} ${item.label}` : item.label}
-        </span>
-      ))}
-      <span>{adaptation.settings.storyKind}</span>
     </div>
   );
 }
@@ -1742,6 +1797,27 @@ function emptyFileDraft(kind: AdaptationFileKind, existingKeys: string[]): Adapt
   };
 }
 
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="confirm-backdrop" onClick={onClose}>
+      <div className="editor-dialog" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <div className="editor-dialog-head">
+          <h2>{title}</h2>
+          <button className="icon-button" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function AdaptationFileEditor({
   projectSlug,
   kind,
@@ -1754,32 +1830,25 @@ function AdaptationFileEditor({
   onReloadAdaptation: () => Promise<void>;
 }) {
   const files = filesFromLinks(kind, links);
-  const [selectedKey, setSelectedKey] = useState(files[0]?.key ?? '');
-  const selected = files.find((file) => file.key === selectedKey) ?? files[0] ?? null;
-  const [draft, setDraft] = useState<AdaptationFilePayload>(() =>
-    selected
-      ? { key: selected.key, body: selected.body, mode: selected.mode, styleRef: selected.styleRef }
-      : emptyFileDraft(kind, files.map((file) => file.key)),
-  );
-  const [isCreating, setIsCreating] = useState(!selected);
+  const singular = singularFileKindLabel(kind);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [draft, setDraft] = useState<AdaptationFilePayload>(() => emptyFileDraft(kind, []));
   const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    const nextSelected = files.find((file) => file.key === selectedKey) ?? files[0] ?? null;
-    if (!nextSelected) {
-      setIsCreating(true);
-      setDraft(emptyFileDraft(kind, []));
-      return;
-    }
-    setSelectedKey(nextSelected.key);
-    setIsCreating(false);
-    setDraft({ key: nextSelected.key, body: nextSelected.body, mode: nextSelected.mode, styleRef: nextSelected.styleRef });
-  }, [kind, links]);
-
-  const startNew = () => {
+  const openNew = () => {
     setIsCreating(true);
-    setSelectedKey('');
+    setEditingKey(null);
     setDraft(emptyFileDraft(kind, files.map((file) => file.key)));
+    setIsModalOpen(true);
+  };
+
+  const openEdit = (file: ReturnType<typeof filesFromLinks>[number]) => {
+    setIsCreating(false);
+    setEditingKey(file.key);
+    setDraft({ key: file.key, body: file.body, mode: file.mode, styleRef: file.styleRef });
+    setIsModalOpen(true);
   };
 
   const save = async () => {
@@ -1793,11 +1862,11 @@ function AdaptationFileEditor({
     try {
       if (isCreating) {
         await api.createAdaptationFile(projectSlug, kind, payload);
-      } else if (selected) {
-        await api.updateAdaptationFile(projectSlug, kind, selected.key, payload);
+      } else if (editingKey) {
+        await api.updateAdaptationFile(projectSlug, kind, editingKey, payload);
       }
-      setSelectedKey(payload.key);
       await onReloadAdaptation();
+      setIsModalOpen(false);
     } finally {
       setIsSaving(false);
     }
@@ -1808,56 +1877,54 @@ function AdaptationFileEditor({
       <div className="adaptation-file-header">
         <div>
           <h2>{fileKindLabel(kind)}</h2>
-          <p className="muted">{files.length ? `${files.length} saved ${fileKindLabel(kind).toLowerCase()}` : `Create the first ${singularFileKindLabel(kind)}.`}</p>
+          {files.length > 0 && <p className="muted">{files.length} saved {fileKindLabel(kind).toLowerCase()} · click to edit</p>}
         </div>
-        <button className="secondary" onClick={startNew}>New {singularFileKindLabel(kind)}</button>
+        <button className="secondary" onClick={openNew}>New {singular}</button>
       </div>
-      <div className="adaptation-file-layout">
-        <div className="adaptation-file-list">
-          {files.map((file) => (
-            <button
-              key={file.key}
-              className={`adaptation-file-list-item ${!isCreating && selected?.key === file.key ? 'active' : ''}`}
-              onClick={() => {
-                setSelectedKey(file.key);
-                setIsCreating(false);
-              }}
-            >
-              <strong>{file.key}</strong>
-              <small>{file.status} · {file.promptPath}</small>
-            </button>
-          ))}
-          {!files.length && <p className="muted">No {fileKindLabel(kind).toLowerCase()} yet.</p>}
-        </div>
-        <div className="adaptation-file-form">
-          <label className="field-label">
-            Key
-            <input value={draft.key} onChange={(event) => setDraft((current) => ({ ...current, key: event.target.value }))} />
-          </label>
-          {kind !== 'scenes' && (
-            <div className="adaptation-file-row">
-              <label className="field-label">
-                Mode
-                <select value={draft.mode ?? 'new-image'} onChange={(event) => setDraft((current) => ({ ...current, mode: event.target.value }))}>
-                  <option value="new-image">New image</option>
-                  <option value="edit-reference">Edit reference</option>
-                </select>
-              </label>
-              <label className="field-label">
-                Style ref
-                <input value={draft.styleRef ?? ''} onChange={(event) => setDraft((current) => ({ ...current, styleRef: event.target.value }))} placeholder={kind === 'characters' ? 'character:base' : 'location:base'} />
-              </label>
-            </div>
-          )}
-          <label className="field-label">
-            {kind === 'scenes' ? 'Scene artifact' : 'Image prompt'}
-            <textarea value={draft.body} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} />
-          </label>
-          <button className="generate-button" onClick={save} disabled={isSaving || !draft.key.trim()}>
-            {isSaving ? 'Saving...' : isCreating ? `Create ${singularFileKindLabel(kind)}` : 'Save changes'}
+      <div className="adaptation-file-grid">
+        {files.map((file) => (
+          <button key={file.key} className="adaptation-file-list-item" onClick={() => openEdit(file)}>
+            <strong>{file.key}</strong>
+            <small>{file.status} · {file.promptPath}</small>
           </button>
-        </div>
+        ))}
+        {!files.length && <p className="muted">No {fileKindLabel(kind).toLowerCase()} yet.</p>}
       </div>
+      {isModalOpen && (
+        <Modal title={isCreating ? `New ${singular}` : `Edit ${draft.key || singular}`} onClose={() => setIsModalOpen(false)}>
+          <div className="adaptation-file-form">
+            <label className="field-label">
+              Key
+              <input value={draft.key} onChange={(event) => setDraft((current) => ({ ...current, key: event.target.value }))} />
+            </label>
+            {kind !== 'scenes' && (
+              <div className="adaptation-file-row">
+                <label className="field-label">
+                  Mode
+                  <select value={draft.mode ?? 'new-image'} onChange={(event) => setDraft((current) => ({ ...current, mode: event.target.value }))}>
+                    <option value="new-image">New image</option>
+                    <option value="edit-reference">Edit reference</option>
+                  </select>
+                </label>
+                <label className="field-label">
+                  Style ref
+                  <input value={draft.styleRef ?? ''} onChange={(event) => setDraft((current) => ({ ...current, styleRef: event.target.value }))} placeholder={kind === 'characters' ? 'character:base' : 'location:base'} />
+                </label>
+              </div>
+            )}
+            <label className="field-label">
+              {kind === 'scenes' ? 'Scene artifact' : 'Image prompt'}
+              <textarea className="modal-textarea" rows={10} value={draft.body} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} />
+            </label>
+          </div>
+          <div className="modal-actions">
+            <button className="secondary" onClick={() => setIsModalOpen(false)} disabled={isSaving}>Cancel</button>
+            <button className="generate-button" onClick={save} disabled={isSaving || !draft.key.trim()}>
+              {isSaving ? 'Saving...' : isCreating ? `Create ${singular}` : 'Save changes'}
+            </button>
+          </div>
+        </Modal>
+      )}
     </section>
   );
 }
@@ -1874,124 +1941,303 @@ function PhaseIngestion({
   onStartWorkflow: () => Promise<void>;
 }) {
   return (
-    <>
-      <section className="book-upload-section">
-        <h2>Book Source</h2>
-        <p className="muted">
-          {adaptation.hasBook ? 'book.txt is present. The next workflow run will create or reuse the isolated read-book session.' : 'Upload a plain text book file to start ingestion.'}
-        </p>
-        <label className="generate-button file-button book-upload-button">
-          {adaptation.hasBook ? 'Replace book.txt' : 'Upload book.txt'}
-          <input type="file" accept=".txt,text/plain" hidden onChange={(event) => event.target.files?.[0] && void onImportBook(event.target.files[0])} />
+    <section className="ingest-panel">
+      <ol className="ingest-steps">
+        <li className={`ingest-step ${adaptation.hasBook ? 'is-done' : ''}`}>
+          <span className="ingest-step-index">1</span>
+          <div className="ingest-step-content">
+            <h2>Book Source</h2>
+            <label className="generate-button file-button book-upload-button">
+              {adaptation.hasBook ? 'Replace book.txt' : 'Upload book.txt'}
+              <input type="file" accept=".txt,text/plain" hidden onChange={(event) => event.target.files?.[0] && void onImportBook(event.target.files[0])} />
+            </label>
+          </div>
+        </li>
+        <li className={`ingest-step ${adaptation.hasBookSession ? 'is-done' : ''}`}>
+          <span className="ingest-step-index">2</span>
+          <div className="ingest-step-content">
+            <h2>Read Book &amp; Build Style</h2>
+            <p className="muted">Creates the read-book session and generates the visual style and archetypes. Edit the visual style in Phase 1.</p>
+            <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBook || workflow?.running}>
+              {workflow?.running && <span className="spinner" aria-hidden="true" />}
+              {workflow?.running ? 'Loading book & style...' : adaptation.hasBookSession ? 'Rebuild session & style' : 'Load book & build style'}
+            </button>
+          </div>
+        </li>
+      </ol>
+    </section>
+  );
+}
+
+function ArchetypeReferenceCard({
+  refKind,
+  projectSlug,
+  asset,
+  prompt,
+  onImportStyleRef,
+  onSavePrompt,
+}: {
+  refKind: 'archetype-character' | 'archetype-scene';
+  projectSlug: string;
+  asset: Asset | null;
+  prompt: string;
+  onImportStyleRef: (refKind: 'archetype-character' | 'archetype-scene', file: File) => Promise<void>;
+  onSavePrompt: (refKind: 'archetype-character' | 'archetype-scene', prompt: string) => Promise<void>;
+}) {
+  const isCharacter = refKind === 'archetype-character';
+  const title = isCharacter ? 'Character Archetype' : 'Scene Archetype';
+  const styleLabel = isCharacter ? 'character style reference' : 'scene style reference';
+  const hasPrompt = prompt.trim().length > 0;
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(prompt);
+  const [isSaving, setIsSaving] = useState(false);
+  useEffect(() => {
+    setDraft(prompt);
+  }, [prompt]);
+  const savePrompt = async () => {
+    setIsSaving(true);
+    try {
+      await onSavePrompt(refKind, draft);
+      setIsEditing(false);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  return (
+    <section className="story-card archetype-card">
+      <div className="archetype-card-head">
+        <div className="archetype-card-title">
+          <h2>{title}</h2>
+          <HelpTip text={`The ${styleLabel} for this project. Generate it on the canvas, edit the prompt, or import a reference image.`} />
+        </div>
+        <span className={`status-pill ${asset ? 'is-ready' : hasPrompt ? 'is-active' : 'is-pending'}`}>
+          {asset ? 'Image set' : hasPrompt ? 'Prompt ready' : 'Empty'}
+        </span>
+      </div>
+      {asset && (
+        <div className="archetype-preview">
+          <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb`} alt="" />
+        </div>
+      )}
+      {hasPrompt ? <p className="archetype-prompt-preview">{prompt}</p> : <p className="muted">No prompt yet.</p>}
+      <div className="archetype-card-actions">
+        <button className="secondary" onClick={() => setIsEditing(true)}>{hasPrompt ? 'Edit prompt' : 'Write prompt'}</button>
+        <label className="secondary file-button">
+          {asset ? 'Replace image' : 'Import image'}
+          <input type="file" accept="image/*" hidden onChange={(event) => event.target.files?.[0] && void onImportStyleRef(refKind, event.target.files[0])} />
         </label>
+      </div>
+      {isEditing && (
+        <Modal title={`Edit ${title} Prompt`} onClose={() => setIsEditing(false)}>
+          <p className="muted">This prompt drives the generated {styleLabel} on the canvas.</p>
+          <textarea className="modal-textarea" value={draft} onChange={(event) => setDraft(event.target.value)} rows={10} />
+          <div className="modal-actions">
+            <button className="secondary" onClick={() => setIsEditing(false)} disabled={isSaving}>Cancel</button>
+            <button className="generate-button" onClick={savePrompt} disabled={isSaving}>{isSaving ? 'Saving...' : 'Save prompt'}</button>
+          </div>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
+function HelpTip({ text }: { text: string }) {
+  return (
+    <span className="help-tip-wrap">
+      <button type="button" className="help-tip" aria-label={text} onClick={(event) => event.preventDefault()}>?</button>
+      <span className="help-tip-bubble" role="tooltip">{text}</span>
+    </span>
+  );
+}
+
+function VisualStyleCard({
+  value,
+  isSaving,
+  onChange,
+  onSave,
+}: {
+  value: string;
+  isSaving: boolean;
+  onChange: (value: string) => void;
+  onSave: (value: string) => Promise<void>;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+  const hasStyle = value.trim().length > 0;
+  const save = async () => {
+    onChange(draft);
+    await onSave(draft);
+    setIsEditing(false);
+  };
+  return (
+    <section className="story-card archetype-card">
+      <div className="archetype-card-head">
+        <div className="archetype-card-title">
+          <h2>Visual Style</h2>
+          <HelpTip text="The shared style guide appended to every generated image." />
+        </div>
+        <span className={`status-pill ${hasStyle ? 'is-ready' : 'is-pending'}`}>{hasStyle ? 'Set' : 'Empty'}</span>
+      </div>
+      {hasStyle ? <p className="archetype-prompt-preview">{value}</p> : <p className="muted">No visual style yet.</p>}
+      <div className="archetype-card-actions">
+        <button className="secondary" onClick={() => setIsEditing(true)}>{hasStyle ? 'Edit style' : 'Write style'}</button>
+      </div>
+      {isEditing && (
+        <Modal title="Edit Visual Style" onClose={() => setIsEditing(false)}>
+          <p className="muted">This style guide is appended to every generated image prompt.</p>
+          <textarea className="modal-textarea" value={draft} onChange={(event) => setDraft(event.target.value)} rows={12} />
+          <div className="modal-actions">
+            <button className="secondary" onClick={() => setIsEditing(false)} disabled={isSaving}>Cancel</button>
+            <button className="generate-button" onClick={save} disabled={isSaving}>{isSaving ? 'Saving...' : 'Save style'}</button>
+          </div>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
+function PhaseAssetType({
+  kind,
+  projectSlug,
+  adaptation,
+  assets,
+  workflow,
+  validation,
+  onImportStyleRef,
+  onSaveStylePrompt,
+  onStartWorkflow,
+  onStartValidation,
+  onImportDraftsToCanvas,
+  isImportingDrafts,
+  onReloadAdaptation,
+  visualStyle,
+  isSavingStyle,
+  onVisualStyleChange,
+  onSaveStyle,
+}: {
+  kind: 'characters' | 'locations';
+  projectSlug: string;
+  adaptation: AdaptationStatus;
+  assets: Asset[];
+  workflow: AdaptationWorkflowStatus | null;
+  validation: AdaptationWorkflowStatus | null;
+  onImportStyleRef: (refKind: 'archetype-character' | 'archetype-scene', file: File) => Promise<void>;
+  onSaveStylePrompt: (refKind: 'archetype-character' | 'archetype-scene', prompt: string) => Promise<void>;
+  onStartWorkflow: () => Promise<void>;
+  onStartValidation: () => Promise<void>;
+  onImportDraftsToCanvas: () => Promise<void>;
+  isImportingDrafts: boolean;
+  onReloadAdaptation: () => Promise<void>;
+  visualStyle?: string;
+  isSavingStyle?: boolean;
+  onVisualStyleChange?: (value: string) => void;
+  onSaveStyle?: (value: string) => Promise<void>;
+}) {
+  const isCharacters = kind === 'characters';
+  const characterAsset = assets.find((asset) => asset.id === adaptation.archetypeCharacterAssetId) ?? null;
+  const sceneAsset = assets.find((asset) => asset.id === adaptation.archetypeSceneAssetId) ?? null;
+  const links = isCharacters ? adaptation.characters : adaptation.locations;
+  const count = Object.keys(links).length;
+  const showVisualStyle = isCharacters && onVisualStyleChange && onSaveStyle;
+  return (
+    <>
+      {showVisualStyle && (
+        <VisualStyleCard
+          value={visualStyle ?? ''}
+          isSaving={Boolean(isSavingStyle)}
+          onChange={onVisualStyleChange!}
+          onSave={onSaveStyle!}
+        />
+      )}
+
+      <div className="archetype-row">
+        {isCharacters ? (
+          <ArchetypeReferenceCard
+            refKind="archetype-character"
+            projectSlug={projectSlug}
+            asset={characterAsset}
+            prompt={adaptation.archetypeCharacterPromptText ?? ''}
+            onImportStyleRef={onImportStyleRef}
+            onSavePrompt={onSaveStylePrompt}
+          />
+        ) : (
+          <ArchetypeReferenceCard
+            refKind="archetype-scene"
+            projectSlug={projectSlug}
+            asset={sceneAsset}
+            prompt={adaptation.archetypeScenePromptText ?? ''}
+            onImportStyleRef={onImportStyleRef}
+            onSavePrompt={onSaveStylePrompt}
+          />
+        )}
+      </div>
+
+      <section className="story-card assets-extract-card">
+        <div className="assets-extract-head">
+          <div>
+            <h2>Extract From Book</h2>
+            <p className="muted">Run Pi to populate {kind} files from the ingested book session.</p>
+          </div>
+          <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBookSession || workflow?.running}>
+            {workflow?.running && <span className="spinner" aria-hidden="true" />}
+            {workflow?.running ? 'Running extraction...' : 'Run extraction'}
+          </button>
+        </div>
+        {!adaptation.hasBookSession && (
+          <p className="assets-extract-hint">Create the read-book session in Phase 0 first, or author files manually below.</p>
+        )}
       </section>
-      <section className="workflow-run-section">
-        <h2>Read Book Session</h2>
-        <p className="muted">Create the project-local Pi read-book session and continue the adaptation workflow.</p>
-        <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBook || workflow?.running}>
-          {workflow?.running && <span className="spinner" aria-hidden="true" />}
-          {workflow?.running ? 'Running ingestion...' : adaptation.hasBookSession ? 'Run workflow again' : 'Create read-book session'}
-        </button>
-      </section>
-      <section className="story-card">
-        <h2>Ingestion Status</h2>
-        <StatusPills adaptation={adaptation} items={[{ label: 'Book text', ok: adaptation.hasBook }, { label: 'Book session', ok: adaptation.hasBookSession }]} />
-      </section>
+
+      <AdaptationFileEditor projectSlug={projectSlug} kind={kind} links={links} onReloadAdaptation={onReloadAdaptation} />
+
+      <div className="assets-row">
+        <section className="story-card">
+          <h2>Publish To Canvas</h2>
+          <p className="muted">Send {kind} files to the canvas to generate references.</p>
+          <button className="generate-button" onClick={onImportDraftsToCanvas} disabled={!count || isImportingDrafts}>
+            {isImportingDrafts ? 'Publishing...' : `Publish ${count} ${kind}`}
+          </button>
+        </section>
+        <section className="story-card">
+          <h2>Validate</h2>
+          <p className="muted">Check that {kind} files are well-formed.</p>
+          <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
+        </section>
+      </div>
     </>
   );
 }
 
-function PhaseAssets({
-  projectSlug,
-  adaptation,
-  workflow,
-  validation,
-  visualStyle,
-  isSavingStyle,
-  isSavingSettings,
-  onVisualStyleChange,
-  onSaveStyle,
-  onSaveStoryKind,
-  onStartWorkflow,
-  onStartValidation,
-  onReloadAdaptation,
-}: {
+function PhaseScenes({ projectSlug, adaptation, workflow, validation, isSavingSettings, onSaveStoryKind, onStartWorkflow, onStartValidation, onImportDraftsToCanvas, isImportingDrafts, onReloadAdaptation }: {
   projectSlug: string;
   adaptation: AdaptationStatus;
   workflow: AdaptationWorkflowStatus | null;
   validation: AdaptationWorkflowStatus | null;
-  visualStyle: string;
-  isSavingStyle: boolean;
   isSavingSettings: boolean;
-  onVisualStyleChange: (value: string) => void;
-  onSaveStyle: () => Promise<void>;
   onSaveStoryKind: (kind: StoryKind) => Promise<void>;
   onStartWorkflow: () => Promise<void>;
   onStartValidation: () => Promise<void>;
+  onImportDraftsToCanvas: () => Promise<void>;
+  isImportingDrafts: boolean;
   onReloadAdaptation: () => Promise<void>;
 }) {
+  const sceneCount = Object.keys(adaptation.scenes).length;
   return (
     <>
-      <AdaptationFileEditor projectSlug={projectSlug} kind="characters" links={adaptation.characters} onReloadAdaptation={onReloadAdaptation} />
-      <AdaptationFileEditor projectSlug={projectSlug} kind="locations" links={adaptation.locations} onReloadAdaptation={onReloadAdaptation} />
+      <AdaptationFileEditor projectSlug={projectSlug} kind="scenes" links={adaptation.scenes} onReloadAdaptation={onReloadAdaptation} />
       <section className="story-card">
         <h2>Story Kind</h2>
-        <p className="muted">Choose the adaptation shape before layout planning.</p>
+        <p className="muted">Choose the adaptation shape. This drives how scenes break down into pages or panels in later phases.</p>
         <select value={adaptation.settings.storyKind} disabled={isSavingSettings || workflow?.running} onChange={(event) => void onSaveStoryKind(event.target.value as StoryKind)}>
           <option value="picture-book">Picture book</option>
           <option value="illustrated-story">Illustrated story</option>
           <option value="comic-book">Comic book</option>
         </select>
       </section>
-      <section className="story-card visual-style-card">
-        <h2>Visual Style</h2>
-        <textarea value={visualStyle} onChange={(event) => onVisualStyleChange(event.target.value)} />
-        <button className="secondary" onClick={onSaveStyle} disabled={isSavingStyle}>{isSavingStyle ? 'Saving...' : 'Save style'}</button>
-      </section>
-      <section className="workflow-run-section">
-        <h2>Extract From Book</h2>
-        <p className="muted">Optionally run Pi extraction to populate character and location files from an ingested book.</p>
-        <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBook || workflow?.running}>
-          {workflow?.running && <span className="spinner" aria-hidden="true" />}
-          {workflow?.running ? 'Running extraction...' : 'Run extraction'}
-        </button>
-      </section>
       <section className="story-card">
-        <h2>Reference Status</h2>
-        <StatusPills
-          adaptation={adaptation}
-          items={[
-            { label: 'Visual style', ok: adaptation.styleRefs.visualStyle },
-            { label: 'Character archetype', ok: adaptation.styleRefs.archetypeCharacterPrompt },
-            { label: 'Scene archetype', ok: adaptation.styleRefs.archetypeScenePrompt },
-            { label: 'character artifacts', value: adaptation.counts.characterArtifacts ?? 0 },
-            { label: 'character sheets', value: adaptation.counts.characterSheets ?? 0 },
-            { label: 'location prompts', value: adaptation.counts.locationPrompts ?? 0 },
-          ]}
-        />
-      </section>
-      <section className="story-card">
-        <h2>Validate Artifacts</h2>
-        <p className="muted">Check extracted reference artifacts before publishing them to the canvas.</p>
-        <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
-      </section>
-    </>
-  );
-}
-
-function PhaseScenes({ projectSlug, adaptation, workflow, validation, onStartWorkflow, onStartValidation, onReloadAdaptation }: {
-  projectSlug: string;
-  adaptation: AdaptationStatus;
-  workflow: AdaptationWorkflowStatus | null;
-  validation: AdaptationWorkflowStatus | null;
-  onStartWorkflow: () => Promise<void>;
-  onStartValidation: () => Promise<void>;
-  onReloadAdaptation: () => Promise<void>;
-}) {
-  return (
-    <>
-      <AdaptationFileEditor projectSlug={projectSlug} kind="scenes" links={adaptation.scenes} onReloadAdaptation={onReloadAdaptation} />
-      <section className="workflow-run-section">
         <h2>Acts And Scenes</h2>
         <p className="muted">Optionally generate play-by-play and scene files from an ingested book context.</p>
         <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBookSession || workflow?.running}>
@@ -1999,8 +2245,11 @@ function PhaseScenes({ projectSlug, adaptation, workflow, validation, onStartWor
         </button>
       </section>
       <section className="story-card">
-        <h2>Scene Status</h2>
-        <StatusPills adaptation={adaptation} items={[{ label: 'scene manifest', value: adaptation.counts.sceneManifest ?? 0 }, { label: 'play-by-play', value: adaptation.counts.playByPlay ?? 0 }, { label: 'scene artifacts', value: adaptation.counts.sceneArtifacts ?? 0 }]} />
+        <h2>Scene Canvas</h2>
+        <p className="muted">{sceneCount ? `${sceneCount} scene files are ready to publish as planning nodes.` : 'No scene files yet.'}</p>
+        <button className="generate-button" onClick={onImportDraftsToCanvas} disabled={!sceneCount || isImportingDrafts}>
+          {isImportingDrafts ? 'Publishing...' : 'Publish scene nodes'}
+        </button>
       </section>
       <section className="story-card">
         <h2>Validate Scenes</h2>
@@ -2010,16 +2259,19 @@ function PhaseScenes({ projectSlug, adaptation, workflow, validation, onStartWor
   );
 }
 
-function PhaseMoments({ adaptation, workflow, validation, onStartWorkflow, onStartValidation }: {
+function PhaseMoments({ adaptation, workflow, validation, onStartWorkflow, onStartValidation, onImportDraftsToCanvas, isImportingDrafts }: {
   adaptation: AdaptationStatus;
   workflow: AdaptationWorkflowStatus | null;
   validation: AdaptationWorkflowStatus | null;
   onStartWorkflow: () => Promise<void>;
   onStartValidation: () => Promise<void>;
+  onImportDraftsToCanvas: () => Promise<void>;
+  isImportingDrafts: boolean;
 }) {
+  const momentNodeCount = Object.keys(adaptation.pages).length + Object.keys(adaptation.panels).length;
   return (
     <>
-      <section className="workflow-run-section">
+      <section className="story-card">
         <h2>Moments, Beats, Panels</h2>
         <p className="muted">Break scene artifacts into story-kind page plans or comic panel prompts.</p>
         <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={(adaptation.counts.sceneArtifacts ?? 0) === 0 || workflow?.running}>
@@ -2027,8 +2279,11 @@ function PhaseMoments({ adaptation, workflow, validation, onStartWorkflow, onSta
         </button>
       </section>
       <section className="story-card">
-        <h2>Moment Status</h2>
-        <StatusPills adaptation={adaptation} items={[{ label: 'page plans', value: adaptation.counts.pagePlans ?? 0 }, { label: 'panel prompts', value: adaptation.counts.panelPrompts ?? 0 }]} />
+        <h2>Moment Canvas</h2>
+        <p className="muted">{momentNodeCount ? `${momentNodeCount} page/panel prompts are ready for the moment image canvas.` : 'No page or panel prompts yet.'}</p>
+        <button className="generate-button" onClick={onImportDraftsToCanvas} disabled={!momentNodeCount || isImportingDrafts}>
+          {isImportingDrafts ? 'Publishing...' : 'Publish moment nodes'}
+        </button>
       </section>
       <section className="story-card">
         <h2>Validate Moment Prompts</h2>
@@ -2038,49 +2293,170 @@ function PhaseMoments({ adaptation, workflow, validation, onStartWorkflow, onSta
   );
 }
 
-function WorkflowLogPanel({
-  title = 'Adaptation Output',
-  workflow,
-  isExpanded,
-  onToggle,
-}: {
-  title?: string;
-  workflow: AdaptationWorkflowStatus;
-  isExpanded: boolean;
-  onToggle: () => void;
-}) {
-  const logRef = useRef<HTMLPreElement | null>(null);
-  useEffect(() => {
-    const element = logRef.current;
-    if (!element || !isExpanded) return;
-    element.scrollTop = element.scrollHeight;
-  }, [workflow.log, isExpanded]);
-  const statusText = workflow.running ? 'running' : workflow.returnCode === 0 ? 'complete' : workflow.returnCode === null ? 'idle' : `exited ${workflow.returnCode}`;
+type PiWorkflowEvent =
+  | { type: 'assistant_text'; text: string }
+  | { type: 'tool_start'; toolName: string; args: string }
+  | { type: 'tool_end'; toolName: string; isError: boolean; size: number; result: string }
+  | { type: 'retry'; attempt: number; maxAttempts: number; message: string }
+  | { type: 'agent_start' | 'turn_start' | 'turn_end' | 'agent_end' | 'compaction_start' | 'compaction_end' };
+
+type WorkflowLogRow = { kind: 'event'; event: PiWorkflowEvent } | { kind: 'text'; text: string };
+
+type WorkflowLogSection = { id: number; label: string; output?: string; rows: WorkflowLogRow[] };
+
+function parseWorkflowLog(log: string): WorkflowLogSection[] {
+  const sections: WorkflowLogSection[] = [];
+  let current: WorkflowLogSection | null = null;
+  let nextId = 0;
+  const makeSection = (label: string): WorkflowLogSection => {
+    const section: WorkflowLogSection = { id: nextId++, label, rows: [] };
+    sections.push(section);
+    return section;
+  };
+  for (const rawLine of log.split('\n')) {
+    const line = rawLine.replace(/\s+$/, '');
+    if (!line) continue;
+    const outputMatch = /^\s+output:\s*(.+)$/.exec(rawLine);
+    if (outputMatch && current) {
+      current.output = outputMatch[1].trim();
+      continue;
+    }
+    if (/^\[[^\]]+\]\s+\S/.test(line)) {
+      current = makeSection(line.trim());
+      continue;
+    }
+    if (!current) current = makeSection('Output');
+    const trimmed = line.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed) as { type?: unknown };
+        if (parsed && typeof parsed.type === 'string') {
+          current.rows.push({ kind: 'event', event: parsed as PiWorkflowEvent });
+          continue;
+        }
+      } catch {
+        // Not a Pi event; fall back to a plain text line.
+      }
+    }
+    current.rows.push({ kind: 'text', text: line });
+  }
+  return sections;
+}
+
+function formatCharCount(n: number): string {
+  if (n < 1000) return `${n} chars`;
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k chars`;
+  return `${(n / 1_000_000).toFixed(1)}M chars`;
+}
+
+function WorkflowToolResult({ event }: { event: Extract<PiWorkflowEvent, { type: 'tool_end' }> }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className={`workflow-log-panel ${isExpanded ? 'expanded' : 'collapsed'}`}>
-      <button className="workflow-log-toggle" onClick={onToggle}>
-        <strong>{title}</strong>
-        <span>{statusText}</span>
-        <span>{isExpanded ? 'Collapse' : 'Expand'}</span>
-      </button>
-      {isExpanded && (
-        <pre ref={logRef} className="workflow-log-output" role="log" aria-live="polite">
-          {workflow.log || 'Waiting for output...'}
-        </pre>
+    <div className={`workflow-event workflow-event-tool-end ${event.isError ? 'is-error' : ''}`}>
+      <span className="workflow-event-icon" aria-hidden="true">{event.isError ? '✗' : '✓'}</span>
+      <span className="workflow-tool-name">{event.toolName}</span>
+      <span className="workflow-tool-size">{formatCharCount(event.size)}</span>
+      {event.result && (
+        <button type="button" className="workflow-tool-toggle" onClick={() => setOpen((value) => !value)}>
+          {open ? 'hide' : 'preview'}
+        </button>
       )}
+      {open && event.result && <pre className="workflow-tool-result">{event.result}</pre>}
     </div>
   );
 }
 
-function WorkflowLogDrawer(props: {
+function WorkflowEventRow({ event }: { event: PiWorkflowEvent }) {
+  if (event.type === 'assistant_text') {
+    return (
+      <div className="workflow-event workflow-event-assistant">
+        <span className="workflow-event-icon" aria-hidden="true">✦</span>
+        <div className="workflow-event-text">{event.text}</div>
+      </div>
+    );
+  }
+  if (event.type === 'tool_start') {
+    return (
+      <div className="workflow-event workflow-event-tool">
+        <span className="workflow-event-icon" aria-hidden="true">→</span>
+        <span className="workflow-tool-name">{event.toolName}</span>
+        {event.args && <code className="workflow-tool-args">{event.args}</code>}
+      </div>
+    );
+  }
+  if (event.type === 'tool_end') {
+    return <WorkflowToolResult event={event} />;
+  }
+  if (event.type === 'retry') {
+    return (
+      <div className="workflow-event workflow-event-retry">
+        <span className="workflow-event-icon" aria-hidden="true">↻</span>
+        <span>retry {event.attempt}/{event.maxAttempts}</span>
+        {event.message && <span className="workflow-event-text">{event.message}</span>}
+      </div>
+    );
+  }
+  return null;
+}
+
+function WorkflowLogSectionView({ section }: { section: WorkflowLogSection }) {
+  return (
+    <section className="workflow-step">
+      <header className="workflow-step-head">
+        <span className="workflow-step-label">{section.label}</span>
+        {section.output && <code className="workflow-step-output">{section.output}</code>}
+      </header>
+      <div className="workflow-step-body">
+        {section.rows.map((row, index) =>
+          row.kind === 'text' ? (
+            <div key={index} className="workflow-line">{row.text}</div>
+          ) : (
+            <WorkflowEventRow key={index} event={row.event} />
+          ),
+        )}
+      </div>
+    </section>
+  );
+}
+
+function WorkflowLogPanel({
+  title = 'Adaptation Output',
+  workflow,
+}: {
   title?: string;
   workflow: AdaptationWorkflowStatus;
-  isExpanded: boolean;
-  onToggle: () => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const sections = useMemo(() => parseWorkflowLog(workflow.log), [workflow.log]);
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    element.scrollTop = element.scrollHeight;
+  }, [workflow.log]);
+  const statusText = workflow.running
+    ? 'running'
+    : workflow.returnCode === 0
+      ? 'complete'
+      : workflow.returnCode === null || workflow.returnCode === undefined
+        ? 'idle'
+        : `exited ${workflow.returnCode}`;
+  const statusClass = workflow.running ? 'running' : workflow.returnCode ? 'error' : '';
   return (
-    <div className={`workflow-log-drawer ${props.isExpanded ? 'expanded' : 'collapsed'}`}>
-      <WorkflowLogPanel {...props} />
+    <div className="workflow-log-panel">
+      <div className="workflow-log-header">
+        <strong>{title}</strong>
+        <span className={`workflow-log-status ${statusClass}`}>
+          {workflow.running && <span className="spinner" aria-hidden="true" />}
+          {statusText}
+        </span>
+      </div>
+      <div className="workflow-timeline" ref={scrollRef} role="log" aria-live="polite">
+        {sections.length === 0 ? (
+          <p className="workflow-timeline-empty">Waiting for output…</p>
+        ) : (
+          sections.map((section) => <WorkflowLogSectionView key={section.id} section={section} />)
+        )}
+      </div>
     </div>
   );
 }

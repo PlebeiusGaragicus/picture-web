@@ -4,27 +4,30 @@ This workflow turns story source material into reusable visual references, scene
 
 ## Phase 0: Ingest
 
-Optional. Upload `book.txt` and run the read-book workflow to create a project-local Pi session.
+Upload `book.txt`, create the project-local Pi read-book session, and build the shared visual style.
 
-Projects may skip this phase and manually author story files in later phases.
+- The `ingest` stage creates the read-book session and runs `visual-style` to produce `style-refs/visual-style.md`, `style-refs/archetype-character.md`, and `style-refs/archetype-scene.md`.
+- The visual style is generated here; it is edited in Phase 1.
+- Projects may skip ingestion and manually author story files in later phases.
 
-## Phase 1: Story Assets
+## Phase 1: Characters
 
-Owns editable character and location files.
+Owns visual style editing, both style archetypes, editable character files, and their canonical images. Toggle between **List** and **Canvas** views.
 
-- Characters live in `adaptation/characters/sheets/*.md`.
+- Edit the shared visual style (`style-refs/visual-style.md`) here.
+- Shows both the character archetype (`archetype-character`) and scene archetype (`archetype-scene`) references; each can be generated on the canvas or imported.
+- The archetype nodes are auto-published to this canvas once the `visual-style` step has run, so you can go straight to generating them.
+- Characters live in `adaptation/characters/sheets/*.md`. List view edits the files; canvas view shows the archetypes plus character-sheet nodes for generating and marking canonical images.
+- Pi extraction (`characters` stage) is optional and only populates the character files from the book session.
+
+## Phase 2: Locations
+
+Owns editable location files and their canonical images. Toggle between **List** and **Canvas** views.
+
 - Locations live in `adaptation/locations/prompts/*.md`.
-- Users can create and edit these files without ingesting a book.
-- Pi extraction is optional and only populates these same files from `book.txt`.
-
-## Phase 2: Canonical Canvas
-
-Owns image generation for Phase 1 characters and locations.
-
-- Character sheet and location prompt nodes are image work items.
-- Generated candidates attach back to their story asset node.
-- The chosen/generated image becomes the canonical reference for that character or location.
-- Canonical references are used by later page and panel prompts.
+- List view edits the location files and shows the chosen scene style reference (the `archetype-scene` asset).
+- Canvas view shows the scene archetype plus location nodes; generate or import the archetype, then generate location images and mark the canonical version.
+- Pi extraction (`locations` stage) is optional and only populates these same files from the book session.
 
 ## Phase 3: Scenes
 

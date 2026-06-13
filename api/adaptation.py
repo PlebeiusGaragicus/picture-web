@@ -24,6 +24,7 @@ from models import (
     AdaptationMetadata,
     AdaptationSettingsPatch,
     AdaptationStatus,
+    AdaptationStylePromptPatch,
     AdaptationStyleRefAssetRequest,
     AdaptationWorkflowStatus,
     ArtifactKind,
@@ -46,12 +47,21 @@ def metadata_path(slug: str) -> Path:
     return adaptation_dir(slug) / "adaptation.json"
 
 
-def workflow_status_path(slug: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / "run-status.json"
+WORKFLOW_STAGES = ("ingest", "characters", "locations", "scenes", "moments", "all")
 
 
-def workflow_log_path(slug: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / "run.log"
+def require_stage(stage: str) -> str:
+    if stage not in WORKFLOW_STAGES:
+        raise HTTPException(status_code=400, detail=f"Unknown workflow stage: {stage}")
+    return stage
+
+
+def workflow_status_path(slug: str, stage: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{stage}-status.json"
+
+
+def workflow_log_path(slug: str, stage: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{stage}.log"
 
 
 def validation_status_path(slug: str) -> Path:
@@ -93,7 +103,14 @@ def process_status(slug: str, status_path: Path, log_path: Path) -> AdaptationWo
     pid = data.get("pid")
     if data.get("running") and isinstance(pid, int):
         running = process_is_running(pid)
-    log = read_text(log_path)[-20000:]
+    log = read_text(log_path)
+    log_limit = 400000
+    if len(log) > log_limit:
+        log = log[-log_limit:]
+        # Drop a partial first line so the UI never tries to parse a truncated event.
+        newline = log.find("\n")
+        if newline != -1:
+            log = log[newline + 1 :]
     if data.get("running") and not running:
         data["running"] = False
         data["completedAt"] = data.get("completedAt") or utc_now()
@@ -108,8 +125,9 @@ def process_status(slug: str, status_path: Path, log_path: Path) -> AdaptationWo
     )
 
 
-def workflow_status(slug: str) -> AdaptationWorkflowStatus:
-    return process_status(slug, workflow_status_path(slug), workflow_log_path(slug))
+def workflow_status(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
+    require_stage(stage)
+    return process_status(slug, workflow_status_path(slug, stage), workflow_log_path(slug, stage))
 
 
 def validation_status(slug: str) -> AdaptationWorkflowStatus:
@@ -192,16 +210,18 @@ def start_logged_process(
     return process_status(slug, status_path, log_path)
 
 
-def start_workflow(slug: str) -> AdaptationWorkflowStatus:
+def start_workflow(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
     root = ensure_adaptation(slug)
+    require_stage(stage)
     if not (root / "book.txt").is_file():
         raise HTTPException(status_code=400, detail="Upload book.txt before running adaptation")
+    # stage is validated against WORKFLOW_STAGES above, so it is safe to interpolate.
     return start_logged_process(
         slug,
-        log_path=workflow_log_path(slug),
-        status_path=workflow_status_path(slug),
-        start_line=f"Starting adaptation workflow for {slug}",
-        script_command="./scripts/comic-adaptation/run \"$SLUG\"",
+        log_path=workflow_log_path(slug, stage),
+        status_path=workflow_status_path(slug, stage),
+        start_line=f"Starting adaptation workflow ({stage}) for {slug}",
+        script_command=f"./scripts/comic-adaptation/run \"$SLUG\" \"{stage}\"",
     )
 
 
@@ -544,6 +564,10 @@ def status(slug: str) -> AdaptationStatus:
             "archetypeCharacterAsset": metadata.styleRefs.archetypeCharacterAssetId is not None,
             "archetypeSceneAsset": metadata.styleRefs.archetypeSceneAssetId is not None,
         },
+        archetypeCharacterAssetId=metadata.styleRefs.archetypeCharacterAssetId,
+        archetypeSceneAssetId=metadata.styleRefs.archetypeSceneAssetId,
+        archetypeCharacterPromptText=read_text(root / "style-refs" / "archetype-character.md"),
+        archetypeScenePromptText=read_text(root / "style-refs" / "archetype-scene.md"),
         counts={
             "characterListLines": count_nonempty_lines(root / "characters" / "list.txt"),
             "characterArtifacts": len(list((root / "characters" / "artifacts").glob("*.md"))),
@@ -571,6 +595,15 @@ def count_nonempty_lines(path: Path) -> int:
 def write_visual_style(slug: str, value: str) -> AdaptationStatus:
     root = ensure_adaptation(slug)
     (root / "style-refs" / "visual-style.md").write_text(value.rstrip() + "\n")
+    return status(slug)
+
+
+def write_style_ref_prompt(slug: str, request: AdaptationStylePromptPatch) -> AdaptationStatus:
+    if request.kind not in {"archetype-character", "archetype-scene"}:
+        raise HTTPException(status_code=400, detail="Invalid style ref kind")
+    root = ensure_adaptation(slug)
+    (root / "style-refs" / f"{request.kind}.md").write_text(request.prompt.rstrip() + "\n")
+    library.write_canvas(slug, library.default_canvas_for_story_artifacts(slug, library.read_stored_canvas(slug)))
     return status(slug)
 
 

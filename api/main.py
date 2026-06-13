@@ -32,6 +32,8 @@ from models import (
     AdaptationStatus,
     AdaptationStyleRefAssetRequest,
     AdaptationStylePatch,
+    AdaptationStylePromptPatch,
+    AdaptationWorkflowStartRequest,
     AdaptationWorkflowStatus,
     DisplayPatch,
     GenerateRequest,
@@ -141,6 +143,11 @@ def put_adaptation_style(slug: str, payload: AdaptationStylePatch) -> Adaptation
     return adaptation.write_visual_style(slug, payload.visualStyle)
 
 
+@app.put("/api/projects/{slug}/adaptation/style-ref-prompt", response_model=AdaptationStatus)
+def put_adaptation_style_ref_prompt(slug: str, payload: AdaptationStylePromptPatch) -> AdaptationStatus:
+    return adaptation.write_style_ref_prompt(slug, payload)
+
+
 @app.patch("/api/projects/{slug}/adaptation/settings", response_model=AdaptationStatus)
 def patch_adaptation_settings(slug: str, payload: AdaptationSettingsPatch) -> AdaptationStatus:
     return adaptation.write_settings(slug, payload)
@@ -162,13 +169,15 @@ def update_adaptation_file(slug: str, kind: AdaptationFileKind, key: str, payloa
 
 
 @app.get("/api/projects/{slug}/adaptation/workflow", response_model=AdaptationWorkflowStatus)
-def get_adaptation_workflow(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.workflow_status(slug)
+def get_adaptation_workflow(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
+    return adaptation.workflow_status(slug, stage)
 
 
 @app.post("/api/projects/{slug}/adaptation/workflow/start", response_model=AdaptationWorkflowStatus)
-def start_adaptation_workflow(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.start_workflow(slug)
+def start_adaptation_workflow(
+    slug: str, payload: AdaptationWorkflowStartRequest = AdaptationWorkflowStartRequest()
+) -> AdaptationWorkflowStatus:
+    return adaptation.start_workflow(slug, payload.stage)
 
 
 @app.get("/api/projects/{slug}/adaptation/validation", response_model=AdaptationWorkflowStatus)
