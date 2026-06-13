@@ -452,6 +452,135 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     assert {"character-sheet", "location-prompt", "scene-artifact"}.issubset(artifact_kinds)
 
 
+def test_style_ref_status_clears_stale_asset_and_repairs_canvas(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    (root / "style-refs").mkdir(parents=True, exist_ok=True)
+    (root / "style-refs" / "archetype-character.md").write_text("Character archetype prompt.\n")
+    stale_asset_id = "01HSTALE"
+    library.write_json(
+        root / "adaptation.json",
+        {
+            "version": 2,
+            "settings": {"storyKind": "comic-book"},
+            "styleRefs": {"archetypeCharacterAssetId": stale_asset_id},
+            "characters": {},
+            "locations": {},
+            "scenes": {},
+            "pages": {},
+            "panels": {},
+        },
+    )
+    canvas = {
+        "version": 2,
+        "viewport": {"x": 0, "y": 0, "zoom": 1},
+        "nodes": {
+            "archetype_archetype_character": {
+                "type": "imageGroup",
+                "displayName": "Old wrong node",
+                "x": 1,
+                "y": 2,
+                "assetIds": [stale_asset_id],
+                "activeAssetId": stale_asset_id,
+                "tags": ["adaptation", "archetype", "character-style"],
+            },
+            "archetype_archetype_character_image": {
+                "type": "imageGroup",
+                "displayName": "Stale image",
+                "x": 1,
+                "y": 320,
+                "assetIds": [stale_asset_id],
+                "activeAssetId": stale_asset_id,
+                "tags": ["adaptation", "archetype", "character-style"],
+            },
+        },
+    }
+    assert client.put("/api/projects/farm-comic/canvas", json=canvas).status_code == 200
+
+    status = client.get("/api/projects/farm-comic/adaptation")
+    assert status.status_code == 200
+    assert status.json()["styleRefStatuses"]["archetype-character"]["assetId"] is None
+
+    sync = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas")
+    assert sync.status_code == 200
+    nodes = sync.json()["canvas"]["nodes"]
+    draft = nodes["archetype_archetype_character"]
+    assert draft["type"] == "draft"
+    assert draft["prompt"] == "Character archetype prompt.\n"
+    assert "missing" in draft["tags"]
+    assert "archetype_archetype_character_image" not in nodes
+
+
+def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    (root / "style-refs").mkdir(parents=True, exist_ok=True)
+    (root / "style-refs" / "archetype-character.md").write_text("Character archetype prompt.\n")
+    (root / "style-refs" / "visual-style.md").write_text("Ink wash style.\n")
+
+    imported = client.post(
+        "/api/projects/farm-comic/adaptation/import-style-ref",
+        data={"kind": "archetype-character"},
+        files={"file": ("character.png", png_bytes("green"), "image/png")},
+    )
+    assert imported.status_code == 200
+    imported_asset_id = imported.json()["styleRefStatuses"]["archetype-character"]["assetId"]
+    canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert canvas_nodes["archetype_archetype_character"]["type"] == "draft"
+    assert canvas_nodes["archetype_archetype_character_image"]["activeAssetId"] == imported_asset_id
+
+    replacement_asset_id = "01HREPLACE"
+    make_png(library.asset_png_path("farm-comic", replacement_asset_id), color="blue")
+    library.write_json(
+        library.asset_json_path("farm-comic", replacement_asset_id),
+        {
+            "id": replacement_asset_id,
+            "kind": "imported",
+            "title": "Replacement",
+            "tags": [],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    selected = client.post(
+        "/api/projects/farm-comic/adaptation/style-ref-asset",
+        json={"kind": "archetype-character", "assetId": replacement_asset_id},
+    )
+    assert selected.status_code == 200
+    assert selected.json()["styleRefStatuses"]["archetype-character"]["assetId"] == replacement_asset_id
+    canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert canvas_nodes["archetype_archetype_character_image"]["activeAssetId"] == replacement_asset_id
+
+    captured = {}
+
+    def fake_generate(**kwargs):
+        captured["prompt"] = kwargs["prompt"]
+        make_png(kwargs["output_png"], color="purple")
+
+        class Result:
+            provider_response = {"imageFile": kwargs["output_png"].name, "response": {"candidates": [{"finishReason": "STOP"}]}}
+
+        return Result()
+
+    monkeypatch.setattr(gemini, "generate_image", fake_generate)
+    generated = client.post(
+        "/api/projects/farm-comic/adaptation/generate-style-ref",
+        json={"kind": "archetype-character"},
+    )
+    assert generated.status_code == 200
+    generated_asset_id = generated.json()["asset"]["id"]
+    assert "Character archetype prompt." in captured["prompt"]
+    assert "Ink wash style." in captured["prompt"]
+    assert generated.json()["status"]["styleRefStatuses"]["archetype-character"]["assetId"] == generated_asset_id
+    canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert canvas_nodes["archetype_archetype_character_image"]["activeAssetId"] == generated_asset_id
+    first_sync = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
+    second_sync = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
+    assert first_sync == second_sync
+
+
 def test_story_artifact_generated_asset_does_not_duplicate_as_image_group(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)

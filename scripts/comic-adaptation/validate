@@ -7,10 +7,18 @@ source "$ROOT_DIR/scripts/comic-adaptation/lib.sh"
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/comic-adaptation/validate <project-slug>
-  scripts/comic-adaptation/validate books/<book-id>  # deprecated
+  scripts/comic-adaptation/validate <project-slug> [stage]
+  scripts/comic-adaptation/validate books/<book-id> [stage]  # deprecated
 
 Validates generated comic-adaptation text artifacts without invoking Pi.
+
+Stages:
+  ingest      Phase 0: style refs.
+  characters  Phase 1: character list, artifacts, and sheets.
+  locations   Phase 2: location index and prompts.
+  scenes      Phase 3: play-by-play, scene manifest, and scene artifacts.
+  moments     Phase 4: page/panel story layouts.
+  all         Validate every phase (default).
 EOF
 }
 
@@ -313,10 +321,16 @@ validate_location_prompt() {
   fi
 }
 
-if [[ $# -ne 1 ]]; then
+if [[ $# -lt 1 || $# -gt 2 ]]; then
   usage
   exit 2
 fi
+
+STAGE="${2:-all}"
+case "$STAGE" in
+  ingest | characters | locations | scenes | moments | all) ;;
+  *) usage; echo "error: Unknown validation stage: $STAGE" >&2; exit 2 ;;
+esac
 
 [[ "$PWD" == "$ROOT_DIR" ]] || {
   echo "error: Run from repo root: $ROOT_DIR" >&2
@@ -330,12 +344,32 @@ BOOK_ROOT="$ADAPTATION_ROOT"
   exit 1
 }
 
-validate_style_refs
-validate_character_list
-validate_play_by_play
-validate_scene_manifest_and_artifacts
-validate_locations
-validate_story_layouts
+case "$STAGE" in
+  ingest)
+    validate_style_refs
+    ;;
+  characters)
+    validate_character_list
+    ;;
+  locations)
+    validate_locations
+    ;;
+  scenes)
+    validate_play_by_play
+    validate_scene_manifest_and_artifacts
+    ;;
+  moments)
+    validate_story_layouts
+    ;;
+  all)
+    validate_style_refs
+    validate_character_list
+    validate_locations
+    validate_play_by_play
+    validate_scene_manifest_and_artifacts
+    validate_story_layouts
+    ;;
+esac
 
 echo
 if [[ "$failures" -eq 0 ]]; then

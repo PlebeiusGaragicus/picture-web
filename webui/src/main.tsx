@@ -16,7 +16,8 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import './style.css';
 import { api } from './api';
-import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StoryKind } from './types';
+import { isCanonicalStyleRefAsset, isStyleRefImageNode, styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForNode, styleRefKindForTags, styleRefStatusFromAdaptation } from './styleRefs';
+import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StoryKind, StyleRefKind, StyleRefStatus } from './types';
 
 interface DraftNodeData extends DraftCanvasNode {
   kind: 'draft';
@@ -835,36 +836,50 @@ function App() {
   const generateDraft = async (id: string, draft: DraftNodeData) => {
     try {
       setError(null);
-      setGeneratingNodeIds((current) => new Set(current).add(id));
-      setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
-      const payload: GeneratePayload = {
-        prompt: draft.prompt,
-        refs: draft.refs,
-        model: draft.params.model,
-        aspectRatio: draft.params.aspectRatio,
-        imageSize: draft.params.imageSize,
-        seed: draft.params.seed,
-        batchCount: draft.params.batchCount,
-        title: visibleDisplayName(draft.displayName) || null,
-        tags: [],
-        canvasNodeId: id,
-      };
-      await api.generate(openProjectSlug, payload);
+      const styleRefKind = styleRefKindForTags(draft.tags);
+      const generatingId = styleRefKind ? styleRefImageNodeId(styleRefKind, adaptation) : id;
+      setGeneratingNodeIds((current) => new Set(current).add(generatingId));
+      setNodes((current) => current.map((node) => (node.id === generatingId || node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
+      if (styleRefKind) {
+        const result = await api.generateAdaptationStyleRef(openProjectSlug, styleRefKind, generatingId);
+        if (result.status) setAdaptation(result.status);
+      } else {
+        const payload: GeneratePayload = {
+          prompt: draft.prompt,
+          refs: draft.refs,
+          model: draft.params.model,
+          aspectRatio: draft.params.aspectRatio,
+          imageSize: draft.params.imageSize,
+          seed: draft.params.seed,
+          batchCount: draft.params.batchCount,
+          title: visibleDisplayName(draft.displayName) || null,
+          tags: [],
+          canvasNodeId: id,
+        };
+        await api.generate(openProjectSlug, payload);
+      }
       setPopoverNodeId(null);
       await reload();
     } catch (err) {
       setError(String(err));
     } finally {
+      const styleRefKind = styleRefKindForTags(draft.tags);
+      const generatingId = styleRefKind ? styleRefImageNodeId(styleRefKind, adaptation) : id;
       setGeneratingNodeIds((current) => {
         const next = new Set(current);
         next.delete(id);
+        next.delete(generatingId);
         return next;
       });
-      setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: false } } : node)));
+      setNodes((current) => current.map((node) => (node.id === id || node.id === generatingId ? { ...node, data: { ...node.data, isGenerating: false } } : node)));
     }
   };
 
   const generateImageVariants = async (id: string, group: ImageGroupNodeData, params: GenerationParams) => {
+    if (styleRefKindForTags(group.tags)) {
+      setError('Generate style reference replacements from the adaptation style reference action.');
+      return;
+    }
     const sourceAsset = group.activeAsset ?? group.assets[0] ?? null;
     const prompt = sourceAsset?.prompt?.text ?? '';
     const refs = sourceAsset?.generation?.refs ?? [];
@@ -932,16 +947,17 @@ function App() {
   }, [openProjectSlug, projectPhase]);
 
   const loadAdaptationValidation = useCallback(async () => {
+    const stage = phaseStage(projectPhase);
     if (!openProjectSlug) {
       setAdaptationValidation(null);
       return;
     }
     try {
-      setAdaptationValidation(await api.getAdaptationValidation(openProjectSlug));
+      setAdaptationValidation(stage ? await api.getAdaptationValidation(openProjectSlug, stage) : null);
     } catch (err) {
       setError(String(err));
     }
-  }, [openProjectSlug]);
+  }, [openProjectSlug, projectPhase]);
 
   useEffect(() => {
     void loadAdaptationWorkflow();
@@ -966,12 +982,13 @@ function App() {
   }, [adaptationWorkflow?.running, loadAdaptation, openProjectSlug, projectPhase]);
 
   useEffect(() => {
-    if (!openProjectSlug || !adaptationValidation?.running) return;
+    const stage = phaseStage(projectPhase);
+    if (!openProjectSlug || !stage || !adaptationValidation?.running) return;
     const timer = window.setInterval(async () => {
-      setAdaptationValidation(await api.getAdaptationValidation(openProjectSlug));
+      setAdaptationValidation(await api.getAdaptationValidation(openProjectSlug, stage));
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [adaptationValidation?.running, openProjectSlug]);
+  }, [adaptationValidation?.running, openProjectSlug, projectPhase]);
 
   const ensureAdaptationDraftsPublished = useCallback(async () => {
     if (!openProjectSlug) return;
@@ -1007,22 +1024,48 @@ function App() {
     setAdaptation(await api.importAdaptationBook(openProjectSlug, file));
   };
 
-  const importAdaptationStyleRef = async (kind: 'archetype-character' | 'archetype-scene', file: File) => {
+  const importAdaptationStyleRef = async (kind: StyleRefKind, file: File) => {
     if (!openProjectSlug) return;
     setAdaptation(await api.importAdaptationStyleRef(openProjectSlug, kind, file));
     await reload();
   };
 
-  const saveAdaptationStyleRefPrompt = async (kind: 'archetype-character' | 'archetype-scene', prompt: string) => {
+  const saveAdaptationStyleRefPrompt = async (kind: StyleRefKind, prompt: string) => {
     if (!openProjectSlug) return;
     setAdaptation(await api.saveAdaptationStyleRefPrompt(openProjectSlug, kind, prompt));
     await reload();
   };
 
-  const setAdaptationStyleRefAsset = async (kind: 'archetype-character' | 'archetype-scene', assetId: string) => {
+  const setAdaptationStyleRefAsset = async (kind: StyleRefKind, assetId: string) => {
     if (!openProjectSlug) return;
     setAdaptation(await api.setAdaptationStyleRefAsset(openProjectSlug, kind, assetId));
     await reload();
+  };
+
+  const generateAdaptationStyleRef = async (kind: StyleRefKind) => {
+    if (!openProjectSlug) return;
+    setError(null);
+    const draftNodeId = styleRefDraftNodeId(kind, adaptation);
+    const imageNodeId = styleRefImageNodeId(kind, adaptation);
+    setProjectPhase(kind === 'archetype-character' ? 'phase-1-characters' : 'phase-2-locations');
+    setPhaseViewMode('canvas');
+    setPopoverNodeId(imageNodeId);
+    setGeneratingNodeIds((current) => new Set(current).add(imageNodeId));
+    setNodes((current) => current.map((node) => (node.id === imageNodeId || node.id === draftNodeId ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
+    try {
+      const result = await api.generateAdaptationStyleRef(openProjectSlug, kind, imageNodeId);
+      if (result.status) setAdaptation(result.status);
+      await reload();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setGeneratingNodeIds((current) => {
+        const next = new Set(current);
+        next.delete(imageNodeId);
+        return next;
+      });
+      setNodes((current) => current.map((node) => (node.id === imageNodeId || node.id === draftNodeId ? { ...node, data: { ...node.data, isGenerating: false } } : node)));
+    }
   };
 
   const startAdaptationWorkflow = async (stage: AdaptationStage = 'all') => {
@@ -1032,9 +1075,11 @@ function App() {
   };
 
   const startAdaptationValidation = async () => {
+    const stage = phaseStage(projectPhase);
     if (!openProjectSlug) return;
+    if (!stage) return;
     setError(null);
-    setAdaptationValidation(await api.startAdaptationValidation(openProjectSlug));
+    setAdaptationValidation(await api.startAdaptationValidation(openProjectSlug, stage));
   };
 
   const importAdaptationDraftsToCanvas = async () => {
@@ -1167,6 +1212,7 @@ function App() {
             onImportBook={importAdaptationBook}
             onImportStyleRef={importAdaptationStyleRef}
             onSaveStylePrompt={saveAdaptationStyleRefPrompt}
+            onGenerateStyleRef={generateAdaptationStyleRef}
             onStartWorkflow={startAdaptationWorkflow}
             onStartValidation={startAdaptationValidation}
             onImportDraftsToCanvas={importAdaptationDraftsToCanvas}
@@ -1296,6 +1342,7 @@ function App() {
         <NodeSidebar
           node={selectedNode}
           assets={assets}
+          adaptation={adaptation}
           projectSlug={openProjectSlug}
           onDraftChange={updateDraft}
           onImageGroupChange={updateImageGroup}
@@ -1604,6 +1651,7 @@ function StoryPhaseScreen({
   onImportBook,
   onImportStyleRef,
   onSaveStylePrompt,
+  onGenerateStyleRef,
   onStartWorkflow,
   onStartValidation,
   onImportDraftsToCanvas,
@@ -1620,6 +1668,7 @@ function StoryPhaseScreen({
   onImportBook: (file: File) => Promise<void>;
   onImportStyleRef: (kind: 'archetype-character' | 'archetype-scene', file: File) => Promise<void>;
   onSaveStylePrompt: (kind: 'archetype-character' | 'archetype-scene', prompt: string) => Promise<void>;
+  onGenerateStyleRef: (kind: 'archetype-character' | 'archetype-scene') => Promise<void>;
   onStartWorkflow: (stage: AdaptationStage) => Promise<void>;
   onStartValidation: () => Promise<void>;
   onImportDraftsToCanvas: () => Promise<void>;
@@ -1688,6 +1737,7 @@ function StoryPhaseScreen({
             validation={validation}
             onImportStyleRef={onImportStyleRef}
             onSaveStylePrompt={onSaveStylePrompt}
+            onGenerateStyleRef={onGenerateStyleRef}
             onStartWorkflow={() => onStartWorkflow('characters')}
             onStartValidation={onStartValidation}
             onImportDraftsToCanvas={importDrafts}
@@ -1705,6 +1755,7 @@ function StoryPhaseScreen({
             validation={validation}
             onImportStyleRef={onImportStyleRef}
             onSaveStylePrompt={onSaveStylePrompt}
+            onGenerateStyleRef={onGenerateStyleRef}
             onStartWorkflow={() => onStartWorkflow('locations')}
             onStartValidation={onStartValidation}
             onImportDraftsToCanvas={importDrafts}
@@ -1896,22 +1947,13 @@ function AdaptationFileEditor({
           <div className="adaptation-file-form">
             <label className="field-label">
               Key
-              <input value={draft.key} onChange={(event) => setDraft((current) => ({ ...current, key: event.target.value }))} />
+              <input value={draft.key} readOnly />
             </label>
             {kind !== 'scenes' && (
-              <div className="adaptation-file-row">
-                <label className="field-label">
-                  Mode
-                  <select value={draft.mode ?? 'new-image'} onChange={(event) => setDraft((current) => ({ ...current, mode: event.target.value }))}>
-                    <option value="new-image">New image</option>
-                    <option value="edit-reference">Edit reference</option>
-                  </select>
-                </label>
-                <label className="field-label">
-                  Style ref
-                  <input value={draft.styleRef ?? ''} onChange={(event) => setDraft((current) => ({ ...current, styleRef: event.target.value }))} placeholder={kind === 'characters' ? 'character:base' : 'location:base'} />
-                </label>
-              </div>
+              <label className="field-label">
+                Style ref
+                <input value={draft.styleRef ?? ''} readOnly placeholder={kind === 'characters' ? 'character:base' : 'location:base'} />
+              </label>
             )}
             <label className="field-label">
               {kind === 'scenes' ? 'Scene artifact' : 'Image prompt'}
@@ -2014,21 +2056,23 @@ function PhaseIngestion({
   );
 }
 
-function ArchetypeReferenceCard({
-  refKind,
+function StyleRefCard({
+  status,
   projectSlug,
   asset,
-  prompt,
   onImportStyleRef,
   onSavePrompt,
+  onGenerateStyleRef,
 }: {
-  refKind: 'archetype-character' | 'archetype-scene';
+  status: StyleRefStatus;
   projectSlug: string;
   asset: Asset | null;
-  prompt: string;
-  onImportStyleRef: (refKind: 'archetype-character' | 'archetype-scene', file: File) => Promise<void>;
-  onSavePrompt: (refKind: 'archetype-character' | 'archetype-scene', prompt: string) => Promise<void>;
+  onImportStyleRef: (refKind: StyleRefKind, file: File) => Promise<void>;
+  onSavePrompt: (refKind: StyleRefKind, prompt: string) => Promise<void>;
+  onGenerateStyleRef: (refKind: StyleRefKind) => Promise<void>;
 }) {
+  const refKind = status.kind;
+  const prompt = status.promptText;
   const isCharacter = refKind === 'archetype-character';
   const title = isCharacter ? 'Character Archetype' : 'Scene Archetype';
   const styleLabel = isCharacter ? 'character style reference' : 'scene style reference';
@@ -2044,7 +2088,7 @@ function ArchetypeReferenceCard({
   const savePrompt = async () => {
     setIsSaving(true);
     try {
-      await onSavePrompt(refKind, draft);
+      await onSavePrompt(status.kind, draft);
       setIsEditing(false);
     } finally {
       setIsSaving(false);
@@ -2055,7 +2099,7 @@ function ArchetypeReferenceCard({
     event.preventDefault();
     setIsDragging(false);
     const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith('image/'));
-    if (file) void onImportStyleRef(refKind, file);
+    if (file) void onImportStyleRef(status.kind, file);
   };
   return (
     <section className="story-card archetype-card">
@@ -2072,6 +2116,9 @@ function ArchetypeReferenceCard({
         <div className="archetype-prompt-col">
           {hasPrompt ? <p className="archetype-prompt-preview">{prompt}</p> : <p className="muted">No prompt yet.</p>}
           <button className="secondary" onClick={() => setIsEditing(true)}>{hasPrompt ? 'Edit prompt' : 'Write prompt'}</button>
+          <button className="generate-button" onClick={() => onGenerateStyleRef(status.kind)} disabled={!hasPrompt || isSaving}>
+            Generate this {isCharacter ? 'character' : 'scene'} reference
+          </button>
         </div>
         <div className="archetype-image-col">
           <div
@@ -2087,7 +2134,7 @@ function ArchetypeReferenceCard({
           </div>
           <label className="secondary file-button">
             {asset ? 'Replace image' : 'Import image'}
-            <input type="file" accept="image/*" hidden onChange={(event) => event.target.files?.[0] && void onImportStyleRef(refKind, event.target.files[0])} />
+            <input type="file" accept="image/*" hidden onChange={(event) => event.target.files?.[0] && void onImportStyleRef(status.kind, event.target.files[0])} />
           </label>
         </div>
       </div>
@@ -2169,64 +2216,23 @@ function VisualStyleCard({
   );
 }
 
-function PhaseAssetType({
+function PhaseWorkflowActions({
   kind,
-  projectSlug,
   adaptation,
-  assets,
   workflow,
   validation,
-  onImportStyleRef,
-  onSaveStylePrompt,
   onStartWorkflow,
   onStartValidation,
-  onImportDraftsToCanvas,
-  isImportingDrafts,
-  onReloadAdaptation,
 }: {
   kind: 'characters' | 'locations';
-  projectSlug: string;
   adaptation: AdaptationStatus;
-  assets: Asset[];
   workflow: AdaptationWorkflowStatus | null;
   validation: AdaptationWorkflowStatus | null;
-  onImportStyleRef: (refKind: 'archetype-character' | 'archetype-scene', file: File) => Promise<void>;
-  onSaveStylePrompt: (refKind: 'archetype-character' | 'archetype-scene', prompt: string) => Promise<void>;
   onStartWorkflow: () => Promise<void>;
   onStartValidation: () => Promise<void>;
-  onImportDraftsToCanvas: () => Promise<void>;
-  isImportingDrafts: boolean;
-  onReloadAdaptation: () => Promise<void>;
 }) {
-  const isCharacters = kind === 'characters';
-  const characterAsset = assets.find((asset) => asset.id === adaptation.archetypeCharacterAssetId) ?? null;
-  const sceneAsset = assets.find((asset) => asset.id === adaptation.archetypeSceneAssetId) ?? null;
-  const links = isCharacters ? adaptation.characters : adaptation.locations;
-  const count = Object.keys(links).length;
   return (
-    <>
-      <div className="archetype-row">
-        {isCharacters ? (
-          <ArchetypeReferenceCard
-            refKind="archetype-character"
-            projectSlug={projectSlug}
-            asset={characterAsset}
-            prompt={adaptation.archetypeCharacterPromptText ?? ''}
-            onImportStyleRef={onImportStyleRef}
-            onSavePrompt={onSaveStylePrompt}
-          />
-        ) : (
-          <ArchetypeReferenceCard
-            refKind="archetype-scene"
-            projectSlug={projectSlug}
-            asset={sceneAsset}
-            prompt={adaptation.archetypeScenePromptText ?? ''}
-            onImportStyleRef={onImportStyleRef}
-            onSavePrompt={onSaveStylePrompt}
-          />
-        )}
-      </div>
-
+    <div className="assets-row">
       <section className="story-card assets-extract-card">
         <div className="assets-extract-head">
           <div className="archetype-card-title">
@@ -2242,27 +2248,96 @@ function PhaseAssetType({
           <p className="assets-extract-hint">Create the read-book session in Phase 0 first, or author files manually below.</p>
         )}
       </section>
+      <section className="story-card">
+        <div className="archetype-card-title">
+          <h2>Validate</h2>
+          <HelpTip text={`Check that ${kind} files are well-formed.`} />
+        </div>
+        <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
+      </section>
+    </div>
+  );
+}
+
+function PublishToCanvasCard({
+  kind,
+  count,
+  isImportingDrafts,
+  onImportDraftsToCanvas,
+}: {
+  kind: 'characters' | 'locations';
+  count: number;
+  isImportingDrafts: boolean;
+  onImportDraftsToCanvas: () => Promise<void>;
+}) {
+  return (
+    <div className="assets-row">
+      <section className="story-card">
+        <div className="archetype-card-title">
+          <h2>Publish To Canvas</h2>
+          <HelpTip text={`Send ${kind} files to the canvas to generate references.`} />
+        </div>
+        <button className="generate-button" onClick={onImportDraftsToCanvas} disabled={!count || isImportingDrafts}>
+          {isImportingDrafts ? 'Publishing...' : `Publish ${count} ${kind}`}
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function PhaseAssetType({
+  kind,
+  projectSlug,
+  adaptation,
+  assets,
+  workflow,
+  validation,
+  onImportStyleRef,
+  onSaveStylePrompt,
+  onGenerateStyleRef,
+  onStartWorkflow,
+  onStartValidation,
+  onImportDraftsToCanvas,
+  isImportingDrafts,
+  onReloadAdaptation,
+}: {
+  kind: 'characters' | 'locations';
+  projectSlug: string;
+  adaptation: AdaptationStatus;
+  assets: Asset[];
+  workflow: AdaptationWorkflowStatus | null;
+  validation: AdaptationWorkflowStatus | null;
+  onImportStyleRef: (refKind: StyleRefKind, file: File) => Promise<void>;
+  onSaveStylePrompt: (refKind: StyleRefKind, prompt: string) => Promise<void>;
+  onGenerateStyleRef: (refKind: StyleRefKind) => Promise<void>;
+  onStartWorkflow: () => Promise<void>;
+  onStartValidation: () => Promise<void>;
+  onImportDraftsToCanvas: () => Promise<void>;
+  isImportingDrafts: boolean;
+  onReloadAdaptation: () => Promise<void>;
+}) {
+  const isCharacters = kind === 'characters';
+  const styleRefStatus = styleRefStatusFromAdaptation(isCharacters ? 'archetype-character' : 'archetype-scene', adaptation, assets);
+  const links = isCharacters ? adaptation.characters : adaptation.locations;
+  const count = Object.keys(links).length;
+  return (
+    <>
+      <div className="archetype-row">
+        <StyleRefCard
+          status={styleRefStatus}
+          projectSlug={projectSlug}
+          asset={styleRefStatus.asset}
+          onImportStyleRef={onImportStyleRef}
+          onSavePrompt={onSaveStylePrompt}
+          onGenerateStyleRef={onGenerateStyleRef}
+        />
+      </div>
+
+      <PhaseWorkflowActions kind={kind} adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={onStartWorkflow} onStartValidation={onStartValidation} />
 
       <AdaptationFileEditor projectSlug={projectSlug} kind={kind} links={links} onReloadAdaptation={onReloadAdaptation} />
 
-      <div className="assets-row">
-        <section className="story-card">
-          <div className="archetype-card-title">
-            <h2>Publish To Canvas</h2>
-            <HelpTip text={`Send ${kind} files to the canvas to generate references.`} />
-          </div>
-          <button className="generate-button" onClick={onImportDraftsToCanvas} disabled={!count || isImportingDrafts}>
-            {isImportingDrafts ? 'Publishing...' : `Publish ${count} ${kind}`}
-          </button>
-        </section>
-        <section className="story-card">
-          <div className="archetype-card-title">
-            <h2>Validate</h2>
-            <HelpTip text={`Check that ${kind} files are well-formed.`} />
-          </div>
-          <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
-        </section>
-      </div>
+      <PublishToCanvasCard kind={kind} count={count} isImportingDrafts={isImportingDrafts} onImportDraftsToCanvas={onImportDraftsToCanvas} />
     </>
   );
 }
@@ -2520,6 +2595,7 @@ function WorkflowLogPanel({
 function NodeSidebar({
   node,
   assets,
+  adaptation,
   projectSlug,
   onDraftChange,
   onImageGroupChange,
@@ -2535,13 +2611,14 @@ function NodeSidebar({
 }: {
   node: Node<PhotoNodeData>;
   assets: Asset[];
+  adaptation: AdaptationStatus | null;
   projectSlug: string;
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onImageGroupChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onGenerateArtifact: (id: string, artifact: StoryArtifactNodeData) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
-  onSetStyleRefAsset: (kind: 'archetype-character' | 'archetype-scene', assetId: string) => void;
+  onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
   onCreateChildDraft: (nodeId: string, sourceAssetId: string) => void;
@@ -2554,6 +2631,7 @@ function NodeSidebar({
       <DraftSidebar
         node={draftNode}
         assets={assets}
+        adaptation={adaptation}
         onDraftChange={onDraftChange}
         onGenerate={onGenerate}
         onDelete={onDelete}
@@ -2589,6 +2667,7 @@ function NodeSidebar({
       node={imageNode}
       asset={node.data.activeAsset}
       assets={assets}
+      adaptation={adaptation}
       onDelete={onDelete}
       onNodeChange={onImageGroupChange}
       onVariant={onVariant}
@@ -2603,12 +2682,14 @@ function NodeSidebar({
 function DraftSidebar({
   node,
   assets,
+  adaptation,
   onDraftChange,
   onGenerate,
   onDelete,
 }: {
   node: Node<DraftNodeData>;
   assets: Asset[];
+  adaptation: AdaptationStatus | null;
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onDelete: (id: string, assetId?: string) => void;
@@ -2620,6 +2701,8 @@ function DraftSidebar({
   const availableParents = assets.filter((asset) => !draft.refs.includes(asset.id));
   const draftModel = draft.params.model ?? defaultDraftParams.model;
   const draftCapabilities = capabilitiesForModel(draftModel);
+  const styleRefKind = styleRefKindForTags(draft.tags);
+  const styleRefLabel = styleRefKind === 'archetype-character' ? 'character' : styleRefKind === 'archetype-scene' ? 'scene' : null;
   useEffect(() => {
     const textarea = promptRef.current;
     if (!textarea) return;
@@ -2632,64 +2715,73 @@ function DraftSidebar({
         <h2>{visibleDisplayName(draft.displayName) || 'Draft'}</h2>
         <button className="danger" onClick={() => onDelete(node.id)}>Delete</button>
       </div>
+      {styleRefLabel && (
+        <div className="canvas-role-badge">
+          Draft {styleRefLabel} archetype reference
+        </div>
+      )}
       <label className="field-label">
         Name
         <input value={draft.displayName} onChange={(event) => onDraftChange(node.id, { displayName: event.target.value })} />
       </label>
-      <section className="sidebar-section parent-section">
-        <h3>Parents</h3>
-        {parents.length === 0 && <p className="muted">None</p>}
-        {parents.length > 0 && (
-          <div className="parent-list">
-            {parents.map((parent, index) => (
-              <div className="parent-item" key={draft.refs[index]}>
-                {parent?.thumbnailUrl ? <img src={parent.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
-                <span>{visibleDisplayName(draft.parentDisplayNames?.get(draft.refs[index]) ?? '') || assetLabel(parent, 'Unknown parent')}</span>
+      {!styleRefKind && (
+        <section className="sidebar-section parent-section">
+          <h3>Parents</h3>
+          {parents.length === 0 && <p className="muted">None</p>}
+          {parents.length > 0 && (
+            <div className="parent-list">
+              {parents.map((parent, index) => (
+                <div className="parent-item" key={draft.refs[index]}>
+                  {parent?.thumbnailUrl ? <img src={parent.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
+                  <span>{visibleDisplayName(draft.parentDisplayNames?.get(draft.refs[index]) ?? '') || assetLabel(parent, 'Unknown parent')}</span>
+                  <button
+                    className="parent-remove"
+                    onClick={() => onDraftChange(node.id, { refs: draft.refs.filter((_, refIndex) => refIndex !== index) })}
+                    title="Remove parent"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <button className="add-parent-button" onClick={() => setIsParentPickerOpen((current) => !current)}>+</button>
+          {isParentPickerOpen && (
+            <div className="asset-picker-popover">
+              {availableParents.length === 0 && <p className="muted">All assets are already parents.</p>}
+              {availableParents.map((asset) => (
                 <button
-                  className="parent-remove"
-                  onClick={() => onDraftChange(node.id, { refs: draft.refs.filter((_, refIndex) => refIndex !== index) })}
-                  title="Remove parent"
+                  className="asset-picker-row"
+                  key={asset.id}
+                  onClick={() => {
+                    onDraftChange(node.id, { refs: [...draft.refs, asset.id] });
+                    setIsParentPickerOpen(false);
+                  }}
                 >
-                  ×
+                  {asset.thumbnailUrl ? <img src={asset.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
+                  <span>{visibleDisplayName(draft.parentDisplayNames?.get(asset.id) ?? '') || assetLabel(asset)}</span>
                 </button>
-              </div>
-            ))}
-          </div>
-        )}
-        <button className="add-parent-button" onClick={() => setIsParentPickerOpen((current) => !current)}>+</button>
-        {isParentPickerOpen && (
-          <div className="asset-picker-popover">
-            {availableParents.length === 0 && <p className="muted">All assets are already parents.</p>}
-            {availableParents.map((asset) => (
-              <button
-                className="asset-picker-row"
-                key={asset.id}
-                onClick={() => {
-                  onDraftChange(node.id, { refs: [...draft.refs, asset.id] });
-                  setIsParentPickerOpen(false);
-                }}
-              >
-                {asset.thumbnailUrl ? <img src={asset.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
-                <span>{visibleDisplayName(draft.parentDisplayNames?.get(asset.id) ?? '') || assetLabel(asset)}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
       <section className="sidebar-section">
         <label className="field-label">
           Prompt
           <textarea
             ref={promptRef}
-            className="prompt-textarea"
-            autoFocus
+            className={`prompt-textarea ${styleRefKind ? 'locked-field' : ''}`}
+            autoFocus={!styleRefKind}
             value={draft.prompt}
-            onChange={(event) => onDraftChange(node.id, { prompt: event.target.value })}
+            onChange={(event) => !styleRefKind && onDraftChange(node.id, { prompt: event.target.value })}
             placeholder="Prompt"
+            readOnly={Boolean(styleRefKind)}
           />
         </label>
+        {styleRefKind && <p className="muted">Edit this prompt from the style reference card. The canvas node is synced from the file.</p>}
       </section>
-      <section className="sidebar-section generation-section">
+      {!styleRefKind && <section className="sidebar-section generation-section">
         <h3>Parameters</h3>
       <div className="row">
         <select
@@ -2730,7 +2822,15 @@ function DraftSidebar({
           />
         </label>
       </div>
-      </section>
+      </section>}
+      {styleRefKind && (
+        <section className="sidebar-section generation-section">
+          <button className="generate-button" onClick={() => onGenerate(node.id, draft)} disabled={!draft.prompt.trim() || draft.isGenerating}>
+            {draft.isGenerating && <span className="spinner" aria-hidden="true" />}
+            {draft.isGenerating ? 'Generating...' : 'Generate canonical reference'}
+          </button>
+        </section>
+      )}
     </aside>
   );
 }
@@ -2820,6 +2920,7 @@ function ImageSidebar({
   node,
   asset,
   assets,
+  adaptation,
   onDelete,
   onNodeChange,
   onVariant,
@@ -2831,12 +2932,13 @@ function ImageSidebar({
   node: Node<ImageGroupNodeData>;
   asset: Asset;
   assets: Asset[];
+  adaptation: AdaptationStatus | null;
   onDelete: (id: string, assetId?: string) => void;
   onNodeChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
-  onSetStyleRefAsset: (kind: 'archetype-character' | 'archetype-scene', assetId: string) => void;
+  onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
   onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
   const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
@@ -2845,6 +2947,10 @@ function ImageSidebar({
   const refs = asset.generation?.refs ?? [];
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const activeVariantIndex = Math.max(0, node.data.assetIds.indexOf(asset.id));
+  const styleRefKind = styleRefKindForTags(node.data.tags);
+  const isCharacterArchetype = adaptation?.styleRefStatuses?.['archetype-character']?.assetId === asset.id || adaptation?.archetypeCharacterAssetId === asset.id;
+  const isSceneArchetype = adaptation?.styleRefStatuses?.['archetype-scene']?.assetId === asset.id || adaptation?.archetypeSceneAssetId === asset.id;
+  const canSetCanonicalReference = Boolean(styleRefKind) || isCanonicalStyleRefAsset(adaptation, asset.id);
   const activeModel = isVariantPanelOpen ? variantParams.model ?? asset.generation?.model : asset.generation?.model;
   const activeCapabilities = capabilitiesForModel(activeModel);
   const modelOptions = uniqueOptions(Object.keys(modelCapabilities), asset.generation?.model);
@@ -2868,6 +2974,11 @@ function ImageSidebar({
   return (
     <aside className="details-sidebar">
       <button className="danger" onClick={() => onDelete(node.id, asset.id)}>Delete</button>
+      {(isCharacterArchetype || isSceneArchetype || styleRefKind) && (
+        <div className="canvas-role-badge">
+          {isCharacterArchetype ? 'Chosen character archetype' : isSceneArchetype ? 'Chosen scene archetype' : 'Style reference candidate'}
+        </div>
+      )}
       <label className="field-label">
         Group name
         <input value={node.data.displayName} onChange={(event) => onNodeChange(node.id, { displayName: event.target.value })} />
@@ -2910,11 +3021,15 @@ function ImageSidebar({
           </>
         )}
       </div>
-      <section className="sidebar-section canonical-reference-section">
+      {canSetCanonicalReference && <section className="sidebar-section canonical-reference-section">
         <h3>Canonical Reference</h3>
-        <button className="secondary" onClick={() => onSetStyleRefAsset('archetype-character', asset.id)}>Set as character archetype</button>
-        <button className="secondary" onClick={() => onSetStyleRefAsset('archetype-scene', asset.id)}>Set as scene archetype</button>
-      </section>
+        <button className="secondary" onClick={() => onSetStyleRefAsset('archetype-character', asset.id)} disabled={isCharacterArchetype}>
+          {isCharacterArchetype ? 'Current character archetype' : 'Set as character archetype'}
+        </button>
+        <button className="secondary" onClick={() => onSetStyleRefAsset('archetype-scene', asset.id)} disabled={isSceneArchetype}>
+          {isSceneArchetype ? 'Current scene archetype' : 'Set as scene archetype'}
+        </button>
+      </section>}
       {asset.generation && (
         <section className="sidebar-section parent-section">
           <h3>Parents</h3>
@@ -2989,7 +3104,9 @@ function ImageSidebar({
               />
             </label>
           </div>
-          {isVariantPanelOpen ? (
+          {styleRefKind ? (
+            <p className="muted">Generate style reference replacements from the adaptation style reference action so canonical metadata stays in sync.</p>
+          ) : isVariantPanelOpen ? (
             <div className="generate-control">
               <button className="generate-button" onClick={() => onGenerateVariants(node.id, node.data, variantParams)} disabled={!prompt.trim() || node.data.isGenerating}>
                 {node.data.isGenerating && <span className="spinner" aria-hidden="true" />}
@@ -3218,6 +3335,7 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
   }
   const currentIndex = Math.max(0, data.assetIds.indexOf(asset.id));
   const params = asset.generation;
+  const styleRole = data.tags.includes('character-style') ? 'Character archetype' : data.tags.includes('scene-style') ? 'Scene archetype' : null;
   const tooltip = [
     asset.prompt?.text,
     params ? `model: ${params.model}` : null,
@@ -3227,7 +3345,7 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
     .filter(Boolean)
     .join('\n');
   return (
-    <div className={`node image-group-node ${data.assetIds.length > 1 ? 'stacked' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
+    <div className={`node image-group-node ${styleRole ? 'style-ref-image-node' : ''} ${data.assetIds.length > 1 ? 'stacked' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       {isEditingName ? (
         <input
@@ -3251,6 +3369,7 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
         </strong>
       )}
       <div className="node-image-frame" style={{ aspectRatio: imageRatio ? `${imageRatio}` : undefined }}>
+        {styleRole && <span className="node-role-badge">{styleRole}</span>}
         {asset.thumbnailUrl && (
           <img
             src={asset.thumbnailUrl}
@@ -3474,6 +3593,7 @@ function ImageViewer({
 }
 
 function DraftNode({ data }: NodeProps<DraftNodeData>) {
+  const styleRole = data.tags.includes('character-style') ? 'Character archetype draft' : data.tags.includes('scene-style') ? 'Scene archetype draft' : null;
   const tooltip = [
     data.prompt || 'Draft prompt not set',
     `parents: ${data.refs.length}`,
@@ -3484,6 +3604,7 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
     <div className={`node draft-node ${data.tags.includes('archetype') ? 'archetype-draft-node' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       <div className="draft-placeholder" aria-hidden="true">
+        {styleRole && <span className="node-role-badge">{styleRole}</span>}
         {data.isGenerating && (
           <div className="node-generating-overlay">
             <span className="spinner" aria-hidden="true" />

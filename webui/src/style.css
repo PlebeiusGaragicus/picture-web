@@ -1547,7 +1547,7 @@ pre {
 
 .adaptation-file-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: 1fr;
   gap: 8px;
   margin-top: 12px;
 }
@@ -1914,6 +1914,27 @@ pre {
   border-color: #e879f9;
 }
 
+.node-role-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  max-width: calc(100% - 12px);
+  padding: 3px 7px;
+  color: #f5d0fe;
+  background: rgb(88 28 135 / 0.9);
+  border: 1px solid rgb(232 121 249 / 0.6);
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1.1;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .draft-placeholder {
   position: relative;
   width: 100%;
@@ -2079,6 +2100,21 @@ pre {
   border: 1px solid rgb(15 23 42 / 0.5);
   border-radius: 8px;
   box-shadow: 0 12px 30px rgb(0 0 0 / 0.24);
+}
+
+.style-ref-image-node {
+  border-color: rgb(232 121 249 / 0.72);
+  box-shadow: 0 0 0 2px rgb(232 121 249 / 0.18), 0 12px 30px rgb(0 0 0 / 0.24);
+}
+
+.canvas-role-badge {
+  padding: 8px 10px;
+  color: #f5d0fe;
+  background: rgb(88 28 135 / 0.32);
+  border: 1px solid rgb(232 121 249 / 0.45);
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .node.generating {

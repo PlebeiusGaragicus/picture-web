@@ -51,6 +51,7 @@ export interface ProjectDetail {
 }
 
 export type StoryKind = 'picture-book' | 'illustrated-story' | 'comic-book';
+export type StyleRefKind = 'archetype-character' | 'archetype-scene';
 
 export interface AdaptationSettings {
   storyKind: StoryKind;
@@ -132,12 +133,22 @@ export interface AdaptationAssetLink {
   status: 'missing' | 'ready' | 'generated';
 }
 
+export interface StyleRefStatus {
+  kind: StyleRefKind;
+  promptPath: string;
+  promptText: string;
+  assetId?: string | null;
+  canvasDraftNodeId: string;
+  canvasImageNodeId: string;
+}
+
 export interface AdaptationStatus {
   projectSlug: string;
   settings: AdaptationSettings;
   hasBook: boolean;
   hasBookSession: boolean;
   styleRefs: Record<string, boolean>;
+  styleRefStatuses: Record<StyleRefKind, StyleRefStatus>;
   archetypeCharacterAssetId?: string | null;
   archetypeSceneAssetId?: string | null;
   archetypeCharacterPromptText?: string;
@@ -163,7 +174,7 @@ export interface AdaptationWorkflowStatus {
 
 export interface AdaptationGenerateResponse {
   generated: boolean;
-  kind: 'character' | 'artifact';
+  kind: 'character' | 'artifact' | 'style-ref';
   key?: string | null;
   asset?: Asset | null;
   status?: AdaptationStatus | null;

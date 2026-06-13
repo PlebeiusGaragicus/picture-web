@@ -18,6 +18,7 @@ from models import (
     AdaptationFileDocument,
     AdaptationFileKind,
     AdaptationFileUpdate,
+    AdaptationGenerateStyleRefRequest,
     AdaptationGenerateArtifactRequest,
     AdaptationAssetLink,
     AdaptationGenerateResponse,
@@ -30,6 +31,8 @@ from models import (
     ArtifactKind,
     AssetSummary,
     GenerateRequest,
+    StyleRefKind,
+    StyleRefStatus,
     StoryArtifactCanvasNode,
     utc_now,
 )
@@ -48,6 +51,99 @@ def metadata_path(slug: str) -> Path:
 
 
 WORKFLOW_STAGES = ("ingest", "characters", "locations", "scenes", "moments", "all")
+STYLE_REF_KINDS: tuple[StyleRefKind, StyleRefKind] = ("archetype-character", "archetype-scene")
+
+
+def require_style_ref_kind(kind: str) -> StyleRefKind:
+    if kind not in STYLE_REF_KINDS:
+        raise HTTPException(status_code=400, detail="Invalid style ref kind")
+    return kind
+
+
+def style_ref_config(kind: StyleRefKind) -> dict[str, object]:
+    if kind == "archetype-character":
+        return {
+            "kind": kind,
+            "display_name": "Character Archetype",
+            "prompt_filename": "archetype-character.md",
+            "legacy_png_filename": "archetype-character.png",
+            "asset_field": "archetypeCharacterAssetId",
+            "style_tag": "character-style",
+            "x": 80,
+            "y": 80,
+        }
+    return {
+        "kind": kind,
+        "display_name": "Scene Archetype",
+        "prompt_filename": "archetype-scene.md",
+        "legacy_png_filename": "archetype-scene.png",
+        "asset_field": "archetypeSceneAssetId",
+        "style_tag": "scene-style",
+        "x": 360,
+        "y": 80,
+    }
+
+
+def style_ref_prompt_path(root: Path, kind: StyleRefKind) -> Path:
+    return root / "style-refs" / str(style_ref_config(kind)["prompt_filename"])
+
+
+def style_ref_legacy_png_path(root: Path, kind: StyleRefKind) -> Path:
+    return root / "style-refs" / str(style_ref_config(kind)["legacy_png_filename"])
+
+
+def get_style_ref_asset_id(metadata: AdaptationMetadata, kind: StyleRefKind) -> str | None:
+    return getattr(metadata.styleRefs, str(style_ref_config(kind)["asset_field"]))
+
+
+def set_style_ref_asset_id(metadata: AdaptationMetadata, kind: StyleRefKind, asset_id: str | None) -> AdaptationMetadata:
+    setattr(metadata.styleRefs, str(style_ref_config(kind)["asset_field"]), asset_id)
+    return metadata
+
+
+def style_ref_tags(kind: StyleRefKind) -> list[str]:
+    return ["adaptation", "archetype", str(style_ref_config(kind)["style_tag"])]
+
+
+def style_ref_node_ids(kind: StyleRefKind) -> tuple[str, str]:
+    draft_node_id = library.archetype_node_id(kind)
+    return draft_node_id, f"{draft_node_id}_image"
+
+
+def asset_exists(slug: str, asset_id: str) -> bool:
+    return library.asset_json_path(slug, asset_id).is_file() and library.asset_png_path(slug, asset_id).is_file()
+
+
+def clear_stale_style_ref_assets(slug: str, metadata: AdaptationMetadata) -> tuple[AdaptationMetadata, bool]:
+    changed = False
+    for kind in STYLE_REF_KINDS:
+        asset_id = get_style_ref_asset_id(metadata, kind)
+        if asset_id and not asset_exists(slug, asset_id):
+            set_style_ref_asset_id(metadata, kind, None)
+            changed = True
+    return metadata, changed
+
+
+def style_ref_status(slug: str, kind: StyleRefKind, metadata: AdaptationMetadata | None = None) -> StyleRefStatus:
+    root = ensure_adaptation(slug)
+    metadata = metadata or read_metadata(slug)
+    prompt_path = style_ref_prompt_path(root, kind)
+    draft_node_id, image_node_id = style_ref_node_ids(kind)
+    asset_id = get_style_ref_asset_id(metadata, kind)
+    if asset_id and not asset_exists(slug, asset_id):
+        asset_id = None
+    return StyleRefStatus(
+        kind=kind,
+        promptPath=relpath(root, prompt_path),
+        promptText=read_text(prompt_path),
+        assetId=asset_id,
+        canvasDraftNodeId=draft_node_id,
+        canvasImageNodeId=image_node_id,
+    )
+
+
+def style_ref_statuses(slug: str, metadata: AdaptationMetadata) -> dict[StyleRefKind, StyleRefStatus]:
+    return {kind: style_ref_status(slug, kind, metadata) for kind in STYLE_REF_KINDS}
 
 
 def require_stage(stage: str) -> str:
@@ -64,12 +160,12 @@ def workflow_log_path(slug: str, stage: str) -> Path:
     return adaptation_dir(slug) / "sessions" / f"run-{stage}.log"
 
 
-def validation_status_path(slug: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / "validate-status.json"
+def validation_status_path(slug: str, stage: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"validate-{stage}-status.json"
 
 
-def validation_log_path(slug: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / "validate.log"
+def validation_log_path(slug: str, stage: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"validate-{stage}.log"
 
 
 def ensure_adaptation(slug: str) -> Path:
@@ -130,8 +226,9 @@ def workflow_status(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
     return process_status(slug, workflow_status_path(slug, stage), workflow_log_path(slug, stage))
 
 
-def validation_status(slug: str) -> AdaptationWorkflowStatus:
-    return process_status(slug, validation_status_path(slug), validation_log_path(slug))
+def validation_status(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
+    require_stage(stage)
+    return process_status(slug, validation_status_path(slug, stage), validation_log_path(slug, stage))
 
 
 def process_is_running(pid: int) -> bool:
@@ -225,14 +322,15 @@ def start_workflow(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
     )
 
 
-def start_validation(slug: str) -> AdaptationWorkflowStatus:
+def start_validation(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
     ensure_adaptation(slug)
+    require_stage(stage)
     return start_logged_process(
         slug,
-        log_path=validation_log_path(slug),
-        status_path=validation_status_path(slug),
-        start_line=f"Starting adaptation validation for {slug}",
-        script_command="./scripts/comic-adaptation/validate \"$SLUG\"",
+        log_path=validation_log_path(slug, stage),
+        status_path=validation_status_path(slug, stage),
+        start_line=f"Starting adaptation validation ({stage}) for {slug}",
+        script_command=f"./scripts/comic-adaptation/validate \"$SLUG\" \"{stage}\"",
     )
 
 
@@ -550,6 +648,10 @@ def sync_prompt_links(slug: str, metadata: AdaptationMetadata) -> AdaptationMeta
 def status(slug: str) -> AdaptationStatus:
     root = ensure_adaptation(slug)
     metadata = sync_prompt_links(slug, read_metadata(slug))
+    metadata, changed = clear_stale_style_ref_assets(slug, metadata)
+    if changed:
+        metadata = write_metadata(slug, metadata)
+    statuses = style_ref_statuses(slug, metadata)
     return AdaptationStatus(
         projectSlug=slug,
         settings=metadata.settings,
@@ -564,10 +666,11 @@ def status(slug: str) -> AdaptationStatus:
             "archetypeCharacterAsset": metadata.styleRefs.archetypeCharacterAssetId is not None,
             "archetypeSceneAsset": metadata.styleRefs.archetypeSceneAssetId is not None,
         },
+        styleRefStatuses=statuses,
         archetypeCharacterAssetId=metadata.styleRefs.archetypeCharacterAssetId,
         archetypeSceneAssetId=metadata.styleRefs.archetypeSceneAssetId,
-        archetypeCharacterPromptText=read_text(root / "style-refs" / "archetype-character.md"),
-        archetypeScenePromptText=read_text(root / "style-refs" / "archetype-scene.md"),
+        archetypeCharacterPromptText=statuses["archetype-character"].promptText,
+        archetypeScenePromptText=statuses["archetype-scene"].promptText,
         counts={
             "characterListLines": count_nonempty_lines(root / "characters" / "list.txt"),
             "characterArtifacts": len(list((root / "characters" / "artifacts").glob("*.md"))),
@@ -599,11 +702,10 @@ def write_visual_style(slug: str, value: str) -> AdaptationStatus:
 
 
 def write_style_ref_prompt(slug: str, request: AdaptationStylePromptPatch) -> AdaptationStatus:
-    if request.kind not in {"archetype-character", "archetype-scene"}:
-        raise HTTPException(status_code=400, detail="Invalid style ref kind")
+    kind = require_style_ref_kind(request.kind)
     root = ensure_adaptation(slug)
-    (root / "style-refs" / f"{request.kind}.md").write_text(request.prompt.rstrip() + "\n")
-    library.write_canvas(slug, library.default_canvas_for_story_artifacts(slug, library.read_stored_canvas(slug)))
+    style_ref_prompt_path(root, kind).write_text(request.prompt.rstrip() + "\n")
+    library.write_canvas(slug, library.sync_style_ref_canvas_nodes(slug, library.read_stored_canvas(slug), kind))
     return status(slug)
 
 
@@ -632,51 +734,86 @@ async def import_book(slug: str, upload: UploadFile) -> AdaptationStatus:
 
 
 async def import_style_ref(slug: str, kind: str, upload: UploadFile) -> AdaptationStatus:
-    if kind not in {"archetype-character", "archetype-scene"}:
-        raise HTTPException(status_code=400, detail="Invalid style ref kind")
+    ref_kind = require_style_ref_kind(kind)
     root = ensure_adaptation(slug)
-    target = root / "style-refs" / f"{kind}.png"
+    target = style_ref_legacy_png_path(root, ref_kind)
     with target.open("wb") as fh:
         shutil.copyfileobj(upload.file, fh)
-    summary = library.import_asset_file(slug, target, title=f"Comic adaptation {kind}")
+    summary = library.import_asset_file(slug, target, title=f"Comic adaptation {ref_kind}")
     metadata = read_metadata(slug)
-    if kind == "archetype-character":
-        metadata.styleRefs.archetypeCharacterAssetId = summary.id
-    else:
-        metadata.styleRefs.archetypeSceneAssetId = summary.id
+    set_style_ref_asset_id(metadata, ref_kind, summary.id)
     write_metadata(slug, metadata)
-    library.write_canvas(slug, library.default_canvas_for_story_artifacts(slug, library.read_stored_canvas(slug)))
+    library.write_canvas(slug, library.sync_style_ref_canvas_nodes(slug, library.read_stored_canvas(slug), ref_kind))
     return status(slug)
 
 
 def set_style_ref_asset(slug: str, request: AdaptationStyleRefAssetRequest) -> AdaptationStatus:
+    kind = require_style_ref_kind(request.kind)
     library.read_asset(slug, request.assetId)
     metadata = read_metadata(slug)
-    if request.kind == "archetype-character":
-        metadata.styleRefs.archetypeCharacterAssetId = request.assetId
-    else:
-        metadata.styleRefs.archetypeSceneAssetId = request.assetId
+    set_style_ref_asset_id(metadata, kind, request.assetId)
     write_metadata(slug, metadata)
+    library.write_canvas(slug, library.sync_style_ref_canvas_nodes(slug, library.read_stored_canvas(slug), kind))
     return status(slug)
 
 
 def import_existing_style_refs(slug: str) -> AdaptationStatus:
     root = ensure_adaptation(slug)
     metadata = read_metadata(slug)
-    existing = [
-        ("archetype-character", root / "style-refs" / "archetype-character.png", metadata.styleRefs.archetypeCharacterAssetId),
-        ("archetype-scene", root / "style-refs" / "archetype-scene.png", metadata.styleRefs.archetypeSceneAssetId),
-    ]
-    for kind, path, current_asset_id in existing:
-        if current_asset_id is not None or not path.is_file():
+    imported_kinds: list[StyleRefKind] = []
+    for kind in STYLE_REF_KINDS:
+        path = style_ref_legacy_png_path(root, kind)
+        if get_style_ref_asset_id(metadata, kind) is not None or not path.is_file():
             continue
         summary = library.import_asset_file(slug, path, title=f"Comic adaptation {kind}")
-        if kind == "archetype-character":
-            metadata.styleRefs.archetypeCharacterAssetId = summary.id
-        else:
-            metadata.styleRefs.archetypeSceneAssetId = summary.id
+        set_style_ref_asset_id(metadata, kind, summary.id)
+        imported_kinds.append(kind)
     write_metadata(slug, metadata)
+    if imported_kinds:
+        canvas = library.read_stored_canvas(slug)
+        for kind in imported_kinds:
+            canvas = library.sync_style_ref_canvas_nodes(slug, canvas, kind)
+        library.write_canvas(slug, canvas)
     return status(slug)
+
+
+def generate_style_ref(slug: str, request: AdaptationGenerateStyleRefRequest) -> AdaptationGenerateResponse:
+    root = ensure_adaptation(slug)
+    kind = require_style_ref_kind(request.kind)
+    _, image_node_id = style_ref_node_ids(kind)
+    library.write_canvas(slug, library.sync_style_ref_canvas_nodes(slug, library.read_stored_canvas(slug), kind))
+    prompt_path = style_ref_prompt_path(root, kind)
+    prompt_text = read_text(prompt_path).strip()
+    if not prompt_text:
+        raise HTTPException(status_code=400, detail=f"Missing prompt: {prompt_path}")
+    visual_style = read_text(root / "style-refs" / "visual-style.md").strip()
+    prompt = f"{prompt_text}\n\n{visual_style}\n" if visual_style else f"{prompt_text}\n"
+    title = str(style_ref_config(kind)["display_name"])
+    tags = ["comic-adaptation", *style_ref_tags(kind)[1:]]
+    payload = GenerateRequest(
+        prompt=prompt,
+        refs=[],
+        aspectRatio="1:1",
+        imageSize="1K",
+        batchCount=1,
+        title=title,
+        tags=tags,
+        canvasNodeId=image_node_id,
+    )
+    response = library.create_generated_assets(slug, payload, gemini.generate_image)
+    asset = response.assets[0]
+    metadata = read_metadata(slug)
+    set_style_ref_asset_id(metadata, kind, asset.id)
+    write_metadata(slug, metadata)
+    library.write_canvas(slug, library.sync_style_ref_canvas_nodes(slug, library.read_stored_canvas(slug), kind))
+    return AdaptationGenerateResponse(
+        generated=True,
+        kind="style-ref",
+        key=kind,
+        asset=asset,
+        status=status(slug),
+        message=f"Generated {title}.",
+    )
 
 
 def next_base_character(slug: str) -> tuple[str, Path, dict[str, str]] | None:

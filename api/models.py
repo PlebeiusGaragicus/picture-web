@@ -14,6 +14,7 @@ AssetKind = Literal["imported", "generated"]
 StoryKind = Literal["picture-book", "illustrated-story", "comic-book"]
 ArtifactKind = Literal["character-sheet", "location-prompt", "scene-artifact", "page-plan", "panel-prompt"]
 AdaptationFileKind = Literal["characters", "locations", "scenes"]
+StyleRefKind = Literal["archetype-character", "archetype-scene"]
 MODEL_CAPABILITIES = {
     "gemini-2.5-flash-image": {
         "aspectRatios": {"1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"},
@@ -149,6 +150,15 @@ class AdaptationStyleRefs(BaseModel):
     archetypeSceneAssetId: str | None = None
 
 
+class StyleRefStatus(BaseModel):
+    kind: StyleRefKind
+    promptPath: str
+    promptText: str = ""
+    assetId: str | None = None
+    canvasDraftNodeId: str
+    canvasImageNodeId: str
+
+
 class AdaptationMetadata(BaseModel):
     version: int = 2
     settings: AdaptationSettings = Field(default_factory=AdaptationSettings)
@@ -166,6 +176,7 @@ class AdaptationStatus(BaseModel):
     hasBook: bool
     hasBookSession: bool
     styleRefs: dict[str, bool]
+    styleRefStatuses: dict[StyleRefKind, StyleRefStatus]
     archetypeCharacterAssetId: str | None = None
     archetypeSceneAssetId: str | None = None
     archetypeCharacterPromptText: str = ""
@@ -197,7 +208,7 @@ class AdaptationStylePatch(BaseModel):
 
 
 class AdaptationStylePromptPatch(BaseModel):
-    kind: Literal["archetype-character", "archetype-scene"]
+    kind: StyleRefKind
     prompt: str
 
 
@@ -236,8 +247,13 @@ class AdaptationFileDocument(AdaptationFileBase):
 
 
 class AdaptationStyleRefAssetRequest(BaseModel):
-    kind: Literal["archetype-character", "archetype-scene"]
+    kind: StyleRefKind
     assetId: str
+
+
+class AdaptationGenerateStyleRefRequest(BaseModel):
+    kind: StyleRefKind
+    canvasNodeId: str | None = None
 
 
 class AdaptationGenerateArtifactRequest(BaseModel):
@@ -248,7 +264,7 @@ class AdaptationGenerateArtifactRequest(BaseModel):
 
 class AdaptationGenerateResponse(BaseModel):
     generated: bool
-    kind: Literal["character", "artifact"]
+    kind: Literal["character", "artifact", "style-ref"]
     key: str | None = None
     asset: AssetSummary | None = None
     status: AdaptationStatus | None = None

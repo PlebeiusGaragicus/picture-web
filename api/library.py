@@ -366,52 +366,44 @@ def sync_existing_story_artifacts(slug: str, canvas: CanvasDocument) -> CanvasDo
     return next_canvas
 
 
-def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> CanvasDocument:
+def sync_style_ref_canvas_nodes(slug: str, canvas: CanvasDocument, kind: str | None = None) -> CanvasDocument:
+    """Create or repair the style-reference nodes projected from adaptation files."""
     import adaptation
 
-    status = adaptation.status(slug)
     next_canvas = canvas.model_copy(deep=True)
-    root = adaptation.adaptation_dir(slug)
-    archetypes = [
-        (
-            "archetype-character",
-            "Character Archetype",
-            root / "style-refs" / "archetype-character.md",
-            status.archetypeCharacterAssetId,
-            ["adaptation", "archetype", "character-style"],
-            80,
-            80,
-        ),
-        (
-            "archetype-scene",
-            "Scene Archetype",
-            root / "style-refs" / "archetype-scene.md",
-            status.archetypeSceneAssetId,
-            ["adaptation", "archetype", "scene-style"],
-            360,
-            80,
-        ),
-    ]
-    for kind, display_name, path, asset_id, tags, x, y in archetypes:
-        prompt = path.read_text() if path.is_file() else ""
+    kinds = adaptation.STYLE_REF_KINDS if kind is None else (adaptation.require_style_ref_kind(kind),)
+    metadata = adaptation.read_metadata(slug)
+    metadata, changed = adaptation.clear_stale_style_ref_assets(slug, metadata)
+    if changed:
+        metadata = adaptation.write_metadata(slug, metadata)
+
+    for ref_kind in kinds:
+        config = adaptation.style_ref_config(ref_kind)
+        status = adaptation.style_ref_status(slug, ref_kind, metadata)
+        tags = adaptation.style_ref_tags(ref_kind)
+        asset_id = status.assetId
         has_asset = asset_id is not None
-        node_id = archetype_node_id(kind)
+        node_id = status.canvasDraftNodeId
+        image_node_id = status.canvasImageNodeId
         existing = next_canvas.nodes.get(node_id)
         if isinstance(existing, DraftCanvasNode):
-            existing.prompt = prompt
+            existing.prompt = status.promptText
             existing.tags = node_tags(*tags, "generated" if has_asset else "missing")
             next_canvas.nodes[node_id] = existing
-        elif existing is None:
+        else:
+            if isinstance(existing, ImageGroupCanvasNode):
+                # Older generation paths could replace the archetype draft with an image group.
+                # Move that group to the image slot so the prompt draft can be recreated.
+                next_canvas.nodes[image_node_id] = existing
             next_canvas.nodes[node_id] = DraftCanvasNode(
-                displayName=display_name,
-                x=x,
-                y=y,
+                displayName=str(config["display_name"]),
+                x=float(config["x"]),
+                y=float(config["y"]),
                 width=240,
                 tags=node_tags(*tags, "generated" if has_asset else "missing"),
                 refs=[],
-                prompt=prompt,
+                prompt=status.promptText,
             )
-        image_node_id = f"{node_id}_image"
         if asset_id is not None:
             existing_image = next_canvas.nodes.get(image_node_id)
             if isinstance(existing_image, ImageGroupCanvasNode):
@@ -422,9 +414,9 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
                 next_canvas.nodes[image_node_id] = existing_image
             else:
                 next_canvas.nodes[image_node_id] = ImageGroupCanvasNode(
-                    displayName=display_name,
-                    x=x,
-                    y=y + 320,
+                    displayName=str(config["display_name"]),
+                    x=float(config["x"]),
+                    y=float(config["y"]) + 320,
                     width=240,
                     tags=node_tags(*tags, "imported-image"),
                     assetIds=[asset_id],
@@ -432,6 +424,19 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
                 )
         elif image_node_id in next_canvas.nodes:
             del next_canvas.nodes[image_node_id]
+    return next_canvas
+
+
+def sync_story_artifact_nodes(
+    canvas: CanvasDocument,
+    *,
+    artifact_kind: str,
+    entries: dict[str, object],
+    start_x: int,
+    start_y: int,
+    base_tags: list[str],
+) -> CanvasDocument:
+    next_canvas = canvas.model_copy(deep=True)
     existing_artifacts = {
         (node.artifactKind, node.artifactKey)
         for node in next_canvas.nodes.values()
@@ -440,48 +445,74 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
     columns = 5
     x_gap = 310
     y_gap = 230
+    for index, (key, entry) in enumerate(entries.items()):
+        refs = story_artifact_refs(entries, entry)
+        for node_id, node in list(next_canvas.nodes.items()):
+            if isinstance(node, StoryArtifactCanvasNode) and node.artifactKind == artifact_kind and node.artifactKey == key:
+                node.promptPath = entry.promptPath
+                node.prompt = entry.prompt
+                node.refs = refs
+                node.generatedAssetIds = entry.assetIds
+                node.generatedAssetId = entry.canonicalAssetId
+                node.tags = node_tags(*story_artifact_base_tags(artifact_kind), "generated" if entry.canonicalAssetId else "missing")
+                next_canvas.nodes[node_id] = node
+                break
+        if (artifact_kind, key) in existing_artifacts:
+            continue
+        node_id = story_artifact_node_id(artifact_kind, key)
+        while node_id in next_canvas.nodes:
+            node_id = f"{node_id}_{index}"
+        next_canvas.nodes[node_id] = StoryArtifactCanvasNode(
+            displayName=key,
+            x=start_x + (index % columns) * x_gap,
+            y=start_y + (index // columns) * y_gap,
+            width=240,
+            tags=node_tags(*base_tags, "generated" if entry.canonicalAssetId else "missing"),
+            artifactKind=artifact_kind,
+            artifactKey=key,
+            promptPath=entry.promptPath,
+            prompt=entry.prompt,
+            refs=refs,
+            generatedAssetIds=entry.assetIds,
+            generatedAssetId=entry.canonicalAssetId,
+        )
+    return next_canvas
+
+
+def sync_character_nodes(canvas: CanvasDocument, entries: dict[str, object], start_y: int) -> CanvasDocument:
+    return sync_story_artifact_nodes(canvas, artifact_kind="character-sheet", entries=entries, start_x=80, start_y=start_y, base_tags=["adaptation", "character-sheet"])
+
+
+def sync_location_nodes(canvas: CanvasDocument, entries: dict[str, object], start_y: int) -> CanvasDocument:
+    return sync_story_artifact_nodes(canvas, artifact_kind="location-prompt", entries=entries, start_x=80, start_y=start_y, base_tags=["adaptation", "location"])
+
+
+def sync_scene_nodes(canvas: CanvasDocument, entries: dict[str, object], start_y: int) -> CanvasDocument:
+    return sync_story_artifact_nodes(canvas, artifact_kind="scene-artifact", entries=entries, start_x=80, start_y=start_y, base_tags=["adaptation", "scene"])
+
+
+def sync_moment_nodes(canvas: CanvasDocument, pages: dict[str, object], panels: dict[str, object], page_start_y: int, panel_start_y: int) -> CanvasDocument:
+    next_canvas = sync_story_artifact_nodes(canvas, artifact_kind="page-plan", entries=pages, start_x=80, start_y=page_start_y, base_tags=["adaptation", "page"])
+    return sync_story_artifact_nodes(next_canvas, artifact_kind="panel-prompt", entries=panels, start_x=80, start_y=panel_start_y, base_tags=["adaptation", "panel"])
+
+
+def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> CanvasDocument:
+    import adaptation
+
+    status = adaptation.status(slug)
+    next_canvas = sync_style_ref_canvas_nodes(slug, canvas)
+    columns = 5
+    y_gap = 230
     character_start_y = 320
     character_rows = max(1, (len(status.characters) + columns - 1) // columns)
     location_start_y = character_start_y + character_rows * y_gap + 180
-    artifact_groups = [
-        ("character-sheet", status.characters, 80, character_start_y, ["adaptation", "character-sheet"]),
-        ("location-prompt", status.locations, 80, location_start_y, ["adaptation", "location"]),
-        ("scene-artifact", status.scenes, 80, location_start_y + max(1, (len(status.locations) + columns - 1) // columns) * y_gap + 180, ["adaptation", "scene"]),
-        ("page-plan", status.pages, 80, location_start_y + max(1, (len(status.locations) + len(status.scenes) + columns - 1) // columns) * y_gap + 360, ["adaptation", "page"]),
-        ("panel-prompt", status.panels, 80, location_start_y + max(1, (len(status.locations) + len(status.scenes) + len(status.pages) + columns - 1) // columns) * y_gap + 540, ["adaptation", "panel"]),
-    ]
-    for kind, entries, start_x, start_y, base_tags in artifact_groups:
-        for index, (key, entry) in enumerate(entries.items()):
-            refs = story_artifact_refs(entries, entry)
-            for node_id, node in list(next_canvas.nodes.items()):
-                if isinstance(node, StoryArtifactCanvasNode) and node.artifactKind == kind and node.artifactKey == key:
-                    node.promptPath = entry.promptPath
-                    node.prompt = entry.prompt
-                    node.refs = refs
-                    node.generatedAssetIds = entry.assetIds
-                    node.generatedAssetId = entry.canonicalAssetId
-                    node.tags = node_tags(*story_artifact_base_tags(kind), "generated" if entry.canonicalAssetId else "missing")
-                    next_canvas.nodes[node_id] = node
-                    break
-            if (kind, key) in existing_artifacts:
-                continue
-            node_id = story_artifact_node_id(kind, key)
-            while node_id in next_canvas.nodes:
-                node_id = f"{node_id}_{index}"
-            next_canvas.nodes[node_id] = StoryArtifactCanvasNode(
-                displayName=key,
-                x=start_x + (index % columns) * x_gap,
-                y=start_y + (index // columns) * y_gap,
-                width=240,
-                tags=node_tags(*base_tags, "generated" if entry.canonicalAssetId else "missing"),
-                artifactKind=kind,
-                artifactKey=key,
-                promptPath=entry.promptPath,
-                prompt=entry.prompt,
-                refs=refs,
-                generatedAssetIds=entry.assetIds,
-                generatedAssetId=entry.canonicalAssetId,
-            )
+    scene_start_y = location_start_y + max(1, (len(status.locations) + columns - 1) // columns) * y_gap + 180
+    page_start_y = location_start_y + max(1, (len(status.locations) + len(status.scenes) + columns - 1) // columns) * y_gap + 360
+    panel_start_y = location_start_y + max(1, (len(status.locations) + len(status.scenes) + len(status.pages) + columns - 1) // columns) * y_gap + 540
+    next_canvas = sync_character_nodes(next_canvas, status.characters, character_start_y)
+    next_canvas = sync_location_nodes(next_canvas, status.locations, location_start_y)
+    next_canvas = sync_scene_nodes(next_canvas, status.scenes, scene_start_y)
+    next_canvas = sync_moment_nodes(next_canvas, status.pages, status.panels, page_start_y, panel_start_y)
     return next_canvas
 
 

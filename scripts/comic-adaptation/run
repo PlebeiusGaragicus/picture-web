@@ -43,32 +43,20 @@ slugify_name() {
     sed 's/^-//; s/-$//'
 }
 
-session_dir_name() {
-  local path="$1"
-  printf '%s' "$path" | sed 's|^/||' | tr '/:' '-'
-}
-
 capture_latest_session_id() {
-  local session_dir="$HOME/.pi/agent/sessions/--$(session_dir_name "$PI_WORKSPACE")--"
   local latest
 
-  latest="$(ls -t "$session_dir"/*.jsonl 2>/dev/null | head -n 1 || true)"
-  [[ -n "$latest" ]] || die "Could not find a Pi session file in $session_dir"
+  latest="$(ls -t "$PI_SESSION_DIR"/*.jsonl 2>/dev/null | head -n 1 || true)"
+  [[ -n "$latest" ]] || die "Could not find a Pi session file in $PI_SESSION_DIR"
 
   jq -r 'select(.type=="session") | .id' "$latest" | head -n 1
 }
 
 ensure_pi_workspace() {
   PI_WORKSPACE="$BOOK_ROOT_ABS/sessions/pi-workspace"
-  PI_SESSION_DIR="$HOME/.pi/agent/sessions/--$(session_dir_name "$PI_WORKSPACE")--"
-  mkdir -p "$PI_WORKSPACE/.pi"
-  if [[ -L "$PI_WORKSPACE/.pi/skills" ]]; then
-    ln -sfn "$ROOT_DIR/.pi/skills" "$PI_WORKSPACE/.pi/skills"
-  elif [[ -e "$PI_WORKSPACE/.pi/skills" ]]; then
-    warn "Using existing non-symlink Pi skills path: $PI_WORKSPACE/.pi/skills"
-  else
-    ln -s "$ROOT_DIR/.pi/skills" "$PI_WORKSPACE/.pi/skills"
-  fi
+  PI_SESSION_DIR="$BOOK_ROOT_ABS/sessions/pi"
+  PI_SKILLS_DIR="$ROOT_DIR/.pi/skills"
+  mkdir -p "$PI_WORKSPACE" "$PI_SESSION_DIR"
 }
 
 # jq program that projects Pi's --mode json event stream into compact,
@@ -102,7 +90,7 @@ run_pi_step() {
   echo
   echo "[$step] $name"
   echo "    output: $output"
-  (cd "$PI_WORKSPACE" && pi --fork "$BOOK_LOAD_ID" --name "$name" --mode json "$prompt" < /dev/null | pi_event_filter)
+  (cd "$PI_WORKSPACE" && pi --fork "$BOOK_LOAD_ID" --name "$name" --mode json --session-dir "$PI_SESSION_DIR" --skill "$PI_SKILLS_DIR" "$prompt" < /dev/null | pi_event_filter)
 }
 
 write_multiline_prompt() {
@@ -248,14 +236,16 @@ ensure_book_session() {
     [[ -n "${PI_WORKSPACE:-}" ]] || die "$SESSION_ENV does not set PI_WORKSPACE"
     [[ -n "${PI_SESSION_DIR:-}" ]] || die "$SESSION_ENV does not set PI_SESSION_DIR"
     if [[ "${PI_WORKSPACE:-}" != "$EXPECTED_PI_WORKSPACE" || "${PI_SESSION_DIR:-}" != "$EXPECTED_PI_SESSION_DIR" ]]; then
-      die "$SESSION_ENV does not match this project's Pi workspace"
+      warn "$SESSION_ENV does not match this project's Pi workspace; recreating book-load session"
+      rm -f "$SESSION_ENV"
+    else
+      echo "[load] Reusing book session: $BOOK_LOAD_ID"
+      return
     fi
-    echo "[load] Reusing book session: $BOOK_LOAD_ID"
-    return
   fi
 
   echo "[load] Creating clean book-load session from $BOOK_ROOT/book.txt"
-  (cd "$PI_WORKSPACE" && pi --name "read book $PROJECT_SLUG" --mode json "/skill:read-book $BOOK_ROOT_ABS/book.txt" < /dev/null | pi_event_filter)
+  (cd "$PI_WORKSPACE" && pi --name "read book $PROJECT_SLUG" --mode json --session-dir "$PI_SESSION_DIR" --skill "$PI_SKILLS_DIR" "/skill:read-book $BOOK_ROOT_ABS/book.txt" < /dev/null | pi_event_filter)
   BOOK_LOAD_ID="$(capture_latest_session_id)"
   [[ -n "$BOOK_LOAD_ID" && "$BOOK_LOAD_ID" != "null" ]] || die "Could not capture BOOK_LOAD_ID"
   {

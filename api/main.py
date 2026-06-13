@@ -27,6 +27,7 @@ from models import (
     ChatTurnRequest,
     ChatTurnResponse,
     AdaptationGenerateArtifactRequest,
+    AdaptationGenerateStyleRefRequest,
     AdaptationGenerateResponse,
     AdaptationSettingsPatch,
     AdaptationStatus,
@@ -181,13 +182,13 @@ def start_adaptation_workflow(
 
 
 @app.get("/api/projects/{slug}/adaptation/validation", response_model=AdaptationWorkflowStatus)
-def get_adaptation_validation(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.validation_status(slug)
+def get_adaptation_validation(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
+    return adaptation.validation_status(slug, stage)
 
 
 @app.post("/api/projects/{slug}/adaptation/validation/start", response_model=AdaptationWorkflowStatus)
-def start_adaptation_validation(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.start_validation(slug)
+def start_adaptation_validation(slug: str, payload: AdaptationWorkflowStartRequest = AdaptationWorkflowStartRequest()) -> AdaptationWorkflowStatus:
+    return adaptation.start_validation(slug, payload.stage)
 
 
 @app.post("/api/projects/{slug}/adaptation/import-drafts-to-canvas", response_model=AdaptationCanvasImportResponse)
@@ -222,6 +223,11 @@ def import_existing_adaptation_style_refs(slug: str) -> AdaptationStatus:
 @app.post("/api/projects/{slug}/adaptation/style-ref-asset", response_model=AdaptationStatus)
 def set_adaptation_style_ref_asset(slug: str, payload: AdaptationStyleRefAssetRequest) -> AdaptationStatus:
     return adaptation.set_style_ref_asset(slug, payload)
+
+
+@app.post("/api/projects/{slug}/adaptation/generate-style-ref", response_model=AdaptationGenerateResponse)
+def generate_adaptation_style_ref(slug: str, payload: AdaptationGenerateStyleRefRequest) -> AdaptationGenerateResponse:
+    return adaptation.generate_style_ref(slug, payload)
 
 
 @app.post("/api/projects/{slug}/adaptation/generate-next-character-sheet", response_model=AdaptationGenerateResponse)

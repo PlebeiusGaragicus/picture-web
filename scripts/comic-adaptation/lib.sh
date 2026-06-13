@@ -27,6 +27,7 @@ resolve_adaptation_target() {
 ensure_project_adaptation_dirs() {
   mkdir -p \
     "$ADAPTATION_ROOT/sessions" \
+    "$ADAPTATION_ROOT/sessions/pi" \
     "$ADAPTATION_ROOT/style-refs" \
     "$ADAPTATION_ROOT/acts" \
     "$ADAPTATION_ROOT/characters/artifacts" \

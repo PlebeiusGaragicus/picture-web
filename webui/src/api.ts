@@ -104,10 +104,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ stage }),
     }),
-  getAdaptationValidation: (slug: string) => request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/validation`),
-  startAdaptationValidation: (slug: string) =>
+  getAdaptationValidation: (slug: string, stage: AdaptationStage = 'all') =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/validation?stage=${stage}`),
+  startAdaptationValidation: (slug: string, stage: AdaptationStage = 'all') =>
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/validation/start`, {
       method: 'POST',
+      body: JSON.stringify({ stage }),
     }),
   importAdaptationDraftsToCanvas: (slug: string) =>
     request<AdaptationCanvasImportResponse>(`/api/projects/${slug}/adaptation/import-drafts-to-canvas`, {
@@ -136,6 +138,11 @@ export const api = {
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/style-ref-asset`, {
       method: 'POST',
       body: JSON.stringify({ kind, assetId }),
+    }),
+  generateAdaptationStyleRef: (slug: string, kind: 'archetype-character' | 'archetype-scene', canvasNodeId?: string | null) =>
+    request<AdaptationGenerateResponse>(`/api/projects/${slug}/adaptation/generate-style-ref`, {
+      method: 'POST',
+      body: JSON.stringify({ kind, canvasNodeId }),
     }),
   generateAdaptationArtifact: (slug: string, artifactKind: ArtifactKind, artifactKey: string, canvasNodeId?: string | null) =>
     request<AdaptationGenerateResponse>(`/api/projects/${slug}/adaptation/generate-artifact`, {
