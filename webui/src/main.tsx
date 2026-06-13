@@ -16,7 +16,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import './style.css';
 import { api } from './api';
-import type { AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode } from './types';
+import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StoryKind } from './types';
 
 interface DraftNodeData extends DraftCanvasNode {
   kind: 'draft';
@@ -52,6 +52,36 @@ interface StoryArtifactNodeData extends StoryArtifactCanvasNode {
 }
 
 type PhotoNodeData = DraftNodeData | StoryArtifactNodeData | ImageGroupNodeData;
+
+type ProjectPhase =
+  | 'phase-0-ingestion'
+  | 'phase-1-assets'
+  | 'phase-2-canonical-canvas'
+  | 'phase-3-scenes'
+  | 'phase-4-moments'
+  | 'phase-5-moment-canvas';
+
+const projectPhases: Array<{ id: ProjectPhase; number: string; title: string; shortTitle: string; description: string }> = [
+  { id: 'phase-0-ingestion', number: '0', title: 'Ingest', shortTitle: 'Ingest', description: 'Book' },
+  { id: 'phase-1-assets', number: '1', title: 'Assets', shortTitle: 'Assets', description: 'Cast & places' },
+  { id: 'phase-2-canonical-canvas', number: '2', title: 'Canon', shortTitle: 'Canon', description: 'References' },
+  { id: 'phase-3-scenes', number: '3', title: 'Scenes', shortTitle: 'Scenes', description: 'Acts' },
+  { id: 'phase-4-moments', number: '4', title: 'Moments', shortTitle: 'Moments', description: 'Beats' },
+  { id: 'phase-5-moment-canvas', number: '5', title: 'Images', shortTitle: 'Images', description: 'Panels' },
+];
+
+const phaseDefaultTags: Record<ProjectPhase, string[]> = {
+  'phase-0-ingestion': [],
+  'phase-1-assets': [],
+  'phase-2-canonical-canvas': ['archetype', 'character-sheet', 'location'],
+  'phase-3-scenes': [],
+  'phase-4-moments': [],
+  'phase-5-moment-canvas': ['page', 'panel'],
+};
+
+function isCanvasPhase(phase: ProjectPhase) {
+  return phase === 'phase-2-canonical-canvas' || phase === 'phase-5-moment-canvas';
+}
 
 const emptyCanvas: CanvasDocument = {
   version: 2,
@@ -120,6 +150,7 @@ function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): Ca
               prompt: node.data.prompt,
               refs: node.data.refs,
               params: node.data.params,
+              generatedAssetIds: node.data.generatedAssetIds ?? [],
               generatedAssetId: node.data.generatedAssetId ?? null,
             },
           ];
@@ -203,7 +234,7 @@ function toFlowNodes(
         id,
         position: { x: canvasNode.x, y: canvasNode.y },
         type: 'storyArtifact',
-        data: { ...canvasNode, kind: 'storyArtifact', nodeId: id, generatedAsset, isGenerating: generatingNodeIds.has(id), onDetails, onViewAsset, onRefineChat, onCreateChildDraft: () => undefined },
+        data: { ...canvasNode, generatedAssetIds: canvasNode.generatedAssetIds ?? [], kind: 'storyArtifact', nodeId: id, generatedAsset, isGenerating: generatingNodeIds.has(id), onDetails, onViewAsset, onRefineChat, onCreateChildDraft: () => undefined },
       };
     }
     const groupAssets = canvasNode.assetIds.map((assetId) => assetById.get(assetId)).filter((asset): asset is Asset => Boolean(asset));
@@ -238,7 +269,10 @@ function App() {
   const [pendingDelete, setPendingDelete] = useState<{ nodeId: string; assetId?: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
-  const [projectView, setProjectView] = useState<'canvas' | 'adaptation'>('canvas');
+  const [hasManualTagFilters, setHasManualTagFilters] = useState(false);
+  const [isTagFilterMenuOpen, setIsTagFilterMenuOpen] = useState(false);
+  const [projectPhase, setProjectPhase] = useState<ProjectPhase>('phase-0-ingestion');
+  const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const [adaptation, setAdaptation] = useState<AdaptationStatus | null>(null);
   const [adaptationWorkflow, setAdaptationWorkflow] = useState<AdaptationWorkflowStatus | null>(null);
@@ -396,25 +430,35 @@ function App() {
     nodes.forEach((node) => node.data.tags.forEach((tag) => tags.add(tag)));
     return Array.from(tags).sort();
   }, [nodes]);
+  const effectiveTagFilters = useMemo(() => {
+    if (hasManualTagFilters) return activeTagFilters;
+    return phaseDefaultTags[projectPhase].filter((tag) => availableTagFilters.includes(tag));
+  }, [activeTagFilters, availableTagFilters, hasManualTagFilters, projectPhase]);
   const filteredNodes = useMemo(() => {
-    if (activeTagFilters.length === 0) return nodes;
-    const required = new Set(activeTagFilters);
+    if (effectiveTagFilters.length === 0) return nodes;
+    const required = new Set(effectiveTagFilters);
     return nodes.filter((node) => node.data.tags.some((tag) => required.has(tag)));
-  }, [activeTagFilters, nodes]);
+  }, [effectiveTagFilters, nodes]);
 
   const edges: Edge[] = useMemo(() => {
     const visibleNodeIds = new Set(filteredNodes.map((node) => node.id));
-    const nodeForAsset = new Map<string, Node<ImageGroupNodeData>>();
+    const nodeForAsset = new Map<string, Node<ImageGroupNodeData> | Node<StoryArtifactNodeData>>();
     filteredNodes.forEach((node) => {
       if (node.data.kind === 'imageGroup') {
         const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
         node.data.assetIds.forEach((assetId) => nodeForAsset.set(assetId, imageNode));
       }
+      if (node.data.kind === 'storyArtifact' && node.data.generatedAssetId) {
+        const artifactNode: Node<StoryArtifactNodeData> = { ...node, data: node.data };
+        nodeForAsset.set(node.data.generatedAssetId, artifactNode);
+      }
     });
     const edgeForAssetRef = (childNode: Node<ImageGroupNodeData> | Node<DraftNodeData> | Node<StoryArtifactNodeData>, childAssetId: string | null, ref: string): Edge | null => {
       const sourceNode = nodeForAsset.get(ref);
       if (!sourceNode || sourceNode.id === childNode.id) return null;
-      const sourceVisible = sourceNode.data.activeAsset?.id === ref;
+      const sourceVisible = sourceNode.data.kind === 'imageGroup'
+        ? sourceNode.data.activeAsset?.id === ref
+        : sourceNode.data.generatedAssetId === ref;
       const childVisible = childNode.data.kind === 'draft' || childNode.data.kind === 'storyArtifact' || childNode.data.activeAsset?.id === childAssetId;
       const isVisibleLineage = sourceVisible && childVisible;
       return {
@@ -441,19 +485,7 @@ function App() {
       const artifactNode: Node<StoryArtifactNodeData> = { ...node, data: node.data };
       return node.data.refs.flatMap((ref) => edgeForAssetRef(artifactNode, null, ref) ?? []);
     });
-    const artifactGeneratedEdges = filteredNodes.flatMap((node): Edge[] => {
-      if (node.data.kind !== 'storyArtifact' || !node.data.generatedAssetId) return [];
-      const targetNode = nodeForAsset.get(node.data.generatedAssetId);
-      if (!targetNode || !visibleNodeIds.has(targetNode.id)) return [];
-      return [{
-        id: `${node.id}-${targetNode.id}-${node.data.generatedAssetId}`,
-        source: node.id,
-        target: targetNode.id,
-        animated: false,
-        className: 'lineage-edge-visible',
-      }];
-    });
-    return [...assetEdges, ...draftEdges, ...artifactRefEdges, ...artifactGeneratedEdges];
+    return [...assetEdges, ...draftEdges, ...artifactRefEdges];
   }, [filteredNodes]);
 
   const selectedNode = useMemo(() => nodes.find((node) => node.id === popoverNodeId) ?? null, [nodes, popoverNodeId]);
@@ -517,7 +549,9 @@ function App() {
 
   const openProject = async (projectSlug: string) => {
     setOpenProjectSlug(projectSlug);
-    setProjectView('canvas');
+    setProjectPhase('phase-0-ingestion');
+    setHasManualTagFilters(false);
+    setActiveTagFilters([]);
     setSelectedIds([]);
     setSelectedNodeIds([]);
     setError(null);
@@ -525,7 +559,9 @@ function App() {
 
   const closeProject = () => {
     setOpenProjectSlug('');
-    setProjectView('canvas');
+    setProjectPhase('phase-0-ingestion');
+    setHasManualTagFilters(false);
+    setActiveTagFilters([]);
     setAssets([]);
     setChatSessions([]);
     setActiveChatSessionId(null);
@@ -919,6 +955,11 @@ function App() {
     setAdaptation(await api.saveAdaptationStyle(openProjectSlug, visualStyle));
   };
 
+  const saveAdaptationSettings = async (storyKind: StoryKind) => {
+    if (!openProjectSlug) return;
+    setAdaptation(await api.saveAdaptationSettings(openProjectSlug, storyKind));
+  };
+
   const importAdaptationBook = async (file: File) => {
     if (!openProjectSlug) return;
     setAdaptation(await api.importAdaptationBook(openProjectSlug, file));
@@ -950,7 +991,7 @@ function App() {
     const result = await api.importAdaptationDraftsToCanvas(openProjectSlug);
     setCanvas(result.canvas);
     await loadProject(openProjectSlug);
-    setProjectView('canvas');
+    setProjectPhase((adaptation?.counts.panelPrompts ?? 0) > 0 || (adaptation?.counts.pagePlans ?? 0) > 0 ? 'phase-5-moment-canvas' : 'phase-2-canonical-canvas');
   };
 
   const generateStoryArtifact = async (id: string, artifact: StoryArtifactNodeData) => {
@@ -992,28 +1033,46 @@ function App() {
     );
   }
 
+  const isCanvasActive = isCanvasPhase(projectPhase);
+
   return (
     <div className="app">
+      <ProjectPhaseSidebar
+        project={currentProject}
+        projectSlug={openProjectSlug}
+        activePhase={projectPhase}
+        adaptation={adaptation}
+        error={error}
+        isCollapsed={isPhaseSidebarCollapsed}
+        onToggleCollapsed={() => setIsPhaseSidebarCollapsed((current) => !current)}
+        onBack={closeProject}
+        onPhaseChange={(phase) => {
+          setProjectPhase(phase);
+          setIsTagFilterMenuOpen(false);
+          setPopoverNodeId(null);
+          setActiveChatSessionId(null);
+        }}
+      />
       <main
         ref={canvasRef}
-        className={`canvas ${projectView === 'adaptation' ? 'story-adaptation-view' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
+        className={`canvas ${!isCanvasActive ? 'story-adaptation-view' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
         onDragOver={(event) => {
-          if (projectView !== 'canvas') return;
+          if (!isCanvasActive) return;
           event.preventDefault();
           setIsDraggingFile(true);
         }}
         onDragLeave={(event) => {
-          if (projectView !== 'canvas') return;
+          if (!isCanvasActive) return;
           if (event.currentTarget === event.target) setIsDraggingFile(false);
         }}
         onDrop={async (event) => {
-          if (projectView !== 'canvas') return;
+          if (!isCanvasActive) return;
           event.preventDefault();
           setIsDraggingFile(false);
           await importFiles(event.dataTransfer.files, flowPositionFromClientPoint({ x: event.clientX, y: event.clientY }));
         }}
         onContextMenu={(event) => {
-          if (projectView !== 'canvas') return;
+          if (!isCanvasActive) return;
           event.preventDefault();
           setContextMenu({ x: event.clientX, y: event.clientY });
         }}
@@ -1030,68 +1089,27 @@ function App() {
             event.currentTarget.value = '';
           }}
         />
-        <div className="toolbar">
-          <div className="toolbar-left">
-            <button className="project-back-button" onClick={closeProject} title="Back to projects">
-              {currentProject?.name ?? openProjectSlug}
-            </button>
-            <div className="view-switcher" role="tablist" aria-label="Project view">
-              <button className={projectView === 'canvas' ? 'active' : ''} onClick={() => setProjectView('canvas')}>Canvas</button>
-              <button className={projectView === 'adaptation' ? 'active' : ''} onClick={() => setProjectView('adaptation')}>Story Adaptation</button>
-            </div>
-            {projectView === 'canvas' && (
-              <label className="toolbar-toggle">
-                <input
-                  type="checkbox"
-                  checked={showArchived}
-                  onChange={(event) => setShowArchived(event.target.checked)}
-                />
-                Show archived
-              </label>
-            )}
-            {error && <span className="error">{error}</span>}
-          </div>
-          {projectView === 'canvas' && (
-            <div className="tag-filter-bar">
-              <button className={activeTagFilters.length === 0 ? 'active' : ''} onClick={() => setActiveTagFilters([])}>All</button>
-              {['archetype', 'character-sheet', 'location', 'generated-image'].map((tag) => (
-                <button
-                  key={tag}
-                  className={activeTagFilters.includes(tag) ? 'active' : ''}
-                  onClick={() => setActiveTagFilters((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag])}
-                >
-                  {tag}
-                </button>
-              ))}
-              {availableTagFilters.filter((tag) => !['archetype', 'character-sheet', 'location', 'generated-image'].includes(tag)).slice(0, 6).map((tag) => (
-                <button
-                  key={tag}
-                  className={activeTagFilters.includes(tag) ? 'active' : ''}
-                  onClick={() => setActiveTagFilters((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag])}
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        {projectView === 'adaptation' && adaptation && (
-          <StoryAdaptationScreen
+        {!isCanvasActive && adaptation && (
+          <StoryPhaseScreen
+            phase={projectPhase}
+            projectSlug={openProjectSlug}
             adaptation={adaptation}
             workflow={adaptationWorkflow}
             validation={adaptationValidation}
             isWorkflowLogExpanded={isWorkflowLogExpanded}
             isValidationLogExpanded={isValidationLogExpanded}
             onSaveStyle={saveAdaptationStyle}
+            onSaveSettings={saveAdaptationSettings}
             onImportBook={importAdaptationBook}
             onStartWorkflow={startAdaptationWorkflow}
             onStartValidation={startAdaptationValidation}
             onImportDraftsToCanvas={importAdaptationDraftsToCanvas}
+            onReloadAdaptation={loadAdaptation}
             onToggleWorkflowLog={() => setIsWorkflowLogExpanded((current) => !current)}
             onToggleValidationLog={() => setIsValidationLogExpanded((current) => !current)}
           />
         )}
-        {projectView === 'canvas' && (
+        {isCanvasActive && (
           <>
             <ReactFlow
               nodeTypes={nodeTypes}
@@ -1178,17 +1196,39 @@ function App() {
                 Zoom {zoomPercent}%
               </Panel>
             </ReactFlow>
+            <FloatingFilterMenu
+              availableTagFilters={availableTagFilters}
+              activeTagFilters={activeTagFilters}
+              effectiveTagFilters={effectiveTagFilters}
+              hasManualTagFilters={hasManualTagFilters}
+              showArchived={showArchived}
+              isOpen={isTagFilterMenuOpen}
+              onToggleOpen={() => setIsTagFilterMenuOpen((current) => !current)}
+              onShowArchivedChange={setShowArchived}
+              onClear={() => {
+                setHasManualTagFilters(true);
+                setActiveTagFilters([]);
+              }}
+              onUsePhaseDefaults={() => {
+                setHasManualTagFilters(false);
+                setActiveTagFilters([]);
+              }}
+              onToggleTag={(tag) => {
+                setHasManualTagFilters(true);
+                setActiveTagFilters((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]);
+              }}
+            />
             {isDraggingFile && <div className="drop-overlay">Drop photos to import</div>}
           </>
         )}
-        {contextMenu && projectView === 'canvas' && (
+        {contextMenu && isCanvasActive && (
           <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()}>
             <button onClick={openImportPicker}>Import</button>
             <button onClick={createLooseDraft}>Generate</button>
           </div>
         )}
       </main>
-      {projectView === 'canvas' && selectedNode && (
+      {isCanvasActive && selectedNode && (
         <NodeSidebar
           node={selectedNode}
           assets={assets}
@@ -1206,7 +1246,7 @@ function App() {
           onRefineChat={openChatForAsset}
         />
       )}
-      {projectView === 'canvas' && activeChatSession && (
+      {isCanvasActive && activeChatSession && (
         <ChatRefinementPanel
           session={activeChatSession}
           assets={assets}
@@ -1217,7 +1257,7 @@ function App() {
           onViewAsset={openAssetInViewer}
         />
       )}
-      {projectView === 'canvas' && (viewerNodeId || viewerAssetId) && (
+      {isCanvasActive && (viewerNodeId || viewerAssetId) && (
         <ImageViewer
           node={nodes.find((node) => node.id === viewerNodeId && node.data.kind === 'imageGroup') as Node<ImageGroupNodeData> | undefined}
           fallbackAsset={assets.find((asset) => asset.id === viewerAssetId)}
@@ -1233,7 +1273,7 @@ function App() {
           onDelete={deleteNodeById}
         />
       )}
-      {projectView === 'canvas' && pendingDelete && (
+      {isCanvasActive && pendingDelete && (
         <div className="confirm-backdrop" onClick={() => setPendingDelete(null)}>
           <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
             <h2>Confirm delete</h2>
@@ -1350,35 +1390,162 @@ function ProjectLanding({
   );
 }
 
-function StoryAdaptationScreen({
+function phaseStatus(adaptation: AdaptationStatus | null, phase: ProjectPhase) {
+  if (!adaptation) return 'pending';
+  const counts = adaptation.counts;
+  if (phase === 'phase-0-ingestion') return adaptation.hasBookSession ? 'ready' : adaptation.hasBook ? 'active' : 'pending';
+  if (phase === 'phase-1-assets') return (counts.characterSheets ?? 0) > 0 || (counts.locationPrompts ?? 0) > 0 ? 'ready' : 'pending';
+  if (phase === 'phase-2-canonical-canvas') return adaptation.styleRefs.archetypeCharacterAsset || adaptation.styleRefs.archetypeSceneAsset ? 'ready' : 'active';
+  if (phase === 'phase-3-scenes') return (counts.sceneArtifacts ?? 0) > 0 ? 'ready' : (counts.sceneManifest ?? 0) > 0 ? 'active' : 'pending';
+  if (phase === 'phase-4-moments') return (counts.panelPrompts ?? 0) > 0 || (counts.pagePlans ?? 0) > 0 ? 'ready' : 'pending';
+  return (counts.panelPrompts ?? 0) > 0 || (counts.pagePlans ?? 0) > 0 ? 'active' : 'pending';
+}
+
+function ProjectPhaseSidebar({
+  project,
+  projectSlug,
+  activePhase,
+  adaptation,
+  error,
+  isCollapsed,
+  onToggleCollapsed,
+  onBack,
+  onPhaseChange,
+}: {
+  project: Project | undefined;
+  projectSlug: string;
+  activePhase: ProjectPhase;
+  adaptation: AdaptationStatus | null;
+  error: string | null;
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
+  onBack: () => void;
+  onPhaseChange: (phase: ProjectPhase) => void;
+}) {
+  return (
+    <aside className={`project-phase-sidebar ${isCollapsed ? 'collapsed' : ''}`}>
+      <div className="phase-sidebar-project">
+        <button className="project-back-button" onClick={onBack} title="Back to projects">{isCollapsed ? '←' : 'All'}</button>
+        {!isCollapsed && (
+          <div className="phase-sidebar-project-title">
+            <span>Project</span>
+            <strong>{project?.name ?? projectSlug}</strong>
+          </div>
+        )}
+        <button className="phase-sidebar-collapse" onClick={onToggleCollapsed} title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          {isCollapsed ? '›' : '‹'}
+        </button>
+      </div>
+      {error && !isCollapsed && <p className="error">{error}</p>}
+      <nav className="phase-nav" aria-label="Project phases">
+        {projectPhases.map((phase) => {
+          const status = phaseStatus(adaptation, phase.id);
+          return (
+            <button
+              key={phase.id}
+              className={`phase-nav-item ${activePhase === phase.id ? 'active' : ''} ${status}`}
+              onClick={() => onPhaseChange(phase.id)}
+              title={`${phase.number}. ${phase.title}: ${phase.description}`}
+            >
+              <span className="phase-number">{phase.number}</span>
+              <strong>{isCollapsed ? phase.shortTitle.slice(0, 1) : phase.title}</strong>
+              {!isCollapsed && <small>{phase.description}</small>}
+            </button>
+          );
+        })}
+      </nav>
+    </aside>
+  );
+}
+
+function FloatingFilterMenu({
+  availableTagFilters,
+  activeTagFilters,
+  effectiveTagFilters,
+  hasManualTagFilters,
+  showArchived,
+  isOpen,
+  onToggleOpen,
+  onShowArchivedChange,
+  onClear,
+  onUsePhaseDefaults,
+  onToggleTag,
+}: {
+  availableTagFilters: string[];
+  activeTagFilters: string[];
+  effectiveTagFilters: string[];
+  hasManualTagFilters: boolean;
+  showArchived: boolean;
+  isOpen: boolean;
+  onToggleOpen: () => void;
+  onShowArchivedChange: (value: boolean) => void;
+  onClear: () => void;
+  onUsePhaseDefaults: () => void;
+  onToggleTag: (tag: string) => void;
+}) {
+  const visibleTags = ['archetype', 'character-sheet', 'location', 'page', 'panel', 'generated-image', ...availableTagFilters.filter((tag) => !['archetype', 'character-sheet', 'location', 'page', 'panel', 'generated-image'].includes(tag))];
+  return (
+    <div className="floating-filter-menu">
+      <button className={`secondary tag-filter-toggle ${effectiveTagFilters.length ? 'active' : ''}`} onClick={onToggleOpen}>
+        Filters{effectiveTagFilters.length ? ` (${effectiveTagFilters.length})` : ''}
+      </button>
+      {isOpen && (
+        <div className="floating-filter-popover">
+          <label className="toolbar-toggle filter-popover-toggle">
+            <input type="checkbox" checked={showArchived} onChange={(event) => onShowArchivedChange(event.target.checked)} />
+            Show archived
+          </label>
+          <button className={!hasManualTagFilters ? 'active' : ''} onClick={onUsePhaseDefaults}>Phase defaults</button>
+          <button className={hasManualTagFilters && activeTagFilters.length === 0 ? 'active' : ''} onClick={onClear}>All</button>
+          {visibleTags.map((tag) => (
+            <button key={tag} className={hasManualTagFilters && activeTagFilters.includes(tag) ? 'active' : ''} onClick={() => onToggleTag(tag)}>
+              {tag}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StoryPhaseScreen({
+  phase,
+  projectSlug,
   adaptation,
   workflow,
   validation,
   isWorkflowLogExpanded,
   isValidationLogExpanded,
   onSaveStyle,
+  onSaveSettings,
   onImportBook,
   onStartWorkflow,
   onStartValidation,
   onImportDraftsToCanvas,
+  onReloadAdaptation,
   onToggleWorkflowLog,
   onToggleValidationLog,
 }: {
+  phase: ProjectPhase;
+  projectSlug: string;
   adaptation: AdaptationStatus;
   workflow: AdaptationWorkflowStatus | null;
   validation: AdaptationWorkflowStatus | null;
   isWorkflowLogExpanded: boolean;
   isValidationLogExpanded: boolean;
   onSaveStyle: (visualStyle: string) => Promise<void>;
+  onSaveSettings: (storyKind: StoryKind) => Promise<void>;
   onImportBook: (file: File) => Promise<void>;
   onStartWorkflow: () => Promise<void>;
   onStartValidation: () => Promise<void>;
   onImportDraftsToCanvas: () => Promise<void>;
+  onReloadAdaptation: () => Promise<void>;
   onToggleWorkflowLog: () => void;
   onToggleValidationLog: () => void;
 }) {
   const [visualStyle, setVisualStyle] = useState(adaptation.visualStyle);
   const [isSavingStyle, setIsSavingStyle] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isImportingDrafts, setIsImportingDrafts] = useState(false);
   useEffect(() => {
     setVisualStyle(adaptation.visualStyle);
@@ -1399,6 +1566,14 @@ function StoryAdaptationScreen({
       setIsImportingDrafts(false);
     }
   };
+  const saveStoryKind = async (storyKind: StoryKind) => {
+    setIsSavingSettings(true);
+    try {
+      await onSaveSettings(storyKind);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
   const validationFailed = validation?.returnCode !== null && validation?.returnCode !== undefined && validation.returnCode !== 0;
   const validationStatus = validation?.running
     ? 'Validation running'
@@ -1414,13 +1589,17 @@ function StoryAdaptationScreen({
       : workflow?.returnCode
         ? `Workflow exited ${workflow.returnCode}`
         : 'Workflow not run yet';
-  const hasArtifacts = (adaptation.counts.characterSheets ?? 0) > 0 || (adaptation.counts.locationPrompts ?? 0) > 0;
+  const hasArtifacts = (adaptation.counts.characterSheets ?? 0) > 0
+    || (adaptation.counts.locationPrompts ?? 0) > 0
+    || (adaptation.counts.panelPrompts ?? 0) > 0
+    || (adaptation.counts.pagePlans ?? 0) > 0;
+  const phaseMeta = projectPhases.find((item) => item.id === phase) ?? projectPhases[0];
   return (
     <div className="story-adaptation-screen">
       <div className="story-adaptation-header">
         <div>
-          <h1>Story Adaptation</h1>
-          <p className="muted">Import a book, extract visual planning artifacts, validate them, then publish draft nodes to the canvas.</p>
+          <h1>Phase {phaseMeta.number}: {phaseMeta.title}</h1>
+          <p className="muted">{phaseMeta.description}</p>
         </div>
         <div className="adaptation-status-stack">
           <span className={`adaptation-status ${workflow?.returnCode === 0 ? 'generated' : ''}`}>{workflowStatus}</span>
@@ -1433,56 +1612,37 @@ function StoryAdaptationScreen({
         </div>
       )}
       <div className="story-adaptation-grid">
-        <section className="book-upload-section">
-          <h2>Book Source</h2>
-          <p className="muted">
-            {adaptation.hasBook ? 'book.txt is present in this project.' : 'Upload a plain text book file to start the adaptation workflow.'}
-          </p>
-          <label className="generate-button file-button book-upload-button">
-            {adaptation.hasBook ? 'Replace book.txt' : 'Upload book.txt'}
-            <input type="file" accept=".txt,text/plain" hidden onChange={(event) => event.target.files?.[0] && void onImportBook(event.target.files[0])} />
-          </label>
-        </section>
-        <section className="story-card">
-          <h2>Artifact Status</h2>
-          <div className="adaptation-checklist">
-            <span className={adaptation.hasBook ? 'ok' : ''}>Book text</span>
-            <span className={adaptation.hasBookSession ? 'ok' : ''}>Book session</span>
-            <span className={adaptation.styleRefs.visualStyle ? 'ok' : ''}>Visual style</span>
-            <span className={adaptation.styleRefs.archetypeCharacterPrompt ? 'ok' : ''}>Character archetype draft</span>
-            <span className={adaptation.styleRefs.archetypeScenePrompt ? 'ok' : ''}>Scene archetype draft</span>
-            <span>{adaptation.counts.characterArtifacts ?? 0} artifacts</span>
-            <span>{adaptation.counts.characterSheets ?? 0} sheets</span>
-            <span>{adaptation.counts.locationPrompts ?? 0} location prompts</span>
-          </div>
-        </section>
-        <section className="story-card visual-style-card">
-          <h2>Visual Style</h2>
-          <textarea value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)} />
-          <button className="secondary" onClick={save} disabled={isSavingStyle}>
-            {isSavingStyle ? 'Saving...' : 'Save style'}
-          </button>
-        </section>
-        <section className="workflow-run-section">
-          <h2>Run Workflow</h2>
-          <p className="muted">Run Pi extraction to read the book, create character artifacts, character sheet prompts, scene manifest, location index, and location prompts.</p>
-          <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBook || workflow?.running}>
-            {workflow?.running && <span className="spinner" aria-hidden="true" />}
-            {workflow?.running ? 'Running adaptation...' : 'Run adaptation workflow'}
-          </button>
-        </section>
-        <section className="story-card">
-          <h2>Validate Artifacts</h2>
-          <p className="muted">Validation checks the extracted adaptation files and reports missing or malformed pieces without blocking the canvas workflow.</p>
-          <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>
-            {validation?.running ? 'Validating...' : validation?.startedAt ? 'Run validation again' : 'Run validation'}
-          </button>
-        </section>
+        {phase === 'phase-0-ingestion' && (
+          <PhaseIngestion adaptation={adaptation} workflow={workflow} onImportBook={onImportBook} onStartWorkflow={onStartWorkflow} />
+        )}
+        {phase === 'phase-1-assets' && (
+          <PhaseAssets
+            projectSlug={projectSlug}
+            adaptation={adaptation}
+            workflow={workflow}
+            validation={validation}
+            visualStyle={visualStyle}
+            isSavingStyle={isSavingStyle}
+            isSavingSettings={isSavingSettings}
+            onVisualStyleChange={setVisualStyle}
+            onSaveStyle={save}
+            onSaveStoryKind={saveStoryKind}
+            onStartWorkflow={onStartWorkflow}
+            onStartValidation={onStartValidation}
+            onReloadAdaptation={onReloadAdaptation}
+          />
+        )}
+        {phase === 'phase-3-scenes' && (
+          <PhaseScenes projectSlug={projectSlug} adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={onStartWorkflow} onStartValidation={onStartValidation} onReloadAdaptation={onReloadAdaptation} />
+        )}
+        {phase === 'phase-4-moments' && (
+          <PhaseMoments adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={onStartWorkflow} onStartValidation={onStartValidation} />
+        )}
         <section className="story-card import-drafts-card">
-          <h2>Publish Drafts</h2>
-          <p className="muted">Create or update canvas nodes for archetype drafts, character sheets, and location prompts.</p>
+          <h2>Publish Canvas Nodes</h2>
+          <p className="muted">Create or update canvas nodes for artifacts generated by this workflow.</p>
           <button className="generate-button" onClick={importDrafts} disabled={!hasArtifacts || isImportingDrafts}>
-            {isImportingDrafts ? 'Importing drafts...' : 'Import drafts to canvas'}
+            {isImportingDrafts ? 'Publishing...' : 'Publish to canvas'}
           </button>
         </section>
       </div>
@@ -1507,6 +1667,374 @@ function StoryAdaptationScreen({
         </div>
       )}
     </div>
+  );
+}
+
+function StatusPills({ adaptation, items }: { adaptation: AdaptationStatus; items: Array<{ label: string; ok?: boolean; value?: number }> }) {
+  return (
+    <div className="adaptation-checklist">
+      {items.map((item) => (
+        <span key={item.label} className={item.ok ? 'ok' : ''}>
+          {item.value !== undefined ? `${item.value} ${item.label}` : item.label}
+        </span>
+      ))}
+      <span>{adaptation.settings.storyKind}</span>
+    </div>
+  );
+}
+
+function fileKindLabel(kind: AdaptationFileKind) {
+  const labels: Record<AdaptationFileKind, string> = {
+    characters: 'Characters',
+    locations: 'Locations',
+    scenes: 'Scenes',
+  };
+  return labels[kind];
+}
+
+function singularFileKindLabel(kind: AdaptationFileKind) {
+  const labels: Record<AdaptationFileKind, string> = {
+    characters: 'character',
+    locations: 'location',
+    scenes: 'scene',
+  };
+  return labels[kind];
+}
+
+function slugifyFileKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'new-item';
+}
+
+function filesFromLinks(kind: AdaptationFileKind, links: Record<string, AdaptationAssetLink>) {
+  return Object.entries(links)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, link]) => ({
+      key,
+      body: link.prompt,
+      mode: link.mode,
+      styleRef: link.styleRef,
+      status: link.status,
+      promptPath: link.promptPath,
+      artifactKind: link.artifactKind,
+      canonicalAssetId: link.canonicalAssetId ?? null,
+      kind,
+    }));
+}
+
+function emptyFileDraft(kind: AdaptationFileKind, existingKeys: string[]): AdaptationFilePayload {
+  const base = `new-${singularFileKindLabel(kind)}`;
+  let index = existingKeys.length + 1;
+  let key = `${base}-${index}`;
+  while (existingKeys.includes(key)) {
+    index += 1;
+    key = `${base}-${index}`;
+  }
+  return {
+    key,
+    body: kind === 'scenes' ? `# ${key}\n\nScene summary:\n` : '',
+    mode: kind === 'scenes' ? '' : 'new-image',
+    styleRef: '',
+  };
+}
+
+function AdaptationFileEditor({
+  projectSlug,
+  kind,
+  links,
+  onReloadAdaptation,
+}: {
+  projectSlug: string;
+  kind: AdaptationFileKind;
+  links: Record<string, AdaptationAssetLink>;
+  onReloadAdaptation: () => Promise<void>;
+}) {
+  const files = filesFromLinks(kind, links);
+  const [selectedKey, setSelectedKey] = useState(files[0]?.key ?? '');
+  const selected = files.find((file) => file.key === selectedKey) ?? files[0] ?? null;
+  const [draft, setDraft] = useState<AdaptationFilePayload>(() =>
+    selected
+      ? { key: selected.key, body: selected.body, mode: selected.mode, styleRef: selected.styleRef }
+      : emptyFileDraft(kind, files.map((file) => file.key)),
+  );
+  const [isCreating, setIsCreating] = useState(!selected);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    const nextSelected = files.find((file) => file.key === selectedKey) ?? files[0] ?? null;
+    if (!nextSelected) {
+      setIsCreating(true);
+      setDraft(emptyFileDraft(kind, []));
+      return;
+    }
+    setSelectedKey(nextSelected.key);
+    setIsCreating(false);
+    setDraft({ key: nextSelected.key, body: nextSelected.body, mode: nextSelected.mode, styleRef: nextSelected.styleRef });
+  }, [kind, links]);
+
+  const startNew = () => {
+    setIsCreating(true);
+    setSelectedKey('');
+    setDraft(emptyFileDraft(kind, files.map((file) => file.key)));
+  };
+
+  const save = async () => {
+    const payload = {
+      key: slugifyFileKey(draft.key),
+      body: draft.body,
+      mode: draft.mode,
+      styleRef: draft.styleRef,
+    };
+    setIsSaving(true);
+    try {
+      if (isCreating) {
+        await api.createAdaptationFile(projectSlug, kind, payload);
+      } else if (selected) {
+        await api.updateAdaptationFile(projectSlug, kind, selected.key, payload);
+      }
+      setSelectedKey(payload.key);
+      await onReloadAdaptation();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <section className="story-card adaptation-file-card">
+      <div className="adaptation-file-header">
+        <div>
+          <h2>{fileKindLabel(kind)}</h2>
+          <p className="muted">{files.length ? `${files.length} saved ${fileKindLabel(kind).toLowerCase()}` : `Create the first ${singularFileKindLabel(kind)}.`}</p>
+        </div>
+        <button className="secondary" onClick={startNew}>New {singularFileKindLabel(kind)}</button>
+      </div>
+      <div className="adaptation-file-layout">
+        <div className="adaptation-file-list">
+          {files.map((file) => (
+            <button
+              key={file.key}
+              className={`adaptation-file-list-item ${!isCreating && selected?.key === file.key ? 'active' : ''}`}
+              onClick={() => {
+                setSelectedKey(file.key);
+                setIsCreating(false);
+              }}
+            >
+              <strong>{file.key}</strong>
+              <small>{file.status} · {file.promptPath}</small>
+            </button>
+          ))}
+          {!files.length && <p className="muted">No {fileKindLabel(kind).toLowerCase()} yet.</p>}
+        </div>
+        <div className="adaptation-file-form">
+          <label className="field-label">
+            Key
+            <input value={draft.key} onChange={(event) => setDraft((current) => ({ ...current, key: event.target.value }))} />
+          </label>
+          {kind !== 'scenes' && (
+            <div className="adaptation-file-row">
+              <label className="field-label">
+                Mode
+                <select value={draft.mode ?? 'new-image'} onChange={(event) => setDraft((current) => ({ ...current, mode: event.target.value }))}>
+                  <option value="new-image">New image</option>
+                  <option value="edit-reference">Edit reference</option>
+                </select>
+              </label>
+              <label className="field-label">
+                Style ref
+                <input value={draft.styleRef ?? ''} onChange={(event) => setDraft((current) => ({ ...current, styleRef: event.target.value }))} placeholder={kind === 'characters' ? 'character:base' : 'location:base'} />
+              </label>
+            </div>
+          )}
+          <label className="field-label">
+            {kind === 'scenes' ? 'Scene artifact' : 'Image prompt'}
+            <textarea value={draft.body} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} />
+          </label>
+          <button className="generate-button" onClick={save} disabled={isSaving || !draft.key.trim()}>
+            {isSaving ? 'Saving...' : isCreating ? `Create ${singularFileKindLabel(kind)}` : 'Save changes'}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PhaseIngestion({
+  adaptation,
+  workflow,
+  onImportBook,
+  onStartWorkflow,
+}: {
+  adaptation: AdaptationStatus;
+  workflow: AdaptationWorkflowStatus | null;
+  onImportBook: (file: File) => Promise<void>;
+  onStartWorkflow: () => Promise<void>;
+}) {
+  return (
+    <>
+      <section className="book-upload-section">
+        <h2>Book Source</h2>
+        <p className="muted">
+          {adaptation.hasBook ? 'book.txt is present. The next workflow run will create or reuse the isolated read-book session.' : 'Upload a plain text book file to start ingestion.'}
+        </p>
+        <label className="generate-button file-button book-upload-button">
+          {adaptation.hasBook ? 'Replace book.txt' : 'Upload book.txt'}
+          <input type="file" accept=".txt,text/plain" hidden onChange={(event) => event.target.files?.[0] && void onImportBook(event.target.files[0])} />
+        </label>
+      </section>
+      <section className="workflow-run-section">
+        <h2>Read Book Session</h2>
+        <p className="muted">Create the project-local Pi read-book session and continue the adaptation workflow.</p>
+        <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBook || workflow?.running}>
+          {workflow?.running && <span className="spinner" aria-hidden="true" />}
+          {workflow?.running ? 'Running ingestion...' : adaptation.hasBookSession ? 'Run workflow again' : 'Create read-book session'}
+        </button>
+      </section>
+      <section className="story-card">
+        <h2>Ingestion Status</h2>
+        <StatusPills adaptation={adaptation} items={[{ label: 'Book text', ok: adaptation.hasBook }, { label: 'Book session', ok: adaptation.hasBookSession }]} />
+      </section>
+    </>
+  );
+}
+
+function PhaseAssets({
+  projectSlug,
+  adaptation,
+  workflow,
+  validation,
+  visualStyle,
+  isSavingStyle,
+  isSavingSettings,
+  onVisualStyleChange,
+  onSaveStyle,
+  onSaveStoryKind,
+  onStartWorkflow,
+  onStartValidation,
+  onReloadAdaptation,
+}: {
+  projectSlug: string;
+  adaptation: AdaptationStatus;
+  workflow: AdaptationWorkflowStatus | null;
+  validation: AdaptationWorkflowStatus | null;
+  visualStyle: string;
+  isSavingStyle: boolean;
+  isSavingSettings: boolean;
+  onVisualStyleChange: (value: string) => void;
+  onSaveStyle: () => Promise<void>;
+  onSaveStoryKind: (kind: StoryKind) => Promise<void>;
+  onStartWorkflow: () => Promise<void>;
+  onStartValidation: () => Promise<void>;
+  onReloadAdaptation: () => Promise<void>;
+}) {
+  return (
+    <>
+      <AdaptationFileEditor projectSlug={projectSlug} kind="characters" links={adaptation.characters} onReloadAdaptation={onReloadAdaptation} />
+      <AdaptationFileEditor projectSlug={projectSlug} kind="locations" links={adaptation.locations} onReloadAdaptation={onReloadAdaptation} />
+      <section className="story-card">
+        <h2>Story Kind</h2>
+        <p className="muted">Choose the adaptation shape before layout planning.</p>
+        <select value={adaptation.settings.storyKind} disabled={isSavingSettings || workflow?.running} onChange={(event) => void onSaveStoryKind(event.target.value as StoryKind)}>
+          <option value="picture-book">Picture book</option>
+          <option value="illustrated-story">Illustrated story</option>
+          <option value="comic-book">Comic book</option>
+        </select>
+      </section>
+      <section className="story-card visual-style-card">
+        <h2>Visual Style</h2>
+        <textarea value={visualStyle} onChange={(event) => onVisualStyleChange(event.target.value)} />
+        <button className="secondary" onClick={onSaveStyle} disabled={isSavingStyle}>{isSavingStyle ? 'Saving...' : 'Save style'}</button>
+      </section>
+      <section className="workflow-run-section">
+        <h2>Extract From Book</h2>
+        <p className="muted">Optionally run Pi extraction to populate character and location files from an ingested book.</p>
+        <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBook || workflow?.running}>
+          {workflow?.running && <span className="spinner" aria-hidden="true" />}
+          {workflow?.running ? 'Running extraction...' : 'Run extraction'}
+        </button>
+      </section>
+      <section className="story-card">
+        <h2>Reference Status</h2>
+        <StatusPills
+          adaptation={adaptation}
+          items={[
+            { label: 'Visual style', ok: adaptation.styleRefs.visualStyle },
+            { label: 'Character archetype', ok: adaptation.styleRefs.archetypeCharacterPrompt },
+            { label: 'Scene archetype', ok: adaptation.styleRefs.archetypeScenePrompt },
+            { label: 'character artifacts', value: adaptation.counts.characterArtifacts ?? 0 },
+            { label: 'character sheets', value: adaptation.counts.characterSheets ?? 0 },
+            { label: 'location prompts', value: adaptation.counts.locationPrompts ?? 0 },
+          ]}
+        />
+      </section>
+      <section className="story-card">
+        <h2>Validate Artifacts</h2>
+        <p className="muted">Check extracted reference artifacts before publishing them to the canvas.</p>
+        <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
+      </section>
+    </>
+  );
+}
+
+function PhaseScenes({ projectSlug, adaptation, workflow, validation, onStartWorkflow, onStartValidation, onReloadAdaptation }: {
+  projectSlug: string;
+  adaptation: AdaptationStatus;
+  workflow: AdaptationWorkflowStatus | null;
+  validation: AdaptationWorkflowStatus | null;
+  onStartWorkflow: () => Promise<void>;
+  onStartValidation: () => Promise<void>;
+  onReloadAdaptation: () => Promise<void>;
+}) {
+  return (
+    <>
+      <AdaptationFileEditor projectSlug={projectSlug} kind="scenes" links={adaptation.scenes} onReloadAdaptation={onReloadAdaptation} />
+      <section className="workflow-run-section">
+        <h2>Acts And Scenes</h2>
+        <p className="muted">Optionally generate play-by-play and scene files from an ingested book context.</p>
+        <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBookSession || workflow?.running}>
+          {workflow?.running ? 'Running scene creation...' : 'Run scene workflow'}
+        </button>
+      </section>
+      <section className="story-card">
+        <h2>Scene Status</h2>
+        <StatusPills adaptation={adaptation} items={[{ label: 'scene manifest', value: adaptation.counts.sceneManifest ?? 0 }, { label: 'play-by-play', value: adaptation.counts.playByPlay ?? 0 }, { label: 'scene artifacts', value: adaptation.counts.sceneArtifacts ?? 0 }]} />
+      </section>
+      <section className="story-card">
+        <h2>Validate Scenes</h2>
+        <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
+      </section>
+    </>
+  );
+}
+
+function PhaseMoments({ adaptation, workflow, validation, onStartWorkflow, onStartValidation }: {
+  adaptation: AdaptationStatus;
+  workflow: AdaptationWorkflowStatus | null;
+  validation: AdaptationWorkflowStatus | null;
+  onStartWorkflow: () => Promise<void>;
+  onStartValidation: () => Promise<void>;
+}) {
+  return (
+    <>
+      <section className="workflow-run-section">
+        <h2>Moments, Beats, Panels</h2>
+        <p className="muted">Break scene artifacts into story-kind page plans or comic panel prompts.</p>
+        <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={(adaptation.counts.sceneArtifacts ?? 0) === 0 || workflow?.running}>
+          {workflow?.running ? 'Planning moments...' : 'Run moment planning'}
+        </button>
+      </section>
+      <section className="story-card">
+        <h2>Moment Status</h2>
+        <StatusPills adaptation={adaptation} items={[{ label: 'page plans', value: adaptation.counts.pagePlans ?? 0 }, { label: 'panel prompts', value: adaptation.counts.panelPrompts ?? 0 }]} />
+      </section>
+      <section className="story-card">
+        <h2>Validate Moment Prompts</h2>
+        <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
+      </section>
+    </>
   );
 }
 
@@ -1776,7 +2304,18 @@ function DraftSidebar({
 }
 
 function artifactKindLabel(kind: ArtifactKind) {
-  return kind === 'character-sheet' ? 'Character Sheet' : 'Location Prompt';
+  const labels: Record<ArtifactKind, string> = {
+    'character-sheet': 'Character Sheet',
+    'location-prompt': 'Location Prompt',
+    'scene-artifact': 'Scene Artifact',
+    'page-plan': 'Page Plan',
+    'panel-prompt': 'Panel Prompt',
+  };
+  return labels[kind];
+}
+
+function canGenerateArtifact(kind: ArtifactKind) {
+  return kind !== 'scene-artifact';
 }
 
 function StoryArtifactSidebar({
@@ -1832,10 +2371,14 @@ function StoryArtifactSidebar({
           <input value={artifact.params.aspectRatio ?? defaultDraftParams.aspectRatio ?? ''} readOnly />
           <input value={artifact.params.imageSize ?? defaultDraftParams.imageSize ?? ''} readOnly />
         </div>
-        <button className="generate-button" onClick={() => onGenerate(node.id, artifact)} disabled={!artifact.prompt.trim() || artifact.isGenerating}>
-          {artifact.isGenerating && <span className="spinner" aria-hidden="true" />}
-          {artifact.isGenerating ? 'Generating...' : generated ? 'Regenerate artifact' : 'Generate artifact'}
-        </button>
+        {canGenerateArtifact(artifact.artifactKind) ? (
+          <button className="generate-button" onClick={() => onGenerate(node.id, artifact)} disabled={!artifact.prompt.trim() || artifact.isGenerating}>
+            {artifact.isGenerating && <span className="spinner" aria-hidden="true" />}
+            {artifact.isGenerating ? 'Generating...' : generated ? 'Regenerate artifact' : 'Generate artifact'}
+          </button>
+        ) : (
+          <p className="muted">Planning artifact only. Generate page or panel prompts from later layout artifacts.</p>
+        )}
       </section>
     </aside>
   );
@@ -2530,37 +3073,39 @@ function StoryArtifactNode({ data }: NodeProps<StoryArtifactNodeData>) {
     `artifact: ${data.artifactKind}`,
     generatedAssetId ? `generated: ${generatedAssetId}` : 'not generated',
   ].join('\n');
+  const kindClass = `${data.artifactKind}-artifact-node`;
   return (
-    <div className={`node story-artifact-node ${data.artifactKind === 'location-prompt' ? 'location-artifact-node' : 'character-artifact-node'} ${data.generatedAssetId ? 'generated' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
+    <div className={`node story-artifact-node ${kindClass} ${data.generatedAssetId ? 'generated' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
-      <div className="story-artifact-icon" aria-hidden="true">
-        {data.generatedAsset?.thumbnailUrl ? (
-          <img src={data.generatedAsset.thumbnailUrl} alt="" />
-        ) : data.isGenerating ? (
-          <div className="node-generating-overlay">
-            <span className="spinner" aria-hidden="true" />
-            <span>Generating</span>
-          </div>
-        ) : (
-          <span>{data.artifactKind === 'character-sheet' ? 'CS' : 'LP'}</span>
+      <strong className="node-title">{data.displayName || data.artifactKey}</strong>
+      <div className="story-artifact-card">
+        <span className="story-artifact-badge">{artifactKindLabel(data.artifactKind)}</span>
+        <div className="story-artifact-icon" aria-hidden="true">
+          {data.generatedAsset?.thumbnailUrl ? (
+            <img src={data.generatedAsset.thumbnailUrl} alt="" />
+          ) : data.isGenerating ? (
+            <div className="node-generating-overlay">
+              <span className="spinner" aria-hidden="true" />
+              <span>Generating</span>
+            </div>
+          ) : (
+            <span>{data.artifactKind === 'character-sheet' ? 'CS' : 'LP'}</span>
+          )}
+        </div>
+        {generatedAssetId && (
+          <button
+            className="node-action-button view-image-button nodrag nopan"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              data.onViewAsset(generatedAssetId);
+            }}
+            title="View full image"
+          >
+            👁️
+          </button>
         )}
       </div>
-      {generatedAssetId && (
-        <button
-          className="node-action-button view-image-button nodrag nopan"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            data.onViewAsset(generatedAssetId);
-          }}
-          title="View full image"
-        >
-          👁️
-        </button>
-      )}
-      <span className="story-artifact-badge">{artifactKindLabel(data.artifactKind)}</span>
-      <strong>{data.displayName || data.artifactKey}</strong>
-      <small>{data.generatedAssetId ? 'generated' : 'ready'}</small>
       {data.generatedAssetId && <Handle type="source" position={Position.Right} className="output-handle" />}
     </div>
   );

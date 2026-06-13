@@ -269,6 +269,253 @@ def test_import_duplicate_file_returns_conflict(tmp_path, monkeypatch):
     assert len(client.get("/api/projects/farm-comic/assets").json()) == 1
 
 
+def test_adaptation_settings_scene_panel_status_and_canvas_import(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    settings = client.patch(
+        "/api/projects/farm-comic/adaptation/settings",
+        json={"storyKind": "picture-book"},
+    )
+    assert settings.status_code == 200
+    assert settings.json()["settings"]["storyKind"] == "picture-book"
+
+    root = library.project_dir("farm-comic") / "adaptation"
+    (root / "scenes" / "artifacts").mkdir(parents=True, exist_ok=True)
+    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
+    (root / "acts").mkdir(parents=True, exist_ok=True)
+    (root / "acts" / "play-by-play.md").write_text("# Play By Play\n\n## act-01\n\nScene Range: 001-001\nPurpose: Test.\nKey Beats:\n- `L001-L002`: Test. \"Quote.\"\n")
+    (root / "scenes" / "artifacts" / "001-test-scene.md").write_text(
+        "# Test Scene\n\nScene Id: 001-test-scene\nSource Lines: L001-L002\nMajor Act: act-01\nPrimary Location: test-location\n\n## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: test-character-base\n- Locations: test-location\n- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n\n## Text Candidates\n\n- Narration: None.\n- Dialogue: None.\n- Caption: None.\n\n## Adaptation Notes\n\nNone.\n"
+    )
+    (root / "panels" / "prompts" / "001-test-scene.md").write_text(
+        "## 001-test-scene-panel-01\nmode: story-layout\nrefs: character:test-character-base, location:test-location\n\nComic panel of a test scene. No watermarks.\n"
+    )
+
+    status = client.get("/api/projects/farm-comic/adaptation")
+    assert status.status_code == 200
+    payload = status.json()
+    assert payload["counts"]["playByPlay"] == 1
+    assert payload["counts"]["sceneArtifacts"] == 1
+    assert payload["counts"]["panelPrompts"] == 1
+    assert payload["scenes"]["001-test-scene"]["artifactKind"] == "scene-artifact"
+    assert payload["panels"]["001-test-scene-panel-01"]["artifactKind"] == "panel-prompt"
+
+    canvas_response = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas")
+    assert canvas_response.status_code == 200
+    nodes = canvas_response.json()["canvas"]["nodes"]
+    artifact_kinds = {node["artifactKind"] for node in nodes.values() if node["type"] == "storyArtifact"}
+    assert "scene-artifact" in artifact_kinds
+    assert "panel-prompt" in artifact_kinds
+
+
+def test_adaptation_panel_generation_uses_canonical_semantic_refs(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
+
+    for asset_id, title in [
+        ("01HSTYLE", "Style"),
+        ("01HCHAR", "Character"),
+        ("01HLOC", "Location"),
+    ]:
+        make_png(library.asset_png_path("farm-comic", asset_id), color="green")
+        library.write_json(
+            library.asset_json_path("farm-comic", asset_id),
+            {
+                "id": asset_id,
+                "kind": "imported",
+                "title": title,
+                "tags": [],
+                "createdAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:00Z",
+            },
+        )
+
+    library.write_json(
+        root / "adaptation.json",
+        {
+            "version": 2,
+            "settings": {"storyKind": "comic-book"},
+            "styleRefs": {"archetypeSceneAssetId": "01HSTYLE"},
+            "characters": {
+                "hero-base": {
+                    "artifactKind": "character-sheet",
+                    "promptPath": "characters/sheets/hero.md",
+                    "assetIds": ["01HCHAR"],
+                    "canonicalAssetId": "01HCHAR",
+                    "status": "generated",
+                }
+            },
+            "locations": {
+                "farm": {
+                    "artifactKind": "location-prompt",
+                    "promptPath": "locations/prompts/farm.md",
+                    "assetIds": ["01HLOC"],
+                    "canonicalAssetId": "01HLOC",
+                    "status": "generated",
+                }
+            },
+            "scenes": {},
+            "pages": {},
+            "panels": {},
+        },
+    )
+    (root / "panels" / "prompts" / "001-panel.md").write_text(
+        "## 001-panel-01\nmode: story-layout\nrefs: character:hero-base, location:farm\n\nHero crosses the farm in a comic panel. No watermarks.\n"
+    )
+
+    captured_refs = []
+
+    def fake_generate(**kwargs):
+        captured_refs[:] = [path.stem for path in kwargs["parent_png_paths"]]
+        make_png(kwargs["output_png"], color="blue")
+
+        class Result:
+            provider_response = {"imageFile": kwargs["output_png"].name, "response": {"candidates": [{"finishReason": "STOP"}]}}
+
+        return Result()
+
+    monkeypatch.setattr(gemini, "generate_image", fake_generate)
+    response = client.post(
+        "/api/projects/farm-comic/adaptation/generate-artifact",
+        json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01"},
+    )
+    assert response.status_code == 200
+    assert captured_refs == ["01HSTYLE", "01HCHAR", "01HLOC"]
+    panel_link = client.get("/api/projects/farm-comic/adaptation").json()["panels"]["001-panel-01"]
+    assert panel_link["canonicalAssetId"] == response.json()["asset"]["id"]
+    assert panel_link["assetIds"] == [response.json()["asset"]["id"]]
+
+
+def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    character = client.post(
+        "/api/projects/farm-comic/adaptation/files/characters",
+        json={
+            "key": "hero-base",
+            "mode": "new-image",
+            "styleRef": "",
+            "body": "Full body character sheet for the farm hero.",
+        },
+    )
+    assert character.status_code == 200
+    assert character.json()["promptPath"] == "characters/sheets/hero-base.md"
+
+    location = client.post(
+        "/api/projects/farm-comic/adaptation/files/locations",
+        json={
+            "key": "barn",
+            "mode": "new-image",
+            "styleRef": "",
+            "body": "Wide establishing image prompt for a red barn.",
+        },
+    )
+    assert location.status_code == 200
+
+    scene = client.post(
+        "/api/projects/farm-comic/adaptation/files/scenes",
+        json={
+            "key": "opening-scene",
+            "body": "# Opening Scene\n\nThe hero arrives at the barn.",
+        },
+    )
+    assert scene.status_code == 200
+    assert scene.json()["artifactKind"] == "scene-artifact"
+
+    update = client.put(
+        "/api/projects/farm-comic/adaptation/files/characters/hero-base",
+        json={"key": "hero-primary", "body": "Updated character sheet prompt.", "mode": "new-image", "styleRef": ""},
+    )
+    assert update.status_code == 200
+    assert update.json()["key"] == "hero-primary"
+
+    characters = client.get("/api/projects/farm-comic/adaptation/files/characters")
+    assert characters.status_code == 200
+    assert [item["key"] for item in characters.json()] == ["hero-primary"]
+
+    status = client.get("/api/projects/farm-comic/adaptation")
+    assert status.status_code == 200
+    payload = status.json()
+    assert payload["hasBook"] is False
+    assert "hero-primary" in payload["characters"]
+    assert "barn" in payload["locations"]
+    assert "opening-scene" in payload["scenes"]
+
+    canvas_response = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas")
+    assert canvas_response.status_code == 200
+    nodes = canvas_response.json()["canvas"]["nodes"]
+    artifact_kinds = {node["artifactKind"] for node in nodes.values() if node["type"] == "storyArtifact"}
+    assert {"character-sheet", "location-prompt", "scene-artifact"}.issubset(artifact_kinds)
+
+
+def test_story_artifact_generated_asset_does_not_duplicate_as_image_group(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    asset_id = "01HCHAR"
+    make_png(library.asset_png_path("farm-comic", asset_id), color="green")
+    library.write_json(
+        library.asset_json_path("farm-comic", asset_id),
+        {
+            "id": asset_id,
+            "kind": "generated",
+            "title": "Character Sheet: hero",
+            "tags": ["comic-adaptation", "character-sheet"],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+            "prompt": {"text": "hero prompt"},
+            "generation": {
+                "refs": [],
+                "runId": "01HRUN",
+                "runIndex": 0,
+                "model": "gemini-3.1-flash-image",
+                "aspectRatio": "16:9",
+                "imageSize": "1K",
+                "seed": 1,
+            },
+            "provider": {"name": "google-genai", "response": {}},
+        },
+    )
+    canvas = {
+        "version": 2,
+        "viewport": {"x": 0, "y": 0, "zoom": 1},
+        "nodes": {
+            "artifact_character_sheet_hero": {
+                "type": "storyArtifact",
+                "displayName": "hero",
+                "x": 80,
+                "y": 320,
+                "width": 240,
+                "tags": ["adaptation", "character-sheet", "generated"],
+                "artifactKind": "character-sheet",
+                "artifactKey": "hero",
+                "promptPath": "characters/sheets/hero.md",
+                "prompt": "hero prompt",
+                "refs": [],
+                "generatedAssetIds": [asset_id],
+                "generatedAssetId": asset_id,
+            },
+            "node_01HCHAR": {
+                "type": "imageGroup",
+                "displayName": "Character Sheet: hero",
+                "x": 1500,
+                "y": 80,
+                "assetIds": [asset_id],
+                "activeAssetId": asset_id,
+                "tags": ["comic-adaptation", "character-sheet", "generated-image"],
+            },
+        },
+    }
+    assert client.put("/api/projects/farm-comic/canvas", json=canvas).status_code == 200
+
+    nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert "artifact_character_sheet_hero" in nodes
+    assert "node_01HCHAR" not in nodes
+
+
 def test_chat_session_create_list_archive_and_protect_source(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)

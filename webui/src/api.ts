@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationGenerateResponse, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail, StoryKind } from './types';
 
 const DEBUG = true;
 
@@ -74,6 +74,23 @@ export const api = {
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/style`, {
       method: 'PUT',
       body: JSON.stringify({ visualStyle }),
+    }),
+  saveAdaptationSettings: (slug: string, storyKind: StoryKind) =>
+    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/settings`, {
+      method: 'PATCH',
+      body: JSON.stringify({ storyKind }),
+    }),
+  listAdaptationFiles: (slug: string, kind: AdaptationFileKind) =>
+    request<AdaptationFileDocument[]>(`/api/projects/${slug}/adaptation/files/${kind}`),
+  createAdaptationFile: (slug: string, kind: AdaptationFileKind, payload: AdaptationFilePayload) =>
+    request<AdaptationFileDocument>(`/api/projects/${slug}/adaptation/files/${kind}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateAdaptationFile: (slug: string, kind: AdaptationFileKind, key: string, payload: AdaptationFileUpdatePayload) =>
+    request<AdaptationFileDocument>(`/api/projects/${slug}/adaptation/files/${kind}/${key}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     }),
   getAdaptationWorkflow: (slug: string) => request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/workflow`),
   startAdaptationWorkflow: (slug: string) =>

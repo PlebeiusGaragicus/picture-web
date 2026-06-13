@@ -15,6 +15,10 @@ import chat_sessions
 from models import (
     ArchivePatch,
     AdaptationCanvasImportResponse,
+    AdaptationFileCreate,
+    AdaptationFileDocument,
+    AdaptationFileKind,
+    AdaptationFileUpdate,
     AssetSummary,
     CanvasDocument,
     ChatSessionCreate,
@@ -24,6 +28,7 @@ from models import (
     ChatTurnResponse,
     AdaptationGenerateArtifactRequest,
     AdaptationGenerateResponse,
+    AdaptationSettingsPatch,
     AdaptationStatus,
     AdaptationStyleRefAssetRequest,
     AdaptationStylePatch,
@@ -134,6 +139,26 @@ def get_adaptation(slug: str) -> AdaptationStatus:
 @app.put("/api/projects/{slug}/adaptation/style", response_model=AdaptationStatus)
 def put_adaptation_style(slug: str, payload: AdaptationStylePatch) -> AdaptationStatus:
     return adaptation.write_visual_style(slug, payload.visualStyle)
+
+
+@app.patch("/api/projects/{slug}/adaptation/settings", response_model=AdaptationStatus)
+def patch_adaptation_settings(slug: str, payload: AdaptationSettingsPatch) -> AdaptationStatus:
+    return adaptation.write_settings(slug, payload)
+
+
+@app.get("/api/projects/{slug}/adaptation/files/{kind}", response_model=list[AdaptationFileDocument])
+def list_adaptation_files(slug: str, kind: AdaptationFileKind) -> list[AdaptationFileDocument]:
+    return adaptation.list_adaptation_files(slug, kind)
+
+
+@app.post("/api/projects/{slug}/adaptation/files/{kind}", response_model=AdaptationFileDocument)
+def create_adaptation_file(slug: str, kind: AdaptationFileKind, payload: AdaptationFileCreate) -> AdaptationFileDocument:
+    return adaptation.create_adaptation_file(slug, kind, payload)
+
+
+@app.put("/api/projects/{slug}/adaptation/files/{kind}/{key}", response_model=AdaptationFileDocument)
+def update_adaptation_file(slug: str, kind: AdaptationFileKind, key: str, payload: AdaptationFileUpdate) -> AdaptationFileDocument:
+    return adaptation.update_adaptation_file(slug, kind, key, payload)
 
 
 @app.get("/api/projects/{slug}/adaptation/workflow", response_model=AdaptationWorkflowStatus)

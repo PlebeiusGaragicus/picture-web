@@ -14,10 +14,15 @@ import gemini
 import library
 from models import (
     AdaptationCanvasImportResponse,
+    AdaptationFileCreate,
+    AdaptationFileDocument,
+    AdaptationFileKind,
+    AdaptationFileUpdate,
     AdaptationGenerateArtifactRequest,
     AdaptationAssetLink,
     AdaptationGenerateResponse,
     AdaptationMetadata,
+    AdaptationSettingsPatch,
     AdaptationStatus,
     AdaptationStyleRefAssetRequest,
     AdaptationWorkflowStatus,
@@ -64,7 +69,10 @@ def ensure_adaptation(slug: str) -> Path:
         root / "style-refs",
         root / "characters" / "artifacts",
         root / "characters" / "sheets",
-        root / "scenes",
+        root / "acts",
+        root / "scenes" / "artifacts",
+        root / "pages" / "plans",
+        root / "panels" / "prompts",
         root / "locations" / "prompts",
     ]:
         path.mkdir(parents=True, exist_ok=True)
@@ -283,6 +291,163 @@ def parse_prompt_sections(path: Path) -> dict[str, dict[str, str]]:
     return sections
 
 
+def parse_scene_artifact(path: Path) -> dict[str, str]:
+    text = read_text(path).strip()
+    if not text:
+        return {}
+    return {
+        "mode": "story-only",
+        "style_ref": "",
+        "prompt": text,
+    }
+
+
+def file_kind_config(kind: AdaptationFileKind) -> tuple[ArtifactKind, Path]:
+    root = Path()
+    configs: dict[AdaptationFileKind, tuple[ArtifactKind, Path]] = {
+        "characters": ("character-sheet", root / "characters" / "sheets"),
+        "locations": ("location-prompt", root / "locations" / "prompts"),
+        "scenes": ("scene-artifact", root / "scenes" / "artifacts"),
+    }
+    return configs[kind]
+
+
+def adaptation_file_path(slug: str, kind: AdaptationFileKind, key: str) -> Path:
+    root = ensure_adaptation(slug)
+    _artifact_kind, directory = file_kind_config(kind)
+    return root / directory / f"{key}.md"
+
+
+def format_prompt_file(key: str, body: str, mode: str, style_ref: str) -> str:
+    return f"## {key}\nmode: {mode.strip()}\nstyle_ref: {style_ref.strip()}\n\n{body.strip()}\n"
+
+
+def format_adaptation_file(kind: AdaptationFileKind, key: str, body: str, mode: str, style_ref: str) -> str:
+    if kind == "scenes":
+        return (body.strip() or f"# {key}") + "\n"
+    return format_prompt_file(key, body, mode or "new-image", style_ref)
+
+
+def adaptation_file_from_link(
+    *,
+    slug: str,
+    kind: AdaptationFileKind,
+    key: str,
+    link: AdaptationAssetLink,
+) -> AdaptationFileDocument:
+    return AdaptationFileDocument(
+        kind=kind,
+        key=key,
+        promptPath=link.promptPath,
+        artifactKind=link.artifactKind,
+        body=link.prompt,
+        mode=link.mode,
+        styleRef=link.styleRef,
+        status=link.status,
+        canonicalAssetId=link.canonicalAssetId,
+    )
+
+
+def list_adaptation_files(slug: str, kind: AdaptationFileKind) -> list[AdaptationFileDocument]:
+    root = ensure_adaptation(slug)
+    metadata = sync_prompt_links(slug, read_metadata(slug))
+    groups: dict[AdaptationFileKind, dict[str, AdaptationAssetLink]] = {
+        "characters": metadata.characters,
+        "locations": metadata.locations,
+        "scenes": metadata.scenes,
+    }
+    return [
+        adaptation_file_from_link(slug=slug, kind=kind, key=key, link=link)
+        for key, link in sorted(groups[kind].items())
+        if (root / link.promptPath).is_file()
+    ]
+
+
+def create_adaptation_file(slug: str, kind: AdaptationFileKind, payload: AdaptationFileCreate) -> AdaptationFileDocument:
+    path = adaptation_file_path(slug, kind, payload.key)
+    if path.exists():
+        raise HTTPException(status_code=409, detail=f"{kind} file already exists: {payload.key}")
+    path.write_text(format_adaptation_file(kind, payload.key, payload.body, payload.mode, payload.styleRef))
+    files = {item.key: item for item in list_adaptation_files(slug, kind)}
+    return files[payload.key]
+
+
+def update_adaptation_file(slug: str, kind: AdaptationFileKind, key: str, payload: AdaptationFileUpdate) -> AdaptationFileDocument:
+    current_path = adaptation_file_path(slug, kind, key)
+    if not current_path.exists():
+        raise HTTPException(status_code=404, detail=f"{kind} file not found: {key}")
+    current_files = {item.key: item for item in list_adaptation_files(slug, kind)}
+    current = current_files.get(key)
+    if current is None:
+        raise HTTPException(status_code=404, detail=f"{kind} file not found: {key}")
+    next_key = payload.key or current.key
+    next_path = adaptation_file_path(slug, kind, next_key)
+    if next_key != key and next_path.exists():
+        raise HTTPException(status_code=409, detail=f"{kind} file already exists: {next_key}")
+    next_body = current.body if payload.body is None else payload.body
+    next_mode = current.mode if payload.mode is None else payload.mode
+    next_style_ref = current.styleRef if payload.styleRef is None else payload.styleRef
+    if next_key != key:
+        current_path.unlink()
+    next_path.write_text(format_adaptation_file(kind, next_key, next_body, next_mode, next_style_ref))
+    if next_key != key:
+        metadata = read_metadata(slug)
+        groups: dict[AdaptationFileKind, dict[str, AdaptationAssetLink]] = {
+            "characters": metadata.characters,
+            "locations": metadata.locations,
+            "scenes": metadata.scenes,
+        }
+        existing = groups[kind].pop(key, None)
+        if existing is not None:
+            groups[kind][next_key] = existing
+            write_metadata(slug, metadata)
+    files = {item.key: item for item in list_adaptation_files(slug, kind)}
+    return files[next_key]
+
+
+def parse_layout_sections(path: Path) -> dict[str, dict[str, str]]:
+    sections: dict[str, dict[str, str]] = {}
+    current: str | None = None
+    mode = ""
+    refs = ""
+    prompt_lines: list[str] = []
+    in_prompt = False
+    for raw_line in read_text(path).splitlines():
+        if raw_line.startswith("## "):
+            if current is not None:
+                sections[current] = {
+                    "mode": mode,
+                    "style_ref": refs,
+                    "prompt": "\n".join(prompt_lines).strip(),
+                }
+            current = slug_from_heading(raw_line)
+            mode = ""
+            refs = ""
+            prompt_lines = []
+            in_prompt = False
+            continue
+        if current is None:
+            continue
+        if raw_line.startswith("mode:"):
+            mode = raw_line.split(":", 1)[1].strip()
+            continue
+        if raw_line.startswith("refs:"):
+            refs = raw_line.split(":", 1)[1].strip()
+            continue
+        if raw_line == "" and mode:
+            in_prompt = True
+            continue
+        if in_prompt:
+            prompt_lines.append(raw_line)
+    if current is not None:
+        sections[current] = {
+            "mode": mode,
+            "style_ref": refs,
+            "prompt": "\n".join(prompt_lines).strip(),
+        }
+    return sections
+
+
 def prompt_link(
     *,
     artifact_kind: ArtifactKind,
@@ -290,14 +455,17 @@ def prompt_link(
     section: dict[str, str],
     existing: AdaptationAssetLink | None,
 ) -> AdaptationAssetLink:
+    asset_ids = list(existing.assetIds) if existing else []
+    canonical_asset_id = existing.canonicalAssetId if existing else None
     return AdaptationAssetLink(
         artifactKind=artifact_kind,
         promptPath=prompt_path,
         mode=section.get("mode", ""),
         styleRef=section.get("style_ref", ""),
         prompt=section.get("prompt", ""),
-        assetId=existing.assetId if existing else None,
-        status="generated" if existing and existing.assetId else "ready",
+        assetIds=asset_ids,
+        canonicalAssetId=canonical_asset_id,
+        status="generated" if canonical_asset_id else "ready",
     )
 
 
@@ -323,6 +491,39 @@ def sync_prompt_links(slug: str, metadata: AdaptationMetadata) -> AdaptationMeta
                 section=section,
                 existing=existing,
             )
+    for artifact_file in sorted((root / "scenes" / "artifacts").glob("*.md")):
+        prompt_path = relpath(root, artifact_file)
+        key = artifact_file.stem
+        section = parse_scene_artifact(artifact_file)
+        if not section:
+            continue
+        existing = metadata.scenes.get(key)
+        metadata.scenes[key] = prompt_link(
+            artifact_kind="scene-artifact",
+            prompt_path=prompt_path,
+            section=section,
+            existing=existing,
+        )
+    for plan_file in sorted((root / "pages" / "plans").glob("*.md")):
+        prompt_path = relpath(root, plan_file)
+        for key, section in parse_layout_sections(plan_file).items():
+            existing = metadata.pages.get(key)
+            metadata.pages[key] = prompt_link(
+                artifact_kind="page-plan",
+                prompt_path=prompt_path,
+                section=section,
+                existing=existing,
+            )
+    for prompt_file in sorted((root / "panels" / "prompts").glob("*.md")):
+        prompt_path = relpath(root, prompt_file)
+        for key, section in parse_layout_sections(prompt_file).items():
+            existing = metadata.panels.get(key)
+            metadata.panels[key] = prompt_link(
+                artifact_kind="panel-prompt",
+                prompt_path=prompt_path,
+                section=section,
+                existing=existing,
+            )
     return write_metadata(slug, metadata)
 
 
@@ -331,6 +532,7 @@ def status(slug: str) -> AdaptationStatus:
     metadata = sync_prompt_links(slug, read_metadata(slug))
     return AdaptationStatus(
         projectSlug=slug,
+        settings=metadata.settings,
         hasBook=(root / "book.txt").is_file(),
         hasBookSession=(root / "sessions" / "book-load.env").is_file(),
         styleRefs={
@@ -347,11 +549,18 @@ def status(slug: str) -> AdaptationStatus:
             "characterArtifacts": len(list((root / "characters" / "artifacts").glob("*.md"))),
             "characterSheets": len(list((root / "characters" / "sheets").glob("*.md"))),
             "sceneManifest": 1 if (root / "scenes" / "manifest.md").is_file() else 0,
+            "playByPlay": 1 if (root / "acts" / "play-by-play.md").is_file() else 0,
+            "sceneArtifacts": len(list((root / "scenes" / "artifacts").glob("*.md"))),
             "locationPrompts": len(list((root / "locations" / "prompts").glob("*.md"))),
+            "pagePlans": len(list((root / "pages" / "plans").glob("*.md"))),
+            "panelPrompts": len(list((root / "panels" / "prompts").glob("*.md"))),
         },
         visualStyle=read_text(root / "style-refs" / "visual-style.md"),
         characters=metadata.characters,
         locations=metadata.locations,
+        scenes=metadata.scenes,
+        pages=metadata.pages,
+        panels=metadata.panels,
     )
 
 
@@ -362,6 +571,13 @@ def count_nonempty_lines(path: Path) -> int:
 def write_visual_style(slug: str, value: str) -> AdaptationStatus:
     root = ensure_adaptation(slug)
     (root / "style-refs" / "visual-style.md").write_text(value.rstrip() + "\n")
+    return status(slug)
+
+
+def write_settings(slug: str, patch: AdaptationSettingsPatch) -> AdaptationStatus:
+    metadata = read_metadata(slug)
+    metadata.settings.storyKind = patch.storyKind
+    write_metadata(slug, metadata)
     return status(slug)
 
 
@@ -429,18 +645,27 @@ def next_base_character(slug: str) -> tuple[str, Path, dict[str, str]] | None:
             if section.get("mode") != "new-image":
                 continue
             link = metadata.characters.get(key)
-            if link is None or link.assetId is None:
+            if link is None or link.canonicalAssetId is None:
                 return key, sheet, section
     return None
 
 
 def artifact_entries(metadata: AdaptationMetadata, artifact_kind: ArtifactKind) -> dict[str, AdaptationAssetLink]:
-    return metadata.characters if artifact_kind == "character-sheet" else metadata.locations
+    groups = {
+        "character-sheet": metadata.characters,
+        "location-prompt": metadata.locations,
+        "scene-artifact": metadata.scenes,
+        "page-plan": metadata.pages,
+        "panel-prompt": metadata.panels,
+    }
+    return groups[artifact_kind]
 
 
 def style_ref_asset_id(metadata: AdaptationMetadata, artifact_kind: ArtifactKind) -> str | None:
     if artifact_kind == "character-sheet":
         return metadata.styleRefs.archetypeCharacterAssetId
+    if artifact_kind in {"location-prompt", "page-plan", "panel-prompt"}:
+        return metadata.styleRefs.archetypeSceneAssetId
     return metadata.styleRefs.archetypeSceneAssetId
 
 
@@ -448,6 +673,77 @@ def missing_style_ref_detail(artifact_kind: ArtifactKind) -> str:
     if artifact_kind == "character-sheet":
         return "Import archetype character style ref before generating"
     return "Import archetype scene style ref before generating"
+
+
+def style_ref_artifact_key(style_ref: str) -> str:
+    return Path(style_ref).stem
+
+
+def canonical_asset_id(link: AdaptationAssetLink) -> str | None:
+    return link.canonicalAssetId
+
+
+def artifact_ref_asset_id(metadata: AdaptationMetadata, artifact_kind: ArtifactKind, link: AdaptationAssetLink) -> str:
+    if link.mode == "new-image":
+        ref_asset_id = style_ref_asset_id(metadata, artifact_kind)
+        if ref_asset_id is None:
+            raise HTTPException(status_code=400, detail=missing_style_ref_detail(artifact_kind))
+        return ref_asset_id
+    if link.mode == "edit-reference":
+        entries = artifact_entries(metadata, artifact_kind)
+        base_key = style_ref_artifact_key(link.styleRef)
+        base = entries.get(base_key)
+        if base is None:
+            raise HTTPException(status_code=400, detail=f"Referenced base artifact not found: {base_key}")
+        base_asset_id = canonical_asset_id(base)
+        if base_asset_id is None:
+            raise HTTPException(status_code=400, detail=f"Generate base artifact before variant: {base_key}")
+        return base_asset_id
+    raise HTTPException(status_code=400, detail=f"Unsupported artifact generation mode: {link.mode or 'missing'}")
+
+
+def parse_semantic_ref(ref: str) -> tuple[str, str] | None:
+    if ":" not in ref:
+        return None
+    kind, key = ref.split(":", 1)
+    return kind.strip(), key.strip()
+
+
+def resolve_semantic_ref(metadata: AdaptationMetadata, ref: str) -> str | None:
+    parsed = parse_semantic_ref(ref)
+    if parsed is None:
+        return None
+    kind, key = parsed
+    groups: dict[str, dict[str, AdaptationAssetLink]] = {
+        "character": metadata.characters,
+        "character-sheet": metadata.characters,
+        "location": metadata.locations,
+        "location-prompt": metadata.locations,
+        "scene": metadata.scenes,
+        "scene-artifact": metadata.scenes,
+        "page": metadata.pages,
+        "page-plan": metadata.pages,
+        "panel": metadata.panels,
+        "panel-prompt": metadata.panels,
+    }
+    link = groups.get(kind, {}).get(key)
+    return canonical_asset_id(link) if link is not None else None
+
+
+def artifact_ref_asset_ids(metadata: AdaptationMetadata, artifact_kind: ArtifactKind, link: AdaptationAssetLink) -> list[str]:
+    if artifact_kind == "scene-artifact":
+        return []
+    if artifact_kind in {"page-plan", "panel-prompt"}:
+        refs: list[str] = []
+        style_ref_id = style_ref_asset_id(metadata, artifact_kind)
+        if style_ref_id:
+            refs.append(style_ref_id)
+        for raw_ref in [item.strip() for item in link.styleRef.split(",") if item.strip()]:
+            asset_id = resolve_semantic_ref(metadata, raw_ref)
+            if asset_id is not None:
+                refs.append(asset_id)
+        return list(dict.fromkeys(refs))
+    return [artifact_ref_asset_id(metadata, artifact_kind, link)]
 
 
 def attach_artifact_asset_to_canvas(
@@ -470,6 +766,7 @@ def attach_artifact_asset_to_canvas(
     if not isinstance(target, StoryArtifactCanvasNode) or target_id is None:
         return
     target.generatedAssetId = asset_id
+    target.generatedAssetIds = list(dict.fromkeys([*target.generatedAssetIds, asset_id]))
     target.tags = library.node_tags(*target.tags, "generated")
     canvas.nodes[target_id] = target
     library.write_canvas(slug, canvas)
@@ -482,16 +779,14 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
     link = entries.get(request.artifactKey)
     if link is None:
         raise HTTPException(status_code=404, detail=f"Story artifact not found: {request.artifactKey}")
-    ref_asset_id = style_ref_asset_id(metadata, request.artifactKind)
-    if ref_asset_id is None:
-        raise HTTPException(status_code=400, detail=missing_style_ref_detail(request.artifactKind))
-    if link.mode != "new-image":
-        raise HTTPException(status_code=400, detail="Only new-image story artifacts can be generated directly")
+    if request.artifactKind == "scene-artifact":
+        raise HTTPException(status_code=400, detail="Scene artifacts are planning artifacts and cannot be generated directly")
+    ref_asset_ids = artifact_ref_asset_ids(metadata, request.artifactKind, link)
     visual_style = read_text(root / "style-refs" / "visual-style.md")
     prompt = f"{link.prompt.strip()}\n\n{visual_style.strip()}\n"
     payload = GenerateRequest(
         prompt=prompt,
-        refs=[ref_asset_id],
+        refs=ref_asset_ids,
         aspectRatio="16:9",
         imageSize="1K",
         batchCount=1,
@@ -500,7 +795,14 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
     )
     response = library.create_generated_assets(slug, payload, gemini.generate_image)
     asset = response.assets[0]
-    entries[request.artifactKey] = link.model_copy(update={"assetId": asset.id, "status": "generated"})
+    next_asset_ids = list(dict.fromkeys([*link.assetIds, asset.id]))
+    entries[request.artifactKey] = link.model_copy(
+        update={
+            "assetIds": next_asset_ids,
+            "canonicalAssetId": asset.id,
+            "status": "generated",
+        }
+    )
     write_metadata(slug, metadata)
     attach_artifact_asset_to_canvas(
         slug,

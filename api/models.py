@@ -11,7 +11,9 @@ TAG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 SLUG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 
 AssetKind = Literal["imported", "generated"]
-ArtifactKind = Literal["character-sheet", "location-prompt"]
+StoryKind = Literal["picture-book", "illustrated-story", "comic-book"]
+ArtifactKind = Literal["character-sheet", "location-prompt", "scene-artifact", "page-plan", "panel-prompt"]
+AdaptationFileKind = Literal["characters", "locations", "scenes"]
 MODEL_CAPABILITIES = {
     "gemini-2.5-flash-image": {
         "aspectRatios": {"1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"},
@@ -127,13 +129,18 @@ class ProjectMetadata(ProjectCreate):
     createdAt: str
 
 
+class AdaptationSettings(BaseModel):
+    storyKind: StoryKind = "comic-book"
+
+
 class AdaptationAssetLink(BaseModel):
     artifactKind: ArtifactKind
     promptPath: str
     mode: str = ""
     styleRef: str = ""
     prompt: str = ""
-    assetId: str | None = None
+    assetIds: list[str] = Field(default_factory=list)
+    canonicalAssetId: str | None = None
     status: Literal["missing", "ready", "generated"] = "missing"
 
 
@@ -143,14 +150,19 @@ class AdaptationStyleRefs(BaseModel):
 
 
 class AdaptationMetadata(BaseModel):
-    version: int = 1
+    version: int = 2
+    settings: AdaptationSettings = Field(default_factory=AdaptationSettings)
     styleRefs: AdaptationStyleRefs = Field(default_factory=AdaptationStyleRefs)
     characters: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
     locations: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
+    scenes: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
+    pages: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
+    panels: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
 
 
 class AdaptationStatus(BaseModel):
     projectSlug: str
+    settings: AdaptationSettings
     hasBook: bool
     hasBookSession: bool
     styleRefs: dict[str, bool]
@@ -158,6 +170,9 @@ class AdaptationStatus(BaseModel):
     visualStyle: str
     characters: dict[str, AdaptationAssetLink]
     locations: dict[str, AdaptationAssetLink]
+    scenes: dict[str, AdaptationAssetLink]
+    pages: dict[str, AdaptationAssetLink]
+    panels: dict[str, AdaptationAssetLink]
 
 
 class AdaptationWorkflowStatus(BaseModel):
@@ -175,6 +190,36 @@ class AdaptationCanvasImportResponse(BaseModel):
 
 class AdaptationStylePatch(BaseModel):
     visualStyle: str
+
+
+class AdaptationSettingsPatch(BaseModel):
+    storyKind: StoryKind
+
+
+class AdaptationFileBase(BaseModel):
+    key: str = Field(pattern=SLUG_RE)
+    body: str = ""
+    mode: str = ""
+    styleRef: str = ""
+
+
+class AdaptationFileCreate(AdaptationFileBase):
+    pass
+
+
+class AdaptationFileUpdate(BaseModel):
+    key: str | None = Field(default=None, pattern=SLUG_RE)
+    body: str | None = None
+    mode: str | None = None
+    styleRef: str | None = None
+
+
+class AdaptationFileDocument(AdaptationFileBase):
+    kind: AdaptationFileKind
+    promptPath: str
+    artifactKind: ArtifactKind
+    status: Literal["missing", "ready", "generated"] = "missing"
+    canonicalAssetId: str | None = None
 
 
 class AdaptationStyleRefAssetRequest(BaseModel):
@@ -327,6 +372,7 @@ class StoryArtifactCanvasNode(CanvasNodeLayout):
     prompt: str = ""
     refs: list[str] = Field(default_factory=list)
     params: GenerationParams = Field(default_factory=GenerationParams)
+    generatedAssetIds: list[str] = Field(default_factory=list)
     generatedAssetId: str | None = None
 
 

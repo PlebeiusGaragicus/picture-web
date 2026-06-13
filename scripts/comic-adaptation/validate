@@ -139,6 +139,20 @@ validate_character_sheet() {
   done
 }
 
+validate_play_by_play() {
+  echo
+  echo "Play by play"
+  local path="$BOOK_ROOT/acts/play-by-play.md"
+  validate_common_file "$path" || return
+  for required in "# Play By Play" "Scene Range:" "Purpose:" "Key Beats:"; do
+    if file_has "$path" "$required"; then
+      :
+    else
+      fail "$path missing $required"
+    fi
+  done
+}
+
 extract_sections() {
   local input="$1"
   local out_dir="$2"
@@ -160,6 +174,54 @@ extract_sections() {
       print > out
     }
   ' "$input"
+}
+
+validate_scene_manifest_and_artifacts() {
+  echo
+  echo "Scenes"
+
+  if ! validate_common_file "$BOOK_ROOT/scenes/manifest.md"; then
+    return
+  fi
+
+  tmp_dir="$BOOK_ROOT/scenes/.validate-entries"
+  extract_sections "$BOOK_ROOT/scenes/manifest.md" "$tmp_dir"
+
+  entries=()
+  while IFS= read -r entry; do
+    entries+=("$entry")
+  done < <(ls "$tmp_dir"/*.md 2>/dev/null || true)
+
+  if [[ "${#entries[@]}" -eq 0 ]]; then
+    fail "scenes/manifest.md has no ## scene sections"
+    return
+  fi
+
+  for entry in "${entries[@]}"; do
+    slug="$(basename "$entry" .md)"
+    for required in "Title:" "Source Lines:" "Major Act:" "Primary Location:" "Characters:" "Props And Visual Assets:"; do
+      if file_has "$entry" "$required"; then
+        :
+      else
+        fail "scenes/manifest.md section $slug missing $required"
+      fi
+    done
+    validate_scene_artifact "$BOOK_ROOT/scenes/artifacts/$slug.md"
+  done
+
+  pass "checked ${#entries[@]} scene entries"
+}
+
+validate_scene_artifact() {
+  local path="$1"
+  validate_common_file "$path" || return 0
+  for required in "Scene Id:" "## Story Function" "## Visual Continuity" "## Dramatic Beats" "## Staging Notes"; do
+    if file_has "$path" "$required"; then
+      :
+    else
+      fail "$path missing $required"
+    fi
+  done
 }
 
 validate_locations() {
@@ -198,6 +260,36 @@ validate_locations() {
   done
 
   pass "checked ${#entries[@]} location entries"
+}
+
+validate_story_layouts() {
+  echo
+  echo "Story layouts"
+
+  layout_count=0
+  while IFS= read -r path; do
+    [[ -f "$path" ]] || continue
+    layout_count=$((layout_count + 1))
+    validate_story_layout "$path"
+  done < <(ls "$BOOK_ROOT"/pages/plans/*.md "$BOOK_ROOT"/panels/prompts/*.md 2>/dev/null || true)
+
+  if [[ "$layout_count" -eq 0 ]]; then
+    fail "no page plans or panel prompts found"
+    return
+  fi
+  pass "checked $layout_count story layout files"
+}
+
+validate_story_layout() {
+  local path="$1"
+  validate_common_file "$path" || return 0
+  for required in "mode: story-layout" "refs:" "No watermarks."; do
+    if file_has "$path" "$required"; then
+      :
+    else
+      fail "$path missing $required"
+    fi
+  done
 }
 
 validate_location_prompt() {
@@ -240,8 +332,10 @@ BOOK_ROOT="$ADAPTATION_ROOT"
 
 validate_style_refs
 validate_character_list
-validate_common_file "$BOOK_ROOT/scenes/manifest.md" && pass "scenes/manifest.md present" || true
+validate_play_by_play
+validate_scene_manifest_and_artifacts
 validate_locations
+validate_story_layouts
 
 echo
 if [[ "$failures" -eq 0 ]]; then

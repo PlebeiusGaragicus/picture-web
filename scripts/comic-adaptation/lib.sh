@@ -28,9 +28,12 @@ ensure_project_adaptation_dirs() {
   mkdir -p \
     "$ADAPTATION_ROOT/sessions" \
     "$ADAPTATION_ROOT/style-refs" \
+    "$ADAPTATION_ROOT/acts" \
     "$ADAPTATION_ROOT/characters/artifacts" \
     "$ADAPTATION_ROOT/characters/sheets" \
-    "$ADAPTATION_ROOT/scenes" \
+    "$ADAPTATION_ROOT/scenes/artifacts" \
+    "$ADAPTATION_ROOT/pages/plans" \
+    "$ADAPTATION_ROOT/panels/prompts" \
     "$ADAPTATION_ROOT/locations/prompts"
 }
 

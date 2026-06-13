@@ -50,6 +50,12 @@ export interface ProjectDetail {
   assets: Asset[];
 }
 
+export type StoryKind = 'picture-book' | 'illustrated-story' | 'comic-book';
+
+export interface AdaptationSettings {
+  storyKind: StoryKind;
+}
+
 export interface CanvasDocument {
   version: 2;
   viewport: { x: number; y: number; zoom: number };
@@ -79,7 +85,8 @@ export interface DraftCanvasNode extends CanvasNodeLayout {
   params: GenerationParams;
 }
 
-export type ArtifactKind = 'character-sheet' | 'location-prompt';
+export type ArtifactKind = 'character-sheet' | 'location-prompt' | 'scene-artifact' | 'page-plan' | 'panel-prompt';
+export type AdaptationFileKind = 'characters' | 'locations' | 'scenes';
 
 export interface StoryArtifactCanvasNode extends CanvasNodeLayout {
   type: 'storyArtifact';
@@ -89,6 +96,7 @@ export interface StoryArtifactCanvasNode extends CanvasNodeLayout {
   prompt: string;
   refs: string[];
   params: GenerationParams;
+  generatedAssetIds: string[];
   generatedAssetId?: string | null;
 }
 
@@ -119,12 +127,14 @@ export interface AdaptationAssetLink {
   mode: string;
   styleRef: string;
   prompt: string;
-  assetId?: string | null;
+  assetIds: string[];
+  canonicalAssetId?: string | null;
   status: 'missing' | 'ready' | 'generated';
 }
 
 export interface AdaptationStatus {
   projectSlug: string;
+  settings: AdaptationSettings;
   hasBook: boolean;
   hasBookSession: boolean;
   styleRefs: Record<string, boolean>;
@@ -132,6 +142,9 @@ export interface AdaptationStatus {
   visualStyle: string;
   characters: Record<string, AdaptationAssetLink>;
   locations: Record<string, AdaptationAssetLink>;
+  scenes: Record<string, AdaptationAssetLink>;
+  pages: Record<string, AdaptationAssetLink>;
+  panels: Record<string, AdaptationAssetLink>;
 }
 
 export interface AdaptationWorkflowStatus {
@@ -154,6 +167,32 @@ export interface AdaptationGenerateResponse {
 export interface AdaptationCanvasImportResponse {
   canvas: CanvasDocument;
   importedNodeCount: number;
+}
+
+export interface AdaptationFileDocument {
+  kind: AdaptationFileKind;
+  key: string;
+  promptPath: string;
+  artifactKind: ArtifactKind;
+  body: string;
+  mode: string;
+  styleRef: string;
+  status: 'missing' | 'ready' | 'generated';
+  canonicalAssetId?: string | null;
+}
+
+export interface AdaptationFilePayload {
+  key: string;
+  body: string;
+  mode?: string;
+  styleRef?: string;
+}
+
+export interface AdaptationFileUpdatePayload {
+  key?: string;
+  body?: string;
+  mode?: string;
+  styleRef?: string;
 }
 
 export interface ChatTurnSettings {

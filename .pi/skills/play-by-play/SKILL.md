@@ -10,13 +10,27 @@ disable-model-invocation: false
 
 The full book is already loaded in context. Create a play-by-play outline of the story's major acts and dramatic beats for comic adaptation.
 
+## Input
+
+The user provides a book root path, usually `photo-library/projects/<project-slug>/adaptation`.
+
 ## Output Contract
+
+Use the **`write` tool** to save exactly:
+
+```text
+<book-root>/acts/play-by-play.md
+```
+
+Create `<book-root>/acts/` if needed.
 
 Write plain markdown only.
 
 Do not use YAML frontmatter, JSON, or tables.
 
 The output should be a high-level adaptation map, not a scene-by-scene manifest. Group scenes into major dramatic movements.
+
+After writing, reply with exactly `Wrote <book-root>/acts/play-by-play.md.` and nothing else.
 
 ## Required Structure
 
@@ -55,3 +69,8 @@ Continuity Notes: [Important setup/payoff, visual motif, or character state.]
 - If you know the quote but not the exact line number, use `LINE-VERIFY` instead of inventing a line number.
 - Do not fabricate line numbers.
 - Do not include long excerpts.
+
+## Forbidden In Assistant Reply
+
+- Pasting the play-by-play after `write`
+- Summaries, explanations, bullets, or code fences

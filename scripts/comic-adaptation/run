@@ -36,17 +36,31 @@ slugify_name() {
 }
 
 session_dir_name() {
-  printf '%s' "$ROOT_DIR" | sed 's|^/||' | tr '/:' '-'
+  local path="$1"
+  printf '%s' "$path" | sed 's|^/||' | tr '/:' '-'
 }
 
 capture_latest_session_id() {
-  local session_dir="$HOME/.pi/agent/sessions/--$(session_dir_name)--"
+  local session_dir="$HOME/.pi/agent/sessions/--$(session_dir_name "$PI_WORKSPACE")--"
   local latest
 
   latest="$(ls -t "$session_dir"/*.jsonl 2>/dev/null | head -n 1 || true)"
   [[ -n "$latest" ]] || die "Could not find a Pi session file in $session_dir"
 
   jq -r 'select(.type=="session") | .id' "$latest" | head -n 1
+}
+
+ensure_pi_workspace() {
+  PI_WORKSPACE="$BOOK_ROOT_ABS/sessions/pi-workspace"
+  PI_SESSION_DIR="$HOME/.pi/agent/sessions/--$(session_dir_name "$PI_WORKSPACE")--"
+  mkdir -p "$PI_WORKSPACE/.pi"
+  if [[ -L "$PI_WORKSPACE/.pi/skills" ]]; then
+    ln -sfn "$ROOT_DIR/.pi/skills" "$PI_WORKSPACE/.pi/skills"
+  elif [[ -e "$PI_WORKSPACE/.pi/skills" ]]; then
+    warn "Using existing non-symlink Pi skills path: $PI_WORKSPACE/.pi/skills"
+  else
+    ln -s "$ROOT_DIR/.pi/skills" "$PI_WORKSPACE/.pi/skills"
+  fi
 }
 
 run_pi_step() {
@@ -58,7 +72,7 @@ run_pi_step() {
   echo
   echo "[$step] $name"
   echo "    output: $output"
-  (cd "$ROOT_DIR" && pi --fork "$BOOK_LOAD_ID" --name "$name" -p "$prompt" < /dev/null)
+  (cd "$PI_WORKSPACE" && pi --fork "$BOOK_LOAD_ID" --name "$name" -p "$prompt" < /dev/null)
 }
 
 write_multiline_prompt() {
@@ -128,6 +142,34 @@ validate_location_prompt() {
   fi
 }
 
+validate_play_by_play() {
+  local path="$1"
+  validate_nonempty_file "$path"
+  validate_no_chat_wrappers "$path"
+  validate_contains "$path" "# Play By Play"
+  validate_contains "$path" "Scene Range:"
+  validate_contains "$path" "Key Beats:"
+}
+
+validate_scene_artifact() {
+  local path="$1"
+  validate_nonempty_file "$path"
+  validate_no_chat_wrappers "$path"
+  validate_contains "$path" "Scene Id:"
+  validate_contains "$path" "## Story Function"
+  validate_contains "$path" "## Visual Continuity"
+  validate_contains "$path" "## Dramatic Beats"
+}
+
+validate_story_layout() {
+  local path="$1"
+  validate_nonempty_file "$path"
+  validate_no_chat_wrappers "$path"
+  validate_contains "$path" "mode: story-layout"
+  validate_contains "$path" "refs:"
+  validate_contains "$path" "No watermarks."
+}
+
 extract_sections() {
   local input="$1"
   local out_dir="$2"
@@ -151,6 +193,21 @@ extract_sections() {
   ' "$input"
 }
 
+story_kind() {
+  local metadata="$BOOK_ROOT_ABS/adaptation.json"
+  if [[ -f "$metadata" ]] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$metadata" <<'PY'
+import json
+import sys
+from pathlib import Path
+data = json.loads(Path(sys.argv[1]).read_text())
+print(data.get("settings", {}).get("storyKind", "comic-book"))
+PY
+  else
+    printf 'comic-book\n'
+  fi
+}
+
 if [[ $# -ne 1 ]]; then
   usage
   exit 2
@@ -162,6 +219,7 @@ ensure_pi_node_runtime
 
 resolve_adaptation_target "$1"
 BOOK_ROOT="$ADAPTATION_ROOT"
+BOOK_ROOT_ABS="$ROOT_DIR/$BOOK_ROOT"
 if [[ -z "$LEGACY_BOOK_ROOT" && ! -f "photo-library/projects/$PROJECT_SLUG/project.json" ]]; then
   die "Project not found: $PROJECT_SLUG"
 fi
@@ -175,6 +233,9 @@ need_command tr
 need_command ls
 
 ensure_project_adaptation_dirs
+ensure_pi_workspace
+EXPECTED_PI_WORKSPACE="$PI_WORKSPACE"
+EXPECTED_PI_SESSION_DIR="$PI_SESSION_DIR"
 
 SESSION_ENV="$BOOK_ROOT/sessions/book-load.env"
 
@@ -182,14 +243,21 @@ if [[ -f "$SESSION_ENV" ]]; then
   # shellcheck disable=SC1090
   source "$SESSION_ENV"
   [[ -n "${BOOK_LOAD_ID:-}" ]] || die "$SESSION_ENV does not set BOOK_LOAD_ID"
+  [[ -n "${PI_WORKSPACE:-}" ]] || die "$SESSION_ENV does not set PI_WORKSPACE"
+  [[ -n "${PI_SESSION_DIR:-}" ]] || die "$SESSION_ENV does not set PI_SESSION_DIR"
+  if [[ "${PI_WORKSPACE:-}" != "$EXPECTED_PI_WORKSPACE" || "${PI_SESSION_DIR:-}" != "$EXPECTED_PI_SESSION_DIR" ]]; then
+    die "$SESSION_ENV does not match this project's Pi workspace"
+  fi
   echo "[load] Reusing book session: $BOOK_LOAD_ID"
 else
   echo "[load] Creating clean book-load session from $BOOK_ROOT/book.txt"
-  (cd "$ROOT_DIR" && pi --name "read book $(basename "$BOOK_ROOT")" -p "/skill:read-book ./$BOOK_ROOT/book.txt" < /dev/null)
+  (cd "$PI_WORKSPACE" && pi --name "read book $PROJECT_SLUG" -p "/skill:read-book $BOOK_ROOT_ABS/book.txt" < /dev/null)
   BOOK_LOAD_ID="$(capture_latest_session_id)"
   [[ -n "$BOOK_LOAD_ID" && "$BOOK_LOAD_ID" != "null" ]] || die "Could not capture BOOK_LOAD_ID"
   {
     printf 'BOOK_LOAD_ID=%q\n' "$BOOK_LOAD_ID"
+    printf 'PI_WORKSPACE=%q\n' "$PI_WORKSPACE"
+    printf 'PI_SESSION_DIR=%q\n' "$PI_SESSION_DIR"
   } > "$SESSION_ENV"
   echo "[load] Saved session id to $SESSION_ENV"
 fi
@@ -199,12 +267,14 @@ echo "Book root: $BOOK_ROOT"
 echo "Project:   $PROJECT_SLUG"
 echo "Session:   $BOOK_LOAD_ID"
 
+STORY_KIND="$(story_kind)"
+
 if [[ -f "$BOOK_ROOT/style-refs/visual-style.md" && -f "$BOOK_ROOT/style-refs/archetype-character.md" && -f "$BOOK_ROOT/style-refs/archetype-scene.md" ]]; then
   echo
   echo "[1/7] visual-style (skip)"
   echo "    output: $BOOK_ROOT/style-refs/"
 else
-  run_pi_step "1/7" "visual style $(basename "$BOOK_ROOT")" "$BOOK_ROOT/style-refs/" "/skill:visual-style $BOOK_ROOT"
+  run_pi_step "1/7" "visual style $(basename "$BOOK_ROOT")" "$BOOK_ROOT/style-refs/" "/skill:visual-style $BOOK_ROOT_ABS"
 fi
 
 if [[ -f "$BOOK_ROOT/characters/list.txt" ]]; then
@@ -212,7 +282,7 @@ if [[ -f "$BOOK_ROOT/characters/list.txt" ]]; then
   echo "[2/7] character-list (skip)"
   echo "    output: $BOOK_ROOT/characters/list.txt"
 else
-  run_pi_step "2/7" "character list $(basename "$BOOK_ROOT")" "$BOOK_ROOT/characters/list.txt" "/skill:character-list $BOOK_ROOT"
+  run_pi_step "2/7" "character list $(basename "$BOOK_ROOT")" "$BOOK_ROOT/characters/list.txt" "/skill:character-list $BOOK_ROOT_ABS"
 fi
 
 [[ -f "$BOOK_ROOT/characters/list.txt" ]] || die "Missing $BOOK_ROOT/characters/list.txt"
@@ -235,7 +305,7 @@ while IFS= read -r character_line; do
     continue
   fi
 
-  prompt="$(write_multiline_prompt "/skill:character-artifact $BOOK_ROOT $out" "$character_line")"
+  prompt="$(write_multiline_prompt "/skill:character-artifact $BOOK_ROOT_ABS $ROOT_DIR/$out" "$character_line")"
   run_pi_step "3/7" "character artifact $slug" "$out" "$prompt"
   validate_character_artifact "$out"
 done < "$BOOK_ROOT/characters/list.txt"
@@ -269,7 +339,7 @@ for artifact in "${artifacts[@]}"; do
     continue
   fi
 
-  run_pi_step "4/7" "character sheet $slug" "$out" "/skill:character-sheet $BOOK_ROOT $out @$artifact"
+  run_pi_step "4/7" "character sheet $slug" "$out" "/skill:character-sheet $BOOK_ROOT_ABS $ROOT_DIR/$out @$ROOT_DIR/$artifact"
   validate_character_sheet "$out"
 done
 
@@ -278,8 +348,49 @@ if [[ -f "$BOOK_ROOT/scenes/manifest.md" ]]; then
   echo "[5/7] scene-manifest (skip)"
   echo "    output: $BOOK_ROOT/scenes/manifest.md"
 else
-  run_pi_step "5/7" "scene manifest $(basename "$BOOK_ROOT")" "$BOOK_ROOT/scenes/manifest.md" "/skill:scene-manifest $BOOK_ROOT"
+  run_pi_step "5/7" "scene manifest $(basename "$BOOK_ROOT")" "$BOOK_ROOT/scenes/manifest.md" "/skill:scene-manifest $BOOK_ROOT_ABS"
 fi
+
+if [[ -f "$BOOK_ROOT/acts/play-by-play.md" ]]; then
+  echo
+  echo "[5a/10] play-by-play (skip)"
+  echo "    output: $BOOK_ROOT/acts/play-by-play.md"
+else
+  run_pi_step "5a/10" "play by play $(basename "$BOOK_ROOT")" "$BOOK_ROOT/acts/play-by-play.md" "/skill:play-by-play $BOOK_ROOT_ABS"
+  validate_play_by_play "$BOOK_ROOT/acts/play-by-play.md"
+fi
+
+[[ -f "$BOOK_ROOT/scenes/manifest.md" ]] || die "Missing $BOOK_ROOT/scenes/manifest.md"
+scene_tmp_dir="$BOOK_ROOT/scenes/.entries"
+rm -rf "$scene_tmp_dir"
+extract_sections "$BOOK_ROOT/scenes/manifest.md" "$scene_tmp_dir" ""
+
+scene_entries=()
+if (help mapfile >/dev/null 2>&1); then
+  mapfile -t scene_entries < <(ls "$scene_tmp_dir"/*.md 2>/dev/null || true)
+else
+  while IFS= read -r entry; do
+    scene_entries+=("$entry")
+  done < <(ls "$scene_tmp_dir"/*.md 2>/dev/null || true)
+fi
+
+total_scenes="${#scene_entries[@]}"
+n=0
+for entry in "${scene_entries[@]}"; do
+  [[ -f "$entry" ]] || continue
+  n=$((n + 1))
+  slug="$(basename "$entry" .md)"
+  out="$BOOK_ROOT/scenes/artifacts/$slug.md"
+  if [[ -f "$out" ]]; then
+    echo
+    echo "[5b/10] scene-artifact [$n/$total_scenes] $slug (skip)"
+    echo "    output: $out"
+  else
+    prompt="$(write_multiline_prompt "/skill:scene-artifact $BOOK_ROOT_ABS $ROOT_DIR/$out" "$(read_file_payload "$entry")")"
+    run_pi_step "5b/10" "scene artifact $slug" "$out" "$prompt"
+    validate_scene_artifact "$out"
+  fi
+done
 
 if [[ -f "$BOOK_ROOT/locations/index.md" ]]; then
   echo
@@ -287,7 +398,7 @@ if [[ -f "$BOOK_ROOT/locations/index.md" ]]; then
   echo "    output: $BOOK_ROOT/locations/index.md"
 else
   [[ -f "$BOOK_ROOT/scenes/manifest.md" ]] || die "Missing $BOOK_ROOT/scenes/manifest.md"
-  run_pi_step "6/7" "location index $(basename "$BOOK_ROOT")" "$BOOK_ROOT/locations/index.md" "/skill:location-index $BOOK_ROOT"
+  run_pi_step "6/7" "location index $(basename "$BOOK_ROOT")" "$BOOK_ROOT/locations/index.md" "/skill:location-index $BOOK_ROOT_ABS"
 fi
 
 [[ -f "$BOOK_ROOT/locations/index.md" ]] || die "Missing $BOOK_ROOT/locations/index.md"
@@ -319,9 +430,40 @@ for entry in "${entries[@]}"; do
     continue
   fi
 
-  prompt="$(write_multiline_prompt "/skill:location-prompt $BOOK_ROOT $out" "$(read_file_payload "$entry")")"
+  prompt="$(write_multiline_prompt "/skill:location-prompt $BOOK_ROOT_ABS $ROOT_DIR/$out" "$(read_file_payload "$entry")")"
   run_pi_step "7/7" "location prompt $slug" "$out" "$prompt"
   validate_location_prompt "$out"
+done
+
+scene_artifacts=()
+if (help mapfile >/dev/null 2>&1); then
+  mapfile -t scene_artifacts < <(ls "$BOOK_ROOT"/scenes/artifacts/*.md 2>/dev/null || true)
+else
+  while IFS= read -r artifact; do
+    scene_artifacts+=("$artifact")
+  done < <(ls "$BOOK_ROOT"/scenes/artifacts/*.md 2>/dev/null || true)
+fi
+
+total_scene_artifacts="${#scene_artifacts[@]}"
+n=0
+for artifact in "${scene_artifacts[@]}"; do
+  [[ -f "$artifact" ]] || continue
+  n=$((n + 1))
+  slug="$(basename "$artifact" .md)"
+  if [[ "$STORY_KIND" == "comic-book" ]]; then
+    out="$BOOK_ROOT/panels/prompts/$slug.md"
+  else
+    out="$BOOK_ROOT/pages/plans/$slug.md"
+  fi
+  if [[ -f "$out" ]]; then
+    echo
+    echo "[8/10] story-layout [$n/$total_scene_artifacts] $slug (skip)"
+    echo "    output: $out"
+    continue
+  fi
+  prompt="$(write_multiline_prompt "/skill:story-layout $BOOK_ROOT_ABS $STORY_KIND $ROOT_DIR/$out" "$(read_file_payload "$artifact")")"
+  run_pi_step "8/10" "story layout $slug" "$out" "$prompt"
+  validate_story_layout "$out"
 done
 
 echo
