@@ -645,6 +645,7 @@ async def import_style_ref(slug: str, kind: str, upload: UploadFile) -> Adaptati
     else:
         metadata.styleRefs.archetypeSceneAssetId = summary.id
     write_metadata(slug, metadata)
+    library.write_canvas(slug, library.default_canvas_for_story_artifacts(slug, library.read_stored_canvas(slug)))
     return status(slug)
 
 

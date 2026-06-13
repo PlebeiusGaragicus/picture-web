@@ -2036,6 +2036,8 @@ function ArchetypeReferenceCard({
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(prompt);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   useEffect(() => {
     setDraft(prompt);
   }, [prompt]);
@@ -2048,6 +2050,13 @@ function ArchetypeReferenceCard({
       setIsSaving(false);
     }
   };
+  const imageSrc = asset ? asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb` : null;
+  const onDrop = (event: React.DragEvent) => {
+    event.preventDefault();
+    setIsDragging(false);
+    const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith('image/'));
+    if (file) void onImportStyleRef(refKind, file);
+  };
   return (
     <section className="story-card archetype-card">
       <div className="archetype-card-head">
@@ -2059,18 +2068,28 @@ function ArchetypeReferenceCard({
           {asset ? 'Image set' : hasPrompt ? 'Prompt ready' : 'Empty'}
         </span>
       </div>
-      {asset && (
-        <div className="archetype-preview">
-          <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb`} alt="" />
+      <div className="archetype-body">
+        <div className="archetype-prompt-col">
+          {hasPrompt ? <p className="archetype-prompt-preview">{prompt}</p> : <p className="muted">No prompt yet.</p>}
+          <button className="secondary" onClick={() => setIsEditing(true)}>{hasPrompt ? 'Edit prompt' : 'Write prompt'}</button>
         </div>
-      )}
-      {hasPrompt ? <p className="archetype-prompt-preview">{prompt}</p> : <p className="muted">No prompt yet.</p>}
-      <div className="archetype-card-actions">
-        <button className="secondary" onClick={() => setIsEditing(true)}>{hasPrompt ? 'Edit prompt' : 'Write prompt'}</button>
-        <label className="secondary file-button">
-          {asset ? 'Replace image' : 'Import image'}
-          <input type="file" accept="image/*" hidden onChange={(event) => event.target.files?.[0] && void onImportStyleRef(refKind, event.target.files[0])} />
-        </label>
+        <div className="archetype-image-col">
+          <div
+            className={`archetype-dropzone ${isDragging ? 'is-dragging' : ''} ${imageSrc ? 'has-image' : ''}`}
+            onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
+            onDragLeave={(event) => { if (event.currentTarget === event.target) setIsDragging(false); }}
+            onDrop={onDrop}
+            onClick={() => imageSrc && setIsFullscreen(true)}
+            role={imageSrc ? 'button' : undefined}
+            title={imageSrc ? 'Click to view full screen' : undefined}
+          >
+            {imageSrc ? <img src={imageSrc} alt="" /> : <span className="muted">Drag an image here, or import below</span>}
+          </div>
+          <label className="secondary file-button">
+            {asset ? 'Replace image' : 'Import image'}
+            <input type="file" accept="image/*" hidden onChange={(event) => event.target.files?.[0] && void onImportStyleRef(refKind, event.target.files[0])} />
+          </label>
+        </div>
       </div>
       {isEditing && (
         <Modal title={`Edit ${title} Prompt`} onClose={() => setIsEditing(false)}>
@@ -2081,6 +2100,12 @@ function ArchetypeReferenceCard({
             <button className="generate-button" onClick={savePrompt} disabled={isSaving}>{isSaving ? 'Saving...' : 'Save prompt'}</button>
           </div>
         </Modal>
+      )}
+      {isFullscreen && imageSrc && (
+        <div className="archetype-lightbox" onClick={() => setIsFullscreen(false)} role="dialog" aria-modal="true">
+          <img src={asset ? `/api/projects/${projectSlug}/assets/${asset.id}/image` : imageSrc} alt="" onClick={(event) => event.stopPropagation()} />
+          <button className="archetype-lightbox-close" onClick={() => setIsFullscreen(false)} aria-label="Close">×</button>
+        </div>
       )}
     </section>
   );

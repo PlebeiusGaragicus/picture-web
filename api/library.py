@@ -377,7 +377,7 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
             "archetype-character",
             "Character Archetype",
             root / "style-refs" / "archetype-character.md",
-            status.styleRefs.get("archetypeCharacterAsset"),
+            status.archetypeCharacterAssetId,
             ["adaptation", "archetype", "character-style"],
             80,
             80,
@@ -386,22 +386,22 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
             "archetype-scene",
             "Scene Archetype",
             root / "style-refs" / "archetype-scene.md",
-            status.styleRefs.get("archetypeSceneAsset"),
+            status.archetypeSceneAssetId,
             ["adaptation", "archetype", "scene-style"],
             360,
             80,
         ),
     ]
-    for kind, display_name, path, has_asset, tags, x, y in archetypes:
+    for kind, display_name, path, asset_id, tags, x, y in archetypes:
         prompt = path.read_text() if path.is_file() else ""
+        has_asset = asset_id is not None
         node_id = archetype_node_id(kind)
         existing = next_canvas.nodes.get(node_id)
         if isinstance(existing, DraftCanvasNode):
             existing.prompt = prompt
             existing.tags = node_tags(*tags, "generated" if has_asset else "missing")
             next_canvas.nodes[node_id] = existing
-            continue
-        if existing is None:
+        elif existing is None:
             next_canvas.nodes[node_id] = DraftCanvasNode(
                 displayName=display_name,
                 x=x,
@@ -411,6 +411,27 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
                 refs=[],
                 prompt=prompt,
             )
+        image_node_id = f"{node_id}_image"
+        if asset_id is not None:
+            existing_image = next_canvas.nodes.get(image_node_id)
+            if isinstance(existing_image, ImageGroupCanvasNode):
+                if asset_id not in existing_image.assetIds:
+                    existing_image.assetIds = [asset_id, *existing_image.assetIds]
+                existing_image.activeAssetId = asset_id
+                existing_image.tags = node_tags(*tags, "imported-image")
+                next_canvas.nodes[image_node_id] = existing_image
+            else:
+                next_canvas.nodes[image_node_id] = ImageGroupCanvasNode(
+                    displayName=display_name,
+                    x=x,
+                    y=y + 320,
+                    width=240,
+                    tags=node_tags(*tags, "imported-image"),
+                    assetIds=[asset_id],
+                    activeAssetId=asset_id,
+                )
+        elif image_node_id in next_canvas.nodes:
+            del next_canvas.nodes[image_node_id]
     existing_artifacts = {
         (node.artifactKind, node.artifactKey)
         for node in next_canvas.nodes.values()

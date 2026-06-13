@@ -565,12 +565,6 @@ button {
   align-items: flex-start;
 }
 
-.assets-extract-head > div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
 .assets-extract-card .workflow-run-button {
   flex: 0 0 auto;
 }
@@ -604,6 +598,96 @@ button {
   align-items: center;
   justify-content: space-between;
   width: 100%;
+}
+
+.archetype-body {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 18px;
+  align-items: start;
+}
+
+.archetype-prompt-col {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  justify-items: start;
+  min-width: 0;
+}
+
+.archetype-image-col {
+  display: grid;
+  gap: 10px;
+  justify-items: stretch;
+  width: 200px;
+}
+
+.archetype-dropzone {
+  display: grid;
+  place-items: center;
+  width: 200px;
+  height: 200px;
+  padding: 8px;
+  text-align: center;
+  background: #020617;
+  border: 1px dashed #334155;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.archetype-dropzone.has-image {
+  cursor: zoom-in;
+  border-style: solid;
+}
+
+.archetype-dropzone.is-dragging {
+  border-color: #93c5fd;
+  background: rgb(59 130 246 / 0.12);
+}
+
+.archetype-dropzone img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.archetype-dropzone .muted {
+  font-size: 12px;
+  padding: 0 8px;
+}
+
+.archetype-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: rgb(2 6 23 / 0.88);
+}
+
+.archetype-lightbox img {
+  max-width: 92vw;
+  max-height: 92vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.6);
+}
+
+.archetype-lightbox-close {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  font-size: 26px;
+  line-height: 1;
+  color: #e5e7eb;
+  background: rgb(15 23 42 / 0.9);
+  border: 1px solid #475569;
+  border-radius: 999px;
 }
 
 .archetype-card-title {
