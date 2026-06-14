@@ -21,12 +21,13 @@ import { VisualStyleCard } from './adaptation/cards';
 import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
-import { artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, visibleDisplayName } from './canvas/shared';
+import { SYSTEM_TAGS, artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, visibleDisplayName } from './canvas/shared';
 import { NodeSidebar } from './canvas/sidebars';
+import { TagEditorPopover } from './canvas/tagEditor';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './canvas/types';
 import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags } from './styleRefs';
 import { HelpTip, Modal } from './ui';
-import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryKind, StyleRefKind } from './types';
+import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryKind, StyleRefKind, TagDefinition } from './types';
 
 type ProjectPhase =
   | 'story-canvas'
@@ -200,6 +201,7 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [openProjectSlug, setOpenProjectSlug] = useState('');
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [projectTags, setProjectTags] = useState<TagDefinition[]>([]);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
   const [canvas, setCanvas] = useState<CanvasDocument>(emptyCanvas);
@@ -218,7 +220,9 @@ function App() {
   const [pendingArchive, setPendingArchive] = useState<{ nodeId: string; assetId: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
+  const [activeUserTagFilters, setActiveUserTagFilters] = useState<string[]>([]);
   const [isTagFilterMenuOpen, setIsTagFilterMenuOpen] = useState(false);
+  const [isUserTagFilterMenuOpen, setIsUserTagFilterMenuOpen] = useState(false);
   const [projectPhase, setProjectPhase] = useState<ProjectPhase>('story-canvas');
   const [phaseViewMode, setPhaseViewMode] = useState<'list' | 'canvas'>('list');
   const autoPublishingArchetypesRef = useRef(false);
@@ -381,6 +385,7 @@ function App() {
     ]);
     setProjects((current) => current.map((project) => (project.slug === detail.project.slug ? detail.project : project)));
     setAssets(detail.assets);
+    setProjectTags(detail.tags);
     setChatSessions(sessions);
     setCanvas(layout);
     setNodes(toFlowNodes(layout, detail.assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, openAssetInViewer, updateImageGroupDisplayName, openChatForAsset));
@@ -401,6 +406,7 @@ function App() {
         setContextMenu(null);
         setPopoverNodeId(null);
         setIsTagFilterMenuOpen(false);
+        setIsUserTagFilterMenuOpen(false);
       }
     };
     window.addEventListener('click', closeMenu);
@@ -414,22 +420,50 @@ function App() {
   const availableTagFilters = useMemo(() => {
     const tags = new Set<string>();
     nodes.forEach((node) => node.data.tags.forEach((tag) => tags.add(tag)));
-    return Array.from(tags).sort();
+    return Array.from(tags).filter((tag) => SYSTEM_TAGS.has(tag)).sort();
   }, [nodes]);
+  const availableUserTags = useMemo(() => {
+    const byName = new Map<string, TagDefinition>();
+    projectTags.forEach((tag) => byName.set(tag.name, tag));
+    assets.forEach((asset) => {
+      asset.tags.forEach((tag) => {
+        if (!SYSTEM_TAGS.has(tag) && !byName.has(tag)) byName.set(tag, { name: tag, color: '#64748b' });
+      });
+    });
+    return Array.from(byName.values()).sort((first, second) => first.name.localeCompare(second.name));
+  }, [assets, projectTags]);
+  const userTagCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    assets.forEach((asset) => {
+      if (asset.archivedAt && !showArchived) return;
+      asset.tags.forEach((tag) => {
+        if (SYSTEM_TAGS.has(tag)) return;
+        counts[tag] = (counts[tag] ?? 0) + 1;
+      });
+    });
+    return counts;
+  }, [assets, showArchived]);
   const filteredNodes = useMemo(() => {
-    const tagFiltered = activeTagFilters.length === 0
+    const systemTagFiltered = activeTagFilters.length === 0
       ? nodes
       : nodes.filter((node) => {
           const required = new Set(activeTagFilters);
           return node.data.tags.some((tag) => required.has(tag));
         });
-    if (showArchived) return tagFiltered;
-    return tagFiltered.filter((node) => {
+    const userTagFiltered = activeUserTagFilters.length === 0
+      ? systemTagFiltered
+      : systemTagFiltered.filter((node) => {
+          if (node.data.kind !== 'imageGroup') return true;
+          const required = new Set(activeUserTagFilters);
+          return node.data.assets.some((asset) => asset.tags.some((tag) => required.has(tag)));
+        });
+    if (showArchived) return userTagFiltered;
+    return userTagFiltered.filter((node) => {
       if (node.data.kind !== 'imageGroup') return true;
       const assetsInNode = node.data.assets.length ? node.data.assets : node.data.activeAsset ? [node.data.activeAsset] : [];
       return assetsInNode.some((asset) => !asset.archivedAt);
     });
-  }, [activeTagFilters, nodes, showArchived]);
+  }, [activeTagFilters, activeUserTagFilters, nodes, showArchived]);
 
   const edges: Edge[] = useMemo(() => {
     return deriveStoryGraphEdges(filteredNodes);
@@ -527,11 +561,45 @@ function App() {
     }
   }, [loadProject, openProjectSlug]);
 
+  const saveProjectTags = useCallback(async (nextTags: TagDefinition[]) => {
+    if (!openProjectSlug) return;
+    const uniqueTags = Array.from(new Map(nextTags.map((tag) => [tag.name, tag])).values())
+      .sort((first, second) => first.name.localeCompare(second.name));
+    setProjectTags(uniqueTags);
+    await api.saveProjectTags(openProjectSlug, uniqueTags);
+  }, [openProjectSlug]);
+
+  const createProjectTag = useCallback((tag: TagDefinition) => {
+    void saveProjectTags([...projectTags.filter((existing) => existing.name !== tag.name), tag]).catch((err) => {
+      console.error('[photo-web] failed to save project tags', err);
+      setError(String(err));
+    });
+  }, [projectTags, saveProjectTags]);
+
+  const updateAssetTags = useCallback((nodeId: string, assetId: string, tags: string[]) => {
+    if (!openProjectSlug) return;
+    const asset = assets.find((item) => item.id === assetId);
+    if (!asset) return;
+    const nextTags = Array.from(new Set([...asset.tags.filter((tag) => SYSTEM_TAGS.has(tag)), ...tags]));
+    setAssets((current) => current.map((item) => (item.id === assetId ? { ...item, tags: nextTags } : item)));
+    setNodes((current) => current.map((node) => {
+      if (node.data.kind !== 'imageGroup' || !node.data.assetIds.includes(assetId)) return node;
+      const nextAssets = node.data.assets.map((item) => (item.id === assetId ? { ...item, tags: nextTags } : item));
+      const nextActiveAsset = node.data.activeAsset?.id === assetId ? { ...node.data.activeAsset, tags: nextTags } : node.data.activeAsset;
+      return { ...node, data: { ...node.data, assets: nextAssets, activeAsset: nextActiveAsset } };
+    }));
+    void api.patchDisplay(openProjectSlug, assetId, asset.title, nextTags).catch((err) => {
+      console.error('[photo-web] failed to update asset tags', err);
+      setError(String(err));
+    });
+  }, [assets, openProjectSlug]);
+
   const openProject = async (projectSlug: string) => {
     setOpenProjectSlug(projectSlug);
     setProjectPhase('story-canvas');
     setPhaseViewMode('canvas');
     setActiveTagFilters([]);
+    setActiveUserTagFilters([]);
     setSelectedIds([]);
     setSelectedNodeIds([]);
     setError(null);
@@ -541,7 +609,9 @@ function App() {
     setOpenProjectSlug('');
     setProjectPhase('story-canvas');
     setActiveTagFilters([]);
+    setActiveUserTagFilters([]);
     setAssets([]);
+    setProjectTags([]);
     setChatSessions([]);
     setActiveChatSessionId(null);
     setNodes([]);
@@ -1169,7 +1239,9 @@ function App() {
           setProjectPhase(phase);
           setPhaseViewMode(phase === 'story-canvas' ? 'canvas' : 'list');
           setActiveTagFilters([]);
+          setActiveUserTagFilters([]);
           setIsTagFilterMenuOpen(false);
+          setIsUserTagFilterMenuOpen(false);
           setPopoverNodeId(null);
           setActiveChatSessionId(null);
         }}
@@ -1313,6 +1385,7 @@ function App() {
               onPaneClick={() => {
                 setPopoverNodeId(null);
                 setIsTagFilterMenuOpen(false);
+                setIsUserTagFilterMenuOpen(false);
               }}
               onSelectionChange={({ nodes: selected }) => {
                 setSelectedNodeIds(selected.map((node) => node.id));
@@ -1326,6 +1399,15 @@ function App() {
                 {zoomPercent}%
               </Panel>
             </ReactFlow>
+            <FloatingTagsMenu
+              availableTags={availableUserTags}
+              tagCounts={userTagCounts}
+              activeTags={activeUserTagFilters}
+              isOpen={isUserTagFilterMenuOpen}
+              onToggleOpen={() => setIsUserTagFilterMenuOpen((current) => !current)}
+              onClose={() => setIsUserTagFilterMenuOpen(false)}
+              onChange={setActiveUserTagFilters}
+            />
             <FloatingFilterMenu
               availableTagFilters={availableTagFilters}
               activeTagFilters={activeTagFilters}
@@ -1354,6 +1436,7 @@ function App() {
           node={selectedNode}
           assets={assets}
           adaptation={adaptation}
+          projectTags={availableUserTags}
           coverAssetId={currentProject?.coverAssetId ?? null}
           onDraftChange={updateDraft}
           onImageGroupChange={updateImageGroup}
@@ -1369,6 +1452,8 @@ function App() {
           onArchiveImage={requestArchiveImageAsset}
           onRestoreImage={restoreImageAsset}
           onOpenAsset={openAssetInSidebar}
+          onAssetTagsChange={updateAssetTags}
+          onCreateTag={createProjectTag}
           onRefineChat={openChatForAsset}
         />
       )}
@@ -1389,6 +1474,7 @@ function App() {
           fallbackAsset={assets.find((asset) => asset.id === viewerAssetId)}
           assets={assets}
           projectSlug={openProjectSlug}
+          projectTags={availableUserTags}
           coverAssetId={currentProject?.coverAssetId ?? null}
           onClose={() => {
             setViewerNodeId(null);
@@ -1399,6 +1485,8 @@ function App() {
           onDetails={openViewerDetails}
           onArchiveImage={requestArchiveImageAsset}
           onRestoreImage={restoreImageAsset}
+          onAssetTagsChange={updateAssetTags}
+          onCreateTag={createProjectTag}
           onSetProjectCover={setProjectCover}
         />
       )}
@@ -1762,6 +1850,56 @@ function FloatingFilterMenu({
             </button>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+function FloatingTagsMenu({
+  availableTags,
+  tagCounts,
+  activeTags,
+  isOpen,
+  onToggleOpen,
+  onClose,
+  onChange,
+}: {
+  availableTags: TagDefinition[];
+  tagCounts: Record<string, number>;
+  activeTags: string[];
+  isOpen: boolean;
+  onToggleOpen: () => void;
+  onClose: () => void;
+  onChange: (tags: string[]) => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (menuRef.current?.contains(target)) return;
+      onClose();
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick, true);
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick, true);
+  }, [isOpen, onClose]);
+
+  return (
+    <div ref={menuRef} className="floating-tags-menu">
+      <button className={`secondary tag-filter-toggle ${activeTags.length ? 'active' : ''}`} onClick={onToggleOpen}>
+        Tags{activeTags.length ? ` (${activeTags.length})` : ''}
+      </button>
+      {isOpen && (
+        <TagEditorPopover
+          mode="filter"
+          title="Filter by tags"
+          selectedTags={activeTags}
+          availableTags={availableTags}
+          tagCounts={tagCounts}
+          onChange={onChange}
+        />
       )}
     </div>
   );
@@ -2636,6 +2774,7 @@ function ImageViewer({
   fallbackAsset,
   assets,
   projectSlug,
+  projectTags,
   coverAssetId,
   onClose,
   onVariant,
@@ -2643,12 +2782,15 @@ function ImageViewer({
   onDetails,
   onArchiveImage,
   onRestoreImage,
+  onAssetTagsChange,
+  onCreateTag,
   onSetProjectCover,
 }: {
   node?: Node<ImageGroupNodeData>;
   fallbackAsset?: Asset;
   assets: Asset[];
   projectSlug: string;
+  projectTags: TagDefinition[];
   coverAssetId?: string | null;
   onClose: () => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
@@ -2656,8 +2798,11 @@ function ImageViewer({
   onDetails: (nodeId: string) => void;
   onArchiveImage: (nodeId: string, assetId: string) => void;
   onRestoreImage: (nodeId: string, assetId: string) => void;
+  onAssetTagsChange: (nodeId: string, assetId: string, tags: string[]) => void;
+  onCreateTag: (tag: TagDefinition) => void;
   onSetProjectCover: (assetId: string) => void;
 }) {
+  const [isTagEditorOpen, setIsTagEditorOpen] = useState(false);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -2671,19 +2816,14 @@ function ImageViewer({
   const asset = node?.data.activeAsset ?? fallbackAsset;
   if (!asset) return null;
   const isArchived = Boolean(asset.archivedAt);
+  const userTags = asset.tags.filter((tag) => !SYSTEM_TAGS.has(tag));
   const isProjectCover = coverAssetId === asset.id;
   const currentIndex = node ? Math.max(0, node.data.assetIds.indexOf(asset.id)) : 0;
   const imageUrl = `/api/projects/${projectSlug}/assets/${asset.id}/image`;
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
   const parentAssets = (asset.generation?.refs ?? []).map((ref) => assetById.get(ref)).filter((asset): asset is Asset => Boolean(asset));
   const childAssets = assets.filter((candidate) => candidate.generation?.refs.includes(asset.id));
-  const viewerClassName = [
-    'image-viewer',
-    parentAssets.length > 0 ? 'has-parents' : '',
-    childAssets.length > 0 ? 'has-children' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const viewerClassName = 'image-viewer';
   const changeByClickSide = (event: React.MouseEvent<HTMLImageElement>) => {
     event.stopPropagation();
     if (!node) return;
@@ -2728,6 +2868,27 @@ function ImageViewer({
             )}
             {node && <span>{currentIndex + 1} / {node.data.assetIds.length}</span>}
             {node && (
+              <div className="image-viewer-tag-menu">
+                <button
+                  className={`image-viewer-info-button secondary ${userTags.length ? 'active' : ''}`}
+                  onClick={() => setIsTagEditorOpen((current) => !current)}
+                  title="Edit tags"
+                >
+                  🏷️
+                </button>
+                {isTagEditorOpen && (
+                  <TagEditorPopover
+                    mode="assign"
+                    title="Assign tags"
+                    selectedTags={userTags}
+                    availableTags={projectTags}
+                    onChange={(tags) => onAssetTagsChange(node.id, asset.id, tags)}
+                    onCreateTag={onCreateTag}
+                  />
+                )}
+              </div>
+            )}
+            {node && (
               <button className="image-viewer-info-button secondary" onClick={() => onDetails(node.id)} title="Show details">
                 i
               </button>
@@ -2736,21 +2897,20 @@ function ImageViewer({
           </div>
         </div>
       </div>
-      {parentAssets.length > 0 && (
-        <div className="image-viewer-parents-rail" onClick={(event) => event.stopPropagation()} aria-label="Parent images">
-          <span>Parents</span>
-          {parentAssets.map((parent) => (
-            <button
-              key={parent.id}
-              className="image-viewer-thumb-button"
-              onClick={() => onViewAsset(parent.id)}
-              title={assetLabel(parent)}
-            >
-              <img src={parent.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${parent.id}/thumb`} alt={assetLabel(parent)} />
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="image-viewer-parents-rail" onClick={(event) => event.stopPropagation()} aria-label="Parent images">
+        <span>Parents</span>
+        {parentAssets.length === 0 && <div className="image-viewer-thumb-placeholder">none</div>}
+        {parentAssets.map((parent) => (
+          <button
+            key={parent.id}
+            className="image-viewer-thumb-button"
+            onClick={() => onViewAsset(parent.id)}
+            title={assetLabel(parent)}
+          >
+            <img src={parent.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${parent.id}/thumb`} alt={assetLabel(parent)} />
+          </button>
+        ))}
+      </div>
       {node && node.data.assetIds.length > 1 && (
         <button
           className="image-viewer-nav previous"
@@ -2776,21 +2936,20 @@ function ImageViewer({
           &gt;
         </button>
       )}
-      {childAssets.length > 0 && (
-        <div className="image-viewer-children-rail" onClick={(event) => event.stopPropagation()} aria-label="Child images">
-          <span>Children</span>
-          {childAssets.map((child) => (
-            <button
-              key={child.id}
-              className="image-viewer-thumb-button"
-              onClick={() => onViewAsset(child.id)}
-              title={assetLabel(child)}
-            >
-              <img src={child.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${child.id}/thumb`} alt={assetLabel(child)} />
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="image-viewer-children-rail" onClick={(event) => event.stopPropagation()} aria-label="Child images">
+        <span>Children</span>
+        {childAssets.length === 0 && <div className="image-viewer-thumb-placeholder">none</div>}
+        {childAssets.map((child) => (
+          <button
+            key={child.id}
+            className="image-viewer-thumb-button"
+            onClick={() => onViewAsset(child.id)}
+            title={assetLabel(child)}
+          >
+            <img src={child.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${child.id}/thumb`} alt={assetLabel(child)} />
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

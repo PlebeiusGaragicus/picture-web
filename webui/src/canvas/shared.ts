@@ -1,6 +1,31 @@
 import type { ArtifactKind, Asset, GenerationParams } from '../types';
 
 export const defaultDraftParams: GenerationParams = { model: 'gemini-3.1-flash-image', aspectRatio: '16:9', imageSize: '1K', seed: null, batchCount: 1 };
+export const SYSTEM_TAGS = new Set([
+  'adaptation',
+  'archetype',
+  'character-sheet',
+  'character-style',
+  'comic-adaptation',
+  'generated',
+  'generated-image',
+  'imported-image',
+  'location',
+  'page',
+  'panel',
+  'scene-style',
+  'text-result',
+  'visual-style',
+]);
+export const tagColors = ['#ef4444', '#f59e0b', '#facc15', '#22c55e', '#3b82f6', '#c084fc', '#cbd5e1'];
+
+export function normalizeTagName(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+export function isValidTagName(value: string) {
+  return /^[a-z0-9]+(-[a-z0-9]+)*$/.test(value);
+}
 
 export const modelCapabilities: Record<string, { aspectRatios: string[]; imageSizes: string[] }> = {
   'gemini-2.5-flash-image': {

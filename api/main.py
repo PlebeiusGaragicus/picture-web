@@ -43,6 +43,8 @@ from models import (
     ProjectCoverPatch,
     ProjectDetail,
     ProjectMetadata,
+    TagDefinition,
+    TagRegistryDocument,
 )
 
 logging.basicConfig(
@@ -80,13 +82,23 @@ def create_project(payload: ProjectCreate) -> ProjectMetadata:
 @app.get("/api/projects/{slug}", response_model=ProjectDetail)
 def get_project(slug: str, includeArchived: bool = Query(default=False)) -> ProjectDetail:
     if includeArchived:
-        return ProjectDetail(project=library.get_project(slug), assets=library.list_assets(slug, include_archived=True))
+        return ProjectDetail(project=library.get_project(slug), assets=library.list_assets(slug, include_archived=True), tags=library.list_project_tags(slug))
     return library.get_project_detail(slug)
 
 
 @app.patch("/api/projects/{slug}", response_model=ProjectMetadata)
 def patch_project(slug: str, payload: ProjectCoverPatch) -> ProjectMetadata:
     return library.patch_project_cover(slug, payload.coverAssetId)
+
+
+@app.get("/api/projects/{slug}/tags", response_model=list[TagDefinition])
+def list_tags(slug: str) -> list[TagDefinition]:
+    return library.list_project_tags(slug)
+
+
+@app.put("/api/projects/{slug}/tags", response_model=TagRegistryDocument)
+def put_tags(slug: str, payload: TagRegistryDocument) -> TagRegistryDocument:
+    return library.write_tag_registry(slug, payload)
 
 
 @app.delete("/api/projects/{slug}", status_code=status.HTTP_204_NO_CONTENT)

@@ -47,9 +47,19 @@ export interface Project {
   coverThumbnailUrl?: string | null;
 }
 
+export interface TagDefinition {
+  name: string;
+  color: string;
+}
+
+export interface TagRegistryDocument {
+  tags: TagDefinition[];
+}
+
 export interface ProjectDetail {
   project: Project;
   assets: Asset[];
+  tags: TagDefinition[];
 }
 
 export type StoryKind = 'picture-book' | 'illustrated-story' | 'comic-book';

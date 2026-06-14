@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail, StoryKind, StyleRefKind } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail, StoryKind, StyleRefKind, TagDefinition, TagRegistryDocument } from './types';
 
 const DEBUG = true;
 
@@ -54,6 +54,12 @@ export const api = {
       body: JSON.stringify({ slug, name, settings }),
     }),
   getProject: (slug: string, includeArchived = false) => request<ProjectDetail>(`/api/projects/${slug}${includeArchived ? '?includeArchived=true' : ''}`),
+  getProjectTags: (slug: string) => request<TagDefinition[]>(`/api/projects/${slug}/tags`),
+  saveProjectTags: (slug: string, tags: TagDefinition[]) =>
+    request<TagRegistryDocument>(`/api/projects/${slug}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ tags }),
+    }),
   setProjectCover: (slug: string, coverAssetId: string | null) =>
     request<Project>(`/api/projects/${slug}`, {
       method: 'PATCH',

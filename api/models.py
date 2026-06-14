@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 TAG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 SLUG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
+TAG_COLOR_RE = r"^#[0-9a-fA-F]{6}$"
 
 AssetKind = Literal["imported", "generated"]
 StoryKind = Literal["picture-book", "illustrated-story", "comic-book"]
@@ -130,6 +131,27 @@ class ProjectMetadata(ProjectCreate):
     createdAt: str
     coverAssetId: str | None = None
     coverThumbnailUrl: str | None = None
+
+
+class TagDefinition(BaseModel):
+    name: str = Field(pattern=TAG_RE)
+    color: str = Field(pattern=TAG_COLOR_RE)
+
+
+class TagRegistryDocument(BaseModel):
+    tags: list[TagDefinition] = Field(default_factory=list)
+
+    @field_validator("tags")
+    @classmethod
+    def unique_tags(cls, tags: list[TagDefinition]) -> list[TagDefinition]:
+        seen: set[str] = set()
+        unique: list[TagDefinition] = []
+        for tag in tags:
+            if tag.name in seen:
+                continue
+            seen.add(tag.name)
+            unique.append(tag)
+        return unique
 
 
 class ProjectCoverPatch(BaseModel):
@@ -280,6 +302,7 @@ class AdaptationGenerateResponse(BaseModel):
 class ProjectDetail(BaseModel):
     project: ProjectMetadata
     assets: list[AssetSummary]
+    tags: list[TagDefinition] = Field(default_factory=list)
 
 
 class DisplayPatch(BaseModel):

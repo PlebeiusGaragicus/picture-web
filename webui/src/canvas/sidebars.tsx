@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Node } from 'reactflow';
 import { isCanonicalStyleRefAsset, styleRefKindForTags } from '../styleRefs';
-import type { AdaptationStatus, ArtifactKind, Asset, DraftCanvasNode, GenerationParams, ImageGroupCanvasNode, StyleRefKind } from '../types';
+import type { AdaptationStatus, ArtifactKind, Asset, DraftCanvasNode, GenerationParams, ImageGroupCanvasNode, StyleRefKind, TagDefinition } from '../types';
 import { canDeleteNode } from './roles';
-import { artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, uniqueOptions, visibleDisplayName } from './shared';
+import { SYSTEM_TAGS, artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, uniqueOptions, visibleDisplayName } from './shared';
+import { TagEditorPopover } from './tagEditor';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './types';
 
 export function NodeSidebar({
   node,
   assets,
   adaptation,
+  projectTags,
   coverAssetId,
   onDraftChange,
   onImageGroupChange,
@@ -25,11 +27,14 @@ export function NodeSidebar({
   onArchiveImage,
   onRestoreImage,
   onOpenAsset,
+  onAssetTagsChange,
+  onCreateTag,
   onRefineChat,
 }: {
   node: Node<PhotoNodeData>;
   assets: Asset[];
   adaptation: AdaptationStatus | null;
+  projectTags: TagDefinition[];
   coverAssetId?: string | null;
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onImageGroupChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
@@ -45,6 +50,8 @@ export function NodeSidebar({
   onArchiveImage: (nodeId: string, assetId: string) => void;
   onRestoreImage: (nodeId: string, assetId: string) => void;
   onOpenAsset: (assetId: string) => void;
+  onAssetTagsChange: (nodeId: string, assetId: string, tags: string[]) => void;
+  onCreateTag: (tag: TagDefinition) => void;
   onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
   if (node.data.kind === 'draft') {
@@ -88,11 +95,13 @@ export function NodeSidebar({
       asset={node.data.activeAsset}
       assets={assets}
       adaptation={adaptation}
+      projectTags={projectTags}
       coverAssetId={coverAssetId}
-      onDelete={onDelete}
       onArchiveImage={onArchiveImage}
       onRestoreImage={onRestoreImage}
       onOpenAsset={onOpenAsset}
+      onAssetTagsChange={onAssetTagsChange}
+      onCreateTag={onCreateTag}
       onNodeChange={onImageGroupChange}
       onVariant={onVariant}
       onCreateSibling={onCreateSibling}
@@ -360,10 +369,13 @@ function ImageSidebar({
   asset,
   assets,
   adaptation,
+  projectTags,
   coverAssetId,
   onArchiveImage,
   onRestoreImage,
   onOpenAsset,
+  onAssetTagsChange,
+  onCreateTag,
   onNodeChange,
   onVariant,
   onCreateSibling,
@@ -376,10 +388,13 @@ function ImageSidebar({
   asset: Asset;
   assets: Asset[];
   adaptation: AdaptationStatus | null;
+  projectTags: TagDefinition[];
   coverAssetId?: string | null;
   onArchiveImage: (nodeId: string, assetId: string) => void;
   onRestoreImage: (nodeId: string, assetId: string) => void;
   onOpenAsset: (assetId: string) => void;
+  onAssetTagsChange: (nodeId: string, assetId: string, tags: string[]) => void;
+  onCreateTag: (tag: TagDefinition) => void;
   onNodeChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
@@ -389,6 +404,7 @@ function ImageSidebar({
   onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
   const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
+  const [isTagEditorOpen, setIsTagEditorOpen] = useState(false);
   const [variantParams, setVariantParams] = useState(defaultDraftParams);
   const prompt = asset.prompt?.text ?? '';
   const refs = asset.generation?.refs ?? [];
@@ -421,13 +437,16 @@ function ImageSidebar({
     });
   }, [asset]);
   const isArchived = Boolean(asset.archivedAt);
+  const userTags = asset.tags.filter((tag) => !SYSTEM_TAGS.has(tag));
   return (
     <aside className="details-sidebar">
-      {isArchived ? (
-        <button className="secondary" onClick={() => onRestoreImage(node.id, asset.id)}>Unarchive</button>
-      ) : (
-        <button className="secondary" onClick={() => onArchiveImage(node.id, asset.id)}>Archive</button>
-      )}
+      <div className="sidebar-action-row">
+        {isArchived ? (
+          <button className="secondary" onClick={() => onRestoreImage(node.id, asset.id)}>Unarchive</button>
+        ) : (
+          <button className="secondary" onClick={() => onArchiveImage(node.id, asset.id)}>Archive</button>
+        )}
+      </div>
       {isArchived && <p className="muted">This variant is archived and hidden unless Show archived is enabled.</p>}
       {(isCharacterArchetype || isSceneArchetype || styleRefKind) && (
         <div className="canvas-role-badge">
@@ -440,6 +459,19 @@ function ImageSidebar({
         Group name
         <input value={node.data.displayName} onChange={(event) => onNodeChange(node.id, { displayName: event.target.value })} />
       </label>
+      <button className={`secondary sidebar-tag-button ${userTags.length ? 'active' : ''}`} onClick={() => setIsTagEditorOpen((current) => !current)} title="Edit tags">
+        🏷️ Tags{userTags.length ? ` (${userTags.length})` : ''}
+      </button>
+      {isTagEditorOpen && (
+        <TagEditorPopover
+          mode="assign"
+          title="Assign tags"
+          selectedTags={userTags}
+          availableTags={projectTags}
+          onChange={(tags) => onAssetTagsChange(node.id, asset.id, tags)}
+          onCreateTag={onCreateTag}
+        />
+      )}
       {asset.hasPixels && (
         <button className="secondary" disabled={isProjectCover} onClick={() => onSetProjectCover(asset.id)}>
           {isProjectCover ? 'Project cover' : 'Set as project cover'}
