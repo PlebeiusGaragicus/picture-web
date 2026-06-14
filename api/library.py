@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import logging
+import random
 import shutil
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from models import (
     DisplayPatch,
     GenerateRequest,
     GenerateResponse,
+    GenerationParams,
     GenerationReceipt,
     GeneratedResultRole,
     ImageGroupCanvasNode,
@@ -39,9 +41,54 @@ from models import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LIBRARY_ROOT = REPO_ROOT / "photo-library"
 PROJECTS_ROOT = LIBRARY_ROOT / "projects"
+SEED_DEFAULTS_ROOT = REPO_ROOT / "prompts" / "seed-defaults"
 SYSTEM_TRASH = Path.home() / ".Trash"
 THUMB_MAX_SIZE = (384, 384)
+DEFAULT_STARTER_DRAFT_NODE_ID = "draft_seed"
 logger = logging.getLogger(__name__)
+
+
+def list_seed_default_prompts() -> list[tuple[str, str]]:
+    if not SEED_DEFAULTS_ROOT.is_dir():
+        return []
+    seeds: list[tuple[str, str]] = []
+    for path in sorted(SEED_DEFAULTS_ROOT.glob("*.md")):
+        prompt = path.read_text().strip()
+        if prompt:
+            display_name = path.stem.replace("-", " ").replace("_", " ").strip().title()
+            seeds.append((display_name, prompt))
+    return seeds
+
+
+def pick_random_seed_default_prompt() -> tuple[str, str] | None:
+    seeds = list_seed_default_prompts()
+    if not seeds:
+        return None
+    return random.choice(seeds)
+
+
+def default_canvas_for_new_project() -> CanvasDocument:
+    seed = pick_random_seed_default_prompt()
+    if seed is None:
+        return CanvasDocument()
+    display_name, prompt = seed
+    return CanvasDocument(
+        nodes={
+            DEFAULT_STARTER_DRAFT_NODE_ID: DraftCanvasNode(
+                displayName=display_name,
+                x=120,
+                y=120,
+                refs=[],
+                prompt=prompt,
+                params=GenerationParams(
+                    model="gemini-3.1-flash-image",
+                    aspectRatio="16:9",
+                    imageSize="1K",
+                    batchCount=1,
+                ),
+            )
+        }
+    )
 
 
 def ensure_library() -> None:
@@ -114,7 +161,7 @@ def create_project(payload: ProjectCreate) -> ProjectMetadata:
     )
     assets_dir(payload.slug).mkdir(parents=True, exist_ok=True)
     write_json(project_json_path(payload.slug), project_json_payload(project))
-    write_json(canvas_json_path(payload.slug), CanvasDocument().model_dump(mode="json"))
+    write_json(canvas_json_path(payload.slug), default_canvas_for_new_project().model_dump(mode="json"))
     return project
 
 
@@ -227,25 +274,7 @@ def move_to_trash(path: Path) -> None:
     logger.debug("moved to trash source=%s destination=%s", path, destination)
 
 
-def delete_asset(slug: str, asset_id: str) -> None:
-    require_project(slug)
-    if not asset_json_path(slug, asset_id).is_file():
-        raise HTTPException(status_code=404, detail=f"Asset not found: {asset_id}")
-    import chat_sessions
-
-    blockers = chat_sessions.blocking_session_ids(slug, asset_id)
-    if blockers:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": "Asset is protected by chat session history. Archive it instead.",
-                "chatSessionIds": blockers,
-            },
-        )
-    logger.debug("delete asset slug=%s asset_id=%s", slug, asset_id)
-    move_to_trash(asset_json_path(slug, asset_id))
-    move_to_trash(asset_png_path(slug, asset_id))
-
+def detach_asset_from_project(slug: str, asset_id: str) -> None:
     canvas = read_stored_canvas(slug)
     changed = False
     for node_id, node in list(canvas.nodes.items()):
@@ -266,7 +295,7 @@ def delete_asset(slug: str, asset_id: str) -> None:
             changed = True
     if changed:
         write_canvas(slug, canvas)
-        logger.debug("delete asset updated canvas slug=%s asset_id=%s", slug, asset_id)
+        logger.debug("detached asset from canvas slug=%s asset_id=%s", slug, asset_id)
 
     project_path = project_json_path(slug)
     if project_path.is_file():
@@ -274,6 +303,27 @@ def delete_asset(slug: str, asset_id: str) -> None:
         if project.coverAssetId == asset_id:
             project.coverAssetId = None
             write_json(project_path, project_json_payload(project))
+
+
+def delete_asset(slug: str, asset_id: str) -> None:
+    require_project(slug)
+    if not asset_json_path(slug, asset_id).is_file():
+        raise HTTPException(status_code=404, detail=f"Asset not found: {asset_id}")
+    import chat_sessions
+
+    blockers = chat_sessions.blocking_session_ids(slug, asset_id)
+    if blockers:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Asset is protected by chat session history. Archive it instead.",
+                "chatSessionIds": blockers,
+            },
+        )
+    logger.debug("delete asset slug=%s asset_id=%s", slug, asset_id)
+    move_to_trash(asset_json_path(slug, asset_id))
+    move_to_trash(asset_png_path(slug, asset_id))
+    detach_asset_from_project(slug, asset_id)
 
 
 def patch_display(slug: str, asset_id: str, payload: DisplayPatch) -> AssetSummary:
@@ -291,13 +341,16 @@ def patch_archive(slug: str, asset_id: str, payload: ArchivePatch) -> AssetSumma
     metadata = read_asset_metadata(slug, asset_id)
     metadata.archivedAt = utc_now() if payload.archived else None
     metadata.updatedAt = utc_now()
-    return write_asset_metadata(slug, metadata)
+    summary = write_asset_metadata(slug, metadata)
+    if not payload.archived:
+        restore_asset_to_canvas(slug, asset_id)
+    return summary
 
 
-def read_canvas(slug: str) -> CanvasDocument:
+def read_canvas(slug: str, include_archived: bool = False) -> CanvasDocument:
     require_project(slug)
     canvas = sync_existing_story_artifacts(slug, read_stored_canvas(slug))
-    canvas = default_canvas_for_assets(slug, canvas)
+    canvas = default_canvas_for_assets(slug, canvas, include_archived=include_archived)
     return normalize_variant_groups(slug, canvas)
 
 
@@ -434,7 +487,41 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
     return story_graph.default_canvas_for_story_artifacts(slug, canvas)
 
 
-def default_canvas_for_assets(slug: str, canvas: CanvasDocument) -> CanvasDocument:
+def restore_asset_to_canvas(slug: str, asset_id: str) -> None:
+    canvas = read_stored_canvas(slug)
+    represented = {
+        current_id
+        for node in canvas.nodes.values()
+        if isinstance(node, ImageGroupCanvasNode)
+        for current_id in node.assetIds
+    }
+    if asset_id in represented:
+        return
+    metadata = read_asset_metadata(slug, asset_id)
+    asset = metadata_to_summary(slug, metadata)
+    index = len(canvas.nodes)
+    max_story_x = 80.0
+    for node in canvas.nodes.values():
+        if isinstance(node, DraftCanvasNode | StoryArtifactCanvasNode):
+            max_story_x = max(max_story_x, node.x + (node.width or 240) + 80)
+    asset_start_x = max(1500.0, max_story_x)
+    node_id = canvas_node_id(asset.id)
+    while node_id in canvas.nodes:
+        node_id = f"{canvas_node_id(asset.id)}_{index}"
+        index += 1
+    canvas.nodes[node_id] = ImageGroupCanvasNode(
+        displayName=asset.title,
+        x=asset_start_x + (index % 3) * 280,
+        y=80 + (index // 3) * 240,
+        tags=node_tags(*asset.tags, "generated-image" if asset.kind == "generated" else "imported-image"),
+        assetIds=[asset.id],
+        activeAssetId=asset.id,
+    )
+    write_canvas(slug, canvas)
+    logger.debug("restored asset to canvas slug=%s asset_id=%s", slug, asset_id)
+
+
+def default_canvas_for_assets(slug: str, canvas: CanvasDocument, include_archived: bool = False) -> CanvasDocument:
     """Add visible image groups for assets not yet represented on the canvas."""
     next_canvas = canvas.model_copy(deep=True)
     represented = {
@@ -449,7 +536,7 @@ def default_canvas_for_assets(slug: str, canvas: CanvasDocument) -> CanvasDocume
         if isinstance(node, DraftCanvasNode | StoryArtifactCanvasNode):
             max_story_x = max(max_story_x, node.x + (node.width or 240) + 80)
     asset_start_x = max(1500.0, max_story_x)
-    for asset in list_assets(slug):
+    for asset in list_assets(slug, include_archived=include_archived):
         if asset.id in represented:
             continue
         node_id = canvas_node_id(asset.id)

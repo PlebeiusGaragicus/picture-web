@@ -100,7 +100,12 @@ export function deletableSelectedNodes(nodes: Node<PhotoNodeData>[], selectedNod
 export function deleteSelectedNodesMessage(selectedCount: number, deletableCount: number, imageNodeCount: number): string {
   const skippedCount = selectedCount - deletableCount;
   const suffix = skippedCount ? ` ${skippedCount} source node(s) will be kept.` : '';
-  return imageNodeCount
-    ? `Delete ${deletableCount} selected node(s) and move image files to the system Trash?${suffix}`
-    : `Delete ${deletableCount} selected draft node(s)?${suffix}`;
+  const draftNodeCount = deletableCount - imageNodeCount;
+  if (imageNodeCount && draftNodeCount) {
+    return `Archive ${imageNodeCount} selected image node(s) and delete ${draftNodeCount} draft node(s)?${suffix}`;
+  }
+  if (imageNodeCount) {
+    return `Archive ${imageNodeCount} selected image node(s)?${suffix}`;
+  }
+  return `Delete ${deletableCount} selected draft node(s)?${suffix}`;
 }

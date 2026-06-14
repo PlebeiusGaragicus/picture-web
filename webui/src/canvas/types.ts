@@ -17,8 +17,6 @@ export interface ImageGroupNodeData extends ImageGroupCanvasNode {
   onView: (nodeId: string) => void;
   onDetails: (nodeId: string) => void;
   onDisplayNameChange: (nodeId: string, displayName: string) => void;
-  onRefineChat: (nodeId: string, assetId: string) => void;
-  hasRefinements?: boolean;
   isGenerating?: boolean;
 }
 

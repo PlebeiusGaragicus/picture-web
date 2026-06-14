@@ -22,6 +22,9 @@ export function NodeSidebar({
   onVariant,
   onCreateSibling,
   onDelete,
+  onArchiveImage,
+  onRestoreImage,
+  onOpenAsset,
   onRefineChat,
 }: {
   node: Node<PhotoNodeData>;
@@ -39,6 +42,9 @@ export function NodeSidebar({
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
   onDelete: (id: string, assetId?: string) => void;
+  onArchiveImage: (nodeId: string, assetId: string) => void;
+  onRestoreImage: (nodeId: string, assetId: string) => void;
+  onOpenAsset: (assetId: string) => void;
   onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
   if (node.data.kind === 'draft') {
@@ -84,6 +90,9 @@ export function NodeSidebar({
       adaptation={adaptation}
       coverAssetId={coverAssetId}
       onDelete={onDelete}
+      onArchiveImage={onArchiveImage}
+      onRestoreImage={onRestoreImage}
+      onOpenAsset={onOpenAsset}
       onNodeChange={onImageGroupChange}
       onVariant={onVariant}
       onCreateSibling={onCreateSibling}
@@ -123,6 +132,15 @@ function DraftSidebar({
   const styleRefKind = styleRefKindForTags(draft.tags);
   const styleRefLabel = styleRefKind === 'archetype-character' ? 'character' : styleRefKind === 'archetype-scene' ? 'scene' : null;
   const sourceLabel = draft.role?.type === 'visual-style-source' ? 'visual style' : styleRefLabel ? `${styleRefLabel} archetype` : null;
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [draftName, setDraftName] = useState(visibleDisplayName(draft.displayName));
+  useEffect(() => {
+    if (!isEditingName) setDraftName(visibleDisplayName(draft.displayName));
+  }, [draft.displayName, isEditingName]);
+  const saveName = () => {
+    onDraftChange(node.id, { displayName: draftName.trim() });
+    setIsEditingName(false);
+  };
   useEffect(() => {
     const textarea = promptRef.current;
     if (!textarea) return;
@@ -132,7 +150,30 @@ function DraftSidebar({
   return (
     <aside className="details-sidebar">
       <div className="popover-header">
-        <h2>{visibleDisplayName(draft.displayName) || 'Draft'}</h2>
+        {isEditingName ? (
+          <input
+            className="sidebar-title-input"
+            value={draftName}
+            autoFocus
+            aria-label="Draft name"
+            onChange={(event) => setDraftName(event.target.value)}
+            onBlur={saveName}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') saveName();
+              if (event.key === 'Escape') {
+                setDraftName(visibleDisplayName(draft.displayName));
+                setIsEditingName(false);
+              }
+            }}
+          />
+        ) : (
+          <h2
+            className={`sidebar-title ${visibleDisplayName(draft.displayName) ? '' : 'placeholder'}`}
+            onDoubleClick={() => setIsEditingName(true)}
+          >
+            {visibleDisplayName(draft.displayName) || 'Draft'}
+          </h2>
+        )}
         {canDelete ? <button className="danger" onClick={() => onDelete(node.id)}>Delete</button> : null}
       </div>
       {styleRefLabel && (
@@ -143,31 +184,29 @@ function DraftSidebar({
       {draft.role?.type === 'visual-style-source' && <div className="canvas-role-badge">Durable visual style prompt</div>}
       {isDurableSource && <p className="muted">This {sourceLabel ?? 'source'} prompt is backed by an adaptation file. Sync will recreate it if it is missing from the canvas.</p>}
       {isDurableSource && <button className="secondary" onClick={() => onCreateChildText(node)}>Create child text artifact</button>}
-      <label className="field-label">
-        Name
-        <input value={draft.displayName} onChange={(event) => onDraftChange(node.id, { displayName: event.target.value })} />
-      </label>
       {!isFileBackedPrompt && (
         <section className="sidebar-section parent-section">
           <h3>Parents</h3>
-          {parents.length === 0 && <p className="muted">None</p>}
-          {parents.length > 0 && (
-            <div className="parent-list">
-              {parents.map((parent, index) => (
-                <div className="parent-item" key={draft.refs[index]}>
-                  {parent?.thumbnailUrl ? <img src={parent.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
-                  <span>{visibleDisplayName(draft.parentDisplayNames?.get(draft.refs[index]) ?? '') || assetLabel(parent, 'Unknown parent')}</span>
-                  <button
-                    className="parent-remove"
-                    onClick={() => onDraftChange(node.id, { refs: draft.refs.filter((_, refIndex) => refIndex !== index) })}
-                    title="Remove parent"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="parent-list">
+            {parents.length === 0 ? (
+              <div className="parent-item">
+                <div className="parent-thumb-placeholder" />
+                <span className="muted">None</span>
+              </div>
+            ) : parents.map((parent, index) => (
+              <div className="parent-item" key={draft.refs[index]}>
+                {parent?.thumbnailUrl ? <img src={parent.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
+                <span>{visibleDisplayName(draft.parentDisplayNames?.get(draft.refs[index]) ?? '') || assetLabel(parent, 'Unknown parent')}</span>
+                <button
+                  className="parent-remove"
+                  onClick={() => onDraftChange(node.id, { refs: draft.refs.filter((_, refIndex) => refIndex !== index) })}
+                  title="Remove parent"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
           <button className="add-parent-button" onClick={() => setIsParentPickerOpen((current) => !current)}>+</button>
           {isParentPickerOpen && (
             <div className="asset-picker-popover">
@@ -322,7 +361,9 @@ function ImageSidebar({
   assets,
   adaptation,
   coverAssetId,
-  onDelete,
+  onArchiveImage,
+  onRestoreImage,
+  onOpenAsset,
   onNodeChange,
   onVariant,
   onCreateSibling,
@@ -336,7 +377,9 @@ function ImageSidebar({
   assets: Asset[];
   adaptation: AdaptationStatus | null;
   coverAssetId?: string | null;
-  onDelete: (id: string, assetId?: string) => void;
+  onArchiveImage: (nodeId: string, assetId: string) => void;
+  onRestoreImage: (nodeId: string, assetId: string) => void;
+  onOpenAsset: (assetId: string) => void;
   onNodeChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
@@ -377,16 +420,22 @@ function ImageSidebar({
       batchCount: 1,
     });
   }, [asset]);
+  const isArchived = Boolean(asset.archivedAt);
   return (
     <aside className="details-sidebar">
-      <button className="danger" onClick={() => onDelete(node.id, asset.id)}>Delete</button>
+      {isArchived ? (
+        <button className="secondary" onClick={() => onRestoreImage(node.id, asset.id)}>Unarchive</button>
+      ) : (
+        <button className="secondary" onClick={() => onArchiveImage(node.id, asset.id)}>Archive</button>
+      )}
+      {isArchived && <p className="muted">This variant is archived and hidden unless Show archived is enabled.</p>}
       {(isCharacterArchetype || isSceneArchetype || styleRefKind) && (
         <div className="canvas-role-badge">
           {isCharacterArchetype ? 'Chosen character archetype' : isSceneArchetype ? 'Chosen scene archetype' : 'Style reference candidate'}
         </div>
       )}
       {isGeneratedResult && <div className="canvas-role-badge">Generated child image</div>}
-      {isGeneratedResult && <p className="muted">This image was generated from a durable source node. Deleting it does not delete the source prompt.</p>}
+      {isGeneratedResult && <p className="muted">This image was generated from a durable source node. Archiving it does not remove the source prompt.</p>}
       <label className="field-label">
         Group name
         <input value={node.data.displayName} onChange={(event) => onNodeChange(node.id, { displayName: event.target.value })} />
@@ -446,17 +495,34 @@ function ImageSidebar({
       {asset.generation && (
         <section className="sidebar-section parent-section">
           <h3>Parents</h3>
-          {refs.length === 0 && <p className="muted">None</p>}
-          {refs.length > 0 && (
-            <div className="parent-list">
-              {refs.map((ref) => (
+          <div className="parent-list">
+            {refs.length === 0 ? (
+              <div className="parent-item">
+                <div className="parent-thumb-placeholder" />
+                <span className="muted">None</span>
+              </div>
+            ) : refs.map((ref) => {
+              const parent = assetById.get(ref);
+              const openParent = () => onOpenAsset(ref);
+              return (
                 <div className="parent-item" key={ref}>
-                  {assetById.get(ref)?.thumbnailUrl ? <img src={assetById.get(ref)?.thumbnailUrl ?? ''} alt="" /> : <div className="parent-thumb-placeholder" />}
-                  <span>{assetLabel(assetById.get(ref), 'Parent image')}</span>
+                  {parent?.thumbnailUrl ? (
+                    <button
+                      type="button"
+                      className="parent-thumb-button"
+                      onClick={openParent}
+                      title={`Open ${assetLabel(parent, 'Parent image')}`}
+                    >
+                      <img src={parent.thumbnailUrl} alt="" />
+                    </button>
+                  ) : (
+                    <div className="parent-thumb-placeholder" />
+                  )}
+                  <span>{assetLabel(parent, 'Parent image')}</span>
                 </div>
-              ))}
-            </div>
-          )}
+              );
+            })}
+          </div>
         </section>
       )}
       {prompt && (

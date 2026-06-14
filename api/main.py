@@ -131,8 +131,8 @@ async def import_asset(
 
 
 @app.get("/api/projects/{slug}/canvas", response_model=CanvasDocument)
-def get_canvas(slug: str) -> CanvasDocument:
-    return library.read_canvas(slug)
+def get_canvas(slug: str, includeArchived: bool = Query(default=False)) -> CanvasDocument:
+    return library.read_canvas(slug, include_archived=includeArchived)
 
 
 @app.put("/api/projects/{slug}/canvas", response_model=CanvasDocument)

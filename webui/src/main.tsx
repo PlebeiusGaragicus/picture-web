@@ -16,6 +16,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import './style.css';
 import { api } from './api';
+import { exportProjectAssetsToFolder } from './exportAssets';
 import { VisualStyleCard } from './adaptation/cards';
 import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
@@ -28,6 +29,7 @@ import { HelpTip, Modal } from './ui';
 import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryKind, StyleRefKind } from './types';
 
 type ProjectPhase =
+  | 'story-canvas'
   | 'phase-0-ingestion'
   | 'phase-1-characters'
   | 'phase-2-locations'
@@ -44,21 +46,12 @@ const projectPhases: Array<{ id: ProjectPhase; number: string; title: string; sh
   { id: 'phase-5-moment-canvas', number: '5', title: 'Images', shortTitle: 'Images', description: 'Panels' },
 ];
 
-const phaseDefaultTags: Record<ProjectPhase, string[]> = {
-  'phase-0-ingestion': [],
-  'phase-1-characters': ['character-sheet', 'character-style'],
-  'phase-2-locations': ['location', 'scene-style'],
-  'phase-3-scenes': [],
-  'phase-4-moments': [],
-  'phase-5-moment-canvas': ['page', 'panel'],
-};
-
 function phaseHasCanvas(phase: ProjectPhase) {
-  return phase === 'phase-1-characters' || phase === 'phase-2-locations' || phase === 'phase-5-moment-canvas';
+  return phase === 'story-canvas' || phase === 'phase-1-characters' || phase === 'phase-2-locations' || phase === 'phase-5-moment-canvas';
 }
 
 function phaseHasList(phase: ProjectPhase) {
-  return phase !== 'phase-5-moment-canvas';
+  return phase !== 'phase-5-moment-canvas' && phase !== 'story-canvas';
 }
 
 function phaseStage(phase: ProjectPhase): AdaptationStage | null {
@@ -166,10 +159,8 @@ function toFlowNodes(
   onViewAsset: (assetId: string) => void = () => undefined,
   onDisplayNameChange: (nodeId: string, displayName: string) => void = () => undefined,
   onRefineChat: (nodeId: string, assetId: string) => void = () => undefined,
-  chatSessions: ChatSession[] = [],
 ): Node<PhotoNodeData>[] {
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
-  const sourceAssetIdsWithSessions = new Set(chatSessions.map((session) => session.source.assetId));
   const displayNameByAssetId = new Map<string, string>();
   Object.values(canvas.nodes).forEach((canvasNode) => {
     if (canvasNode.type === 'imageGroup') {
@@ -200,7 +191,7 @@ function toFlowNodes(
       id,
       position: { x: canvasNode.x, y: canvasNode.y },
       type: 'imageGroup',
-      data: { ...canvasNode, kind: 'imageGroup', nodeId: id, assets: groupAssets, activeAsset, onVariant, onView, onDetails, onDisplayNameChange, onRefineChat, hasRefinements: Boolean(activeAsset && sourceAssetIdsWithSessions.has(activeAsset.id)), isGenerating: generatingNodeIds.has(id) },
+      data: { ...canvasNode, kind: 'imageGroup', nodeId: id, assets: groupAssets, activeAsset, onVariant, onView, onDetails, onDisplayNameChange, isGenerating: generatingNodeIds.has(id) },
     };
   });
 }
@@ -224,11 +215,11 @@ function App() {
   const [viewerNodeId, setViewerNodeId] = useState<string | null>(null);
   const [viewerAssetId, setViewerAssetId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ nodeId: string; assetId?: string } | null>(null);
+  const [pendingArchive, setPendingArchive] = useState<{ nodeId: string; assetId: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
-  const [hasManualTagFilters, setHasManualTagFilters] = useState(false);
   const [isTagFilterMenuOpen, setIsTagFilterMenuOpen] = useState(false);
-  const [projectPhase, setProjectPhase] = useState<ProjectPhase>('phase-0-ingestion');
+  const [projectPhase, setProjectPhase] = useState<ProjectPhase>('story-canvas');
   const [phaseViewMode, setPhaseViewMode] = useState<'list' | 'canvas'>('list');
   const autoPublishingArchetypesRef = useRef(false);
   const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
@@ -242,6 +233,15 @@ function App() {
   const pendingImportPositionRef = useRef<{ x: number; y: number } | undefined>(undefined);
   const generatingNodeIdsRef = useRef<Set<string>>(new Set());
   const chatSessionsRef = useRef<ChatSession[]>([]);
+  const persistNodesRef = useRef<(nextNodes: Node<PhotoNodeData>[], options?: { refresh?: boolean }) => Promise<void>>(async () => undefined);
+  const toFlowNodesCallbacksRef = useRef({
+    changeVariant: (_nodeId: string, _direction: -1 | 1) => {},
+    openViewer: (_nodeId: string) => {},
+    openDetails: (_nodeId: string) => {},
+    openAssetInViewer: (_assetId: string) => {},
+    updateImageGroupDisplayName: (_nodeId: string, _displayName: string) => {},
+    openChatForAsset: async (_nodeId: string, _assetId: string) => {},
+  });
 
   useEffect(() => {
     generatingNodeIdsRef.current = generatingNodeIds;
@@ -271,7 +271,7 @@ function App() {
               }
             : node,
       );
-      persistNodes(nextNodes, { refresh: false }).catch((err) => {
+      void persistNodesRef.current(nextNodes, { refresh: false }).catch((err) => {
         console.error('[photo-web] failed to persist image group name', err);
         setError(String(err));
       });
@@ -289,7 +289,7 @@ function App() {
         const activeAsset = node.data.assets.find((asset) => asset.id === activeAssetId) ?? node.data.activeAsset;
         return { ...node, data: { ...node.data, activeAssetId, activeAsset } };
       });
-      void persistNodes(next);
+      void persistNodesRef.current(next);
       return next;
     });
   }, []);
@@ -297,6 +297,29 @@ function App() {
   const openViewer = useCallback((nodeId: string) => {
     setViewerNodeId(nodeId);
     setViewerAssetId(null);
+  }, []);
+
+  const openAssetInSidebar = useCallback((assetId: string) => {
+    setActiveChatSessionId(null);
+    setViewerNodeId(null);
+    setViewerAssetId(null);
+    setNodes((current) => {
+      const targetNode = current.find(
+        (node) => node.data.kind === 'imageGroup' && node.data.assetIds.includes(assetId),
+      ) as Node<ImageGroupNodeData> | undefined;
+      if (!targetNode) {
+        setViewerAssetId(assetId);
+        return current;
+      }
+      setPopoverNodeId(targetNode.id);
+      const next = current.map((node) => {
+        if (node.id !== targetNode.id || node.data.kind !== 'imageGroup') return node;
+        const activeAsset = node.data.assets.find((asset) => asset.id === assetId) ?? node.data.activeAsset;
+        return { ...node, data: { ...node.data, activeAssetId: assetId, activeAsset } };
+      });
+      void persistNodesRef.current(next);
+      return next;
+    });
   }, []);
 
   const openAssetInViewer = useCallback((assetId: string) => {
@@ -314,7 +337,7 @@ function App() {
         const activeAsset = node.data.assets.find((asset) => asset.id === assetId) ?? node.data.activeAsset;
         return { ...node, data: { ...node.data, activeAssetId: assetId, activeAsset } };
       });
-      void persistNodes(next);
+      void persistNodesRef.current(next);
       return next;
     });
   }, []);
@@ -351,12 +374,16 @@ function App() {
 
   const loadProject = useCallback(async (projectSlug: string) => {
     if (!projectSlug) return;
-    const [detail, layout, sessions] = await Promise.all([api.getProject(projectSlug, showArchived), api.getCanvas(projectSlug), api.listChatSessions(projectSlug, showArchived)]);
+    const [detail, layout, sessions] = await Promise.all([
+      api.getProject(projectSlug, showArchived),
+      api.getCanvas(projectSlug, showArchived),
+      api.listChatSessions(projectSlug, showArchived),
+    ]);
     setProjects((current) => current.map((project) => (project.slug === detail.project.slug ? detail.project : project)));
     setAssets(detail.assets);
     setChatSessions(sessions);
     setCanvas(layout);
-    setNodes(toFlowNodes(layout, detail.assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, openAssetInViewer, updateImageGroupDisplayName, openChatForAsset, sessions));
+    setNodes(toFlowNodes(layout, detail.assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, openAssetInViewer, updateImageGroupDisplayName, openChatForAsset));
   }, [changeVariant, openAssetInViewer, openChatForAsset, openDetails, openViewer, showArchived, updateImageGroupDisplayName]);
 
   useEffect(() => {
@@ -373,6 +400,7 @@ function App() {
       if (event.key === 'Escape') {
         setContextMenu(null);
         setPopoverNodeId(null);
+        setIsTagFilterMenuOpen(false);
       }
     };
     window.addEventListener('click', closeMenu);
@@ -388,15 +416,20 @@ function App() {
     nodes.forEach((node) => node.data.tags.forEach((tag) => tags.add(tag)));
     return Array.from(tags).sort();
   }, [nodes]);
-  const effectiveTagFilters = useMemo(() => {
-    if (hasManualTagFilters) return activeTagFilters;
-    return phaseDefaultTags[projectPhase].filter((tag) => availableTagFilters.includes(tag));
-  }, [activeTagFilters, availableTagFilters, hasManualTagFilters, projectPhase]);
   const filteredNodes = useMemo(() => {
-    if (effectiveTagFilters.length === 0) return nodes;
-    const required = new Set(effectiveTagFilters);
-    return nodes.filter((node) => node.data.tags.some((tag) => required.has(tag)));
-  }, [effectiveTagFilters, nodes]);
+    const tagFiltered = activeTagFilters.length === 0
+      ? nodes
+      : nodes.filter((node) => {
+          const required = new Set(activeTagFilters);
+          return node.data.tags.some((tag) => required.has(tag));
+        });
+    if (showArchived) return tagFiltered;
+    return tagFiltered.filter((node) => {
+      if (node.data.kind !== 'imageGroup') return true;
+      const assetsInNode = node.data.assets.length ? node.data.assets : node.data.activeAsset ? [node.data.activeAsset] : [];
+      return assetsInNode.some((asset) => !asset.archivedAt);
+    });
+  }, [activeTagFilters, nodes, showArchived]);
 
   const edges: Edge[] = useMemo(() => {
     return deriveStoryGraphEdges(filteredNodes);
@@ -451,7 +484,7 @@ function App() {
             })
             .filter((node): node is Node<PhotoNodeData> => Boolean(node))
         : current.filter((node) => node.id !== nodeId);
-      void persistNodes(next);
+      void persistNodesRef.current(next);
       return next;
     });
     setSelectedNodeIds((current) => current.filter((id) => id !== nodeId));
@@ -464,10 +497,40 @@ function App() {
     setPendingDelete({ nodeId, assetId });
   }, [nodes]);
 
+  const requestArchiveImageAsset = useCallback((nodeId: string, assetId: string) => {
+    setPendingArchive({ nodeId, assetId });
+  }, []);
+
+  const performArchiveImageAsset = useCallback(async (nodeId: string, assetId: string) => {
+    if (!openProjectSlug) return;
+    try {
+      await api.archiveAsset(openProjectSlug, assetId, true);
+      setPopoverNodeId((current) => (current === nodeId ? null : current));
+      setViewerNodeId((current) => (current === nodeId ? null : current));
+      setViewerAssetId((current) => (current === assetId ? null : current));
+      setSelectedNodeIds((current) => current.filter((id) => id !== nodeId));
+      await loadProject(openProjectSlug);
+    } catch (err) {
+      console.error('[photo-web] failed to archive image asset', err);
+      setError(String(err));
+    }
+  }, [loadProject, openProjectSlug]);
+
+  const restoreImageAsset = useCallback(async (nodeId: string, assetId: string) => {
+    if (!openProjectSlug) return;
+    try {
+      await api.archiveAsset(openProjectSlug, assetId, false);
+      await loadProject(openProjectSlug);
+    } catch (err) {
+      console.error('[photo-web] failed to restore image asset', err);
+      setError(String(err));
+    }
+  }, [loadProject, openProjectSlug]);
+
   const openProject = async (projectSlug: string) => {
     setOpenProjectSlug(projectSlug);
-    setProjectPhase('phase-0-ingestion');
-    setHasManualTagFilters(false);
+    setProjectPhase('story-canvas');
+    setPhaseViewMode('canvas');
     setActiveTagFilters([]);
     setSelectedIds([]);
     setSelectedNodeIds([]);
@@ -476,8 +539,7 @@ function App() {
 
   const closeProject = () => {
     setOpenProjectSlug('');
-    setProjectPhase('phase-0-ingestion');
-    setHasManualTagFilters(false);
+    setProjectPhase('story-canvas');
     setActiveTagFilters([]);
     setAssets([]);
     setChatSessions([]);
@@ -613,15 +675,41 @@ function App() {
     });
   };
 
-  const persistNodes = async (nextNodes: Node<PhotoNodeData>[], options: { refresh?: boolean } = {}) => {
+  const persistNodes = useCallback(async (nextNodes: Node<PhotoNodeData>[], options: { refresh?: boolean } = {}) => {
     if (!openProjectSlug) return;
     const next = nodesToCanvas(canvas, nextNodes);
     const saved = await api.saveCanvas(openProjectSlug, next);
     setCanvas(saved);
     if (options.refresh ?? true) {
-      setNodes(toFlowNodes(saved, assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, openAssetInViewer, updateImageGroupDisplayName, openChatForAsset, chatSessionsRef.current));
+      const callbacks = toFlowNodesCallbacksRef.current;
+      setNodes(toFlowNodes(
+        saved,
+        assets,
+        generatingNodeIdsRef.current,
+        callbacks.changeVariant,
+        callbacks.openViewer,
+        callbacks.openDetails,
+        callbacks.openAssetInViewer,
+        callbacks.updateImageGroupDisplayName,
+        callbacks.openChatForAsset,
+      ));
     }
-  };
+  }, [assets, canvas, openProjectSlug]);
+
+  useEffect(() => {
+    persistNodesRef.current = persistNodes;
+  }, [persistNodes]);
+
+  useEffect(() => {
+    toFlowNodesCallbacksRef.current = {
+      changeVariant,
+      openViewer,
+      openDetails,
+      openAssetInViewer,
+      updateImageGroupDisplayName,
+      openChatForAsset,
+    };
+  }, [changeVariant, openAssetInViewer, openChatForAsset, openDetails, openViewer, updateImageGroupDisplayName]);
 
   const deleteSelectedNodes = useCallback(async () => {
     if (!selectedNodeIds.length) return;
@@ -629,20 +717,28 @@ function App() {
     if (!deletableNodes.length) return;
     const deletable = new Set(deletableNodes.map((node) => node.id));
     const selectedImageNodes = deletableNodes.filter((node) => node.data.kind === 'imageGroup') as Node<ImageGroupNodeData>[];
+    const selectedDraftNodes = deletableNodes.filter((node) => node.data.kind !== 'imageGroup');
     const message = deleteSelectedNodesMessage(selectedNodeIds.length, deletableNodes.length, selectedImageNodes.length);
     if (!window.confirm(message)) return;
     try {
-      await Promise.all(selectedImageNodes.flatMap((node) => node.data.assetIds.map((assetId) => api.deleteAsset(openProjectSlug, assetId))));
+      if (selectedImageNodes.length) {
+        await Promise.all(selectedImageNodes.flatMap((node) => node.data.assetIds.map((assetId) => api.archiveAsset(openProjectSlug, assetId, true))));
+      }
     } catch (err) {
-      console.error('[photo-web] failed to delete selected image assets', err);
+      console.error('[photo-web] failed to archive selected image assets', err);
       setError(String(err));
+      return;
     }
-    const nextNodes = nodes.filter((node) => !deletable.has(node.id));
+    const nextNodes = selectedDraftNodes.length
+      ? nodes.filter((node) => !selectedDraftNodes.some((draftNode) => draftNode.id === node.id))
+      : nodes;
     setNodes(nextNodes);
     setSelectedNodeIds((current) => current.filter((id) => !deletable.has(id)));
     setSelectedIds([]);
     if (popoverNodeId && deletable.has(popoverNodeId)) setPopoverNodeId(null);
-    await persistNodes(nextNodes);
+    if (selectedDraftNodes.length) {
+      await persistNodes(nextNodes);
+    }
     await loadProject(openProjectSlug);
   }, [loadProject, nodes, openProjectSlug, persistNodes, popoverNodeId, selectedNodeIds]);
 
@@ -1058,9 +1154,21 @@ function App() {
           await loadProjects();
           closeProject();
         }}
+        onExportAssets={async () => {
+          if (!currentProject) return;
+          setError(null);
+          try {
+            const detail = await api.getProject(openProjectSlug, true);
+            await exportProjectAssetsToFolder(openProjectSlug, currentProject.name, detail.assets);
+          } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') return;
+            setError(err instanceof Error ? err.message : String(err));
+          }
+        }}
         onPhaseChange={(phase) => {
           setProjectPhase(phase);
-          setPhaseViewMode('list');
+          setPhaseViewMode(phase === 'story-canvas' ? 'canvas' : 'list');
+          setActiveTagFilters([]);
           setIsTagFilterMenuOpen(false);
           setPopoverNodeId(null);
           setActiveChatSessionId(null);
@@ -1202,7 +1310,10 @@ function App() {
                 setActiveChatSessionId(null);
                 setPopoverNodeId(node.id);
               }}
-              onPaneClick={() => setPopoverNodeId(null)}
+              onPaneClick={() => {
+                setPopoverNodeId(null);
+                setIsTagFilterMenuOpen(false);
+              }}
               onSelectionChange={({ nodes: selected }) => {
                 setSelectedNodeIds(selected.map((node) => node.id));
                 setSelectedIds(selected.flatMap((node) => (node.data.kind === 'imageGroup' && node.data.activeAsset ? [node.data.activeAsset.id] : [])));
@@ -1212,28 +1323,19 @@ function App() {
             >
               <Controls showZoom={false} showInteractive={false} />
               <Panel position="bottom-left" className="zoom-panel">
-                Zoom {zoomPercent}%
+                {zoomPercent}%
               </Panel>
             </ReactFlow>
             <FloatingFilterMenu
               availableTagFilters={availableTagFilters}
               activeTagFilters={activeTagFilters}
-              effectiveTagFilters={effectiveTagFilters}
-              hasManualTagFilters={hasManualTagFilters}
               showArchived={showArchived}
               isOpen={isTagFilterMenuOpen}
               onToggleOpen={() => setIsTagFilterMenuOpen((current) => !current)}
+              onClose={() => setIsTagFilterMenuOpen(false)}
               onShowArchivedChange={setShowArchived}
-              onClear={() => {
-                setHasManualTagFilters(true);
-                setActiveTagFilters([]);
-              }}
-              onUsePhaseDefaults={() => {
-                setHasManualTagFilters(false);
-                setActiveTagFilters([]);
-              }}
+              onClear={() => setActiveTagFilters([])}
               onToggleTag={(tag) => {
-                setHasManualTagFilters(true);
                 setActiveTagFilters((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]);
               }}
             />
@@ -1264,6 +1366,9 @@ function App() {
           onVariant={changeVariant}
           onCreateSibling={createSiblingDraft}
           onDelete={deleteNodeById}
+          onArchiveImage={requestArchiveImageAsset}
+          onRestoreImage={restoreImageAsset}
+          onOpenAsset={openAssetInSidebar}
           onRefineChat={openChatForAsset}
         />
       )}
@@ -1292,9 +1397,30 @@ function App() {
           onVariant={changeVariant}
           onViewAsset={openAssetInViewer}
           onDetails={openViewerDetails}
-          onDelete={deleteNodeById}
+          onArchiveImage={requestArchiveImageAsset}
+          onRestoreImage={restoreImageAsset}
           onSetProjectCover={setProjectCover}
         />
+      )}
+      {isCanvasActive && pendingArchive && (
+        <div className="confirm-backdrop" onClick={() => setPendingArchive(null)}>
+          <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
+            <h2>Confirm archive</h2>
+            <p>Archive this variant? It will be hidden from the canvas until you enable Show archived.</p>
+            <div className="row">
+              <button
+                className="secondary"
+                onClick={() => {
+                  void performArchiveImageAsset(pendingArchive.nodeId, pendingArchive.assetId);
+                  setPendingArchive(null);
+                }}
+              >
+                Archive
+              </button>
+              <button className="secondary" onClick={() => setPendingArchive(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
       )}
       {isCanvasActive && pendingDelete && (
         <div className="confirm-backdrop" onClick={() => setPendingDelete(null)}>
@@ -1302,7 +1428,7 @@ function App() {
             <h2>Confirm delete</h2>
             <p>
               {nodes.find((node) => node.id === pendingDelete.nodeId)?.data.kind === 'imageGroup'
-                ? 'Delete this variant and move its files to the system Trash?'
+                ? 'Remove this empty image node from the canvas?'
                 : 'Delete this draft?'}
             </p>
             <div className="row">
@@ -1421,6 +1547,20 @@ function phaseStatus(adaptation: AdaptationStatus | null, phase: ProjectPhase) {
   return (counts.panelPrompts ?? 0) > 0 || (counts.pagePlans ?? 0) > 0 ? 'active' : 'pending';
 }
 
+function PhaseSidebarToggleIcon({ variant }: { variant: 'collapse' | 'expand' }) {
+  return (
+    <svg className="phase-sidebar-toggle-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      <line x1="5.5" y1="2.5" x2="5.5" y2="13.5" stroke="currentColor" strokeWidth="1.25" />
+      {variant === 'collapse' ? (
+        <path d="M7 8 L10 5.5 M7 8 L10 10.5" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+      ) : (
+        <path d="M11 8 L8 5.5 M11 8 L8 10.5" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+      )}
+    </svg>
+  );
+}
+
 function ProjectPhaseSidebar({
   project,
   projectSlug,
@@ -1431,6 +1571,7 @@ function ProjectPhaseSidebar({
   onToggleCollapsed,
   onBack,
   onDeleteProject,
+  onExportAssets,
   onPhaseChange,
 }: {
   project: Project | undefined;
@@ -1442,10 +1583,12 @@ function ProjectPhaseSidebar({
   onToggleCollapsed: () => void;
   onBack: () => void;
   onDeleteProject: () => Promise<void>;
+  onExportAssets: () => Promise<void>;
   onPhaseChange: (phase: ProjectPhase) => void;
 }) {
   const [pendingDelete, setPendingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [exportingAssets, setExportingAssets] = useState(false);
   if (isCollapsed) {
     return (
       <button
@@ -1454,32 +1597,36 @@ function ProjectPhaseSidebar({
         title="Expand sidebar"
         aria-label="Expand sidebar"
       >
-        ›
+        <PhaseSidebarToggleIcon variant="expand" />
       </button>
     );
   }
   return (
-    <aside className="project-phase-sidebar">
-      <div className="phase-sidebar-rail">
-        <button
-          className="phase-sidebar-collapse"
-          onClick={onToggleCollapsed}
-          title="Collapse sidebar"
-          aria-label="Collapse sidebar"
-        >
-          ‹
+    <div className="project-phase-sidebar-shell">
+      <aside className="project-phase-sidebar">
+      <div className="phase-sidebar-header">
+        <button className="project-back-button" onClick={onBack} aria-label="Back to projects">
+          <span className="project-back-arrow" aria-hidden="true">←</span>
+          <span className="project-back-tooltip" role="tooltip">Back to projects</span>
         </button>
-      </div>
-      <button className="project-back-button" onClick={onBack} title="Back to projects">
-        <span className="project-back-arrow" aria-hidden="true">←</span>
-        <span>All projects</span>
-      </button>
-      <div className="phase-sidebar-project-title">
-        <span>Project</span>
-        <strong>{project?.name ?? projectSlug}</strong>
+        <strong className="phase-sidebar-project-name" title={project?.name ?? projectSlug}>
+          {project?.name ?? projectSlug}
+        </strong>
       </div>
       {error && <p className="error">{error}</p>}
-      <nav className="phase-nav" aria-label="Project phases">
+      <nav className="phase-nav" aria-label="Story canvas">
+        <button
+          type="button"
+          className={`phase-nav-item ${activePhase === 'story-canvas' ? 'is-selected' : ''}`}
+          aria-current={activePhase === 'story-canvas' ? 'page' : undefined}
+          onClick={() => onPhaseChange('story-canvas')}
+        >
+          <span className="phase-number" aria-hidden="true">▦</span>
+          <strong>Story Canvas</strong>
+        </button>
+      </nav>
+      <h3 className="phase-nav-heading">Story Adaptation</h3>
+      <nav className="phase-nav" aria-label="Story adaptation phases">
         {projectPhases.map((phase) => {
           const status = phaseStatus(adaptation, phase.id);
           const selected = activePhase === phase.id;
@@ -1489,17 +1636,29 @@ function ProjectPhaseSidebar({
               className={`phase-nav-item status-${status} ${selected ? 'is-selected' : ''}`}
               aria-current={selected ? 'page' : undefined}
               onClick={() => onPhaseChange(phase.id)}
-              title={`${phase.number}. ${phase.title}: ${phase.description}`}
             >
               <span className="phase-number">{phase.number}</span>
               <strong>{phase.title}</strong>
-              <small>{phase.description}</small>
             </button>
           );
         })}
       </nav>
       <div className="phase-sidebar-footer">
-        <button className="danger" disabled={deleting} onClick={() => setPendingDelete(true)}>
+        <button
+          className="secondary"
+          disabled={exportingAssets || deleting}
+          onClick={async () => {
+            setExportingAssets(true);
+            try {
+              await onExportAssets();
+            } finally {
+              setExportingAssets(false);
+            }
+          }}
+        >
+          {exportingAssets ? 'Exporting...' : 'Export assets'}
+        </button>
+        <button className="danger" disabled={deleting || exportingAssets} onClick={() => setPendingDelete(true)}>
           Delete project
         </button>
       </div>
@@ -1532,51 +1691,73 @@ function ProjectPhaseSidebar({
           </div>
         </div>
       )}
-    </aside>
+      </aside>
+      <button
+        className="phase-sidebar-collapse"
+        onClick={onToggleCollapsed}
+        title="Collapse sidebar"
+        aria-label="Collapse sidebar"
+      >
+        <PhaseSidebarToggleIcon variant="collapse" />
+      </button>
+    </div>
   );
 }
 
 function FloatingFilterMenu({
   availableTagFilters,
   activeTagFilters,
-  effectiveTagFilters,
-  hasManualTagFilters,
   showArchived,
   isOpen,
   onToggleOpen,
+  onClose,
   onShowArchivedChange,
   onClear,
-  onUsePhaseDefaults,
   onToggleTag,
 }: {
   availableTagFilters: string[];
   activeTagFilters: string[];
-  effectiveTagFilters: string[];
-  hasManualTagFilters: boolean;
   showArchived: boolean;
   isOpen: boolean;
   onToggleOpen: () => void;
+  onClose: () => void;
   onShowArchivedChange: (value: boolean) => void;
   onClear: () => void;
-  onUsePhaseDefaults: () => void;
   onToggleTag: (tag: string) => void;
 }) {
+  const menuRef = useRef<HTMLDivElement>(null);
   const visibleTags = ['archetype', 'character-sheet', 'location', 'page', 'panel', 'generated-image', ...availableTagFilters.filter((tag) => !['archetype', 'character-sheet', 'location', 'page', 'panel', 'generated-image'].includes(tag))];
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (menuRef.current?.contains(target)) return;
+      onClose();
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick, true);
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick, true);
+  }, [isOpen, onClose]);
+
   return (
-    <div className="floating-filter-menu">
-      <button className={`secondary tag-filter-toggle ${effectiveTagFilters.length ? 'active' : ''}`} onClick={onToggleOpen}>
-        Filters{effectiveTagFilters.length ? ` (${effectiveTagFilters.length})` : ''}
+    <div ref={menuRef} className="floating-filter-menu">
+      <button className={`secondary tag-filter-toggle ${activeTagFilters.length ? 'active' : ''}`} onClick={onToggleOpen}>
+        Filters{activeTagFilters.length ? ` (${activeTagFilters.length})` : ''}
       </button>
       {isOpen && (
         <div className="floating-filter-popover">
-          <label className="toolbar-toggle filter-popover-toggle">
-            <input type="checkbox" checked={showArchived} onChange={(event) => onShowArchivedChange(event.target.checked)} />
-            Show archived
-          </label>
-          <button className={!hasManualTagFilters ? 'active' : ''} onClick={onUsePhaseDefaults}>Phase defaults</button>
-          <button className={hasManualTagFilters && activeTagFilters.length === 0 ? 'active' : ''} onClick={onClear}>All</button>
+          <div className="floating-filter-archive-section">
+            <button
+              className={showArchived ? 'active' : ''}
+              onClick={() => onShowArchivedChange(!showArchived)}
+            >
+              {showArchived ? 'Hide archived' : 'Show archived'}
+            </button>
+          </div>
+          <button className={activeTagFilters.length === 0 ? 'active' : ''} onClick={onClear}>All</button>
           {visibleTags.map((tag) => (
-            <button key={tag} className={hasManualTagFilters && activeTagFilters.includes(tag) ? 'active' : ''} onClick={() => onToggleTag(tag)}>
+            <button key={tag} className={activeTagFilters.includes(tag) ? 'active' : ''} onClick={() => onToggleTag(tag)}>
               {tag}
             </button>
           ))}
@@ -2362,8 +2543,9 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
   ]
     .filter(Boolean)
     .join('\n');
+  const isArchived = Boolean(asset.archivedAt);
   return (
-    <div className={`node image-group-node ${styleRole ? 'style-ref-image-node' : ''} ${data.assetIds.length > 1 ? 'stacked' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
+    <div className={`node image-group-node ${styleRole ? 'style-ref-image-node' : ''} ${data.assetIds.length > 1 ? 'stacked' : ''} ${data.isGenerating ? 'generating' : ''} ${isArchived ? 'is-archived' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       {isEditingName ? (
         <input
@@ -2383,11 +2565,12 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
         />
       ) : (
         <strong className={`node-title ${visibleDisplayName(data.displayName) ? '' : 'placeholder'}`} onDoubleClick={() => setIsEditingName(true)}>
-          {visibleDisplayName(data.displayName) || 'title'}
+          {visibleDisplayName(data.displayName) || 'add title (double click)'}
         </strong>
       )}
       <div className="node-image-frame" style={{ aspectRatio: imageRatio ? `${imageRatio}` : undefined }}>
         {styleRole && <span className="node-role-badge">{styleRole}</span>}
+        {isArchived && <span className="node-role-badge archived-badge">Archived</span>}
         {asset.thumbnailUrl && (
           <img
             src={asset.thumbnailUrl}
@@ -2436,30 +2619,6 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
         >
           👁️
         </button>
-        <button
-          className="node-action-button chat-button nodrag nopan"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            data.onRefineChat(data.nodeId, asset.id);
-          }}
-          title="Refine in chat"
-        >
-          C
-        </button>
-        {data.hasRefinements && (
-          <button
-            className="node-action-button refinements-button nodrag nopan"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              data.onRefineChat(data.nodeId, asset.id);
-            }}
-            title="Open refinements"
-          >
-            R
-          </button>
-        )}
         {data.isGenerating && (
           <div className="node-generating-overlay">
             <span className="spinner" aria-hidden="true" />
@@ -2482,7 +2641,8 @@ function ImageViewer({
   onVariant,
   onViewAsset,
   onDetails,
-  onDelete,
+  onArchiveImage,
+  onRestoreImage,
   onSetProjectCover,
 }: {
   node?: Node<ImageGroupNodeData>;
@@ -2494,7 +2654,8 @@ function ImageViewer({
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onViewAsset: (assetId: string) => void;
   onDetails: (nodeId: string) => void;
-  onDelete: (nodeId: string, assetId?: string) => void;
+  onArchiveImage: (nodeId: string, assetId: string) => void;
+  onRestoreImage: (nodeId: string, assetId: string) => void;
   onSetProjectCover: (assetId: string) => void;
 }) {
   useEffect(() => {
@@ -2509,6 +2670,7 @@ function ImageViewer({
 
   const asset = node?.data.activeAsset ?? fallbackAsset;
   if (!asset) return null;
+  const isArchived = Boolean(asset.archivedAt);
   const isProjectCover = coverAssetId === asset.id;
   const currentIndex = node ? Math.max(0, node.data.assetIds.indexOf(asset.id)) : 0;
   const imageUrl = `/api/projects/${projectSlug}/assets/${asset.id}/image`;
@@ -2534,16 +2696,29 @@ function ImageViewer({
     <div className={viewerClassName} onClick={onClose}>
       <div className="image-viewer-toolbar" onClick={(event) => event.stopPropagation()}>
         <div className="image-viewer-toolbar-main">
-          <button
-            className="danger"
-            disabled={!node}
-            onClick={(event) => {
-              event.stopPropagation();
-              if (node) onDelete(node.id, asset.id);
-            }}
-          >
-            Delete Variant
-          </button>
+          {isArchived ? (
+            <button
+              className="secondary"
+              disabled={!node}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (node) void onRestoreImage(node.id, asset.id);
+              }}
+            >
+              Unarchive variant
+            </button>
+          ) : (
+            <button
+              className="secondary"
+              disabled={!node}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (node) onArchiveImage(node.id, asset.id);
+              }}
+            >
+              Archive variant
+            </button>
+          )}
           <strong>{node?.data.displayName ?? assetLabel(asset)}</strong>
           <div className="image-viewer-toolbar-actions">
             {asset.hasPixels && (
@@ -2635,7 +2810,7 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
       ? 'Editable child artifact'
       : styleRefKind && data.tags.includes('generated')
         ? 'Generated child available'
-        : `${data.refs.length} parent${data.refs.length === 1 ? '' : 's'}`;
+        : '';
   const tooltip = [
     data.prompt || 'Draft prompt not set',
     `parents: ${data.refs.length}`,
@@ -2646,6 +2821,7 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
     <div className={`node draft-node ${data.tags.includes('archetype') ? 'archetype-draft-node' : ''} ${roleClass} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       <div className="draft-placeholder" aria-hidden="true">
+        {data.prompt.trim() && <p className="draft-prompt-preview">{data.prompt.replace(/\s+/g, ' ').trim()}</p>}
         {(styleRole || data.role?.type === 'visual-style-source' || data.role?.type === 'text-result') && <span className="node-role-badge">{styleRole ?? nodeTitle}</span>}
         {data.isGenerating && (
           <div className="node-generating-overlay">
@@ -2655,7 +2831,7 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
         )}
       </div>
       <strong>{nodeTitle}</strong>
-      <small>{nodeSubtitle}</small>
+      {nodeSubtitle && <small>{nodeSubtitle}</small>}
       {(data.role?.type === 'style-ref-source' || data.role?.type === 'visual-style-source' || data.role?.type === 'text-result') && <Handle type="source" position={Position.Right} className="output-handle" />}
     </div>
   );

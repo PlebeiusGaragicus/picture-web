@@ -63,7 +63,8 @@ export const api = {
     request<void>(`/api/projects/${slug}`, {
       method: 'DELETE',
     }),
-  getCanvas: (slug: string) => request<CanvasDocument>(`/api/projects/${slug}/canvas`),
+  getCanvas: (slug: string, includeArchived = false) =>
+    request<CanvasDocument>(`/api/projects/${slug}/canvas${includeArchived ? '?includeArchived=true' : ''}`),
   saveCanvas: (slug: string, canvas: CanvasDocument) =>
     request<CanvasDocument>(`/api/projects/${slug}/canvas`, {
       method: 'PUT',

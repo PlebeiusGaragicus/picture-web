@@ -117,6 +117,15 @@ def test_project_and_canvas_round_trip(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.json()[0]["slug"] == "farm-comic"
 
+    canvas_response = client.get("/api/projects/farm-comic/canvas")
+    assert canvas_response.status_code == 200
+    starter_draft = canvas_response.json()["nodes"][library.DEFAULT_STARTER_DRAFT_NODE_ID]
+    assert starter_draft["type"] == "draft"
+    seed_prompts = {prompt for _, prompt in library.list_seed_default_prompts()}
+    assert seed_prompts
+    assert starter_draft["prompt"] in seed_prompts
+    assert starter_draft["refs"] == []
+
     canvas = {"version": 2, "viewport": {"x": 1, "y": 2, "zoom": 1}, "nodes": {}}
     response = client.put("/api/projects/farm-comic/canvas", json=canvas)
     assert response.status_code == 200
@@ -281,7 +290,8 @@ def test_delete_imported_asset_removes_canvas_node_and_pixels(tmp_path, monkeypa
     assert not library.asset_png_path("farm-comic", asset_id).exists()
     assert (library.SYSTEM_TRASH / f"{asset_id}.json").exists()
     assert (library.SYSTEM_TRASH / f"{asset_id}.png").exists()
-    assert client.get("/api/projects/farm-comic/canvas").json()["nodes"] == {}
+    nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert set(nodes) == {library.DEFAULT_STARTER_DRAFT_NODE_ID}
 
 
 def test_import_duplicate_file_returns_conflict(tmp_path, monkeypatch):
@@ -822,7 +832,76 @@ def test_asset_archive_hides_from_default_lists_and_canvas(tmp_path, monkeypatch
     assert response.json()["archivedAt"] is not None
     assert client.get("/api/projects/farm-comic/assets").json() == []
     assert len(client.get("/api/projects/farm-comic/assets?includeArchived=true").json()) == 1
-    assert client.get("/api/projects/farm-comic/canvas").json()["nodes"] == {}
+    nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert set(nodes) == {library.DEFAULT_STARTER_DRAFT_NODE_ID}
+    archived_canvas_nodes = client.get("/api/projects/farm-comic/canvas?includeArchived=true").json()["nodes"]
+    assert any(asset_id in node.get("assetIds", []) for node in archived_canvas_nodes.values())
+
+    restore_response = client.patch(
+        f"/api/projects/farm-comic/assets/{asset_id}/archive",
+        json={"archived": False},
+    )
+    assert restore_response.status_code == 200
+    assert restore_response.json()["archivedAt"] is None
+    restored_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert any(asset_id in node.get("assetIds", []) for node in restored_nodes.values())
+
+
+def test_archive_preserves_canvas_group_name_and_cover(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    asset_id = "01HGROUPNAME"
+    make_png(library.asset_png_path("farm-comic", asset_id), color="blue")
+    library.write_json(
+        library.asset_json_path("farm-comic", asset_id),
+        {
+            "id": asset_id,
+            "kind": "imported",
+            "title": "Asset title",
+            "tags": [],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    node_id = library.canvas_node_id(asset_id)
+    canvas = client.get("/api/projects/farm-comic/canvas").json()
+    canvas["nodes"][node_id] = {
+        "type": "imageGroup",
+        "displayName": "My scene board",
+        "x": 420,
+        "y": 180,
+        "tags": ["panel"],
+        "assetIds": [asset_id],
+        "activeAssetId": asset_id,
+    }
+    assert client.put("/api/projects/farm-comic/canvas", json=canvas).status_code == 200
+    assert client.patch("/api/projects/farm-comic", json={"coverAssetId": asset_id}).status_code == 200
+
+    archive_response = client.patch(
+        f"/api/projects/farm-comic/assets/{asset_id}/archive",
+        json={"archived": True},
+    )
+    assert archive_response.status_code == 200
+
+    stored_canvas = library.read_stored_canvas("farm-comic")
+    stored_node = stored_canvas.nodes[node_id]
+    assert stored_node.displayName == "My scene board"
+    assert stored_node.assetIds == [asset_id]
+    assert client.get("/api/projects/farm-comic").json()["project"]["coverAssetId"] == asset_id
+
+    restore_response = client.patch(
+        f"/api/projects/farm-comic/assets/{asset_id}/archive",
+        json={"archived": False},
+    )
+    assert restore_response.status_code == 200
+
+    restored_canvas = library.read_stored_canvas("farm-comic")
+    restored_node = restored_canvas.nodes[node_id]
+    assert restored_node.displayName == "My scene board"
+    assert restored_node.assetIds == [asset_id]
+    assert client.get("/api/projects/farm-comic").json()["project"]["coverAssetId"] == asset_id
+    visible_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert visible_nodes[node_id]["displayName"] == "My scene board"
 
 
 def test_chat_turn_persists_history_blobs_and_generated_asset(tmp_path, monkeypatch):
