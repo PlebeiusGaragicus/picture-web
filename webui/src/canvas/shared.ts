@@ -17,7 +17,16 @@ export const SYSTEM_TAGS = new Set([
   'text-result',
   'visual-style',
 ]);
-export const tagColors = ['#ef4444', '#f59e0b', '#facc15', '#22c55e', '#3b82f6', '#c084fc', '#cbd5e1'];
+export const tagColorOptions = [
+  { color: '#ef4444', label: 'Red' },
+  { color: '#f59e0b', label: 'Orange' },
+  { color: '#facc15', label: 'Yellow' },
+  { color: '#22c55e', label: 'Green' },
+  { color: '#3b82f6', label: 'Blue' },
+  { color: '#c084fc', label: 'Purple' },
+  { color: '#cbd5e1', label: 'Gray' },
+] as const;
+export const tagColors = tagColorOptions.map((option) => option.color);
 
 export function normalizeTagName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');

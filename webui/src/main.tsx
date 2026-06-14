@@ -23,7 +23,7 @@ import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdg
 import { canDeleteNode } from './canvas/roles';
 import { SYSTEM_TAGS, artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, visibleDisplayName } from './canvas/shared';
 import { NodeSidebar } from './canvas/sidebars';
-import { TagEditorPopover } from './canvas/tagEditor';
+import { TagColorPickerPopover, TagEditorPopover } from './canvas/tagEditor';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './canvas/types';
 import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags } from './styleRefs';
 import { HelpTip, Modal } from './ui';
@@ -423,14 +423,14 @@ function App() {
     return Array.from(tags).filter((tag) => SYSTEM_TAGS.has(tag)).sort();
   }, [nodes]);
   const availableUserTags = useMemo(() => {
-    const byName = new Map<string, TagDefinition>();
-    projectTags.forEach((tag) => byName.set(tag.name, tag));
+    const byId = new Map<string, TagDefinition>();
+    projectTags.forEach((tag) => byId.set(tag.id, tag));
     assets.forEach((asset) => {
-      asset.tags.forEach((tag) => {
-        if (!SYSTEM_TAGS.has(tag) && !byName.has(tag)) byName.set(tag, { name: tag, color: '#64748b' });
+      asset.tags.forEach((tagId) => {
+        if (!SYSTEM_TAGS.has(tagId) && !byId.has(tagId)) byId.set(tagId, { id: tagId, name: tagId, color: '#64748b' });
       });
     });
-    return Array.from(byName.values()).sort((first, second) => first.name.localeCompare(second.name));
+    return Array.from(byId.values()).sort((first, second) => first.name.localeCompare(second.name));
   }, [assets, projectTags]);
   const userTagCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -443,6 +443,16 @@ function App() {
     });
     return counts;
   }, [assets, showArchived]);
+  const tagAssetCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    assets.forEach((asset) => {
+      asset.tags.forEach((tagId) => {
+        if (SYSTEM_TAGS.has(tagId)) return;
+        counts[tagId] = (counts[tagId] ?? 0) + 1;
+      });
+    });
+    return counts;
+  }, [assets]);
   const filteredNodes = useMemo(() => {
     const systemTagFiltered = activeTagFilters.length === 0
       ? nodes
@@ -563,18 +573,63 @@ function App() {
 
   const saveProjectTags = useCallback(async (nextTags: TagDefinition[]) => {
     if (!openProjectSlug) return;
-    const uniqueTags = Array.from(new Map(nextTags.map((tag) => [tag.name, tag])).values())
+    const uniqueTags = Array.from(new Map(nextTags.map((tag) => [tag.id, tag])).values())
       .sort((first, second) => first.name.localeCompare(second.name));
     setProjectTags(uniqueTags);
     await api.saveProjectTags(openProjectSlug, uniqueTags);
   }, [openProjectSlug]);
 
   const createProjectTag = useCallback((tag: TagDefinition) => {
-    void saveProjectTags([...projectTags.filter((existing) => existing.name !== tag.name), tag]).catch((err) => {
+    void saveProjectTags([...projectTags.filter((existing) => existing.id !== tag.id), tag]).catch((err) => {
       console.error('[photo-web] failed to save project tags', err);
       setError(String(err));
     });
   }, [projectTags, saveProjectTags]);
+
+  const updateProjectTag = useCallback((tagId: string, patch: Partial<Pick<TagDefinition, 'name' | 'color'>>) => {
+    const current = projectTags.find((tag) => tag.id === tagId);
+    if (!current) return;
+    const nextTag: TagDefinition = {
+      id: current.id,
+      name: patch.name?.trim() || current.name,
+      color: patch.color ?? current.color,
+    };
+    void saveProjectTags(projectTags.map((tag) => (tag.id === tagId ? nextTag : tag))).catch((err) => {
+      console.error('[photo-web] failed to update project tag', err);
+      setError(String(err));
+    });
+  }, [projectTags, saveProjectTags]);
+
+  const deleteProjectTag = useCallback(async (tagId: string) => {
+    if (!openProjectSlug) return;
+    const nextProjectTags = projectTags.filter((tag) => tag.id !== tagId);
+    const affectedAssets = assets.filter((asset) => asset.tags.includes(tagId));
+    setActiveUserTagFilters((current) => current.filter((tag) => tag !== tagId));
+    setProjectTags(nextProjectTags);
+    setAssets((current) => current.map((asset) => (
+      asset.tags.includes(tagId) ? { ...asset, tags: asset.tags.filter((tag) => tag !== tagId) } : asset
+    )));
+    setNodes((current) => current.map((node) => {
+      if (node.data.kind !== 'imageGroup') return node;
+      const nextAssets = node.data.assets.map((asset) => (
+        asset.tags.includes(tagId) ? { ...asset, tags: asset.tags.filter((tag) => tag !== tagId) } : asset
+      ));
+      const nextActiveAsset = node.data.activeAsset?.tags.includes(tagId)
+        ? { ...node.data.activeAsset, tags: node.data.activeAsset.tags.filter((tag) => tag !== tagId) }
+        : node.data.activeAsset;
+      return { ...node, data: { ...node.data, assets: nextAssets, activeAsset: nextActiveAsset } };
+    }));
+    try {
+      await api.saveProjectTags(openProjectSlug, nextProjectTags);
+      await Promise.all(affectedAssets.map((asset) => (
+        api.patchDisplay(openProjectSlug, asset.id, asset.title, asset.tags.filter((tag) => tag !== tagId))
+      )));
+    } catch (err) {
+      console.error('[photo-web] failed to delete project tag', err);
+      setError(String(err));
+      await loadProject(openProjectSlug);
+    }
+  }, [assets, loadProject, openProjectSlug, projectTags]);
 
   const updateAssetTags = useCallback((nodeId: string, assetId: string, tags: string[]) => {
     if (!openProjectSlug) return;
@@ -1215,6 +1270,8 @@ function App() {
         projectSlug={openProjectSlug}
         activePhase={projectPhase}
         adaptation={adaptation}
+        projectTags={availableUserTags}
+        tagAssetCounts={tagAssetCounts}
         error={error}
         isCollapsed={isPhaseSidebarCollapsed}
         onToggleCollapsed={() => setIsPhaseSidebarCollapsed((current) => !current)}
@@ -1235,6 +1292,8 @@ function App() {
             setError(err instanceof Error ? err.message : String(err));
           }
         }}
+        onDeleteTag={deleteProjectTag}
+        onUpdateTag={updateProjectTag}
         onPhaseChange={(phase) => {
           setProjectPhase(phase);
           setPhaseViewMode(phase === 'story-canvas' ? 'canvas' : 'list');
@@ -1649,34 +1708,148 @@ function PhaseSidebarToggleIcon({ variant }: { variant: 'collapse' | 'expand' })
   );
 }
 
+function TrashIcon() {
+  return (
+    <svg className="tag-organizer-trash-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 4.5h10" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+      <path d="M6 4.5V3.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+      <path d="M5 4.5l.5 8a1 1 0 0 0 1 .9h3a1 1 0 0 0 1-.9l.5-8" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
+      <path d="M7 7v4M9 7v4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function TagOrganizerRow({
+  tag,
+  onUpdateTag,
+  onRequestDelete,
+}: {
+  tag: TagDefinition;
+  onUpdateTag: (tagId: string, patch: Partial<Pick<TagDefinition, 'name' | 'color'>>) => void;
+  onRequestDelete: () => void;
+}) {
+  const [name, setName] = useState(tag.name);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const colorAnchorRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    setName(tag.name);
+  }, [tag.name]);
+  useEffect(() => {
+    if (!isEditingName) return;
+    nameInputRef.current?.focus();
+    nameInputRef.current?.select();
+  }, [isEditingName]);
+
+  const commitName = () => {
+    const trimmed = name.trim() || tag.id;
+    setName(trimmed);
+    setIsEditingName(false);
+    if (trimmed !== tag.name) onUpdateTag(tag.id, { name: trimmed });
+  };
+
+  return (
+    <div className="tag-organizer-row">
+      <div className="tag-organizer-color-anchor">
+        <button
+          ref={colorAnchorRef}
+          type="button"
+          className="tag-color-dot-button"
+          aria-label={`Change color for ${tag.name}`}
+          aria-expanded={isColorPickerOpen}
+          onClick={() => setIsColorPickerOpen((current) => !current)}
+        >
+          <span className="tag-color-dot" style={{ backgroundColor: tag.color }} />
+        </button>
+        {isColorPickerOpen && (
+          <TagColorPickerPopover
+            anchorRef={colorAnchorRef}
+            selectedColor={tag.color}
+            onSelect={(color) => onUpdateTag(tag.id, { color })}
+            onClose={() => setIsColorPickerOpen(false)}
+          />
+        )}
+      </div>
+      {isEditingName ? (
+        <input
+          ref={nameInputRef}
+          className="tag-organizer-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onBlur={commitName}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commitName();
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setName(tag.name);
+              setIsEditingName(false);
+            }
+          }}
+        />
+      ) : (
+        <span
+          className="tag-organizer-name-display"
+          onDoubleClick={() => setIsEditingName(true)}
+          title="Double-click to rename"
+        >
+          {tag.name}
+        </span>
+      )}
+      <button
+        type="button"
+        className="tag-organizer-delete"
+        onClick={onRequestDelete}
+        aria-label={`Delete ${tag.name}`}
+      >
+        <TrashIcon />
+      </button>
+    </div>
+  );
+}
+
 function ProjectPhaseSidebar({
   project,
   projectSlug,
   activePhase,
   adaptation,
+  projectTags,
+  tagAssetCounts,
   error,
   isCollapsed,
   onToggleCollapsed,
   onBack,
   onDeleteProject,
   onExportAssets,
+  onDeleteTag,
+  onUpdateTag,
   onPhaseChange,
 }: {
   project: Project | undefined;
   projectSlug: string;
   activePhase: ProjectPhase;
   adaptation: AdaptationStatus | null;
+  projectTags: TagDefinition[];
+  tagAssetCounts: Record<string, number>;
   error: string | null;
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
   onBack: () => void;
   onDeleteProject: () => Promise<void>;
   onExportAssets: () => Promise<void>;
+  onDeleteTag: (tagId: string) => Promise<void>;
+  onUpdateTag: (tagId: string, patch: Partial<Pick<TagDefinition, 'name' | 'color'>>) => void;
   onPhaseChange: (phase: ProjectPhase) => void;
 }) {
   const [pendingDelete, setPendingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [exportingAssets, setExportingAssets] = useState(false);
+  const [organizingTags, setOrganizingTags] = useState(false);
+  const [pendingTagDelete, setPendingTagDelete] = useState<TagDefinition | null>(null);
+  const [deletingTag, setDeletingTag] = useState(false);
   if (isCollapsed) {
     return (
       <button
@@ -1732,6 +1905,9 @@ function ProjectPhaseSidebar({
         })}
       </nav>
       <div className="phase-sidebar-footer">
+        <button className="secondary" disabled={deleting || exportingAssets} onClick={() => setOrganizingTags(true)}>
+          Organize Tags
+        </button>
         <button
           className="secondary"
           disabled={exportingAssets || deleting}
@@ -1750,6 +1926,58 @@ function ProjectPhaseSidebar({
           Delete project
         </button>
       </div>
+      {organizingTags && (
+        <Modal title="Organize Tags" onClose={() => !pendingTagDelete && setOrganizingTags(false)}>
+          <div className="tag-organizer-list">
+            {projectTags.length === 0 ? (
+              <p className="muted">No tags yet.</p>
+            ) : projectTags.map((tag) => (
+              <TagOrganizerRow
+                key={tag.id}
+                tag={tag}
+                onUpdateTag={onUpdateTag}
+                onRequestDelete={() => setPendingTagDelete(tag)}
+              />
+            ))}
+          </div>
+        </Modal>
+      )}
+      {pendingTagDelete && (
+        <div className="confirm-backdrop" onClick={() => !deletingTag && setPendingTagDelete(null)}>
+          <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
+            <h2>Delete tag?</h2>
+            <p>
+              Remove tag <strong>{pendingTagDelete.name}</strong> from the project?
+            </p>
+            <p>
+              {(() => {
+                const imageCount = tagAssetCounts[pendingTagDelete.id] ?? 0;
+                if (imageCount === 0) return 'This tag is not assigned to any images.';
+                if (imageCount === 1) return 'This removes it from 1 image.';
+                return `This removes it from ${imageCount} images.`;
+              })()}
+            </p>
+            <div className="row">
+              <button
+                className="danger"
+                disabled={deletingTag}
+                onClick={async () => {
+                  setDeletingTag(true);
+                  try {
+                    await onDeleteTag(pendingTagDelete.id);
+                    setPendingTagDelete(null);
+                  } finally {
+                    setDeletingTag(false);
+                  }
+                }}
+              >
+                {deletingTag ? 'Deleting...' : 'Delete tag'}
+              </button>
+              <button className="secondary" disabled={deletingTag} onClick={() => setPendingTagDelete(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       {pendingDelete && (
         <div className="confirm-backdrop" onClick={() => !deleting && setPendingDelete(false)}>
           <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>

@@ -2000,10 +2000,24 @@ pre {
   font-weight: 800;
 }
 
-.tag-suggestion-list button.active,
 .tag-suggestion-list button:hover {
+  background: rgb(59 130 246 / 0.18);
+  border-color: rgb(96 165 250 / 0.35);
+}
+
+.tag-suggestion-list button.active {
   background: #0b66d8;
   border-color: #60a5fa;
+}
+
+.tag-suggestion-list .tag-clear-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.tag-suggestion-list .tag-clear-row:disabled:hover {
+  background: transparent;
+  border-color: transparent;
 }
 
 .tag-color-dot {
@@ -2033,8 +2047,11 @@ pre {
   font-size: 13px;
 }
 
-.tag-suggestion-list button.active .tag-suggestion-count,
 .tag-suggestion-list button:hover .tag-suggestion-count {
+  color: #bfdbfe;
+}
+
+.tag-suggestion-list button.active .tag-suggestion-count {
   color: #dbeafe;
 }
 
@@ -2070,6 +2087,128 @@ pre {
 .tag-color-row button.active {
   border-color: #f8fafc;
   box-shadow: 0 0 0 2px rgb(96 165 250 / 0.45);
+}
+
+.tag-organizer-list {
+  display: grid;
+  gap: 8px;
+  min-width: min(360px, calc(100vw - 64px));
+}
+
+.tag-organizer-row {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px;
+  background: #111827;
+  border: 1px solid #334155;
+  border-radius: 10px;
+}
+
+.tag-organizer-color-anchor {
+  position: relative;
+}
+
+.tag-color-dot-button {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.tag-color-dot-button:hover .tag-color-dot,
+.tag-color-dot-button:focus-visible .tag-color-dot {
+  box-shadow: 0 0 0 2px rgb(191 219 254 / 0.45);
+}
+
+.tag-color-picker-popover {
+  position: fixed;
+  z-index: 200;
+  display: grid;
+  gap: 2px;
+  min-width: 168px;
+  padding: 6px;
+  background: #111827;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgb(2 6 23 / 0.45);
+}
+
+.tag-color-picker-popover button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #e2e8f0;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tag-color-picker-popover button:hover {
+  background: rgb(30 41 59 / 0.85);
+  border-color: #334155;
+}
+
+.tag-color-picker-popover button.active {
+  background: rgb(30 58 138 / 0.35);
+  border-color: #3b82f6;
+}
+
+.tag-organizer-name {
+  min-width: 0;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-weight: 700;
+}
+
+.tag-organizer-name-display {
+  min-width: 0;
+  padding: 6px 8px;
+  color: #e2e8f0;
+  font-weight: 700;
+  cursor: text;
+  border-radius: 8px;
+  user-select: none;
+}
+
+.tag-organizer-name-display:hover {
+  background: rgb(30 41 59 / 0.55);
+}
+
+.tag-organizer-delete {
+  display: grid;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  padding: 0;
+  color: #94a3b8;
+  background: transparent;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.tag-organizer-delete:hover {
+  color: #fecaca;
+  border-color: #f87171;
+  background: rgb(127 29 29 / 0.25);
+}
+
+.tag-organizer-trash-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .spinner {
@@ -2885,6 +3024,34 @@ pre {
   position: absolute;
   top: calc(100% + 12px);
   right: 0;
+  gap: 8px;
+  width: 300px;
+  padding: 10px;
+  border-radius: 14px;
+}
+
+.image-viewer-tag-menu .tag-editor-popover h3 {
+  font-size: 14px;
+}
+
+.image-viewer-tag-menu .tag-editor-input {
+  min-height: 36px;
+  padding: 5px 7px;
+}
+
+.image-viewer-tag-menu .tag-suggestion-list {
+  max-height: min(44vh, 280px);
+  overflow: auto;
+}
+
+.image-viewer-tag-menu .tag-suggestion-list button {
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.image-viewer-tag-menu .tag-color-dot {
+  width: 14px;
+  height: 14px;
 }
 
 .image-viewer-info-button {

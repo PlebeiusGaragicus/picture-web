@@ -134,7 +134,8 @@ class ProjectMetadata(ProjectCreate):
 
 
 class TagDefinition(BaseModel):
-    name: str = Field(pattern=TAG_RE)
+    id: str = Field(pattern=TAG_RE)
+    name: str = Field(min_length=1)
     color: str = Field(pattern=TAG_COLOR_RE)
 
 
@@ -147,9 +148,9 @@ class TagRegistryDocument(BaseModel):
         seen: set[str] = set()
         unique: list[TagDefinition] = []
         for tag in tags:
-            if tag.name in seen:
+            if tag.id in seen:
                 continue
-            seen.add(tag.name)
+            seen.add(tag.id)
             unique.append(tag)
         return unique
 

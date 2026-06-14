@@ -213,11 +213,23 @@ def get_project_detail(slug: str) -> ProjectDetail:
     return ProjectDetail(project=get_project(slug), assets=list_assets(slug), tags=list_project_tags(slug))
 
 
-def normalize_tag_name(name: str) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+def normalize_tag_id(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
     if not normalized or not re.match(TAG_RE, normalized):
-        raise HTTPException(status_code=400, detail=f"Invalid tag slug: {name}")
+        raise HTTPException(status_code=400, detail=f"Invalid tag slug: {value}")
     return normalized
+
+
+def normalize_tag_name(name: str) -> str:
+    return normalize_tag_id(name)
+
+
+def coerce_tag_definition(raw: dict[str, Any]) -> TagDefinition:
+    if "id" in raw:
+        return TagDefinition.model_validate(raw)
+    slug = normalize_tag_id(str(raw["name"]))
+    display_name = str(raw.get("name", slug)).strip() or slug
+    return TagDefinition(id=slug, name=display_name, color=str(raw["color"]))
 
 
 def read_tag_registry(slug: str) -> TagRegistryDocument:
@@ -225,14 +237,21 @@ def read_tag_registry(slug: str) -> TagRegistryDocument:
     path = tags_json_path(slug)
     if not path.is_file():
         return TagRegistryDocument()
-    return TagRegistryDocument.model_validate(read_json(path))
+    payload = read_json(path)
+    raw_tags = payload.get("tags", []) if isinstance(payload, dict) else []
+    tags = [coerce_tag_definition(item) for item in raw_tags if isinstance(item, dict)]
+    return TagRegistryDocument(tags=tags)
 
 
 def write_tag_registry(slug: str, registry: TagRegistryDocument) -> TagRegistryDocument:
     require_project(slug)
     normalized = TagRegistryDocument(
         tags=[
-            TagDefinition(name=normalize_tag_name(tag.name), color=tag.color)
+            TagDefinition(
+                id=normalize_tag_id(tag.id),
+                name=tag.name.strip(),
+                color=tag.color,
+            )
             for tag in registry.tags
         ]
     )
@@ -246,9 +265,15 @@ def list_project_tags(slug: str) -> list[TagDefinition]:
 
 def upsert_tag(slug: str, tag: TagDefinition) -> TagRegistryDocument:
     registry = read_tag_registry(slug)
-    normalized_name = normalize_tag_name(tag.name)
-    next_tags = [existing for existing in registry.tags if existing.name != normalized_name]
-    next_tags.append(TagDefinition(name=normalized_name, color=tag.color))
+    normalized_id = normalize_tag_id(tag.id)
+    next_tags = [existing for existing in registry.tags if existing.id != normalized_id]
+    next_tags.append(
+        TagDefinition(
+            id=normalized_id,
+            name=tag.name.strip(),
+            color=tag.color,
+        )
+    )
     return write_tag_registry(slug, TagRegistryDocument(tags=sorted(next_tags, key=lambda item: item.name)))
 
 

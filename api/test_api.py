@@ -184,11 +184,11 @@ def test_project_tags_registry_and_asset_assignment(tmp_path, monkeypatch):
 
     registry_response = client.put(
         "/api/projects/farm-comic/tags",
-        json={"tags": [{"name": "red4repo", "color": "#ef4444"}]},
+        json={"tags": [{"id": "red4repo", "name": "Red4Repo", "color": "#ef4444"}]},
     )
     assert registry_response.status_code == 200
-    assert registry_response.json()["tags"] == [{"name": "red4repo", "color": "#ef4444"}]
-    assert client.get("/api/projects/farm-comic/tags").json() == [{"name": "red4repo", "color": "#ef4444"}]
+    assert registry_response.json()["tags"] == [{"id": "red4repo", "name": "Red4Repo", "color": "#ef4444"}]
+    assert client.get("/api/projects/farm-comic/tags").json() == [{"id": "red4repo", "name": "Red4Repo", "color": "#ef4444"}]
 
     patch_response = client.patch(
         f"/api/projects/farm-comic/assets/{asset_id}/display",
@@ -197,8 +197,85 @@ def test_project_tags_registry_and_asset_assignment(tmp_path, monkeypatch):
     assert patch_response.status_code == 200
     assert patch_response.json()["tags"] == ["red4repo"]
     detail = client.get("/api/projects/farm-comic").json()
-    assert detail["tags"] == [{"name": "red4repo", "color": "#ef4444"}]
+    assert detail["tags"] == [{"id": "red4repo", "name": "Red4Repo", "color": "#ef4444"}]
     assert detail["assets"][0]["tags"] == ["red4repo"]
+
+
+def test_project_tag_rename_preserves_asset_assignments(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    asset_id = "01HTAG2"
+    make_png(library.asset_png_path("farm-comic", asset_id), color="blue")
+    library.write_json(
+        library.asset_json_path("farm-comic", asset_id),
+        {
+            "id": asset_id,
+            "kind": "imported",
+            "title": "Tagged image",
+            "tags": ["red4repo"],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    client.put(
+        "/api/projects/farm-comic/tags",
+        json={"tags": [{"id": "red4repo", "name": "Red4Repo", "color": "#ef4444"}]},
+    )
+
+    rename_response = client.put(
+        "/api/projects/farm-comic/tags",
+        json={"tags": [{"id": "red4repo", "name": "Renamed Tag", "color": "#22c55e"}]},
+    )
+    assert rename_response.status_code == 200
+    assert rename_response.json()["tags"] == [{"id": "red4repo", "name": "Renamed Tag", "color": "#22c55e"}]
+
+    asset = client.get(f"/api/projects/farm-comic/assets/{asset_id}").json()
+    assert asset["tags"] == ["red4repo"]
+
+
+def test_project_tag_delete_removes_id_from_assets(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    asset_id = "01HTAG3"
+    make_png(library.asset_png_path("farm-comic", asset_id), color="green")
+    library.write_json(
+        library.asset_json_path("farm-comic", asset_id),
+        {
+            "id": asset_id,
+            "kind": "imported",
+            "title": "Tagged image",
+            "tags": ["red4repo"],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    client.put(
+        "/api/projects/farm-comic/tags",
+        json={"tags": [{"id": "red4repo", "name": "Red4Repo", "color": "#ef4444"}]},
+    )
+
+    delete_response = client.put("/api/projects/farm-comic/tags", json={"tags": []})
+    assert delete_response.status_code == 200
+    assert delete_response.json()["tags"] == []
+
+    patch_response = client.patch(
+        f"/api/projects/farm-comic/assets/{asset_id}/display",
+        json={"title": "Tagged image", "tags": []},
+    )
+    assert patch_response.status_code == 200
+    assert patch_response.json()["tags"] == []
+
+
+def test_project_tag_registry_reads_legacy_name_shape(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    library.write_json(
+        library.tags_json_path("farm-comic"),
+        {"tags": [{"name": "legacy-tag", "color": "#3b82f6"}]},
+    )
+
+    tags = client.get("/api/projects/farm-comic/tags").json()
+    assert tags == [{"id": "legacy-tag", "name": "legacy-tag", "color": "#3b82f6"}]
 
 
 def test_persistent_draft_canvas_round_trip(tmp_path, monkeypatch):
