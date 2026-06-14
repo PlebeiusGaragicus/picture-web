@@ -143,8 +143,17 @@ export function TagEditorPopover({
 
   const removeTag = (tagId: string) => onChange(selectedTags.filter((item) => item !== tagId));
 
+  const stopFlowPointer = (event: React.MouseEvent | React.PointerEvent) => {
+    event.stopPropagation();
+  };
+
   return (
-    <div className="tag-editor-popover">
+    <div
+      className="tag-editor-popover"
+      onPointerDown={stopFlowPointer}
+      onMouseDown={stopFlowPointer}
+      onClick={stopFlowPointer}
+    >
       <h3>{title}</h3>
       <div className="tag-editor-input">
         {selectedTags.map((tagId) => (
@@ -177,7 +186,14 @@ export function TagEditorPopover({
           </button>
         )}
         {suggestions.map((tag) => (
-          <button key={tag.id} className={selected.has(tag.id) ? 'active' : ''} onClick={() => toggleTag(tag.id)}>
+          <button
+            key={tag.id}
+            className={selected.has(tag.id) ? 'active' : ''}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleTag(tag.id);
+            }}
+          >
             <span className="tag-color-dot" style={{ backgroundColor: tag.color }} />
             <span className="tag-suggestion-name">{tag.name}</span>
             {tagCounts[tag.id] !== undefined && <span className="tag-suggestion-count">({tagCounts[tag.id]})</span>}

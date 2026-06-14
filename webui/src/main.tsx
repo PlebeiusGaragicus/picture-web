@@ -25,6 +25,7 @@ import { canDeleteNode } from './canvas/roles';
 import { SYSTEM_TAGS, artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, mergeAvailableUserTags, modelCapabilities, normalizedParamsForModel, visibleDisplayName } from './canvas/shared';
 import { NodeSidebar } from './canvas/sidebars';
 import { NodeAssetTagRow } from './canvas/assetTagRow';
+import { nodeTagActionsRef } from './canvas/nodeTagActions';
 import { TagColorPickerPopover, TagEditorPopover } from './canvas/tagEditor';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './canvas/types';
 import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags } from './styleRefs';
@@ -257,6 +258,7 @@ function App() {
   const generatingNodeIdsRef = useRef<Set<string>>(new Set());
   const chatSessionsRef = useRef<ChatSession[]>([]);
   const persistNodesRef = useRef<(nextNodes: Node<PhotoNodeData>[], options?: { refresh?: boolean }) => Promise<void>>(async () => undefined);
+  const assetsRef = useRef<Asset[]>([]);
   const toFlowNodesCallbacksRef = useRef({
     changeVariant: (_nodeId: string, _direction: -1 | 1) => {},
     openViewer: (_nodeId: string) => {},
@@ -276,6 +278,16 @@ function App() {
   useEffect(() => {
     chatSessionsRef.current = chatSessions;
   }, [chatSessions]);
+
+  assetsRef.current = assets;
+
+  const onAssetTagsChangeForNode = useCallback((nodeId: string, assetId: string, tags: string[]) => {
+    toFlowNodesCallbacksRef.current.updateAssetTags(nodeId, assetId, tags);
+  }, []);
+
+  const onCreateTagForNode = useCallback((tag: TagDefinition) => {
+    toFlowNodesCallbacksRef.current.createProjectTag(tag);
+  }, []);
 
   const updateImageGroupDisplayName = useCallback((nodeId: string, displayName: string) => {
     setNodes((current) => {
@@ -323,6 +335,20 @@ function App() {
   const openViewer = useCallback((nodeId: string) => {
     setViewerNodeId(nodeId);
     setViewerAssetId(null);
+  }, []);
+
+  const focusNodeOnCanvas = useCallback((nodeId: string) => {
+    const instance = reactFlowRef.current;
+    if (!instance?.viewportInitialized) return;
+    const flowNode = instance.getNode(nodeId);
+    if (!flowNode) return;
+    const width = flowNode.width ?? 280;
+    const height = flowNode.height ?? 320;
+    instance.setCenter(
+      flowNode.position.x + width / 2,
+      flowNode.position.y + height / 2,
+      { zoom: instance.getZoom(), duration: 350 },
+    );
   }, []);
 
   const openAssetInSidebar = useCallback((assetId: string) => {
@@ -421,8 +447,8 @@ function App() {
       openAssetInViewer,
       updateImageGroupDisplayName,
       openChatForAsset,
-      toFlowNodesCallbacksRef.current.updateAssetTags,
-      toFlowNodesCallbacksRef.current.createProjectTag,
+      onAssetTagsChangeForNode,
+      onCreateTagForNode,
     ));
   }, [changeVariant, openAssetInViewer, openChatForAsset, openDetails, openViewer, showArchived, updateImageGroupDisplayName]);
 
@@ -659,7 +685,7 @@ function App() {
 
   const updateAssetTags = useCallback((nodeId: string, assetId: string, tags: string[]) => {
     if (!openProjectSlug) return;
-    const asset = assets.find((item) => item.id === assetId);
+    const asset = assetsRef.current.find((item) => item.id === assetId);
     if (!asset) return;
     const nextTags = Array.from(new Set([...asset.tags.filter((tag) => SYSTEM_TAGS.has(tag)), ...tags]));
     setAssets((current) => current.map((item) => (item.id === assetId ? { ...item, tags: nextTags } : item)));
@@ -673,7 +699,7 @@ function App() {
       console.error('[photo-web] failed to update asset tags', err);
       setError(String(err));
     });
-  }, [assets, openProjectSlug]);
+  }, [openProjectSlug]);
 
   const openProject = async (projectSlug: string) => {
     setOpenProjectSlug(projectSlug);
@@ -844,36 +870,44 @@ function App() {
         callbacks.openAssetInViewer,
         callbacks.updateImageGroupDisplayName,
         callbacks.openChatForAsset,
-        callbacks.updateAssetTags,
-        callbacks.createProjectTag,
+        onAssetTagsChangeForNode,
+        onCreateTagForNode,
       ));
     }
-  }, [assets, canvas, openProjectSlug]);
+  }, [assets, canvas, onAssetTagsChangeForNode, onCreateTagForNode, openProjectSlug]);
 
   useEffect(() => {
     persistNodesRef.current = persistNodes;
   }, [persistNodes]);
 
-  useEffect(() => {
-    toFlowNodesCallbacksRef.current = {
-      changeVariant,
-      openViewer,
-      openDetails,
-      openAssetInViewer,
-      updateImageGroupDisplayName,
-      openChatForAsset,
-      updateAssetTags,
-      createProjectTag,
-      projectTags: availableUserTags,
-    };
-  }, [availableUserTags, changeVariant, createProjectTag, openAssetInViewer, openChatForAsset, openDetails, openViewer, updateAssetTags, updateImageGroupDisplayName]);
+  toFlowNodesCallbacksRef.current = {
+    changeVariant,
+    openViewer,
+    openDetails,
+    openAssetInViewer,
+    updateImageGroupDisplayName,
+    openChatForAsset,
+    updateAssetTags,
+    createProjectTag,
+    projectTags: availableUserTags,
+  };
+  nodeTagActionsRef.updateAssetTags = updateAssetTags;
+  nodeTagActionsRef.createProjectTag = createProjectTag;
 
   useEffect(() => {
     setNodes((current) => current.map((node) => {
       if (node.data.kind !== 'imageGroup') return node;
-      return { ...node, data: { ...node.data, projectTags: availableUserTags } };
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          projectTags: availableUserTags,
+          onAssetTagsChange: onAssetTagsChangeForNode,
+          onCreateTag: onCreateTagForNode,
+        },
+      };
     }));
-  }, [availableUserTags]);
+  }, [availableUserTags, onAssetTagsChangeForNode, onCreateTagForNode]);
 
   const deleteSelectedNodes = useCallback(async () => {
     if (!selectedNodeIds.length) return;
@@ -1476,7 +1510,11 @@ function App() {
                 void persistNodes(nextNodes);
                 setPopoverNodeId(connection.target);
               }}
-              onNodeClick={(_, node) => {
+              onNodeClick={(event, node) => {
+                const target = event.target;
+                if (target instanceof HTMLElement && target.closest('.tag-editor-popover, .node-tag-menu, .node-tag-row')) {
+                  return;
+                }
                 setActiveChatSessionId(null);
                 setPopoverNodeId(node.id);
               }}
@@ -1544,6 +1582,7 @@ function App() {
           onCreateChildText={createChildTextArtifact}
           onSetStyleRefAsset={setAdaptationStyleRefAsset}
           onSetProjectCover={setProjectCover}
+          onFindOnCanvas={focusNodeOnCanvas}
           onVariant={changeVariant}
           onCreateSibling={createSiblingDraft}
           onDelete={deleteNodeById}
@@ -3034,8 +3073,8 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
       <NodeAssetTagRow
         tagIds={asset.tags}
         projectTags={data.projectTags}
-        onChange={(tags) => data.onAssetTagsChange(data.nodeId, asset.id, tags)}
-        onCreateTag={data.onCreateTag}
+        onChange={(tags) => nodeTagActionsRef.updateAssetTags(data.nodeId, asset.id, tags)}
+        onCreateTag={(tag) => nodeTagActionsRef.createProjectTag(tag)}
       />
       <Handle type="source" position={Position.Right} className="output-handle" />
     </div>

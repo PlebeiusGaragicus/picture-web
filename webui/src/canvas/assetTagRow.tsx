@@ -47,12 +47,18 @@ export function NodeAssetTagRow({
       if (menuRef.current?.contains(target)) return;
       setIsEditorOpen(false);
     };
-    document.addEventListener('mousedown', closeOnOutsideClick, true);
-    return () => document.removeEventListener('mousedown', closeOnOutsideClick, true);
+    document.addEventListener('click', closeOnOutsideClick, true);
+    return () => document.removeEventListener('click', closeOnOutsideClick, true);
   }, [isEditorOpen]);
 
   return (
-    <div ref={menuRef} className="node-tag-menu nodrag nopan">
+    <div
+      ref={menuRef}
+      className="node-tag-menu nodrag nopan"
+      onPointerDown={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
       <div
         className="node-tag-row-wrap"
         onPointerDown={(event) => event.stopPropagation()}

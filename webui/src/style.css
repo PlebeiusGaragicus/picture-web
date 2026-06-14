@@ -1910,6 +1910,19 @@ pre {
   align-items: center;
 }
 
+.sidebar-cover-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
+.sidebar-cover-row .secondary {
+  min-width: 0;
+  padding-inline: 10px;
+  font-size: 13px;
+}
+
 .sidebar-tag-button {
   width: 100%;
   font-weight: 900;

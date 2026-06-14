@@ -21,6 +21,7 @@ export function NodeSidebar({
   onCreateChildText,
   onSetStyleRefAsset,
   onSetProjectCover,
+  onFindOnCanvas,
   onVariant,
   onCreateSibling,
   onDelete,
@@ -44,6 +45,7 @@ export function NodeSidebar({
   onCreateChildText: (node: Node<DraftNodeData> | Node<StoryArtifactNodeData>) => void;
   onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
   onSetProjectCover: (assetId: string) => void;
+  onFindOnCanvas: (nodeId: string) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
   onDelete: (id: string, assetId?: string) => void;
@@ -108,6 +110,7 @@ export function NodeSidebar({
       onGenerateVariants={onGenerateVariants}
       onSetStyleRefAsset={onSetStyleRefAsset}
       onSetProjectCover={onSetProjectCover}
+      onFindOnCanvas={onFindOnCanvas}
       onRefineChat={onRefineChat}
     />
   );
@@ -382,6 +385,7 @@ function ImageSidebar({
   onGenerateVariants,
   onSetStyleRefAsset,
   onSetProjectCover,
+  onFindOnCanvas,
   onRefineChat,
 }: {
   node: Node<ImageGroupNodeData>;
@@ -401,6 +405,7 @@ function ImageSidebar({
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
   onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
   onSetProjectCover: (assetId: string) => void;
+  onFindOnCanvas: (nodeId: string) => void;
   onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
   const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
@@ -473,9 +478,14 @@ function ImageSidebar({
         />
       )}
       {asset.hasPixels && (
-        <button className="secondary" disabled={isProjectCover} onClick={() => onSetProjectCover(asset.id)}>
-          {isProjectCover ? 'Project cover' : 'Set as project cover'}
-        </button>
+        <div className="sidebar-cover-row">
+          <button type="button" className="secondary" onClick={() => onFindOnCanvas(node.id)}>
+            Find on canvas
+          </button>
+          <button type="button" className="secondary" disabled={isProjectCover} onClick={() => onSetProjectCover(asset.id)}>
+            {isProjectCover ? 'Project cover' : 'Set as project cover'}
+          </button>
+        </div>
       )}
       <div className="sidebar-variant-preview" onClick={changeSidebarVariantByClickSide}>
         {asset.thumbnailUrl && <img src={asset.thumbnailUrl} alt="" />}
