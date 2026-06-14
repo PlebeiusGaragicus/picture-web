@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -128,6 +128,12 @@ class ProjectCreate(BaseModel):
 
 class ProjectMetadata(ProjectCreate):
     createdAt: str
+    coverAssetId: str | None = None
+    coverThumbnailUrl: str | None = None
+
+
+class ProjectCoverPatch(BaseModel):
+    coverAssetId: str | None = None
 
 
 class AdaptationSettings(BaseModel):
@@ -293,13 +299,47 @@ class DisplayPatch(BaseModel):
         return tags
 
 
+class StyleRefSourceRole(BaseModel):
+    type: Literal["style-ref-source"] = "style-ref-source"
+    kind: StyleRefKind
+
+
+class ArtifactSourceRole(BaseModel):
+    type: Literal["artifact-source"] = "artifact-source"
+    artifactKind: ArtifactKind
+    artifactKey: str
+
+
+class VisualStyleSourceRole(BaseModel):
+    type: Literal["visual-style-source"] = "visual-style-source"
+
+
+class TextResultRole(BaseModel):
+    type: Literal["text-result"] = "text-result"
+    sourceNodeId: str
+
+
+class GeneratedResultRole(BaseModel):
+    type: Literal["generated-result"] = "generated-result"
+    sourceNodeId: str
+
+
+class RefinementRole(BaseModel):
+    type: Literal["refinement"] = "refinement"
+    sourceNodeId: str
+    sourceAssetId: str | None = None
+
+
+CanvasRole = Annotated[StyleRefSourceRole | ArtifactSourceRole | VisualStyleSourceRole | TextResultRole | GeneratedResultRole | RefinementRole, Field(discriminator="type")]
+
+
 class CanvasNodeLayout(BaseModel):
     displayName: str
     x: float
     y: float
     width: float | None = None
     tags: list[str] = Field(default_factory=list)
-    role: dict[str, Any] | None = None
+    role: CanvasRole | None = None
 
 
 class GenerationParams(BaseModel):
@@ -418,7 +458,7 @@ class ImageGroupCanvasNode(CanvasNodeLayout):
         return self
 
 
-CanvasNode = DraftCanvasNode | StoryArtifactCanvasNode | ImageGroupCanvasNode
+CanvasNode = Annotated[DraftCanvasNode | StoryArtifactCanvasNode | ImageGroupCanvasNode, Field(discriminator="type")]
 
 
 class CanvasDocument(BaseModel):

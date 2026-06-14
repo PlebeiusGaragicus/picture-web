@@ -10,32 +10,34 @@ export function NodeSidebar({
   node,
   assets,
   adaptation,
-  projectSlug,
+  coverAssetId,
   onDraftChange,
   onImageGroupChange,
   onGenerate,
   onGenerateArtifact,
   onGenerateVariants,
+  onCreateChildText,
   onSetStyleRefAsset,
+  onSetProjectCover,
   onVariant,
   onCreateSibling,
-  onCreateChildDraft,
   onDelete,
   onRefineChat,
 }: {
   node: Node<PhotoNodeData>;
   assets: Asset[];
   adaptation: AdaptationStatus | null;
-  projectSlug: string;
+  coverAssetId?: string | null;
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onImageGroupChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onGenerateArtifact: (id: string, artifact: StoryArtifactNodeData) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
+  onCreateChildText: (node: Node<DraftNodeData> | Node<StoryArtifactNodeData>) => void;
   onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
+  onSetProjectCover: (assetId: string) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
-  onCreateChildDraft: (nodeId: string, sourceAssetId: string) => void;
   onDelete: (id: string, assetId?: string) => void;
   onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
@@ -47,6 +49,7 @@ export function NodeSidebar({
         assets={assets}
         onDraftChange={onDraftChange}
         onGenerate={onGenerate}
+        onCreateChildText={onCreateChildText}
         onDelete={onDelete}
       />
     );
@@ -57,11 +60,9 @@ export function NodeSidebar({
     return (
       <StoryArtifactSidebar
         node={artifactNode}
-        projectSlug={projectSlug}
         onGenerate={onGenerateArtifact}
+        onCreateChildText={onCreateChildText}
         onDelete={onDelete}
-        onCreateChildDraft={onCreateChildDraft}
-        onRefineChat={onRefineChat}
       />
     );
   }
@@ -81,12 +82,14 @@ export function NodeSidebar({
       asset={node.data.activeAsset}
       assets={assets}
       adaptation={adaptation}
+      coverAssetId={coverAssetId}
       onDelete={onDelete}
       onNodeChange={onImageGroupChange}
       onVariant={onVariant}
       onCreateSibling={onCreateSibling}
       onGenerateVariants={onGenerateVariants}
       onSetStyleRefAsset={onSetStyleRefAsset}
+      onSetProjectCover={onSetProjectCover}
       onRefineChat={onRefineChat}
     />
   );
@@ -97,16 +100,20 @@ function DraftSidebar({
   assets,
   onDraftChange,
   onGenerate,
+  onCreateChildText,
   onDelete,
 }: {
   node: Node<DraftNodeData>;
   assets: Asset[];
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
+  onCreateChildText: (node: Node<DraftNodeData>) => void;
   onDelete: (id: string, assetId?: string) => void;
 }) {
   const draft = node.data;
   const canDelete = canDeleteNode(node);
+  const isDurableSource = draft.role?.type === 'style-ref-source' || draft.role?.type === 'visual-style-source';
+  const isFileBackedPrompt = draft.role?.type === 'style-ref-source' || draft.role?.type === 'visual-style-source';
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const [isParentPickerOpen, setIsParentPickerOpen] = useState(false);
   const parents = draft.refs.map((ref) => assets.find((asset) => asset.id === ref) ?? null);
@@ -115,6 +122,7 @@ function DraftSidebar({
   const draftCapabilities = capabilitiesForModel(draftModel);
   const styleRefKind = styleRefKindForTags(draft.tags);
   const styleRefLabel = styleRefKind === 'archetype-character' ? 'character' : styleRefKind === 'archetype-scene' ? 'scene' : null;
+  const sourceLabel = draft.role?.type === 'visual-style-source' ? 'visual style' : styleRefLabel ? `${styleRefLabel} archetype` : null;
   useEffect(() => {
     const textarea = promptRef.current;
     if (!textarea) return;
@@ -129,14 +137,17 @@ function DraftSidebar({
       </div>
       {styleRefLabel && (
         <div className="canvas-role-badge">
-          Draft {styleRefLabel} archetype reference
+          Durable {styleRefLabel} archetype prompt
         </div>
       )}
+      {draft.role?.type === 'visual-style-source' && <div className="canvas-role-badge">Durable visual style prompt</div>}
+      {isDurableSource && <p className="muted">This {sourceLabel ?? 'source'} prompt is backed by an adaptation file. Sync will recreate it if it is missing from the canvas.</p>}
+      {isDurableSource && <button className="secondary" onClick={() => onCreateChildText(node)}>Create child text artifact</button>}
       <label className="field-label">
         Name
         <input value={draft.displayName} onChange={(event) => onDraftChange(node.id, { displayName: event.target.value })} />
       </label>
-      {!styleRefKind && (
+      {!isFileBackedPrompt && (
         <section className="sidebar-section parent-section">
           <h3>Parents</h3>
           {parents.length === 0 && <p className="muted">None</p>}
@@ -178,22 +189,22 @@ function DraftSidebar({
           )}
         </section>
       )}
-      <section className={`sidebar-section ${styleRefKind ? 'style-ref-sidebar-section' : ''}`}>
+      <section className={`sidebar-section ${isFileBackedPrompt ? 'style-ref-sidebar-section' : ''}`}>
         <label className="field-label">
-          {styleRefKind ? 'File-backed prompt' : 'Prompt'}
+          {isFileBackedPrompt ? 'File-backed prompt' : 'Prompt'}
           <textarea
             ref={promptRef}
-            className={`prompt-textarea ${styleRefKind ? 'locked-field' : ''}`}
-            autoFocus={!styleRefKind}
+            className={`prompt-textarea ${isFileBackedPrompt ? 'locked-field' : ''}`}
+            autoFocus={!isFileBackedPrompt}
             value={draft.prompt}
-            onChange={(event) => !styleRefKind && onDraftChange(node.id, { prompt: event.target.value })}
+            onChange={(event) => !isFileBackedPrompt && onDraftChange(node.id, { prompt: event.target.value })}
             placeholder="Prompt"
-            readOnly={Boolean(styleRefKind)}
+            readOnly={isFileBackedPrompt}
           />
         </label>
-        {styleRefKind && <p className="muted">Edit this prompt from the style reference card. The canvas node is synced from the file.</p>}
+        {isFileBackedPrompt && <p className="muted">Edit this prompt from the adaptation style controls or source file. The canvas node is synced from disk.</p>}
       </section>
-      {!styleRefKind && <section className="sidebar-section generation-section">
+      {!isFileBackedPrompt && <section className="sidebar-section generation-section">
         <h3>Parameters</h3>
       <div className="row">
         <select
@@ -253,22 +264,18 @@ function canGenerateArtifact(kind: ArtifactKind) {
 
 function StoryArtifactSidebar({
   node,
-  projectSlug,
   onGenerate,
+  onCreateChildText,
   onDelete,
-  onCreateChildDraft,
-  onRefineChat,
 }: {
   node: Node<StoryArtifactNodeData>;
-  projectSlug: string;
   onGenerate: (id: string, artifact: StoryArtifactNodeData) => void;
+  onCreateChildText: (node: Node<StoryArtifactNodeData>) => void;
   onDelete: (id: string, assetId?: string) => void;
-  onCreateChildDraft: (nodeId: string, sourceAssetId: string) => void;
-  onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
   const artifact = node.data;
-  const generated = artifact.generatedAsset;
   const canDelete = canDeleteNode(node);
+  const isDurableSource = artifact.role?.type === 'artifact-source';
   return (
     <aside className="details-sidebar story-artifact-sidebar">
       <div className="popover-header">
@@ -278,22 +285,13 @@ function StoryArtifactSidebar({
         </div>
         {canDelete ? <button className="danger" onClick={() => onDelete(node.id)}>Delete</button> : null}
       </div>
+      {isDurableSource && <div className="canvas-role-badge">Durable story source</div>}
+      {isDurableSource && <p className="muted">This source artifact is backed by book-derived files and metadata. Generated images appear as child nodes on the canvas.</p>}
+      {isDurableSource && <button className="secondary" onClick={() => onCreateChildText(node)}>Create child text artifact</button>}
       <section className="sidebar-section">
         <h3>Source</h3>
         <code className="path-code">{artifact.promptPath}</code>
       </section>
-      {generated && (
-        <section className="sidebar-section">
-          <h3>Generated Image</h3>
-          <button className="story-artifact-sidebar-preview" onClick={() => artifact.onViewAsset(generated.id)}>
-            <img src={generated.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${generated.id}/thumb`} alt="" />
-            <span className="sidebar-preview-eye story-preview-eye" aria-hidden="true">👁️</span>
-            <span>{assetLabel(generated)}</span>
-          </button>
-          <button className="generate-button" onClick={() => onRefineChat(node.id, generated.id)}>Refine in chat</button>
-          <button className="secondary" onClick={() => onCreateChildDraft(node.id, generated.id)}>Create child draft</button>
-        </section>
-      )}
       <section className="sidebar-section">
         <h3>Prompt</h3>
         <textarea className="prompt-textarea prompt-preview locked-field" value={artifact.prompt} readOnly />
@@ -308,7 +306,7 @@ function StoryArtifactSidebar({
         {canGenerateArtifact(artifact.artifactKind) ? (
           <button className="generate-button" onClick={() => onGenerate(node.id, artifact)} disabled={!artifact.prompt.trim() || artifact.isGenerating}>
             {artifact.isGenerating && <span className="spinner" aria-hidden="true" />}
-            {artifact.isGenerating ? 'Generating...' : generated ? 'Regenerate artifact' : 'Generate artifact'}
+            {artifact.isGenerating ? 'Generating...' : 'Generate child image'}
           </button>
         ) : (
           <p className="muted">Planning artifact only. Generate page or panel prompts from later layout artifacts.</p>
@@ -323,24 +321,28 @@ function ImageSidebar({
   asset,
   assets,
   adaptation,
+  coverAssetId,
   onDelete,
   onNodeChange,
   onVariant,
   onCreateSibling,
   onGenerateVariants,
   onSetStyleRefAsset,
+  onSetProjectCover,
   onRefineChat,
 }: {
   node: Node<ImageGroupNodeData>;
   asset: Asset;
   assets: Asset[];
   adaptation: AdaptationStatus | null;
+  coverAssetId?: string | null;
   onDelete: (id: string, assetId?: string) => void;
   onNodeChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
   onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
+  onSetProjectCover: (assetId: string) => void;
   onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
   const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
@@ -349,9 +351,11 @@ function ImageSidebar({
   const refs = asset.generation?.refs ?? [];
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const activeVariantIndex = Math.max(0, node.data.assetIds.indexOf(asset.id));
+  const isGeneratedResult = node.data.role?.type === 'generated-result';
   const styleRefKind = styleRefKindForTags(node.data.tags);
   const isCharacterArchetype = adaptation?.styleRefStatuses?.['archetype-character']?.assetId === asset.id;
   const isSceneArchetype = adaptation?.styleRefStatuses?.['archetype-scene']?.assetId === asset.id;
+  const isProjectCover = coverAssetId === asset.id;
   const canSetCanonicalReference = Boolean(styleRefKind) || isCanonicalStyleRefAsset(adaptation, asset.id);
   const activeModel = isVariantPanelOpen ? variantParams.model ?? asset.generation?.model : asset.generation?.model;
   const activeCapabilities = capabilitiesForModel(activeModel);
@@ -381,10 +385,17 @@ function ImageSidebar({
           {isCharacterArchetype ? 'Chosen character archetype' : isSceneArchetype ? 'Chosen scene archetype' : 'Style reference candidate'}
         </div>
       )}
+      {isGeneratedResult && <div className="canvas-role-badge">Generated child image</div>}
+      {isGeneratedResult && <p className="muted">This image was generated from a durable source node. Deleting it does not delete the source prompt.</p>}
       <label className="field-label">
         Group name
         <input value={node.data.displayName} onChange={(event) => onNodeChange(node.id, { displayName: event.target.value })} />
       </label>
+      {asset.hasPixels && (
+        <button className="secondary" disabled={isProjectCover} onClick={() => onSetProjectCover(asset.id)}>
+          {isProjectCover ? 'Project cover' : 'Set as project cover'}
+        </button>
+      )}
       <div className="sidebar-variant-preview" onClick={changeSidebarVariantByClickSide}>
         {asset.thumbnailUrl && <img src={asset.thumbnailUrl} alt="" />}
         <span>{activeVariantIndex + 1} / {node.data.assetIds.length}</span>

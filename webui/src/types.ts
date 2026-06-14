@@ -43,6 +43,8 @@ export interface Project {
   name: string;
   createdAt: string;
   settings: Record<string, unknown>;
+  coverAssetId?: string | null;
+  coverThumbnailUrl?: string | null;
 }
 
 export interface ProjectDetail {
@@ -83,7 +85,10 @@ export interface CanvasNodeLayout {
 export type CanvasRole =
   | { type: 'style-ref-source'; kind: StyleRefKind }
   | { type: 'artifact-source'; artifactKind: ArtifactKind; artifactKey: string }
-  | { type: 'generated-result'; sourceNodeId: string };
+  | { type: 'visual-style-source' }
+  | { type: 'text-result'; sourceNodeId: string }
+  | { type: 'generated-result'; sourceNodeId: string }
+  | { type: 'refinement'; sourceNodeId: string; sourceAssetId?: string | null };
 
 export interface DraftCanvasNode extends CanvasNodeLayout {
   type: 'draft';

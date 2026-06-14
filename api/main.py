@@ -40,6 +40,7 @@ from models import (
     GenerateRequest,
     GenerateResponse,
     ProjectCreate,
+    ProjectCoverPatch,
     ProjectDetail,
     ProjectMetadata,
 )
@@ -81,6 +82,11 @@ def get_project(slug: str, includeArchived: bool = Query(default=False)) -> Proj
     if includeArchived:
         return ProjectDetail(project=library.get_project(slug), assets=library.list_assets(slug, include_archived=True))
     return library.get_project_detail(slug)
+
+
+@app.patch("/api/projects/{slug}", response_model=ProjectMetadata)
+def patch_project(slug: str, payload: ProjectCoverPatch) -> ProjectMetadata:
+    return library.patch_project_cover(slug, payload.coverAssetId)
 
 
 @app.delete("/api/projects/{slug}", status_code=status.HTTP_204_NO_CONTENT)

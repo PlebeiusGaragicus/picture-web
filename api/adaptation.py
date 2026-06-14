@@ -124,6 +124,28 @@ def clear_stale_style_ref_assets(slug: str, metadata: AdaptationMetadata) -> tup
     return metadata, changed
 
 
+def artifact_link_groups(metadata: AdaptationMetadata) -> tuple[dict[str, AdaptationAssetLink], ...]:
+    return (metadata.characters, metadata.locations, metadata.scenes, metadata.pages, metadata.panels)
+
+
+def clear_stale_artifact_assets(slug: str, metadata: AdaptationMetadata) -> tuple[AdaptationMetadata, bool]:
+    changed = False
+    for group in artifact_link_groups(metadata):
+        for key, link in list(group.items()):
+            asset_ids = [asset_id for asset_id in link.assetIds if asset_exists(slug, asset_id)]
+            canonical_asset_id = link.canonicalAssetId if link.canonicalAssetId and asset_exists(slug, link.canonicalAssetId) else None
+            if asset_ids != link.assetIds or canonical_asset_id != link.canonicalAssetId:
+                group[key] = link.model_copy(
+                    update={
+                        "assetIds": asset_ids,
+                        "canonicalAssetId": canonical_asset_id,
+                        "status": "generated" if canonical_asset_id else "ready",
+                    }
+                )
+                changed = True
+    return metadata, changed
+
+
 def style_ref_status(slug: str, kind: StyleRefKind, metadata: AdaptationMetadata | None = None) -> StyleRefStatus:
     root = ensure_adaptation(slug)
     metadata = metadata or read_metadata(slug)
@@ -649,7 +671,8 @@ def status(slug: str) -> AdaptationStatus:
     root = ensure_adaptation(slug)
     metadata = sync_prompt_links(slug, read_metadata(slug))
     metadata, changed = clear_stale_style_ref_assets(slug, metadata)
-    if changed:
+    metadata, artifact_changed = clear_stale_artifact_assets(slug, metadata)
+    if changed or artifact_changed:
         metadata = write_metadata(slug, metadata)
     statuses = style_ref_statuses(slug, metadata)
     return AdaptationStatus(

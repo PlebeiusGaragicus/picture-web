@@ -18,13 +18,14 @@ import './style.css';
 import { api } from './api';
 import { VisualStyleCard } from './adaptation/cards';
 import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
+import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
 import { artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, visibleDisplayName } from './canvas/shared';
 import { NodeSidebar } from './canvas/sidebars';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './canvas/types';
 import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags } from './styleRefs';
 import { HelpTip, Modal } from './ui';
-import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, Asset, CanvasDocument, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryKind, StyleRefKind } from './types';
+import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryKind, StyleRefKind } from './types';
 
 type ProjectPhase =
   | 'phase-0-ingestion'
@@ -89,10 +90,6 @@ const maxZoom = 2;
 function zoomToPercent(zoom: number) {
   const normalized = ((zoom - minZoom) / (maxZoom - minZoom)) * 100;
   return Math.round(Math.min(100, Math.max(0, normalized)));
-}
-
-function generatedResultNodeId(sourceNodeId: string): string {
-  return `generated_${sourceNodeId}`;
 }
 
 function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): CanvasDocument {
@@ -194,7 +191,7 @@ function toFlowNodes(
         id,
         position: { x: canvasNode.x, y: canvasNode.y },
         type: 'storyArtifact',
-        data: { ...canvasNode, generatedAssetIds: canvasNode.generatedAssetIds ?? [], kind: 'storyArtifact', nodeId: id, generatedAsset, isGenerating: generatingNodeIds.has(id), onDetails, onViewAsset, onRefineChat, onCreateChildDraft: () => undefined },
+        data: { ...canvasNode, generatedAssetIds: canvasNode.generatedAssetIds ?? [], kind: 'storyArtifact', nodeId: id, generatedAsset, isGenerating: generatingNodeIds.has(id), onDetails, onViewAsset, onRefineChat },
       };
     }
     const groupAssets = canvasNode.assetIds.map((assetId) => assetById.get(assetId)).filter((asset): asset is Asset => Boolean(asset));
@@ -355,6 +352,7 @@ function App() {
   const loadProject = useCallback(async (projectSlug: string) => {
     if (!projectSlug) return;
     const [detail, layout, sessions] = await Promise.all([api.getProject(projectSlug, showArchived), api.getCanvas(projectSlug), api.listChatSessions(projectSlug, showArchived)]);
+    setProjects((current) => current.map((project) => (project.slug === detail.project.slug ? detail.project : project)));
     setAssets(detail.assets);
     setChatSessions(sessions);
     setCanvas(layout);
@@ -401,62 +399,7 @@ function App() {
   }, [effectiveTagFilters, nodes]);
 
   const edges: Edge[] = useMemo(() => {
-    const visibleNodeIds = new Set(filteredNodes.map((node) => node.id));
-    const nodeForAsset = new Map<string, Node<ImageGroupNodeData> | Node<StoryArtifactNodeData>>();
-    filteredNodes.forEach((node) => {
-      if (node.data.kind === 'imageGroup') {
-        const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
-        node.data.assetIds.forEach((assetId) => nodeForAsset.set(assetId, imageNode));
-      }
-      if (node.data.kind === 'storyArtifact' && node.data.generatedAssetId) {
-        const artifactNode: Node<StoryArtifactNodeData> = { ...node, data: node.data };
-        nodeForAsset.set(node.data.generatedAssetId, artifactNode);
-      }
-    });
-    const edgeForAssetRef = (childNode: Node<ImageGroupNodeData> | Node<DraftNodeData> | Node<StoryArtifactNodeData>, childAssetId: string | null, ref: string): Edge | null => {
-      const sourceNode = nodeForAsset.get(ref);
-      if (!sourceNode || sourceNode.id === childNode.id) return null;
-      const sourceVisible = sourceNode.data.kind === 'imageGroup'
-        ? sourceNode.data.activeAsset?.id === ref
-        : sourceNode.data.generatedAssetId === ref;
-      const childVisible = childNode.data.kind === 'draft' || childNode.data.kind === 'storyArtifact' || childNode.data.activeAsset?.id === childAssetId;
-      const isVisibleLineage = sourceVisible && childVisible;
-      return {
-        id: `${sourceNode.id}-${childNode.id}-${childAssetId ?? 'draft'}-${ref}`,
-        source: sourceNode.id,
-        target: childNode.id,
-        animated: childNode.data.kind === 'draft',
-        className: `${isVisibleLineage ? 'lineage-edge-visible' : 'lineage-edge-hidden'}${childAssetId && childNode.data.kind === 'imageGroup' && childNode.data.assets.find((asset) => asset.id === childAssetId)?.generation?.chatSessionId ? ' lineage-edge-chat-refinement' : ''}`,
-        style: isVisibleLineage ? undefined : { strokeDasharray: '5 5', opacity: 0.35 },
-      };
-    };
-    const assetEdges = filteredNodes.flatMap((node) => {
-      if (node.data.kind !== 'imageGroup') return [];
-      const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
-      return node.data.assets.flatMap((asset) => (asset.generation?.refs ?? []).flatMap((ref) => edgeForAssetRef(imageNode, asset.id, ref) ?? []));
-    });
-    const draftEdges = filteredNodes.flatMap((node) => {
-      if (node.data.kind !== 'draft') return [];
-      const draftNode: Node<DraftNodeData> = { ...node, data: node.data };
-      return node.data.refs.flatMap((ref) => edgeForAssetRef(draftNode, null, ref) ?? []);
-    });
-    const artifactRefEdges = filteredNodes.flatMap((node) => {
-      if (node.data.kind !== 'storyArtifact') return [];
-      const artifactNode: Node<StoryArtifactNodeData> = { ...node, data: node.data };
-      return node.data.refs.flatMap((ref) => edgeForAssetRef(artifactNode, null, ref) ?? []);
-    });
-    const generatedResultEdges = filteredNodes.flatMap((node) => {
-      const sourceNodeId = node.data.role?.type === 'generated-result' ? node.data.role.sourceNodeId : null;
-      if (!sourceNodeId || !visibleNodeIds.has(sourceNodeId)) return [];
-      return [{
-        id: `${sourceNodeId}-${node.id}-generated-result`,
-        source: sourceNodeId,
-        target: node.id,
-        animated: node.data.kind === 'imageGroup' && node.data.isGenerating,
-        className: 'lineage-edge-visible',
-      }];
-    });
-    return [...assetEdges, ...draftEdges, ...artifactRefEdges, ...generatedResultEdges];
+    return deriveStoryGraphEdges(filteredNodes);
   }, [filteredNodes]);
 
   const selectedNode = useMemo(() => nodes.find((node) => node.id === popoverNodeId) ?? null, [nodes, popoverNodeId]);
@@ -682,15 +625,11 @@ function App() {
 
   const deleteSelectedNodes = useCallback(async () => {
     if (!selectedNodeIds.length) return;
-    const selected = new Set(selectedNodeIds);
-    const deletableNodes = nodes.filter((node) => selected.has(node.id) && canDeleteNode(node));
+    const deletableNodes = deletableSelectedNodes(nodes, selectedNodeIds);
     if (!deletableNodes.length) return;
     const deletable = new Set(deletableNodes.map((node) => node.id));
     const selectedImageNodes = deletableNodes.filter((node) => node.data.kind === 'imageGroup') as Node<ImageGroupNodeData>[];
-    const skippedCount = selectedNodeIds.length - deletableNodes.length;
-    const message = selectedImageNodes.length
-      ? `Delete ${deletableNodes.length} selected node(s) and move image files to the system Trash?${skippedCount ? ` ${skippedCount} source node(s) will be kept.` : ''}`
-      : `Delete ${deletableNodes.length} selected draft node(s)?${skippedCount ? ` ${skippedCount} source node(s) will be kept.` : ''}`;
+    const message = deleteSelectedNodesMessage(selectedNodeIds.length, deletableNodes.length, selectedImageNodes.length);
     if (!window.confirm(message)) return;
     try {
       await Promise.all(selectedImageNodes.flatMap((node) => node.data.assetIds.map((assetId) => api.deleteAsset(openProjectSlug, assetId))));
@@ -722,7 +661,7 @@ function App() {
   const createDraftAt = async (
     refs: string[],
     position: { x: number; y: number },
-    options: { prompt?: string; params?: GenerationParams; displayName?: string } = {},
+    options: { prompt?: string; params?: GenerationParams; displayName?: string; role?: CanvasRole | null; tags?: string[] } = {},
   ) => {
     const nodeId = `draft_${Date.now()}`;
     const node: Node<PhotoNodeData> = {
@@ -733,10 +672,11 @@ function App() {
         kind: 'draft',
         nodeId,
         type: 'draft',
-        displayName: '',
+        displayName: options.displayName ?? '',
         x: position.x,
         y: position.y,
-        tags: [],
+        tags: options.tags ?? [],
+        role: options.role ?? null,
         refs: Array.from(new Set(refs)),
         prompt: options.prompt ?? '',
         params: options.params ?? defaultDraftParams,
@@ -778,14 +718,17 @@ function App() {
     await createDraftAt(refs, position, { prompt: sourceAsset.prompt?.text ?? '', params });
   };
 
-  const createChildDraftFromAsset = async (sourceNodeId: string, sourceAssetId: string) => {
-    const sourceNode = nodes.find((node) => node.id === sourceNodeId);
-    const sourceAsset = assets.find((asset) => asset.id === sourceAssetId);
-    const position = sourceNode
-      ? { x: sourceNode.position.x + 260, y: sourceNode.position.y }
-      : { x: 180, y: 160 };
-    await createDraftAt([sourceAssetId], position, {
-      displayName: sourceAsset ? `${assetLabel(sourceAsset)} child` : 'Child draft',
+  const createChildTextArtifact = async (sourceNode: Node<DraftNodeData> | Node<StoryArtifactNodeData>) => {
+    const position = { x: sourceNode.position.x + 320, y: sourceNode.position.y + 80 };
+    const prompt = sourceNode.data.prompt;
+    const displayName = `${visibleDisplayName(sourceNode.data.displayName) || 'Source'} child`;
+    const params = sourceNode.data.params ?? defaultDraftParams;
+    await createDraftAt([], position, {
+      displayName,
+      prompt,
+      params,
+      role: { type: 'text-result', sourceNodeId: sourceNode.id },
+      tags: ['text-result'],
     });
   };
 
@@ -999,6 +942,12 @@ function App() {
     await reload();
   };
 
+  const setProjectCover = async (assetId: string) => {
+    if (!openProjectSlug) return;
+    const updated = await api.setProjectCover(openProjectSlug, assetId);
+    setProjects((current) => current.map((project) => (project.slug === updated.slug ? updated : project)));
+  };
+
   const generateAdaptationStyleRef = async (kind: StyleRefKind) => {
     if (!openProjectSlug) return;
     setError(null);
@@ -1082,10 +1031,6 @@ function App() {
         projects={projects}
         error={error}
         onOpen={openProject}
-        onDelete={async (slug) => {
-          await api.deleteProject(slug);
-          await loadProjects();
-        }}
         onCreated={async (nextSlug) => {
           await loadProjects();
           await openProject(nextSlug);
@@ -1108,6 +1053,11 @@ function App() {
         isCollapsed={isPhaseSidebarCollapsed}
         onToggleCollapsed={() => setIsPhaseSidebarCollapsed((current) => !current)}
         onBack={closeProject}
+        onDeleteProject={async () => {
+          await api.deleteProject(openProjectSlug);
+          await loadProjects();
+          closeProject();
+        }}
         onPhaseChange={(phase) => {
           setProjectPhase(phase);
           setPhaseViewMode('list');
@@ -1302,16 +1252,17 @@ function App() {
           node={selectedNode}
           assets={assets}
           adaptation={adaptation}
-          projectSlug={openProjectSlug}
+          coverAssetId={currentProject?.coverAssetId ?? null}
           onDraftChange={updateDraft}
           onImageGroupChange={updateImageGroup}
           onGenerate={generateDraft}
           onGenerateArtifact={generateStoryArtifact}
           onGenerateVariants={generateImageVariants}
+          onCreateChildText={createChildTextArtifact}
           onSetStyleRefAsset={setAdaptationStyleRefAsset}
+          onSetProjectCover={setProjectCover}
           onVariant={changeVariant}
           onCreateSibling={createSiblingDraft}
-          onCreateChildDraft={createChildDraftFromAsset}
           onDelete={deleteNodeById}
           onRefineChat={openChatForAsset}
         />
@@ -1333,6 +1284,7 @@ function App() {
           fallbackAsset={assets.find((asset) => asset.id === viewerAssetId)}
           assets={assets}
           projectSlug={openProjectSlug}
+          coverAssetId={currentProject?.coverAssetId ?? null}
           onClose={() => {
             setViewerNodeId(null);
             setViewerAssetId(null);
@@ -1341,6 +1293,7 @@ function App() {
           onViewAsset={openAssetInViewer}
           onDetails={openViewerDetails}
           onDelete={deleteNodeById}
+          onSetProjectCover={setProjectCover}
         />
       )}
       {isCanvasActive && pendingDelete && (
@@ -1375,87 +1328,84 @@ function ProjectLanding({
   projects,
   error,
   onOpen,
-  onDelete,
   onCreated,
 }: {
   projects: Project[];
   error: string | null;
   onOpen: (slug: string) => void;
-  onDelete: (slug: string) => Promise<void>;
   onCreated: (slug: string) => void;
 }) {
   const [name, setName] = useState('');
-  const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
-  const [pendingProjectDelete, setPendingProjectDelete] = useState<Project | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const closeCreate = () => {
+    if (creating) return;
+    setCreateOpen(false);
+    setName('');
+  };
   const create = async () => {
     const nextSlug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    if (!nextSlug) return;
-    await api.createProject(nextSlug, name, {});
-    setName('');
-    onCreated(nextSlug);
+    if (!nextSlug || creating) return;
+    setCreating(true);
+    try {
+      await api.createProject(nextSlug, name, {});
+      setName('');
+      setCreateOpen(false);
+      onCreated(nextSlug);
+    } finally {
+      setCreating(false);
+    }
   };
   return (
     <div className="landing">
       <div className="landing-card">
-        <h1>photo-web</h1>
+        <h1>Story Canvas</h1>
         {error && <p className="error">{error}</p>}
         <section>
-          <h2>Open project</h2>
-          {projects.length === 0 && <p className="muted">No projects yet.</p>}
+          <h2>Projects</h2>
           <div className="project-list">
             {projects.map((project) => (
-              <div key={project.slug} className="project-card">
-                <button className="project-open-button" onClick={() => onOpen(project.slug)}>
-                  <strong>{project.name}</strong>
-                </button>
-                <button
-                  className="danger project-delete-button"
-                  disabled={deletingSlug === project.slug}
-                  onClick={() => setPendingProjectDelete(project)}
-                >
-                  {deletingSlug === project.slug ? 'Deleting...' : 'Delete'}
-                </button>
-              </div>
+              <button key={project.slug} className="project-tile" onClick={() => onOpen(project.slug)}>
+                <div className="project-tile-cover">
+                  {project.coverThumbnailUrl ? (
+                    <img src={project.coverThumbnailUrl} alt="" />
+                  ) : (
+                    <div className="project-tile-cover-placeholder" aria-hidden="true">🖼️</div>
+                  )}
+                </div>
+                <strong className="project-tile-name">{project.name}</strong>
+              </button>
             ))}
+            <button className="project-tile project-create-tile" onClick={() => setCreateOpen(true)}>
+              <div className="project-tile-cover project-create-cover" aria-hidden="true">+</div>
+              <span className="project-tile-name">New project</span>
+            </button>
           </div>
         </section>
-        <section>
-          <h2>Create project</h2>
-          <div className="row">
-            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Project name" />
-            <button onClick={create}>Create</button>
-          </div>
-        </section>
-        {pendingProjectDelete && (
-          <div className="confirm-backdrop" onClick={() => setPendingProjectDelete(null)}>
-            <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
-              <h2>Delete project?</h2>
-              <p>
-                Move <strong>{pendingProjectDelete.name}</strong> to the system Trash? This removes its canvas,
-                assets, and adaptation files from photo-web.
-              </p>
-              <div className="row">
-                <button
-                  className="danger"
-                  disabled={deletingSlug === pendingProjectDelete.slug}
-                  onClick={async () => {
-                    setDeletingSlug(pendingProjectDelete.slug);
-                    try {
-                      await onDelete(pendingProjectDelete.slug);
-                      setPendingProjectDelete(null);
-                    } finally {
-                      setDeletingSlug(null);
-                    }
-                  }}
-                >
-                  {deletingSlug === pendingProjectDelete.slug ? 'Deleting...' : 'Delete project'}
-                </button>
-                <button className="secondary" disabled={Boolean(deletingSlug)} onClick={() => setPendingProjectDelete(null)}>Cancel</button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
+      {createOpen && (
+        <Modal title="New project" onClose={closeCreate}>
+          <label className="field-label">
+            Project name
+            <input
+              autoFocus
+              value={name}
+              disabled={creating}
+              onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void create();
+              }}
+              placeholder="My project"
+            />
+          </label>
+          <div className="modal-actions">
+            <button className="secondary" disabled={creating} onClick={closeCreate}>Cancel</button>
+            <button disabled={creating || !name.trim()} onClick={() => void create()}>
+              {creating ? 'Creating...' : 'Create project'}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -1480,6 +1430,7 @@ function ProjectPhaseSidebar({
   isCollapsed,
   onToggleCollapsed,
   onBack,
+  onDeleteProject,
   onPhaseChange,
 }: {
   project: Project | undefined;
@@ -1490,8 +1441,11 @@ function ProjectPhaseSidebar({
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
   onBack: () => void;
+  onDeleteProject: () => Promise<void>;
   onPhaseChange: (phase: ProjectPhase) => void;
 }) {
+  const [pendingDelete, setPendingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   if (isCollapsed) {
     return (
       <button
@@ -1544,6 +1498,40 @@ function ProjectPhaseSidebar({
           );
         })}
       </nav>
+      <div className="phase-sidebar-footer">
+        <button className="danger" disabled={deleting} onClick={() => setPendingDelete(true)}>
+          Delete project
+        </button>
+      </div>
+      {pendingDelete && (
+        <div className="confirm-backdrop" onClick={() => !deleting && setPendingDelete(false)}>
+          <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
+            <h2>Delete project?</h2>
+            <p>
+              Move <strong>{project?.name ?? projectSlug}</strong> to the system Trash? This removes its canvas,
+              assets, and adaptation files from Story Canvas.
+            </p>
+            <div className="row">
+              <button
+                className="danger"
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleting(true);
+                  try {
+                    await onDeleteProject();
+                    setPendingDelete(false);
+                  } finally {
+                    setDeleting(false);
+                  }
+                }}
+              >
+                {deleting ? 'Deleting...' : 'Delete project'}
+              </button>
+              <button className="secondary" disabled={deleting} onClick={() => setPendingDelete(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
@@ -2489,21 +2477,25 @@ function ImageViewer({
   fallbackAsset,
   assets,
   projectSlug,
+  coverAssetId,
   onClose,
   onVariant,
   onViewAsset,
   onDetails,
   onDelete,
+  onSetProjectCover,
 }: {
   node?: Node<ImageGroupNodeData>;
   fallbackAsset?: Asset;
   assets: Asset[];
   projectSlug: string;
+  coverAssetId?: string | null;
   onClose: () => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onViewAsset: (assetId: string) => void;
   onDetails: (nodeId: string) => void;
   onDelete: (nodeId: string, assetId?: string) => void;
+  onSetProjectCover: (assetId: string) => void;
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -2517,6 +2509,7 @@ function ImageViewer({
 
   const asset = node?.data.activeAsset ?? fallbackAsset;
   if (!asset) return null;
+  const isProjectCover = coverAssetId === asset.id;
   const currentIndex = node ? Math.max(0, node.data.assetIds.indexOf(asset.id)) : 0;
   const imageUrl = `/api/projects/${projectSlug}/assets/${asset.id}/image`;
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
@@ -2553,6 +2546,11 @@ function ImageViewer({
           </button>
           <strong>{node?.data.displayName ?? assetLabel(asset)}</strong>
           <div className="image-viewer-toolbar-actions">
+            {asset.hasPixels && (
+              <button className="secondary" disabled={isProjectCover} onClick={() => onSetProjectCover(asset.id)}>
+                {isProjectCover ? 'Project cover' : 'Set as cover'}
+              </button>
+            )}
             {node && <span>{currentIndex + 1} / {node.data.assetIds.length}</span>}
             {node && (
               <button className="image-viewer-info-button secondary" onClick={() => onDetails(node.id)} title="Show details">
@@ -2625,6 +2623,19 @@ function ImageViewer({
 function DraftNode({ data }: NodeProps<DraftNodeData>) {
   const styleRefKind = styleRefKindForTags(data.tags);
   const styleRole = styleRefKind === 'archetype-character' ? 'Character archetype prompt' : styleRefKind === 'archetype-scene' ? 'Scene archetype prompt' : null;
+  const roleClass = data.role?.type === 'visual-style-source'
+    ? 'visual-style-node'
+    : data.role?.type === 'text-result'
+      ? 'text-result-node'
+      : '';
+  const nodeTitle = data.role?.type === 'visual-style-source' ? 'Visual Style' : data.role?.type === 'text-result' ? 'Child Text' : 'Draft';
+  const nodeSubtitle = data.role?.type === 'visual-style-source'
+    ? 'Shared style source'
+    : data.role?.type === 'text-result'
+      ? 'Editable child artifact'
+      : styleRefKind && data.tags.includes('generated')
+        ? 'Generated child available'
+        : `${data.refs.length} parent${data.refs.length === 1 ? '' : 's'}`;
   const tooltip = [
     data.prompt || 'Draft prompt not set',
     `parents: ${data.refs.length}`,
@@ -2632,10 +2643,10 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
     `ratio: ${data.params.aspectRatio ?? 'default'}, size: ${data.params.imageSize ?? 'default'}, seed: ${data.params.seed ?? 'auto'}`,
   ].join('\n');
   return (
-    <div className={`node draft-node ${data.tags.includes('archetype') ? 'archetype-draft-node' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
+    <div className={`node draft-node ${data.tags.includes('archetype') ? 'archetype-draft-node' : ''} ${roleClass} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       <div className="draft-placeholder" aria-hidden="true">
-        {styleRole && <span className="node-role-badge">{styleRole}</span>}
+        {(styleRole || data.role?.type === 'visual-style-source' || data.role?.type === 'text-result') && <span className="node-role-badge">{styleRole ?? nodeTitle}</span>}
         {data.isGenerating && (
           <div className="node-generating-overlay">
             <span className="spinner" aria-hidden="true" />
@@ -2643,9 +2654,9 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
           </div>
         )}
       </div>
-      <strong>Draft</strong>
-      <small>{styleRefKind && data.tags.includes('generated') ? 'Generated child available' : `${data.refs.length} parent${data.refs.length === 1 ? '' : 's'}`}</small>
-      {data.role?.type === 'style-ref-source' && <Handle type="source" position={Position.Right} className="output-handle" />}
+      <strong>{nodeTitle}</strong>
+      <small>{nodeSubtitle}</small>
+      {(data.role?.type === 'style-ref-source' || data.role?.type === 'visual-style-source' || data.role?.type === 'text-result') && <Handle type="source" position={Position.Right} className="output-handle" />}
     </div>
   );
 }

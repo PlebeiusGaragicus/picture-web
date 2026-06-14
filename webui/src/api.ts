@@ -54,6 +54,11 @@ export const api = {
       body: JSON.stringify({ slug, name, settings }),
     }),
   getProject: (slug: string, includeArchived = false) => request<ProjectDetail>(`/api/projects/${slug}${includeArchived ? '?includeArchived=true' : ''}`),
+  setProjectCover: (slug: string, coverAssetId: string | null) =>
+    request<Project>(`/api/projects/${slug}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ coverAssetId }),
+    }),
   deleteProject: (slug: string) =>
     request<void>(`/api/projects/${slug}`, {
       method: 'DELETE',
