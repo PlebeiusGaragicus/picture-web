@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
+import { createPortal } from 'react-dom';
 import ReactFlow, {
   Controls,
   Handle,
@@ -16,13 +17,14 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import './style.css';
 import { api } from './api';
-import { exportProjectAssetsToFolder } from './exportAssets';
+import { exportProjectAssetsToFolder, saveAssetImageToDisk } from './exportAssets';
 import { VisualStyleCard } from './adaptation/cards';
 import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
-import { SYSTEM_TAGS, artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, visibleDisplayName } from './canvas/shared';
+import { SYSTEM_TAGS, artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, mergeAvailableUserTags, modelCapabilities, normalizedParamsForModel, visibleDisplayName } from './canvas/shared';
 import { NodeSidebar } from './canvas/sidebars';
+import { NodeAssetTagRow } from './canvas/assetTagRow';
 import { TagColorPickerPopover, TagEditorPopover } from './canvas/tagEditor';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './canvas/types';
 import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags } from './styleRefs';
@@ -154,12 +156,15 @@ function toFlowNodes(
   canvas: CanvasDocument,
   assets: Asset[],
   generatingNodeIds: Set<string> = new Set(),
+  projectTags: TagDefinition[] = [],
   onVariant: (nodeId: string, direction: -1 | 1) => void = () => undefined,
   onView: (nodeId: string) => void = () => undefined,
   onDetails: (nodeId: string) => void = () => undefined,
   onViewAsset: (assetId: string) => void = () => undefined,
   onDisplayNameChange: (nodeId: string, displayName: string) => void = () => undefined,
   onRefineChat: (nodeId: string, assetId: string) => void = () => undefined,
+  onAssetTagsChange: (nodeId: string, assetId: string, tags: string[]) => void = () => undefined,
+  onCreateTag: (tag: TagDefinition) => void = () => undefined,
 ): Node<PhotoNodeData>[] {
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
   const displayNameByAssetId = new Map<string, string>();
@@ -192,7 +197,21 @@ function toFlowNodes(
       id,
       position: { x: canvasNode.x, y: canvasNode.y },
       type: 'imageGroup',
-      data: { ...canvasNode, kind: 'imageGroup', nodeId: id, assets: groupAssets, activeAsset, onVariant, onView, onDetails, onDisplayNameChange, isGenerating: generatingNodeIds.has(id) },
+      data: {
+        ...canvasNode,
+        kind: 'imageGroup',
+        nodeId: id,
+        assets: groupAssets,
+        activeAsset,
+        projectTags,
+        onVariant,
+        onView,
+        onDetails,
+        onDisplayNameChange,
+        onAssetTagsChange,
+        onCreateTag,
+        isGenerating: generatingNodeIds.has(id),
+      },
     };
   });
 }
@@ -245,6 +264,9 @@ function App() {
     openAssetInViewer: (_assetId: string) => {},
     updateImageGroupDisplayName: (_nodeId: string, _displayName: string) => {},
     openChatForAsset: async (_nodeId: string, _assetId: string) => {},
+    updateAssetTags: (_nodeId: string, _assetId: string, _tags: string[]) => {},
+    createProjectTag: (_tag: TagDefinition) => {},
+    projectTags: [] as TagDefinition[],
   });
 
   useEffect(() => {
@@ -388,7 +410,20 @@ function App() {
     setProjectTags(detail.tags);
     setChatSessions(sessions);
     setCanvas(layout);
-    setNodes(toFlowNodes(layout, detail.assets, generatingNodeIdsRef.current, changeVariant, openViewer, openDetails, openAssetInViewer, updateImageGroupDisplayName, openChatForAsset));
+    setNodes(toFlowNodes(
+      layout,
+      detail.assets,
+      generatingNodeIdsRef.current,
+      mergeAvailableUserTags(detail.tags, detail.assets),
+      changeVariant,
+      openViewer,
+      openDetails,
+      openAssetInViewer,
+      updateImageGroupDisplayName,
+      openChatForAsset,
+      toFlowNodesCallbacksRef.current.updateAssetTags,
+      toFlowNodesCallbacksRef.current.createProjectTag,
+    ));
   }, [changeVariant, openAssetInViewer, openChatForAsset, openDetails, openViewer, showArchived, updateImageGroupDisplayName]);
 
   useEffect(() => {
@@ -422,16 +457,7 @@ function App() {
     nodes.forEach((node) => node.data.tags.forEach((tag) => tags.add(tag)));
     return Array.from(tags).filter((tag) => SYSTEM_TAGS.has(tag)).sort();
   }, [nodes]);
-  const availableUserTags = useMemo(() => {
-    const byId = new Map<string, TagDefinition>();
-    projectTags.forEach((tag) => byId.set(tag.id, tag));
-    assets.forEach((asset) => {
-      asset.tags.forEach((tagId) => {
-        if (!SYSTEM_TAGS.has(tagId) && !byId.has(tagId)) byId.set(tagId, { id: tagId, name: tagId, color: '#64748b' });
-      });
-    });
-    return Array.from(byId.values()).sort((first, second) => first.name.localeCompare(second.name));
-  }, [assets, projectTags]);
+  const availableUserTags = useMemo(() => mergeAvailableUserTags(projectTags, assets), [assets, projectTags]);
   const userTagCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     assets.forEach((asset) => {
@@ -811,12 +837,15 @@ function App() {
         saved,
         assets,
         generatingNodeIdsRef.current,
+        callbacks.projectTags,
         callbacks.changeVariant,
         callbacks.openViewer,
         callbacks.openDetails,
         callbacks.openAssetInViewer,
         callbacks.updateImageGroupDisplayName,
         callbacks.openChatForAsset,
+        callbacks.updateAssetTags,
+        callbacks.createProjectTag,
       ));
     }
   }, [assets, canvas, openProjectSlug]);
@@ -833,8 +862,18 @@ function App() {
       openAssetInViewer,
       updateImageGroupDisplayName,
       openChatForAsset,
+      updateAssetTags,
+      createProjectTag,
+      projectTags: availableUserTags,
     };
-  }, [changeVariant, openAssetInViewer, openChatForAsset, openDetails, openViewer, updateImageGroupDisplayName]);
+  }, [availableUserTags, changeVariant, createProjectTag, openAssetInViewer, openChatForAsset, openDetails, openViewer, updateAssetTags, updateImageGroupDisplayName]);
+
+  useEffect(() => {
+    setNodes((current) => current.map((node) => {
+      if (node.data.kind !== 'imageGroup') return node;
+      return { ...node, data: { ...node.data, projectTags: availableUserTags } };
+    }));
+  }, [availableUserTags]);
 
   const deleteSelectedNodes = useCallback(async () => {
     if (!selectedNodeIds.length) return;
@@ -2992,8 +3031,111 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
           </div>
         )}
       </div>
+      <NodeAssetTagRow
+        tagIds={asset.tags}
+        projectTags={data.projectTags}
+        onChange={(tags) => data.onAssetTagsChange(data.nodeId, asset.id, tags)}
+        onCreateTag={data.onCreateTag}
+      />
       <Handle type="source" position={Position.Right} className="output-handle" />
     </div>
+  );
+}
+
+function ImageViewerThumbButton({
+  asset,
+  projectSlug,
+  label,
+  previewAbove = false,
+  onClick,
+}: {
+  asset: Asset;
+  projectSlug: string;
+  label: string;
+  previewAbove?: boolean;
+  onClick: () => void;
+}) {
+  const thumbUrl = asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb`;
+  const previewUrl = `/api/projects/${projectSlug}/assets/${asset.id}/image`;
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [isHovered, setIsHovered] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [isPositioned, setIsPositioned] = useState(false);
+
+  const updatePosition = useCallback(() => {
+    const anchor = wrapRef.current;
+    const preview = previewRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const previewHeight = preview?.offsetHeight ?? 440;
+    const previewWidth = preview?.offsetWidth ?? 560;
+    const gap = 10;
+    const padding = 8;
+    let top = previewAbove ? rect.top - previewHeight - gap : rect.bottom + gap;
+    let left = rect.left + rect.width / 2 - previewWidth / 2;
+    if (left + previewWidth > window.innerWidth - padding) {
+      left = window.innerWidth - previewWidth - padding;
+    }
+    left = Math.max(padding, left);
+    if (top < padding) {
+      top = previewAbove ? rect.bottom + gap : padding;
+    }
+    if (top + previewHeight > window.innerHeight - padding && !previewAbove) {
+      top = Math.max(padding, rect.top - previewHeight - gap);
+    }
+    setPosition({ top, left });
+    setIsPositioned(true);
+  }, [previewAbove]);
+
+  useLayoutEffect(() => {
+    if (!isHovered) {
+      setIsPositioned(false);
+      return;
+    }
+    updatePosition();
+  }, [isHovered, label, updatePosition]);
+
+  useEffect(() => {
+    if (!isHovered) return;
+    const reposition = () => updatePosition();
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [isHovered, updatePosition]);
+
+  return (
+    <>
+      <div
+        ref={wrapRef}
+        className={`image-viewer-thumb-wrap ${previewAbove ? 'preview-above' : 'preview-below'}`}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
+        <button type="button" className="image-viewer-thumb-button" onClick={onClick} aria-label={label}>
+          <img src={thumbUrl} alt={label} />
+        </button>
+      </div>
+      {isHovered && createPortal(
+        <div
+          ref={previewRef}
+          className="image-viewer-thumb-preview is-portaled"
+          style={{
+            top: position.top,
+            left: position.left,
+            visibility: isPositioned ? 'visible' : 'hidden',
+          }}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+        >
+          <img src={previewUrl} alt="" onLoad={updatePosition} />
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
@@ -3031,6 +3173,7 @@ function ImageViewer({
   onSetProjectCover: (assetId: string) => void;
 }) {
   const [isTagEditorOpen, setIsTagEditorOpen] = useState(false);
+  const [isSavingImage, setIsSavingImage] = useState(false);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -3095,6 +3238,32 @@ function ImageViewer({
               </button>
             )}
             {node && <span>{currentIndex + 1} / {node.data.assetIds.length}</span>}
+            {asset.hasPixels && (
+              <button
+                className="image-viewer-info-button secondary"
+                disabled={isSavingImage}
+                title="Save image to disk"
+                aria-label="Save image to disk"
+                onClick={async (event) => {
+                  event.stopPropagation();
+                  setIsSavingImage(true);
+                  try {
+                    const suggestedName = node?.data.displayName
+                      ? visibleDisplayName(node.data.displayName) || assetLabel(asset)
+                      : assetLabel(asset);
+                    await saveAssetImageToDisk(projectSlug, asset, suggestedName);
+                  } catch (err) {
+                    if (err instanceof DOMException && err.name === 'AbortError') return;
+                    console.error('[photo-web] failed to save image', err);
+                    window.alert(err instanceof Error ? err.message : String(err));
+                  } finally {
+                    setIsSavingImage(false);
+                  }
+                }}
+              >
+                {isSavingImage ? '…' : '↓'}
+              </button>
+            )}
             {node && (
               <div className="image-viewer-tag-menu">
                 <button
@@ -3129,14 +3298,13 @@ function ImageViewer({
         <span>Parents</span>
         {parentAssets.length === 0 && <div className="image-viewer-thumb-placeholder">none</div>}
         {parentAssets.map((parent) => (
-          <button
+          <ImageViewerThumbButton
             key={parent.id}
-            className="image-viewer-thumb-button"
+            asset={parent}
+            projectSlug={projectSlug}
+            label={assetLabel(parent)}
             onClick={() => onViewAsset(parent.id)}
-            title={assetLabel(parent)}
-          >
-            <img src={parent.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${parent.id}/thumb`} alt={assetLabel(parent)} />
-          </button>
+          />
         ))}
       </div>
       {node && node.data.assetIds.length > 1 && (
@@ -3168,14 +3336,14 @@ function ImageViewer({
         <span>Children</span>
         {childAssets.length === 0 && <div className="image-viewer-thumb-placeholder">none</div>}
         {childAssets.map((child) => (
-          <button
+          <ImageViewerThumbButton
             key={child.id}
-            className="image-viewer-thumb-button"
+            asset={child}
+            projectSlug={projectSlug}
+            label={assetLabel(child)}
+            previewAbove
             onClick={() => onViewAsset(child.id)}
-            title={assetLabel(child)}
-          >
-            <img src={child.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${child.id}/thumb`} alt={assetLabel(child)} />
-          </button>
+          />
         ))}
       </div>
     </div>

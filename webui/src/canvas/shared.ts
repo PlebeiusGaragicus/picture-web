@@ -1,4 +1,4 @@
-import type { ArtifactKind, Asset, GenerationParams } from '../types';
+import type { ArtifactKind, Asset, GenerationParams, TagDefinition } from '../types';
 
 export const defaultDraftParams: GenerationParams = { model: 'gemini-3.1-flash-image', aspectRatio: '16:9', imageSize: '1K', seed: null, batchCount: 1 };
 export const SYSTEM_TAGS = new Set([
@@ -34,6 +34,16 @@ export function normalizeTagName(value: string) {
 
 export function isValidTagName(value: string) {
   return /^[a-z0-9]+(-[a-z0-9]+)*$/.test(value);
+}
+
+export function mergeAvailableUserTags(projectTags: TagDefinition[], assets: Asset[]): TagDefinition[] {
+  const byId = new Map(projectTags.map((tag) => [tag.id, tag]));
+  assets.forEach((asset) => {
+    asset.tags.forEach((tagId) => {
+      if (!SYSTEM_TAGS.has(tagId) && !byId.has(tagId)) byId.set(tagId, { id: tagId, name: tagId, color: '#64748b' });
+    });
+  });
+  return Array.from(byId.values()).sort((first, second) => first.name.localeCompare(second.name));
 }
 
 export const modelCapabilities: Record<string, { aspectRatios: string[]; imageSizes: string[] }> = {

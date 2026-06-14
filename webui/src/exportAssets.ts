@@ -17,6 +17,10 @@ type FileSystemDirectoryHandle = {
 
 type WindowWithDirectoryPicker = Window & {
   showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
+  showSaveFilePicker?: (options?: {
+    suggestedName?: string;
+    types?: Array<{ description: string; accept: Record<string, string[]> }>;
+  }) => Promise<FileSystemFileHandle>;
 };
 
 function sanitizePathSegment(name: string): string {
@@ -59,4 +63,43 @@ export async function exportProjectAssetsToFolder(projectSlug: string, projectNa
     await writable.write(await response.blob());
     await writable.close();
   }
+}
+
+export async function saveAssetImageToDisk(
+  projectSlug: string,
+  asset: Asset,
+  suggestedName?: string,
+) {
+  if (!asset.hasPixels) {
+    throw new Error('This asset has no image to save.');
+  }
+  const response = await fetch(`/api/projects/${projectSlug}/assets/${asset.id}/image`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${assetLabel(asset)}`);
+  }
+  const blob = await response.blob();
+  const baseName = sanitizePathSegment(suggestedName?.trim() || asset.title || asset.id);
+  const fileName = `${baseName}.png`;
+  const pickerWindow = window as WindowWithDirectoryPicker;
+  if (pickerWindow.showSaveFilePicker) {
+    try {
+      const fileHandle = await pickerWindow.showSaveFilePicker({
+        suggestedName: fileName,
+        types: [{ description: 'PNG image', accept: { 'image/png': ['.png'] } }],
+      });
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      throw err;
+    }
+  }
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
 }

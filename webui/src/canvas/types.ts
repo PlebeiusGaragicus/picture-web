@@ -1,4 +1,4 @@
-import type { Asset, DraftCanvasNode, ImageGroupCanvasNode, StoryArtifactCanvasNode } from '../types';
+import type { Asset, DraftCanvasNode, ImageGroupCanvasNode, StoryArtifactCanvasNode, TagDefinition } from '../types';
 
 export interface DraftNodeData extends DraftCanvasNode {
   kind: 'draft';
@@ -17,6 +17,9 @@ export interface ImageGroupNodeData extends ImageGroupCanvasNode {
   onView: (nodeId: string) => void;
   onDetails: (nodeId: string) => void;
   onDisplayNameChange: (nodeId: string, displayName: string) => void;
+  onAssetTagsChange: (nodeId: string, assetId: string, tags: string[]) => void;
+  onCreateTag: (tag: TagDefinition) => void;
+  projectTags: TagDefinition[];
   isGenerating?: boolean;
 }
 
