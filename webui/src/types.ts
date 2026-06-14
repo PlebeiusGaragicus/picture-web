@@ -77,7 +77,13 @@ export interface CanvasNodeLayout {
   y: number;
   width?: number | null;
   tags: string[];
+  role?: CanvasRole | null;
 }
+
+export type CanvasRole =
+  | { type: 'style-ref-source'; kind: StyleRefKind }
+  | { type: 'artifact-source'; artifactKind: ArtifactKind; artifactKey: string }
+  | { type: 'generated-result'; sourceNodeId: string };
 
 export interface DraftCanvasNode extends CanvasNodeLayout {
   type: 'draft';

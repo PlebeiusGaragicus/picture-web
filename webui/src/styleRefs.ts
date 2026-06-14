@@ -25,7 +25,7 @@ export function styleRefStatusFromAdaptation(
   adaptation: AdaptationStatus,
   assets: Asset[],
 ): StyleRefStatus & { asset: Asset | null } {
-  const status = adaptation.styleRefStatuses?.[kind] ?? legacyStyleRefStatus(kind, adaptation);
+  const status = adaptation.styleRefStatuses[kind];
   return {
     ...status,
     asset: assets.find((asset) => asset.id === status.assetId) ?? null,
@@ -34,28 +34,13 @@ export function styleRefStatusFromAdaptation(
 
 export function isCanonicalStyleRefAsset(adaptation: AdaptationStatus | null, assetId: string): boolean {
   if (!adaptation) return false;
-  return styleRefKinds.some((kind) => adaptation.styleRefStatuses?.[kind]?.assetId === assetId)
-    || adaptation.archetypeCharacterAssetId === assetId
-    || adaptation.archetypeSceneAssetId === assetId;
+  return styleRefKinds.some((kind) => adaptation.styleRefStatuses[kind].assetId === assetId);
 }
 
 export function styleRefImageNodeId(kind: StyleRefKind, adaptation: AdaptationStatus | null): string {
-  return adaptation?.styleRefStatuses?.[kind]?.canvasImageNodeId ?? `${styleRefDraftNodeId(kind, adaptation)}_image`;
+  return adaptation?.styleRefStatuses[kind].canvasImageNodeId ?? styleRefDraftNodeId(kind, adaptation);
 }
 
 export function styleRefDraftNodeId(kind: StyleRefKind, adaptation: AdaptationStatus | null): string {
-  return adaptation?.styleRefStatuses?.[kind]?.canvasDraftNodeId ?? (kind === 'archetype-character' ? 'archetype_archetype_character' : 'archetype_archetype_scene');
-}
-
-function legacyStyleRefStatus(kind: StyleRefKind, adaptation: AdaptationStatus): StyleRefStatus {
-  const isCharacter = kind === 'archetype-character';
-  const draftNodeId = isCharacter ? 'archetype_archetype_character' : 'archetype_archetype_scene';
-  return {
-    kind,
-    promptPath: isCharacter ? 'style-refs/archetype-character.md' : 'style-refs/archetype-scene.md',
-    promptText: isCharacter ? adaptation.archetypeCharacterPromptText ?? '' : adaptation.archetypeScenePromptText ?? '',
-    assetId: isCharacter ? adaptation.archetypeCharacterAssetId ?? null : adaptation.archetypeSceneAssetId ?? null,
-    canvasDraftNodeId: draftNodeId,
-    canvasImageNodeId: `${draftNodeId}_image`,
-  };
+  return adaptation?.styleRefStatuses[kind].canvasDraftNodeId ?? (kind === 'archetype-character' ? 'archetype_archetype_character' : 'archetype_archetype_scene');
 }

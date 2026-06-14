@@ -106,8 +106,8 @@ def style_ref_tags(kind: StyleRefKind) -> list[str]:
 
 
 def style_ref_node_ids(kind: StyleRefKind) -> tuple[str, str]:
-    draft_node_id = library.archetype_node_id(kind)
-    return draft_node_id, f"{draft_node_id}_image"
+    source_node_id = library.archetype_node_id(kind)
+    return source_node_id, library.generated_result_node_id(source_node_id)
 
 
 def asset_exists(slug: str, asset_id: str) -> bool:
@@ -780,7 +780,7 @@ def import_existing_style_refs(slug: str) -> AdaptationStatus:
 def generate_style_ref(slug: str, request: AdaptationGenerateStyleRefRequest) -> AdaptationGenerateResponse:
     root = ensure_adaptation(slug)
     kind = require_style_ref_kind(request.kind)
-    _, image_node_id = style_ref_node_ids(kind)
+    source_node_id, _ = style_ref_node_ids(kind)
     library.write_canvas(slug, library.sync_style_ref_canvas_nodes(slug, library.read_stored_canvas(slug), kind))
     prompt_path = style_ref_prompt_path(root, kind)
     prompt_text = read_text(prompt_path).strip()
@@ -798,7 +798,7 @@ def generate_style_ref(slug: str, request: AdaptationGenerateStyleRefRequest) ->
         batchCount=1,
         title=title,
         tags=tags,
-        canvasNodeId=image_node_id,
+        canvasNodeId=source_node_id,
     )
     response = library.create_generated_assets(slug, payload, gemini.generate_image)
     asset = response.assets[0]
@@ -963,6 +963,19 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
     ref_asset_ids = artifact_ref_asset_ids(metadata, request.artifactKind, link)
     visual_style = read_text(root / "style-refs" / "visual-style.md")
     prompt = f"{link.prompt.strip()}\n\n{visual_style.strip()}\n"
+    canvas_node_id = request.canvasNodeId
+    if canvas_node_id is None:
+        canvas = library.read_stored_canvas(slug)
+        canvas_node_id = next(
+            (
+                node_id
+                for node_id, node in canvas.nodes.items()
+                if isinstance(node, StoryArtifactCanvasNode)
+                and node.artifactKind == request.artifactKind
+                and node.artifactKey == request.artifactKey
+            ),
+            None,
+        )
     payload = GenerateRequest(
         prompt=prompt,
         refs=ref_asset_ids,
@@ -971,6 +984,7 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
         batchCount=1,
         title=f"{link.artifactKind.replace('-', ' ').title()}: {request.artifactKey}",
         tags=["comic-adaptation", link.artifactKind],
+        canvasNodeId=canvas_node_id,
     )
     response = library.create_generated_assets(slug, payload, gemini.generate_image)
     asset = response.assets[0]
@@ -988,7 +1002,7 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
         artifact_kind=request.artifactKind,
         artifact_key=request.artifactKey,
         asset_id=asset.id,
-        canvas_node_id=request.canvasNodeId,
+        canvas_node_id=canvas_node_id,
     )
     return AdaptationGenerateResponse(
         generated=True,

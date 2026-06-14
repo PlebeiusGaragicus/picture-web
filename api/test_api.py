@@ -7,8 +7,10 @@ import base64
 import library
 import gemini
 import chat_sessions
+import adaptation
 from fastapi.testclient import TestClient
 from main import app
+from models import AdaptationAssetLink
 from PIL import Image
 
 
@@ -387,6 +389,14 @@ def test_adaptation_panel_generation_uses_canonical_semantic_refs(tmp_path, monk
     panel_link = client.get("/api/projects/farm-comic/adaptation").json()["panels"]["001-panel-01"]
     assert panel_link["canonicalAssetId"] == response.json()["asset"]["id"]
     assert panel_link["assetIds"] == [response.json()["asset"]["id"]]
+    nodes = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
+    source_id = "artifact_panel_prompt_001_panel_01"
+    child_id = f"generated_{source_id}"
+    assert nodes[source_id]["type"] == "storyArtifact"
+    assert nodes[source_id]["role"] == {"type": "artifact-source", "artifactKind": "panel-prompt", "artifactKey": "001-panel-01"}
+    assert nodes[child_id]["type"] == "imageGroup"
+    assert nodes[child_id]["activeAssetId"] == response.json()["asset"]["id"]
+    assert nodes[child_id]["role"] == {"type": "generated-result", "sourceNodeId": source_id}
 
 
 def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path, monkeypatch):
@@ -496,7 +506,7 @@ def test_style_ref_status_clears_stale_asset_and_repairs_canvas(tmp_path, monkey
             },
         },
     }
-    assert client.put("/api/projects/farm-comic/canvas", json=canvas).status_code == 200
+    library.write_json(library.canvas_json_path("farm-comic"), canvas)
 
     status = client.get("/api/projects/farm-comic/adaptation")
     assert status.status_code == 200
@@ -507,6 +517,7 @@ def test_style_ref_status_clears_stale_asset_and_repairs_canvas(tmp_path, monkey
     nodes = sync.json()["canvas"]["nodes"]
     draft = nodes["archetype_archetype_character"]
     assert draft["type"] == "draft"
+    assert draft["role"] == {"type": "style-ref-source", "kind": "archetype-character"}
     assert draft["prompt"] == "Character archetype prompt.\n"
     assert "missing" in draft["tags"]
     assert "archetype_archetype_character_image" not in nodes
@@ -528,8 +539,14 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
     assert imported.status_code == 200
     imported_asset_id = imported.json()["styleRefStatuses"]["archetype-character"]["assetId"]
     canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert imported.json()["styleRefStatuses"]["archetype-character"]["canvasDraftNodeId"] == "archetype_archetype_character"
+    assert imported.json()["styleRefStatuses"]["archetype-character"]["canvasImageNodeId"] == "generated_archetype_archetype_character"
     assert canvas_nodes["archetype_archetype_character"]["type"] == "draft"
-    assert canvas_nodes["archetype_archetype_character_image"]["activeAssetId"] == imported_asset_id
+    assert canvas_nodes["archetype_archetype_character"]["role"] == {"type": "style-ref-source", "kind": "archetype-character"}
+    assert canvas_nodes["generated_archetype_archetype_character"]["type"] == "imageGroup"
+    assert canvas_nodes["generated_archetype_archetype_character"]["activeAssetId"] == imported_asset_id
+    assert canvas_nodes["generated_archetype_archetype_character"]["role"] == {"type": "generated-result", "sourceNodeId": "archetype_archetype_character"}
+    assert "archetype_archetype_character_image" not in canvas_nodes
 
     replacement_asset_id = "01HREPLACE"
     make_png(library.asset_png_path("farm-comic", replacement_asset_id), color="blue")
@@ -551,12 +568,14 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
     assert selected.status_code == 200
     assert selected.json()["styleRefStatuses"]["archetype-character"]["assetId"] == replacement_asset_id
     canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
-    assert canvas_nodes["archetype_archetype_character_image"]["activeAssetId"] == replacement_asset_id
+    assert canvas_nodes["archetype_archetype_character"]["type"] == "draft"
+    assert canvas_nodes["generated_archetype_archetype_character"]["activeAssetId"] == replacement_asset_id
+    assert "archetype_archetype_character_image" not in canvas_nodes
 
     captured = {}
 
     def fake_generate(**kwargs):
-        captured["prompt"] = kwargs["prompt"]
+        captured["prompt"] = kwargs["prompt_text"]
         make_png(kwargs["output_png"], color="purple")
 
         class Result:
@@ -575,13 +594,27 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
     assert "Ink wash style." in captured["prompt"]
     assert generated.json()["status"]["styleRefStatuses"]["archetype-character"]["assetId"] == generated_asset_id
     canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
-    assert canvas_nodes["archetype_archetype_character_image"]["activeAssetId"] == generated_asset_id
+    assert canvas_nodes["archetype_archetype_character"]["type"] == "draft"
+    assert canvas_nodes["generated_archetype_archetype_character"]["type"] == "imageGroup"
+    assert canvas_nodes["generated_archetype_archetype_character"]["activeAssetId"] == generated_asset_id
+    assert "archetype_archetype_character_image" not in canvas_nodes
     first_sync = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
     second_sync = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
     assert first_sync == second_sync
+    missing_source_canvas = client.get("/api/projects/farm-comic/canvas").json()
+    missing_source_canvas["nodes"].pop("archetype_archetype_character")
+    assert client.put("/api/projects/farm-comic/canvas", json=missing_source_canvas).status_code == 200
+    repaired_nodes = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
+    assert repaired_nodes["archetype_archetype_character"]["type"] == "draft"
+    assert repaired_nodes["archetype_archetype_character"]["role"] == {"type": "style-ref-source", "kind": "archetype-character"}
+
+    delete_child = client.delete(f"/api/projects/farm-comic/assets/{generated_asset_id}")
+    assert delete_child.status_code == 204
+    assert (root / "style-refs" / "archetype-character.md").read_text() == "Character archetype prompt.\n"
+    assert client.get("/api/projects/farm-comic/adaptation").json()["styleRefStatuses"]["archetype-character"]["assetId"] is None
 
 
-def test_story_artifact_generated_asset_does_not_duplicate_as_image_group(tmp_path, monkeypatch):
+def test_story_artifact_generated_asset_projects_to_child_image_group(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
     asset_id = "01HCHAR"
@@ -608,6 +641,16 @@ def test_story_artifact_generated_asset_does_not_duplicate_as_image_group(tmp_pa
             "provider": {"name": "google-genai", "response": {}},
         },
     )
+    metadata = adaptation.read_metadata("farm-comic")
+    metadata.characters["hero"] = AdaptationAssetLink(
+        artifactKind="character-sheet",
+        promptPath="characters/sheets/hero.md",
+        prompt="hero prompt",
+        assetIds=[asset_id],
+        canonicalAssetId=asset_id,
+        status="generated",
+    )
+    adaptation.write_metadata("farm-comic", metadata)
     canvas = {
         "version": 2,
         "viewport": {"x": 0, "y": 0, "zoom": 1},
@@ -627,22 +670,17 @@ def test_story_artifact_generated_asset_does_not_duplicate_as_image_group(tmp_pa
                 "generatedAssetIds": [asset_id],
                 "generatedAssetId": asset_id,
             },
-            "node_01HCHAR": {
-                "type": "imageGroup",
-                "displayName": "Character Sheet: hero",
-                "x": 1500,
-                "y": 80,
-                "assetIds": [asset_id],
-                "activeAssetId": asset_id,
-                "tags": ["comic-adaptation", "character-sheet", "generated-image"],
-            },
         },
     }
     assert client.put("/api/projects/farm-comic/canvas", json=canvas).status_code == 200
 
-    nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    nodes = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
     assert "artifact_character_sheet_hero" in nodes
-    assert "node_01HCHAR" not in nodes
+    assert nodes["artifact_character_sheet_hero"]["type"] == "storyArtifact"
+    assert nodes["artifact_character_sheet_hero"]["role"] == {"type": "artifact-source", "artifactKind": "character-sheet", "artifactKey": "hero"}
+    assert nodes["generated_artifact_character_sheet_hero"]["type"] == "imageGroup"
+    assert nodes["generated_artifact_character_sheet_hero"]["assetIds"] == [asset_id]
+    assert nodes["generated_artifact_character_sheet_hero"]["role"] == {"type": "generated-result", "sourceNodeId": "artifact_character_sheet_hero"}
 
 
 def test_chat_session_create_list_archive_and_protect_source(tmp_path, monkeypatch):

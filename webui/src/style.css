@@ -1914,6 +1914,30 @@ pre {
   border-color: #e879f9;
 }
 
+.style-ref-source-node {
+  gap: 6px;
+  padding: 12px;
+  color: #f5d0fe;
+  background: rgb(88 28 135 / 0.66);
+  border-style: solid;
+  opacity: 0.86;
+}
+
+.style-ref-source-node .node-role-badge {
+  position: static;
+  justify-self: start;
+  max-width: 100%;
+}
+
+.style-ref-source-node strong {
+  font-size: 13px;
+}
+
+.style-ref-source-node small {
+  color: #e9d5ff;
+  font-weight: 700;
+}
+
 .node-role-badge {
   position: absolute;
   top: 6px;

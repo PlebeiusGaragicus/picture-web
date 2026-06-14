@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail, StoryKind } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail, StoryKind, StyleRefKind } from './types';
 
 const DEBUG = true;
 
@@ -75,7 +75,7 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ visualStyle }),
     }),
-  saveAdaptationStyleRefPrompt: (slug: string, kind: 'archetype-character' | 'archetype-scene', prompt: string) =>
+  saveAdaptationStyleRefPrompt: (slug: string, kind: StyleRefKind, prompt: string) =>
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/style-ref-prompt`, {
       method: 'PUT',
       body: JSON.stringify({ kind, prompt }),
@@ -111,7 +111,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ stage }),
     }),
-  importAdaptationDraftsToCanvas: (slug: string) =>
+  publishAdaptationPhaseToCanvas: (slug: string) =>
     request<AdaptationCanvasImportResponse>(`/api/projects/${slug}/adaptation/import-drafts-to-canvas`, {
       method: 'POST',
     }),
@@ -125,7 +125,7 @@ export const api = {
       body: data,
     });
   },
-  importAdaptationStyleRef: (slug: string, kind: 'archetype-character' | 'archetype-scene', file: File) => {
+  importAdaptationStyleRef: (slug: string, kind: StyleRefKind, file: File) => {
     const data = new FormData();
     data.append('kind', kind);
     data.append('file', file);
@@ -134,12 +134,12 @@ export const api = {
       body: data,
     });
   },
-  setAdaptationStyleRefAsset: (slug: string, kind: 'archetype-character' | 'archetype-scene', assetId: string) =>
+  setAdaptationStyleRefAsset: (slug: string, kind: StyleRefKind, assetId: string) =>
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/style-ref-asset`, {
       method: 'POST',
       body: JSON.stringify({ kind, assetId }),
     }),
-  generateAdaptationStyleRef: (slug: string, kind: 'archetype-character' | 'archetype-scene', canvasNodeId?: string | null) =>
+  generateAdaptationStyleRef: (slug: string, kind: StyleRefKind, canvasNodeId?: string | null) =>
     request<AdaptationGenerateResponse>(`/api/projects/${slug}/adaptation/generate-style-ref`, {
       method: 'POST',
       body: JSON.stringify({ kind, canvasNodeId }),

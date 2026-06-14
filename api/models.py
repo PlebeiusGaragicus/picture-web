@@ -299,6 +299,7 @@ class CanvasNodeLayout(BaseModel):
     y: float
     width: float | None = None
     tags: list[str] = Field(default_factory=list)
+    role: dict[str, Any] | None = None
 
 
 class GenerationParams(BaseModel):

@@ -308,6 +308,10 @@ def archetype_node_id(kind: str) -> str:
     return f"archetype_{kind.replace('-', '_')}"
 
 
+def generated_result_node_id(source_node_id: str) -> str:
+    return f"generated_{source_node_id}"
+
+
 def node_tags(*tags: str) -> list[str]:
     return list(dict.fromkeys(tags))
 
@@ -362,6 +366,7 @@ def sync_existing_story_artifacts(slug: str, canvas: CanvasDocument) -> CanvasDo
         node.generatedAssetIds = entry.assetIds
         node.generatedAssetId = entry.canonicalAssetId
         node.tags = node_tags(*story_artifact_base_tags(node.artifactKind), "generated" if entry.canonicalAssetId else "missing")
+        node.role = {"type": "artifact-source", "artifactKind": node.artifactKind, "artifactKey": node.artifactKey}
         next_canvas.nodes[node_id] = node
     return next_canvas
 
@@ -385,45 +390,51 @@ def sync_style_ref_canvas_nodes(slug: str, canvas: CanvasDocument, kind: str | N
         has_asset = asset_id is not None
         node_id = status.canvasDraftNodeId
         image_node_id = status.canvasImageNodeId
+        legacy_image_node_id = f"{node_id}_image"
         existing = next_canvas.nodes.get(node_id)
-        if isinstance(existing, DraftCanvasNode):
-            existing.prompt = status.promptText
-            existing.tags = node_tags(*tags, "generated" if has_asset else "missing")
-            next_canvas.nodes[node_id] = existing
-        else:
-            if isinstance(existing, ImageGroupCanvasNode):
-                # Older generation paths could replace the archetype draft with an image group.
-                # Move that group to the image slot so the prompt draft can be recreated.
-                next_canvas.nodes[image_node_id] = existing
-            next_canvas.nodes[node_id] = DraftCanvasNode(
-                displayName=str(config["display_name"]),
-                x=float(config["x"]),
-                y=float(config["y"]),
-                width=240,
-                tags=node_tags(*tags, "generated" if has_asset else "missing"),
-                refs=[],
-                prompt=status.promptText,
-            )
+        source_x = existing.x if isinstance(existing, DraftCanvasNode | ImageGroupCanvasNode) else float(config["x"])
+        source_y = existing.y if isinstance(existing, DraftCanvasNode | ImageGroupCanvasNode) else float(config["y"])
+        source_width = existing.width if isinstance(existing, DraftCanvasNode | ImageGroupCanvasNode) else 240
+        next_canvas.nodes[node_id] = DraftCanvasNode(
+            displayName=str(config["display_name"]),
+            x=source_x,
+            y=source_y,
+            width=source_width,
+            tags=node_tags(*tags, "generated" if has_asset else "missing"),
+            role={"type": "style-ref-source", "kind": ref_kind},
+            refs=[],
+            prompt=status.promptText,
+        )
+        legacy_image = next_canvas.nodes.get(legacy_image_node_id)
         if asset_id is not None:
-            existing_image = next_canvas.nodes.get(image_node_id)
-            if isinstance(existing_image, ImageGroupCanvasNode):
-                if asset_id not in existing_image.assetIds:
-                    existing_image.assetIds = [asset_id, *existing_image.assetIds]
-                existing_image.activeAssetId = asset_id
-                existing_image.tags = node_tags(*tags, "imported-image")
-                next_canvas.nodes[image_node_id] = existing_image
+            child = next_canvas.nodes.get(image_node_id)
+            if isinstance(child, ImageGroupCanvasNode):
+                image_node = child
+            elif isinstance(existing, ImageGroupCanvasNode):
+                image_node = existing
+            elif isinstance(legacy_image, ImageGroupCanvasNode):
+                image_node = legacy_image
             else:
-                next_canvas.nodes[image_node_id] = ImageGroupCanvasNode(
+                image_node = ImageGroupCanvasNode(
                     displayName=str(config["display_name"]),
-                    x=float(config["x"]),
-                    y=float(config["y"]) + 320,
+                    x=source_x + 320,
+                    y=source_y,
                     width=240,
                     tags=node_tags(*tags, "imported-image"),
+                    role={"type": "generated-result", "sourceNodeId": node_id},
                     assetIds=[asset_id],
                     activeAssetId=asset_id,
                 )
-        elif image_node_id in next_canvas.nodes:
-            del next_canvas.nodes[image_node_id]
+            if asset_id not in image_node.assetIds:
+                image_node.assetIds = [asset_id, *image_node.assetIds]
+            image_node.activeAssetId = asset_id
+            image_node.tags = node_tags(*tags, "imported-image")
+            image_node.role = {"type": "generated-result", "sourceNodeId": node_id}
+            next_canvas.nodes[image_node_id] = image_node
+            next_canvas.nodes.pop(legacy_image_node_id, None)
+        else:
+            next_canvas.nodes.pop(image_node_id, None)
+            next_canvas.nodes.pop(legacy_image_node_id, None)
     return next_canvas
 
 
@@ -455,27 +466,63 @@ def sync_story_artifact_nodes(
                 node.generatedAssetIds = entry.assetIds
                 node.generatedAssetId = entry.canonicalAssetId
                 node.tags = node_tags(*story_artifact_base_tags(artifact_kind), "generated" if entry.canonicalAssetId else "missing")
+                node.role = {"type": "artifact-source", "artifactKind": artifact_kind, "artifactKey": key}
                 next_canvas.nodes[node_id] = node
                 break
-        if (artifact_kind, key) in existing_artifacts:
-            continue
-        node_id = story_artifact_node_id(artifact_kind, key)
-        while node_id in next_canvas.nodes:
-            node_id = f"{node_id}_{index}"
-        next_canvas.nodes[node_id] = StoryArtifactCanvasNode(
-            displayName=key,
-            x=start_x + (index % columns) * x_gap,
-            y=start_y + (index // columns) * y_gap,
-            width=240,
-            tags=node_tags(*base_tags, "generated" if entry.canonicalAssetId else "missing"),
-            artifactKind=artifact_kind,
-            artifactKey=key,
-            promptPath=entry.promptPath,
-            prompt=entry.prompt,
-            refs=refs,
-            generatedAssetIds=entry.assetIds,
-            generatedAssetId=entry.canonicalAssetId,
+        if (artifact_kind, key) not in existing_artifacts:
+            node_id = story_artifact_node_id(artifact_kind, key)
+            while node_id in next_canvas.nodes:
+                node_id = f"{node_id}_{index}"
+            next_canvas.nodes[node_id] = StoryArtifactCanvasNode(
+                displayName=key,
+                x=start_x + (index % columns) * x_gap,
+                y=start_y + (index // columns) * y_gap,
+                width=240,
+                tags=node_tags(*base_tags, "generated" if entry.canonicalAssetId else "missing"),
+                role={"type": "artifact-source", "artifactKind": artifact_kind, "artifactKey": key},
+                artifactKind=artifact_kind,
+                artifactKey=key,
+                promptPath=entry.promptPath,
+                prompt=entry.prompt,
+                refs=refs,
+                generatedAssetIds=entry.assetIds,
+                generatedAssetId=entry.canonicalAssetId,
+            )
+        source_node_id = next(
+            (
+                current_node_id
+                for current_node_id, current_node in next_canvas.nodes.items()
+                if isinstance(current_node, StoryArtifactCanvasNode)
+                and current_node.artifactKind == artifact_kind
+                and current_node.artifactKey == key
+            ),
+            story_artifact_node_id(artifact_kind, key),
         )
+        child_node_id = generated_result_node_id(source_node_id)
+        if entry.canonicalAssetId:
+            source_node = next_canvas.nodes[source_node_id]
+            existing_child = next_canvas.nodes.get(child_node_id)
+            if isinstance(existing_child, ImageGroupCanvasNode):
+                child = existing_child
+                if entry.canonicalAssetId not in child.assetIds:
+                    child.assetIds = [entry.canonicalAssetId, *child.assetIds]
+            else:
+                child = ImageGroupCanvasNode(
+                    displayName=getattr(entry, "promptPath", key) or key,
+                    x=source_node.x + 320,
+                    y=source_node.y,
+                    width=240,
+                    tags=node_tags(*base_tags, "generated-image"),
+                    role={"type": "generated-result", "sourceNodeId": source_node_id},
+                    assetIds=[entry.canonicalAssetId],
+                    activeAssetId=entry.canonicalAssetId,
+                )
+            child.activeAssetId = entry.canonicalAssetId
+            child.tags = node_tags(*base_tags, "generated-image")
+            child.role = {"type": "generated-result", "sourceNodeId": source_node_id}
+            next_canvas.nodes[child_node_id] = child
+        else:
+            next_canvas.nodes.pop(child_node_id, None)
     return next_canvas
 
 
@@ -519,31 +566,12 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
 def default_canvas_for_assets(slug: str, canvas: CanvasDocument) -> CanvasDocument:
     """Add visible image groups for assets not yet represented on the canvas."""
     next_canvas = canvas.model_copy(deep=True)
-    story_asset_ids = {
-        node.generatedAssetId
-        for node in next_canvas.nodes.values()
-        if isinstance(node, StoryArtifactCanvasNode) and node.generatedAssetId
-    }
-    for node_id, node in list(next_canvas.nodes.items()):
-        if not isinstance(node, ImageGroupCanvasNode):
-            continue
-        next_asset_ids = [asset_id for asset_id in node.assetIds if asset_id not in story_asset_ids]
-        if len(next_asset_ids) == len(node.assetIds):
-            continue
-        if next_asset_ids:
-            node.assetIds = next_asset_ids
-            if node.activeAssetId not in next_asset_ids:
-                node.activeAssetId = next_asset_ids[0]
-            next_canvas.nodes[node_id] = node
-        else:
-            del next_canvas.nodes[node_id]
     represented = {
         asset_id
         for node in next_canvas.nodes.values()
         if isinstance(node, ImageGroupCanvasNode)
         for asset_id in node.assetIds
     }
-    represented.update(story_asset_ids)
     index = len(next_canvas.nodes)
     max_story_x = 80.0
     for node in next_canvas.nodes.values():
@@ -821,6 +849,28 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
     existing = canvas.nodes.get(node_id)
     asset_ids = [asset.id for asset in assets]
     active_asset_id = asset_ids[0] if asset_ids else None
+    if existing is not None and isinstance(existing.role, dict) and existing.role.get("type") in {"style-ref-source", "artifact-source"}:
+        child_node_id = generated_result_node_id(node_id)
+        child = canvas.nodes.get(child_node_id)
+        if isinstance(child, ImageGroupCanvasNode):
+            child.assetIds = list(dict.fromkeys([*asset_ids, *child.assetIds]))
+            child.activeAssetId = active_asset_id or child.activeAssetId
+            child.tags = node_tags(*child.tags, "generated-image")
+            child.role = {"type": "generated-result", "sourceNodeId": node_id}
+            canvas.nodes[child_node_id] = child
+        else:
+            canvas.nodes[child_node_id] = ImageGroupCanvasNode(
+                displayName=assets[0].title if assets else existing.displayName,
+                x=existing.x + 320,
+                y=existing.y,
+                width=240,
+                tags=node_tags(*existing.tags, "generated-image"),
+                role={"type": "generated-result", "sourceNodeId": node_id},
+                assetIds=asset_ids,
+                activeAssetId=active_asset_id,
+            )
+        write_canvas(slug, canvas)
+        return
     target_node_id = matching_variant_group_node_id(slug, canvas, assets)
     logger.debug(
         "attach generated assets slug=%s requested_node=%s existing_type=%s target_node=%s asset_ids=%s",
