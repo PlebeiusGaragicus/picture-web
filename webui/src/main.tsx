@@ -19,10 +19,11 @@ import './style.css';
 import { api } from './api';
 import { exportProjectAssetsToFolder, saveAssetImageToDisk } from './exportAssets';
 import { VisualStyleCard } from './adaptation/cards';
+import { WorkflowLogPanel } from './adaptation/workflowLog';
 import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
-import { SYSTEM_TAGS, artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, mergeAvailableUserTags, modelCapabilities, normalizedParamsForModel, visibleDisplayName } from './canvas/shared';
+import { SYSTEM_TAGS, artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, lockedEntityTagIds, mergeAvailableUserTags, modelCapabilities, normalizedParamsForModel, visibleDisplayName } from './canvas/shared';
 import { NodeSidebar } from './canvas/sidebars';
 import { NodeAssetTagRow } from './canvas/assetTagRow';
 import { nodeTagActionsRef } from './canvas/nodeTagActions';
@@ -64,12 +65,6 @@ function phaseStage(phase: ProjectPhase): AdaptationStage | null {
       return 'ingest';
     case 'phase-1-characters':
       return 'characters';
-    case 'phase-2-locations':
-      return 'locations';
-    case 'phase-3-scenes':
-      return 'scenes';
-    case 'phase-4-moments':
-      return 'moments';
     default:
       return null;
   }
@@ -130,7 +125,6 @@ function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): Ca
               refs: node.data.refs,
               params: node.data.params,
               generatedAssetIds: node.data.generatedAssetIds ?? [],
-              generatedAssetId: node.data.generatedAssetId ?? null,
             },
           ];
         }
@@ -184,7 +178,10 @@ function toFlowNodes(
       };
     }
     if (canvasNode.type === 'storyArtifact') {
-      const generatedAsset = assetById.get(canvasNode.generatedAssetId ?? '') ?? null;
+      const latestGeneratedId = canvasNode.generatedAssetIds.length > 0
+        ? canvasNode.generatedAssetIds[canvasNode.generatedAssetIds.length - 1]
+        : null;
+      const generatedAsset = latestGeneratedId ? assetById.get(latestGeneratedId) ?? null : null;
       return {
         id,
         position: { x: canvasNode.x, y: canvasNode.y },
@@ -654,6 +651,7 @@ function App() {
 
   const deleteProjectTag = useCallback(async (tagId: string) => {
     if (!openProjectSlug) return;
+    if (projectTags.find((tag) => tag.id === tagId)?.locked) return;
     const nextProjectTags = projectTags.filter((tag) => tag.id !== tagId);
     const affectedAssets = assets.filter((asset) => asset.tags.includes(tagId));
     setActiveUserTagFilters((current) => current.filter((tag) => tag !== tagId));
@@ -687,7 +685,9 @@ function App() {
     if (!openProjectSlug) return;
     const asset = assetsRef.current.find((item) => item.id === assetId);
     if (!asset) return;
-    const nextTags = Array.from(new Set([...asset.tags.filter((tag) => SYSTEM_TAGS.has(tag)), ...tags]));
+    const lockedIds = lockedEntityTagIds(projectTags);
+    const preserved = asset.tags.filter((tag) => SYSTEM_TAGS.has(tag) || lockedIds.has(tag));
+    const nextTags = Array.from(new Set([...preserved, ...tags]));
     setAssets((current) => current.map((item) => (item.id === assetId ? { ...item, tags: nextTags } : item)));
     setNodes((current) => current.map((node) => {
       if (node.data.kind !== 'imageGroup' || !node.data.assetIds.includes(assetId)) return node;
@@ -699,7 +699,7 @@ function App() {
       console.error('[photo-web] failed to update asset tags', err);
       setError(String(err));
     });
-  }, [openProjectSlug]);
+  }, [openProjectSlug, projectTags]);
 
   const openProject = async (projectSlug: string) => {
     setOpenProjectSlug(projectSlug);
@@ -1463,7 +1463,9 @@ function App() {
                 const sourceAssetId = sourceNode?.data.kind === 'imageGroup'
                   ? sourceNode.data.activeAsset?.id ?? null
                   : sourceNode?.data.kind === 'storyArtifact'
-                    ? sourceNode.data.generatedAssetId ?? null
+                    ? (sourceNode.data.generatedAssetIds.length > 0
+                      ? sourceNode.data.generatedAssetIds[sourceNode.data.generatedAssetIds.length - 1]
+                      : null)
                     : null;
                 setPendingConnectionSource(sourceAssetId);
               }}
@@ -1498,7 +1500,9 @@ function App() {
                 const sourceAssetId = sourceNode?.data.kind === 'imageGroup'
                   ? sourceNode.data.activeAsset?.id
                   : sourceNode?.data.kind === 'storyArtifact'
-                    ? sourceNode.data.generatedAssetId
+                    ? (sourceNode.data.generatedAssetIds.length > 0
+                      ? sourceNode.data.generatedAssetIds[sourceNode.data.generatedAssetIds.length - 1]
+                      : null)
                     : null;
                 if (!sourceAssetId) return;
                 const nextNodes = nodes.map((node) =>
@@ -1875,8 +1879,10 @@ function TagOrganizerRow({
           title="Double-click to rename"
         >
           {tag.name}
+          {tag.locked && <span className="tag-organizer-entity-label">{tag.entityKind ?? 'entity'}</span>}
         </span>
       )}
+      {!tag.locked && (
       <button
         type="button"
         className="tag-organizer-delete"
@@ -1885,6 +1891,7 @@ function TagOrganizerRow({
       >
         <TrashIcon />
       </button>
+      )}
     </div>
   );
 }
@@ -2328,18 +2335,18 @@ function StoryPhaseScreen({
             onImportStyleRef={onImportStyleRef}
             onSaveStylePrompt={onSaveStylePrompt}
             onGenerateStyleRef={onGenerateStyleRef}
-            onStartWorkflow={() => onStartWorkflow('locations')}
-            onStartValidation={onStartValidation}
+            onStartWorkflow={async () => {}}
+            onStartValidation={async () => {}}
             onPublishPhaseToCanvas={publishPhase}
             isPublishingPhase={isPublishingPhase}
             fileEditor={<AdaptationFileEditor projectSlug={projectSlug} kind="locations" links={adaptation.locations} onReloadAdaptation={onReloadAdaptation} />}
           />
         )}
         {phase === 'phase-3-scenes' && (
-          <PhaseScenes adaptation={adaptation} workflow={workflow} validation={validation} isSavingSettings={isSavingSettings} onSaveStoryKind={saveStoryKind} onStartWorkflow={() => onStartWorkflow('scenes')} onStartValidation={onStartValidation} onPublishPhaseToCanvas={publishPhase} isPublishingPhase={isPublishingPhase} fileEditor={<AdaptationFileEditor projectSlug={projectSlug} kind="scenes" links={adaptation.scenes} onReloadAdaptation={onReloadAdaptation} />} />
+          <PhaseScenes adaptation={adaptation} workflow={workflow} validation={validation} isSavingSettings={isSavingSettings} onSaveStoryKind={saveStoryKind} onStartWorkflow={async () => {}} onStartValidation={async () => {}} onPublishPhaseToCanvas={publishPhase} isPublishingPhase={isPublishingPhase} fileEditor={<AdaptationFileEditor projectSlug={projectSlug} kind="scenes" links={adaptation.scenes} onReloadAdaptation={onReloadAdaptation} />} />
         )}
         {phase === 'phase-4-moments' && (
-          <PhaseMoments adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={() => onStartWorkflow('moments')} onStartValidation={onStartValidation} onPublishPhaseToCanvas={publishPhase} isPublishingPhase={isPublishingPhase} />
+          <PhaseMoments adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={async () => {}} onStartValidation={async () => {}} onPublishPhaseToCanvas={publishPhase} isPublishingPhase={isPublishingPhase} />
         )}
       </div>
       {workflow && (workflow.log || workflow.running || workflow.returnCode !== null) && (
@@ -2400,7 +2407,6 @@ function filesFromLinks(kind: AdaptationFileKind, links: Record<string, Adaptati
       status: link.status,
       promptPath: link.promptPath,
       artifactKind: link.artifactKind,
-      canonicalAssetId: link.canonicalAssetId ?? null,
       kind,
     }));
 }
@@ -2604,174 +2610,6 @@ function PhaseIngestion({
         </Modal>
       )}
     </>
-  );
-}
-
-type PiWorkflowEvent =
-  | { type: 'assistant_text'; text: string }
-  | { type: 'tool_start'; toolName: string; args: string }
-  | { type: 'tool_end'; toolName: string; isError: boolean; size: number; result: string }
-  | { type: 'retry'; attempt: number; maxAttempts: number; message: string }
-  | { type: 'agent_start' | 'turn_start' | 'turn_end' | 'agent_end' | 'compaction_start' | 'compaction_end' };
-
-type WorkflowLogRow = { kind: 'event'; event: PiWorkflowEvent } | { kind: 'text'; text: string };
-
-type WorkflowLogSection = { id: number; label: string; output?: string; rows: WorkflowLogRow[] };
-
-function parseWorkflowLog(log: string): WorkflowLogSection[] {
-  const sections: WorkflowLogSection[] = [];
-  let current: WorkflowLogSection | null = null;
-  let nextId = 0;
-  const makeSection = (label: string): WorkflowLogSection => {
-    const section: WorkflowLogSection = { id: nextId++, label, rows: [] };
-    sections.push(section);
-    return section;
-  };
-  for (const rawLine of log.split('\n')) {
-    const line = rawLine.replace(/\s+$/, '');
-    if (!line) continue;
-    const outputMatch = /^\s+output:\s*(.+)$/.exec(rawLine);
-    if (outputMatch && current) {
-      current.output = outputMatch[1].trim();
-      continue;
-    }
-    if (/^\[[^\]]+\]\s+\S/.test(line)) {
-      current = makeSection(line.trim());
-      continue;
-    }
-    if (!current) current = makeSection('Output');
-    const trimmed = line.trim();
-    if (trimmed.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(trimmed) as { type?: unknown };
-        if (parsed && typeof parsed.type === 'string') {
-          current.rows.push({ kind: 'event', event: parsed as PiWorkflowEvent });
-          continue;
-        }
-      } catch {
-        // Not a Pi event; fall back to a plain text line.
-      }
-    }
-    current.rows.push({ kind: 'text', text: line });
-  }
-  return sections;
-}
-
-function formatCharCount(n: number): string {
-  if (n < 1000) return `${n} chars`;
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k chars`;
-  return `${(n / 1_000_000).toFixed(1)}M chars`;
-}
-
-function WorkflowToolResult({ event }: { event: Extract<PiWorkflowEvent, { type: 'tool_end' }> }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className={`workflow-event workflow-event-tool-end ${event.isError ? 'is-error' : ''}`}>
-      <span className="workflow-event-icon" aria-hidden="true">{event.isError ? '✗' : '✓'}</span>
-      <span className="workflow-tool-name">{event.toolName}</span>
-      <span className="workflow-tool-size">{formatCharCount(event.size)}</span>
-      {event.result && (
-        <button type="button" className="workflow-tool-toggle" onClick={() => setOpen((value) => !value)}>
-          {open ? 'hide' : 'preview'}
-        </button>
-      )}
-      {open && event.result && <pre className="workflow-tool-result">{event.result}</pre>}
-    </div>
-  );
-}
-
-function WorkflowEventRow({ event }: { event: PiWorkflowEvent }) {
-  if (event.type === 'assistant_text') {
-    return (
-      <div className="workflow-event workflow-event-assistant">
-        <span className="workflow-event-icon" aria-hidden="true">✦</span>
-        <div className="workflow-event-text">{event.text}</div>
-      </div>
-    );
-  }
-  if (event.type === 'tool_start') {
-    return (
-      <div className="workflow-event workflow-event-tool">
-        <span className="workflow-event-icon" aria-hidden="true">→</span>
-        <span className="workflow-tool-name">{event.toolName}</span>
-        {event.args && <code className="workflow-tool-args">{event.args}</code>}
-      </div>
-    );
-  }
-  if (event.type === 'tool_end') {
-    return <WorkflowToolResult event={event} />;
-  }
-  if (event.type === 'retry') {
-    return (
-      <div className="workflow-event workflow-event-retry">
-        <span className="workflow-event-icon" aria-hidden="true">↻</span>
-        <span>retry {event.attempt}/{event.maxAttempts}</span>
-        {event.message && <span className="workflow-event-text">{event.message}</span>}
-      </div>
-    );
-  }
-  return null;
-}
-
-function WorkflowLogSectionView({ section }: { section: WorkflowLogSection }) {
-  return (
-    <section className="workflow-step">
-      <header className="workflow-step-head">
-        <span className="workflow-step-label">{section.label}</span>
-        {section.output && <code className="workflow-step-output">{section.output}</code>}
-      </header>
-      <div className="workflow-step-body">
-        {section.rows.map((row, index) =>
-          row.kind === 'text' ? (
-            <div key={index} className="workflow-line">{row.text}</div>
-          ) : (
-            <WorkflowEventRow key={index} event={row.event} />
-          ),
-        )}
-      </div>
-    </section>
-  );
-}
-
-function WorkflowLogPanel({
-  title = 'Adaptation Output',
-  workflow,
-}: {
-  title?: string;
-  workflow: AdaptationWorkflowStatus;
-}) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const sections = useMemo(() => parseWorkflowLog(workflow.log), [workflow.log]);
-  useEffect(() => {
-    const element = scrollRef.current;
-    if (!element) return;
-    element.scrollTop = element.scrollHeight;
-  }, [workflow.log]);
-  const statusText = workflow.running
-    ? 'running'
-    : workflow.returnCode === 0
-      ? 'complete'
-      : workflow.returnCode === null || workflow.returnCode === undefined
-        ? 'idle'
-        : `exited ${workflow.returnCode}`;
-  const statusClass = workflow.running ? 'running' : workflow.returnCode ? 'error' : '';
-  return (
-    <div className="workflow-log-panel">
-      <div className="workflow-log-header">
-        <strong>{title}</strong>
-        <span className={`workflow-log-status ${statusClass}`}>
-          {workflow.running && <span className="spinner" aria-hidden="true" />}
-          {statusText}
-        </span>
-      </div>
-      <div className="workflow-timeline" ref={scrollRef} role="log" aria-live="polite">
-        {sections.length === 0 ? (
-          <p className="workflow-timeline-empty">Waiting for output…</p>
-        ) : (
-          sections.map((section) => <WorkflowLogSectionView key={section.id} section={section} />)
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -3432,16 +3270,20 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
 }
 
 function StoryArtifactNode({ data }: NodeProps<StoryArtifactNodeData>) {
-  const generatedAssetId = data.generatedAssetId;
+  const generatedAssetIds = data.generatedAssetIds ?? [];
+  const latestGeneratedId = generatedAssetIds.length > 0
+    ? generatedAssetIds[generatedAssetIds.length - 1]
+    : null;
+  const hasGenerated = generatedAssetIds.length > 0;
   const tooltip = [
     data.prompt || 'Story artifact prompt not set',
     `source: ${data.promptPath}`,
     `artifact: ${data.artifactKind}`,
-    generatedAssetId ? `generated: ${generatedAssetId}` : 'not generated',
+    hasGenerated ? `generated: ${generatedAssetIds.join(', ')}` : 'not generated',
   ].join('\n');
   const kindClass = `${data.artifactKind}-artifact-node`;
   return (
-    <div className={`node story-artifact-node ${kindClass} ${data.generatedAssetId ? 'generated' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
+    <div className={`node story-artifact-node ${kindClass} ${hasGenerated ? 'generated' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       <strong className="node-title">{data.displayName || data.artifactKey}</strong>
       <div className="story-artifact-card">
@@ -3453,24 +3295,24 @@ function StoryArtifactNode({ data }: NodeProps<StoryArtifactNodeData>) {
               <span>Generating</span>
             </div>
           ) : (
-            <span>{data.generatedAssetId ? 'SRC' : data.artifactKind === 'character-sheet' ? 'CS' : 'LP'}</span>
+            <span>{hasGenerated ? (generatedAssetIds.length > 1 ? `${generatedAssetIds.length} refs` : 'SRC') : data.artifactKind === 'character-sheet' ? 'CS' : 'LP'}</span>
           )}
         </div>
-        {generatedAssetId && (
+        {latestGeneratedId && (
           <button
             className="node-action-button view-image-button nodrag nopan"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
-              data.onViewAsset(generatedAssetId);
+              data.onViewAsset(latestGeneratedId);
             }}
-            title="View full image"
+            title="View latest reference image"
           >
             👁️
           </button>
         )}
       </div>
-      {data.generatedAssetId && <Handle type="source" position={Position.Right} className="output-handle" />}
+      {hasGenerated && <Handle type="source" position={Position.Right} className="output-handle" />}
     </div>
   );
 }

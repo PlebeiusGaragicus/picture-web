@@ -141,7 +141,10 @@ export function TagEditorPopover({
     setSelectedColor(null);
   };
 
-  const removeTag = (tagId: string) => onChange(selectedTags.filter((item) => item !== tagId));
+  const removeTag = (tagId: string) => {
+    if (availableById.get(tagId)?.locked) return;
+    onChange(selectedTags.filter((item) => item !== tagId));
+  };
 
   const stopFlowPointer = (event: React.MouseEvent | React.PointerEvent) => {
     event.stopPropagation();
@@ -156,11 +159,23 @@ export function TagEditorPopover({
     >
       <h3>{title}</h3>
       <div className="tag-editor-input">
-        {selectedTags.map((tagId) => (
-          <button key={tagId} className="tag-chip" onClick={() => removeTag(tagId)} style={{ backgroundColor: availableById.get(tagId)?.color ?? '#64748b' }}>
-            {availableById.get(tagId)?.name ?? tagId}
-          </button>
-        ))}
+        {selectedTags.map((tagId) => {
+          const tag = availableById.get(tagId);
+          const locked = Boolean(tag?.locked);
+          return (
+            <button
+              key={tagId}
+              type="button"
+              className={`tag-chip ${locked ? 'tag-chip-locked' : ''}`}
+              onClick={() => removeTag(tagId)}
+              style={{ backgroundColor: tag?.color ?? '#64748b' }}
+              disabled={locked}
+              title={locked ? 'Entity tags cannot be removed' : undefined}
+            >
+              {tag?.name ?? tagId}
+            </button>
+          );
+        })}
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -188,7 +203,7 @@ export function TagEditorPopover({
         {suggestions.map((tag) => (
           <button
             key={tag.id}
-            className={selected.has(tag.id) ? 'active' : ''}
+            className={`${selected.has(tag.id) ? 'active' : ''} ${tag.locked ? 'entity-tag-suggestion' : ''}`}
             onClick={(event) => {
               event.stopPropagation();
               toggleTag(tag.id);

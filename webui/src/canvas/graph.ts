@@ -14,9 +14,9 @@ export function deriveStoryGraphEdges(filteredNodes: Node<PhotoNodeData>[]): Edg
       const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
       node.data.assetIds.forEach((assetId) => nodeForAsset.set(assetId, imageNode));
     }
-    if (node.data.kind === 'storyArtifact' && node.data.generatedAssetId) {
+    if (node.data.kind === 'storyArtifact') {
       const artifactNode: Node<StoryArtifactNodeData> = { ...node, data: node.data };
-      nodeForAsset.set(node.data.generatedAssetId, artifactNode);
+      node.data.generatedAssetIds.forEach((assetId) => nodeForAsset.set(assetId, artifactNode));
     }
   });
   const edgeForAssetRef = (childNode: Node<ImageGroupNodeData> | Node<DraftNodeData> | Node<StoryArtifactNodeData>, childAssetId: string | null, ref: string): Edge | null => {
@@ -24,7 +24,9 @@ export function deriveStoryGraphEdges(filteredNodes: Node<PhotoNodeData>[]): Edg
     if (!sourceNode || sourceNode.id === childNode.id) return null;
     const sourceVisible = sourceNode.data.kind === 'imageGroup'
       ? sourceNode.data.activeAsset?.id === ref
-      : sourceNode.data.generatedAssetId === ref;
+      : sourceNode.data.kind === 'storyArtifact'
+        ? sourceNode.data.generatedAssetIds.includes(ref)
+        : false;
     const childVisible = childNode.data.kind === 'draft' || childNode.data.kind === 'storyArtifact' || childNode.data.activeAsset?.id === childAssetId;
     const isVisibleLineage = sourceVisible && childVisible;
     return {

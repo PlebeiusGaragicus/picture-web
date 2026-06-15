@@ -573,7 +573,7 @@ function ImageSidebar({
             Prompt
             <textarea className="prompt-textarea locked-field prompt-preview" value={prompt} readOnly />
           </label>
-          {styleRefKind && <p className="muted">Chat refinements create exploratory assets. Use the canonical reference controls to update adaptation metadata.</p>}
+          {styleRefKind && <p className="muted">Chat refinements create exploratory assets. Assign entity tags from the tag editor to link images to characters or locations.</p>}
           <button className="generate-button" onClick={() => onRefineChat(node.id, asset.id)}>{styleRefKind ? 'Explore refinement in chat' : 'Refine in chat'}</button>
           {!styleRefKind && <button className="secondary" onClick={() => onCreateSibling(node.data, asset)}>Create sibling</button>}
         </section>

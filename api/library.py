@@ -39,6 +39,7 @@ from models import (
     TagDefinition,
     TagRegistryDocument,
     TAG_RE,
+    EntityKind,
     utc_now,
 )
 
@@ -245,18 +246,90 @@ def read_tag_registry(slug: str) -> TagRegistryDocument:
 
 def write_tag_registry(slug: str, registry: TagRegistryDocument) -> TagRegistryDocument:
     require_project(slug)
+    existing = read_tag_registry(slug)
+    locked_by_id = {tag.id: tag for tag in existing.tags if tag.locked}
+    normalized_incoming = [
+        TagDefinition(
+            id=normalize_tag_id(tag.id),
+            name=tag.name.strip(),
+            color=tag.color,
+            locked=tag.locked,
+            entityKind=tag.entityKind,
+        )
+        for tag in registry.tags
+    ]
+    next_by_id: dict[str, TagDefinition] = {}
+    for tag in normalized_incoming:
+        existing_locked = locked_by_id.get(tag.id)
+        if existing_locked is not None and not tag.locked:
+            next_by_id[tag.id] = existing_locked
+        else:
+            next_by_id[tag.id] = tag
+    for tag_id, locked_tag in locked_by_id.items():
+        next_by_id.setdefault(tag_id, locked_tag)
     normalized = TagRegistryDocument(
-        tags=[
-            TagDefinition(
-                id=normalize_tag_id(tag.id),
-                name=tag.name.strip(),
-                color=tag.color,
-            )
-            for tag in registry.tags
-        ]
+        tags=sorted(next_by_id.values(), key=lambda item: item.name),
     )
-    write_json(tags_json_path(slug), normalized.model_dump(mode="json"))
+    write_json(tags_json_path(slug), normalized.model_dump(mode="json", exclude_none=True, exclude_defaults=True))
     return normalized
+
+
+ENTITY_TAG_COLORS: dict[EntityKind, str] = {
+    "character": "#3b82f6",
+    "location": "#f59e0b",
+}
+
+
+def entity_display_name(key: str) -> str:
+    return " ".join(part.capitalize() for part in key.split("-") if part)
+
+
+def entity_tag_for_key(key: str, entity_kind: EntityKind) -> TagDefinition:
+    normalized_id = normalize_tag_id(key)
+    return TagDefinition(
+        id=normalized_id,
+        name=entity_display_name(normalized_id),
+        color=ENTITY_TAG_COLORS[entity_kind],
+        locked=True,
+        entityKind=entity_kind,
+    )
+
+
+def sync_entity_tags(slug: str, *, character_keys: list[str], location_keys: list[str]) -> TagRegistryDocument:
+    registry = read_tag_registry(slug)
+    entity_ids = {normalize_tag_id(key) for key in character_keys} | {normalize_tag_id(key) for key in location_keys}
+    user_tags = [tag for tag in registry.tags if not tag.locked and tag.id not in entity_ids]
+    entity_tags = [
+        *[entity_tag_for_key(key, "character") for key in sorted(character_keys)],
+        *[entity_tag_for_key(key, "location") for key in sorted(location_keys)],
+    ]
+    return write_tag_registry(slug, TagRegistryDocument(tags=[*user_tags, *entity_tags]))
+
+
+def locked_entity_tag_ids(slug: str) -> set[str]:
+    return {tag.id for tag in list_project_tags(slug) if tag.locked}
+
+
+def assets_for_entity_tag(slug: str, tag_id: str) -> list[str]:
+    normalized = normalize_tag_id(tag_id)
+    return [asset.id for asset in list_assets(slug) if normalized in asset.tags]
+
+
+def apply_entity_tag_to_asset(slug: str, asset_id: str, entity_key: str) -> AssetSummary:
+    metadata = read_asset_metadata(slug, asset_id)
+    entity_tag = normalize_tag_id(entity_key)
+    if entity_tag not in metadata.tags:
+        metadata.tags = [*metadata.tags, entity_tag]
+        metadata.updatedAt = utc_now()
+        return write_asset_metadata(slug, metadata)
+    return metadata_to_summary(slug, metadata)
+
+
+def merge_asset_tags_preserving_locked(slug: str, asset_id: str, requested_tags: list[str]) -> list[str]:
+    metadata = read_asset_metadata(slug, asset_id)
+    locked_ids = locked_entity_tag_ids(slug)
+    preserved = [tag for tag in metadata.tags if tag in locked_ids]
+    return list(dict.fromkeys([*requested_tags, *preserved]))
 
 
 def list_project_tags(slug: str) -> list[TagDefinition]:
@@ -272,6 +345,8 @@ def upsert_tag(slug: str, tag: TagDefinition) -> TagRegistryDocument:
             id=normalized_id,
             name=tag.name.strip(),
             color=tag.color,
+            locked=tag.locked,
+            entityKind=tag.entityKind,
         )
     )
     return write_tag_registry(slug, TagRegistryDocument(tags=sorted(next_tags, key=lambda item: item.name)))
@@ -405,7 +480,7 @@ def patch_display(slug: str, asset_id: str, payload: DisplayPatch) -> AssetSumma
     if "title" in updates and updates["title"] is not None:
         metadata.title = updates["title"]
     if "tags" in updates and updates["tags"] is not None:
-        metadata.tags = updates["tags"]
+        metadata.tags = merge_asset_tags_preserving_locked(slug, asset_id, updates["tags"])
     metadata.updatedAt = utc_now()
     return write_asset_metadata(slug, metadata)
 
@@ -482,8 +557,10 @@ def story_artifact_refs(entries: dict[str, object], entry: object) -> list[str]:
         return []
     base_key = Path(style_ref).stem
     base = entries.get(base_key)
-    base_asset_id = getattr(base, "canonicalAssetId", None) if base is not None else None
-    return [base_asset_id] if base_asset_id else []
+    if base is None:
+        return []
+    asset_ids = getattr(base, "assetIds", None) or []
+    return list(asset_ids)
 
 
 def story_artifact_base_tags(kind: str) -> list[str]:

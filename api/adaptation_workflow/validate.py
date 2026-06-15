@@ -1,0 +1,138 @@
+"""Validation helpers for ingest and character artifacts."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from adaptation_workflow.slugify import slugify_name
+
+CHAT_WRAPPER_RE = re.compile(
+    r"^(Sure|Here is|Here's|I wrote|Done\.|```|Apologies|I'm sorry)",
+    re.MULTILINE,
+)
+
+
+class ValidationError(Exception):
+    pass
+
+
+class ValidationReport:
+    def __init__(self) -> None:
+        self.failures: list[str] = []
+        self.passes: list[str] = []
+
+    def fail(self, message: str) -> None:
+        self.failures.append(message)
+
+    def ok(self, message: str) -> None:
+        self.passes.append(message)
+
+    @property
+    def success(self) -> bool:
+        return not self.failures
+
+
+def file_has(path: Path, text: str) -> bool:
+    return text in path.read_text()
+
+
+def validate_common_file(path: Path, report: ValidationReport) -> bool:
+    if not path.is_file():
+        report.fail(f"{path} missing")
+        return False
+    if path.stat().st_size == 0:
+        report.fail(f"{path} empty")
+        return False
+    text = path.read_text()
+    if CHAT_WRAPPER_RE.search(text):
+        report.fail(f"{path} contains chat wrapper text")
+        return False
+    return True
+
+
+def validate_contains(path: Path, text: str) -> None:
+    if not file_has(path, text):
+        raise ValidationError(f"File is missing required text '{text}': {path}")
+
+
+def validate_nonempty_file(path: Path) -> None:
+    if not path.is_file() or path.stat().st_size == 0:
+        raise ValidationError(f"Expected non-empty file was not written: {path}")
+
+
+def validate_no_chat_wrappers(path: Path) -> None:
+    if CHAT_WRAPPER_RE.search(path.read_text()):
+        raise ValidationError(f"File appears to contain chat wrapper text: {path}")
+
+
+def validate_character_artifact(path: Path) -> None:
+    validate_nonempty_file(path)
+    validate_no_chat_wrappers(path)
+    for required in ("## Summary", "## Visual Description", "## Visual Variants", "## Source References"):
+        validate_contains(path, required)
+
+
+def validate_character_sheet(path: Path) -> None:
+    validate_nonempty_file(path)
+    validate_no_chat_wrappers(path)
+    for required in ("mode:", "style_ref:", "Layout: top row", "Expressions:"):
+        validate_contains(path, required)
+
+
+def validate_style_refs(book_root: Path, report: ValidationReport) -> None:
+    report.ok("Style refs")
+    visual_style = book_root / "style-refs" / "visual-style.md"
+    validate_common_file(visual_style, report)
+    for label in ("Style:", "Color palette:", "Realism:", "Lighting:"):
+        if visual_style.is_file() and file_has(visual_style, label):
+            report.ok(f"visual-style.md has {label}")
+        else:
+            report.fail(f"visual-style.md missing {label}")
+    archetype_character = book_root / "style-refs" / "archetype-character.md"
+    archetype_scene = book_root / "style-refs" / "archetype-scene.md"
+    if validate_common_file(archetype_character, report):
+        report.ok("archetype-character.md present")
+    if validate_common_file(archetype_scene, report):
+        report.ok("archetype-scene.md present")
+
+
+def validate_character_list(book_root: Path, report: ValidationReport) -> None:
+    report.ok("Characters")
+    list_path = book_root / "characters" / "list.txt"
+    if not validate_common_file(list_path, report):
+        return
+    expected = 0
+    for line in list_path.read_text().splitlines():
+        character_line = line.strip()
+        if not character_line:
+            continue
+        expected += 1
+        if ":" not in character_line:
+            report.fail(f"character list line missing colon: {character_line}")
+            continue
+        if character_line.count(":") > 1:
+            report.fail(f"character list line has more than one colon: {character_line}")
+            continue
+        character_name = character_line.split(":", 1)[0]
+        slug = slugify_name(character_name)
+        artifact = book_root / "characters" / "artifacts" / f"{slug}.md"
+        sheet = book_root / "characters" / "sheets" / f"{slug}.md"
+        try:
+            validate_character_artifact(artifact)
+        except ValidationError as exc:
+            report.fail(str(exc))
+        try:
+            validate_character_sheet(sheet)
+        except ValidationError as exc:
+            report.fail(str(exc))
+    report.ok(f"checked {expected} character list entries")
+
+
+def run_validation(book_root: Path, stage: str) -> ValidationReport:
+    report = ValidationReport()
+    if stage in {"ingest", "all"}:
+        validate_style_refs(book_root, report)
+    if stage in {"characters", "all"}:
+        validate_character_list(book_root, report)
+    return report

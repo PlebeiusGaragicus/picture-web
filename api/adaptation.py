@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import os
@@ -46,11 +47,24 @@ def adaptation_dir(slug: str) -> Path:
     return library.project_dir(slug) / "adaptation"
 
 
+def _has_book_session(root: Path) -> bool:
+    manifest = root / "sessions" / "book-session.json"
+    if not manifest.is_file():
+        return False
+    try:
+        data = library.read_json(manifest)
+    except (json.JSONDecodeError, OSError):
+        return False
+    session_id = data.get("sessionId")
+    session_file = data.get("sessionFile")
+    return bool(session_id) and bool(session_file) and Path(str(session_file)).is_file()
+
+
 def metadata_path(slug: str) -> Path:
     return adaptation_dir(slug) / "adaptation.json"
 
 
-WORKFLOW_STAGES = ("ingest", "characters", "locations", "scenes", "moments", "all")
+WORKFLOW_STAGES = ("ingest", "characters", "all")
 STYLE_REF_KINDS: tuple[StyleRefKind, StyleRefKind] = ("archetype-character", "archetype-scene")
 
 
@@ -133,13 +147,12 @@ def clear_stale_artifact_assets(slug: str, metadata: AdaptationMetadata) -> tupl
     for group in artifact_link_groups(metadata):
         for key, link in list(group.items()):
             asset_ids = [asset_id for asset_id in link.assetIds if asset_exists(slug, asset_id)]
-            canonical_asset_id = link.canonicalAssetId if link.canonicalAssetId and asset_exists(slug, link.canonicalAssetId) else None
-            if asset_ids != link.assetIds or canonical_asset_id != link.canonicalAssetId:
+            next_status = "generated" if asset_ids else ("ready" if link.prompt else "missing")
+            if asset_ids != link.assetIds or next_status != link.status:
                 group[key] = link.model_copy(
                     update={
                         "assetIds": asset_ids,
-                        "canonicalAssetId": canonical_asset_id,
-                        "status": "generated" if canonical_asset_id else "ready",
+                        "status": next_status,
                     }
                 )
                 changed = True
@@ -182,12 +195,55 @@ def workflow_log_path(slug: str, stage: str) -> Path:
     return adaptation_dir(slug) / "sessions" / f"run-{stage}.log"
 
 
+def workflow_launcher_log_path(slug: str, stage: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{stage}-launcher.log"
+
+
+def workflow_manifest_path(slug: str, stage: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{stage}-manifest.json"
+
+
 def validation_status_path(slug: str, stage: str) -> Path:
     return adaptation_dir(slug) / "sessions" / f"validate-{stage}-status.json"
 
 
 def validation_log_path(slug: str, stage: str) -> Path:
     return adaptation_dir(slug) / "sessions" / f"validate-{stage}.log"
+
+
+def validation_launcher_log_path(slug: str, stage: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"validate-{stage}-launcher.log"
+
+
+def workflow_python() -> str:
+    venv_python = library.REPO_ROOT / ".venv" / "bin" / "python"
+    if venv_python.is_file():
+        return venv_python.as_posix()
+    return "python3"
+
+
+def workflow_log_files(slug: str, stage: str, *, validation: bool = False) -> dict[str, str]:
+    root = adaptation_dir(slug)
+    prefix = "validate" if validation else "run"
+    sessions = root / "sessions"
+    files = {
+        "log": (sessions / f"{prefix}-{stage}.log").relative_to(root).as_posix(),
+        "events": (sessions / f"{prefix}-{stage}.events.jsonl").relative_to(root).as_posix(),
+        "summary": (sessions / f"{prefix}-{stage}.summary.json").relative_to(root).as_posix(),
+        "manifest": (sessions / f"{prefix}-{stage}-manifest.json").relative_to(root).as_posix(),
+        "launcher": (sessions / f"{prefix}-{stage}-launcher.log").relative_to(root).as_posix(),
+        "tasksDir": (sessions / "tasks").relative_to(root).as_posix(),
+    }
+    manifest_path = sessions / f"{prefix}-{stage}-manifest.json"
+    if manifest_path.is_file():
+        try:
+            manifest = library.read_json(manifest_path)
+            for key in ("log", "events", "summary", "tasksDir"):
+                if key in manifest:
+                    files[key] = str(manifest[key])
+        except (json.JSONDecodeError, OSError):
+            pass
+    return files
 
 
 def ensure_adaptation(slug: str) -> Path:
@@ -212,7 +268,7 @@ def ensure_adaptation(slug: str) -> Path:
     return root
 
 
-def process_status(slug: str, status_path: Path, log_path: Path) -> AdaptationWorkflowStatus:
+def process_status(slug: str, status_path: Path, log_path: Path, *, validation: bool = False) -> AdaptationWorkflowStatus:
     ensure_adaptation(slug)
     data: dict[str, Any] = {}
     if status_path.is_file():
@@ -234,23 +290,29 @@ def process_status(slug: str, status_path: Path, log_path: Path) -> AdaptationWo
         data["completedAt"] = data.get("completedAt") or utc_now()
         data["returnCode"] = data.get("returnCode")
         library.write_json(status_path, data)
+    stage_name = log_path.name
+    if stage_name.startswith("validate-"):
+        stage_name = stage_name.removeprefix("validate-").removesuffix(".log")
+    else:
+        stage_name = stage_name.removeprefix("run-").removesuffix(".log")
     return AdaptationWorkflowStatus(
         running=running,
         returnCode=data.get("returnCode"),
         startedAt=data.get("startedAt"),
         completedAt=data.get("completedAt"),
         log=log,
+        logFiles=workflow_log_files(slug, stage_name, validation=validation),
     )
 
 
 def workflow_status(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
     require_stage(stage)
-    return process_status(slug, workflow_status_path(slug, stage), workflow_log_path(slug, stage))
+    return process_status(slug, workflow_status_path(slug, stage), workflow_log_path(slug, stage), validation=False)
 
 
 def validation_status(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
     require_stage(stage)
-    return process_status(slug, validation_status_path(slug, stage), validation_log_path(slug, stage))
+    return process_status(slug, validation_status_path(slug, stage), validation_log_path(slug, stage), validation=True)
 
 
 def process_is_running(pid: int) -> bool:
@@ -267,24 +329,27 @@ def start_logged_process(
     slug: str,
     *,
     log_path: Path,
+    launcher_log_path: Path,
     status_path: Path,
     start_line: str,
     script_command: str,
+    validation: bool = False,
 ) -> AdaptationWorkflowStatus:
     root = ensure_adaptation(slug)
-    current = process_status(slug, status_path, log_path)
+    current = process_status(slug, status_path, log_path, validation=validation)
     if current.running:
         raise HTTPException(status_code=409, detail="Process is already running")
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_file = log_path.open("w")
-    log_file.write(f"[{utc_now()}] {start_line}\n")
-    log_file.flush()
+    launcher_file = launcher_log_path.open("w")
+    launcher_file.write(f"[{utc_now()}] {start_line}\n")
+    launcher_file.flush()
+    python_bin = workflow_python()
+    launcher_file.write(f"[{utc_now()}] python: {python_bin}\n")
+    launcher_file.flush()
     command = [
         "bash",
         "-lc",
         (
-            "echo \"node: $(command -v node) $(node --version 2>/dev/null || true)\"; "
-            "echo \"pi: $(command -v pi)\"; "
             f"{script_command}; code=$?; "
             "python3 - \"$STATUS_PATH\" \"$code\" <<'PY'\n"
             "import json\n"
@@ -302,15 +367,15 @@ def start_logged_process(
         ),
     ]
     env = os.environ.copy()
-    node22_bin = Path("/opt/homebrew/opt/node@22/bin")
-    if node22_bin.is_dir():
-        env["PATH"] = f"{node22_bin.as_posix()}:{env.get('PATH', '')}"
+    from adaptation_workflow.config import pi_runtime_env
+
+    env = pi_runtime_env(env)
     env["SLUG"] = slug
     env["STATUS_PATH"] = str(status_path)
     process = subprocess.Popen(
         command,
         cwd=library.REPO_ROOT,
-        stdout=log_file,
+        stdout=launcher_file,
         stderr=subprocess.STDOUT,
         env=env,
         start_new_session=True,
@@ -325,8 +390,8 @@ def start_logged_process(
             "completedAt": None,
         },
     )
-    log_file.close()
-    return process_status(slug, status_path, log_path)
+    launcher_file.close()
+    return process_status(slug, status_path, log_path, validation=validation)
 
 
 def start_workflow(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
@@ -338,9 +403,11 @@ def start_workflow(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
     return start_logged_process(
         slug,
         log_path=workflow_log_path(slug, stage),
+        launcher_log_path=workflow_launcher_log_path(slug, stage),
         status_path=workflow_status_path(slug, stage),
         start_line=f"Starting adaptation workflow ({stage}) for {slug}",
-        script_command=f"./scripts/comic-adaptation/run \"$SLUG\" \"{stage}\"",
+        script_command=f"cd api && {workflow_python()} -m adaptation_workflow run \"$SLUG\" \"{stage}\"",
+        validation=False,
     )
 
 
@@ -350,13 +417,21 @@ def start_validation(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
     return start_logged_process(
         slug,
         log_path=validation_log_path(slug, stage),
+        launcher_log_path=validation_launcher_log_path(slug, stage),
         status_path=validation_status_path(slug, stage),
         start_line=f"Starting adaptation validation ({stage}) for {slug}",
-        script_command=f"./scripts/comic-adaptation/validate \"$SLUG\" \"{stage}\"",
+        script_command=f"cd api && {workflow_python()} -m adaptation_workflow validate \"$SLUG\" \"{stage}\"",
+        validation=True,
     )
 
 
 def import_drafts_to_canvas(slug: str) -> AdaptationCanvasImportResponse:
+    metadata = sync_prompt_links(slug, read_metadata(slug))
+    library.sync_entity_tags(
+        slug,
+        character_keys=list(metadata.characters.keys()),
+        location_keys=list(metadata.locations.keys()),
+    )
     before = library.read_stored_canvas(slug)
     after = library.default_canvas_for_story_artifacts(slug, before)
     imported_count = max(0, len(after.nodes) - len(before.nodes))
@@ -364,13 +439,69 @@ def import_drafts_to_canvas(slug: str) -> AdaptationCanvasImportResponse:
     return AdaptationCanvasImportResponse(canvas=saved, importedNodeCount=imported_count)
 
 
+def migrate_legacy_canonical(slug: str, metadata: AdaptationMetadata) -> AdaptationMetadata:
+    path = metadata_path(slug)
+    if not path.is_file():
+        return metadata
+    raw = library.read_json(path)
+    if not isinstance(raw, dict):
+        return metadata
+    changed = False
+    entity_groups: tuple[tuple[str, dict[str, AdaptationAssetLink]], ...] = (
+        ("characters", metadata.characters),
+        ("locations", metadata.locations),
+    )
+    for group_name, links in entity_groups:
+        raw_group = raw.get(group_name, {})
+        if not isinstance(raw_group, dict):
+            continue
+        for key, link_raw in raw_group.items():
+            if not isinstance(link_raw, dict):
+                continue
+            canonical = link_raw.pop("canonicalAssetId", None)
+            if not canonical:
+                continue
+            changed = True
+            link = links.get(key)
+            if link is None:
+                continue
+            asset_ids = list(link.assetIds)
+            if asset_exists(slug, canonical) and canonical not in asset_ids:
+                asset_ids.append(canonical)
+            links[key] = link.model_copy(
+                update={
+                    "assetIds": asset_ids,
+                    "status": "generated" if asset_ids else link.status,
+                }
+            )
+            if asset_exists(slug, canonical):
+                library.apply_entity_tag_to_asset(slug, canonical, key)
+    for group_name in ("characters", "locations", "scenes", "pages", "panels"):
+        raw_group = raw.get(group_name, {})
+        if not isinstance(raw_group, dict):
+            continue
+        for link_raw in raw_group.values():
+            if isinstance(link_raw, dict):
+                link_raw.pop("canonicalAssetId", None)
+    if changed:
+        library.write_json(path, raw)
+        metadata = AdaptationMetadata.model_validate(raw)
+    return metadata
+
+
 def read_metadata(slug: str) -> AdaptationMetadata:
     ensure_adaptation(slug)
-    return AdaptationMetadata.model_validate(library.read_json(metadata_path(slug)))
+    metadata = AdaptationMetadata.model_validate(library.read_json(metadata_path(slug)))
+    return migrate_legacy_canonical(slug, metadata)
 
 
 def write_metadata(slug: str, metadata: AdaptationMetadata) -> AdaptationMetadata:
     library.write_json(metadata_path(slug), metadata.model_dump(mode="json"))
+    library.sync_entity_tags(
+        slug,
+        character_keys=list(metadata.characters.keys()),
+        location_keys=list(metadata.locations.keys()),
+    )
     return metadata
 
 
@@ -484,7 +615,6 @@ def adaptation_file_from_link(
         mode=link.mode,
         styleRef=link.styleRef,
         status=link.status,
-        canonicalAssetId=link.canonicalAssetId,
     )
 
 
@@ -596,7 +726,6 @@ def prompt_link(
     existing: AdaptationAssetLink | None,
 ) -> AdaptationAssetLink:
     asset_ids = list(existing.assetIds) if existing else []
-    canonical_asset_id = existing.canonicalAssetId if existing else None
     return AdaptationAssetLink(
         artifactKind=artifact_kind,
         promptPath=prompt_path,
@@ -604,8 +733,7 @@ def prompt_link(
         styleRef=section.get("style_ref", ""),
         prompt=section.get("prompt", ""),
         assetIds=asset_ids,
-        canonicalAssetId=canonical_asset_id,
-        status="generated" if canonical_asset_id else "ready",
+        status="generated" if asset_ids else "ready",
     )
 
 
@@ -679,7 +807,7 @@ def status(slug: str) -> AdaptationStatus:
         projectSlug=slug,
         settings=metadata.settings,
         hasBook=(root / "book.txt").is_file(),
-        hasBookSession=(root / "sessions" / "book-load.env").is_file(),
+        hasBookSession=_has_book_session(root),
         styleRefs={
             "visualStyle": (root / "style-refs" / "visual-style.md").is_file(),
             "archetypeCharacterPrompt": (root / "style-refs" / "archetype-character.md").is_file(),
@@ -847,7 +975,7 @@ def next_base_character(slug: str) -> tuple[str, Path, dict[str, str]] | None:
             if section.get("mode") != "new-image":
                 continue
             link = metadata.characters.get(key)
-            if link is None or link.canonicalAssetId is None:
+            if link is None or not link.assetIds:
                 return key, sheet, section
     return None
 
@@ -881,29 +1009,6 @@ def style_ref_artifact_key(style_ref: str) -> str:
     return Path(style_ref).stem
 
 
-def canonical_asset_id(link: AdaptationAssetLink) -> str | None:
-    return link.canonicalAssetId
-
-
-def artifact_ref_asset_id(metadata: AdaptationMetadata, artifact_kind: ArtifactKind, link: AdaptationAssetLink) -> str:
-    if link.mode == "new-image":
-        ref_asset_id = style_ref_asset_id(metadata, artifact_kind)
-        if ref_asset_id is None:
-            raise HTTPException(status_code=400, detail=missing_style_ref_detail(artifact_kind))
-        return ref_asset_id
-    if link.mode == "edit-reference":
-        entries = artifact_entries(metadata, artifact_kind)
-        base_key = style_ref_artifact_key(link.styleRef)
-        base = entries.get(base_key)
-        if base is None:
-            raise HTTPException(status_code=400, detail=f"Referenced base artifact not found: {base_key}")
-        base_asset_id = canonical_asset_id(base)
-        if base_asset_id is None:
-            raise HTTPException(status_code=400, detail=f"Generate base artifact before variant: {base_key}")
-        return base_asset_id
-    raise HTTPException(status_code=400, detail=f"Unsupported artifact generation mode: {link.mode or 'missing'}")
-
-
 def parse_semantic_ref(ref: str) -> tuple[str, str] | None:
     if ":" not in ref:
         return None
@@ -911,28 +1016,40 @@ def parse_semantic_ref(ref: str) -> tuple[str, str] | None:
     return kind.strip(), key.strip()
 
 
-def resolve_semantic_ref(metadata: AdaptationMetadata, ref: str) -> str | None:
+def entity_kind_for_semantic_ref(kind: str) -> str | None:
+    if kind in {"character", "character-sheet"}:
+        return "characters"
+    if kind in {"location", "location-prompt"}:
+        return "locations"
+    if kind in {"scene", "scene-artifact"}:
+        return "scenes"
+    if kind in {"page", "page-plan"}:
+        return "pages"
+    if kind in {"panel", "panel-prompt"}:
+        return "panels"
+    return None
+
+
+def link_for_semantic_ref(metadata: AdaptationMetadata, ref: str) -> AdaptationAssetLink | None:
     parsed = parse_semantic_ref(ref)
     if parsed is None:
         return None
     kind, key = parsed
-    groups: dict[str, dict[str, AdaptationAssetLink]] = {
-        "character": metadata.characters,
-        "character-sheet": metadata.characters,
-        "location": metadata.locations,
-        "location-prompt": metadata.locations,
-        "scene": metadata.scenes,
-        "scene-artifact": metadata.scenes,
-        "page": metadata.pages,
-        "page-plan": metadata.pages,
-        "panel": metadata.panels,
-        "panel-prompt": metadata.panels,
-    }
-    link = groups.get(kind, {}).get(key)
-    return canonical_asset_id(link) if link is not None else None
+    group_name = entity_kind_for_semantic_ref(kind)
+    if group_name is None:
+        return None
+    group = getattr(metadata, group_name)
+    return group.get(key)
 
 
-def artifact_ref_asset_ids(metadata: AdaptationMetadata, artifact_kind: ArtifactKind, link: AdaptationAssetLink) -> list[str]:
+def resolve_entity_assets(slug: str, metadata: AdaptationMetadata, ref: str) -> list[str]:
+    link = link_for_semantic_ref(metadata, ref)
+    if link is None:
+        return []
+    return [asset_id for asset_id in link.assetIds if asset_exists(slug, asset_id)]
+
+
+def artifact_ref_asset_ids(slug: str, metadata: AdaptationMetadata, artifact_kind: ArtifactKind, link: AdaptationAssetLink) -> list[str]:
     if artifact_kind == "scene-artifact":
         return []
     if artifact_kind in {"page-plan", "panel-prompt"}:
@@ -941,11 +1058,24 @@ def artifact_ref_asset_ids(metadata: AdaptationMetadata, artifact_kind: Artifact
         if style_ref_id:
             refs.append(style_ref_id)
         for raw_ref in [item.strip() for item in link.styleRef.split(",") if item.strip()]:
-            asset_id = resolve_semantic_ref(metadata, raw_ref)
-            if asset_id is not None:
-                refs.append(asset_id)
+            refs.extend(resolve_entity_assets(slug, metadata, raw_ref))
         return list(dict.fromkeys(refs))
-    return [artifact_ref_asset_id(metadata, artifact_kind, link)]
+    if link.mode == "new-image":
+        ref_asset_id = style_ref_asset_id(metadata, artifact_kind)
+        if ref_asset_id is None:
+            raise HTTPException(status_code=400, detail=missing_style_ref_detail(artifact_kind))
+        return [ref_asset_id]
+    if link.mode == "edit-reference":
+        entries = artifact_entries(metadata, artifact_kind)
+        base_key = style_ref_artifact_key(link.styleRef)
+        base = entries.get(base_key)
+        if base is None:
+            raise HTTPException(status_code=400, detail=f"Referenced base artifact not found: {base_key}")
+        asset_ids = list(base.assetIds)
+        if not asset_ids:
+            raise HTTPException(status_code=400, detail=f"Generate base artifact before variant: {base_key}")
+        return asset_ids
+    raise HTTPException(status_code=400, detail=f"Unsupported artifact generation mode: {link.mode or 'missing'}")
 
 
 def attach_artifact_asset_to_canvas(
@@ -967,7 +1097,6 @@ def attach_artifact_asset_to_canvas(
                 break
     if not isinstance(target, StoryArtifactCanvasNode) or target_id is None:
         return
-    target.generatedAssetId = asset_id
     target.generatedAssetIds = list(dict.fromkeys([*target.generatedAssetIds, asset_id]))
     target.tags = library.node_tags(*target.tags, "generated")
     canvas.nodes[target_id] = target
@@ -983,7 +1112,7 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
         raise HTTPException(status_code=404, detail=f"Story artifact not found: {request.artifactKey}")
     if request.artifactKind == "scene-artifact":
         raise HTTPException(status_code=400, detail="Scene artifacts are planning artifacts and cannot be generated directly")
-    ref_asset_ids = artifact_ref_asset_ids(metadata, request.artifactKind, link)
+    ref_asset_ids = artifact_ref_asset_ids(slug, metadata, request.artifactKind, link)
     visual_style = read_text(root / "style-refs" / "visual-style.md")
     prompt = f"{link.prompt.strip()}\n\n{visual_style.strip()}\n"
     canvas_node_id = request.canvasNodeId
@@ -999,6 +1128,11 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
             ),
             None,
         )
+    entity_tags = (
+        [request.artifactKey]
+        if request.artifactKind in {"character-sheet", "location-prompt"}
+        else []
+    )
     payload = GenerateRequest(
         prompt=prompt,
         refs=ref_asset_ids,
@@ -1006,16 +1140,17 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
         imageSize="1K",
         batchCount=1,
         title=f"{link.artifactKind.replace('-', ' ').title()}: {request.artifactKey}",
-        tags=["comic-adaptation", link.artifactKind],
+        tags=list(dict.fromkeys(["comic-adaptation", link.artifactKind, *entity_tags])),
         canvasNodeId=canvas_node_id,
     )
     response = library.create_generated_assets(slug, payload, gemini.generate_image)
     asset = response.assets[0]
+    if entity_tags:
+        library.apply_entity_tag_to_asset(slug, asset.id, request.artifactKey)
     next_asset_ids = list(dict.fromkeys([*link.assetIds, asset.id]))
     entries[request.artifactKey] = link.model_copy(
         update={
             "assetIds": next_asset_ids,
-            "canonicalAssetId": asset.id,
             "status": "generated",
         }
     )

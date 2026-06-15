@@ -36,11 +36,21 @@ export function isValidTagName(value: string) {
   return /^[a-z0-9]+(-[a-z0-9]+)*$/.test(value);
 }
 
+export function isEntityTag(tagId: string, projectTags: TagDefinition[]): boolean {
+  return projectTags.some((tag) => tag.id === tagId && tag.locked);
+}
+
+export function lockedEntityTagIds(projectTags: TagDefinition[]): Set<string> {
+  return new Set(projectTags.filter((tag) => tag.locked).map((tag) => tag.id));
+}
+
 export function mergeAvailableUserTags(projectTags: TagDefinition[], assets: Asset[]): TagDefinition[] {
   const byId = new Map(projectTags.map((tag) => [tag.id, tag]));
   assets.forEach((asset) => {
     asset.tags.forEach((tagId) => {
-      if (!SYSTEM_TAGS.has(tagId) && !byId.has(tagId)) byId.set(tagId, { id: tagId, name: tagId, color: '#64748b' });
+      if (!SYSTEM_TAGS.has(tagId) && !byId.has(tagId)) {
+        byId.set(tagId, { id: tagId, name: tagId, color: '#64748b' });
+      }
     });
   });
   return Array.from(byId.values()).sort((first, second) => first.name.localeCompare(second.name));

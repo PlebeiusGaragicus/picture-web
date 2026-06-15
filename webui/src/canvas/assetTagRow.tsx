@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { TagDefinition } from '../types';
 import { TagEditorPopover } from './tagEditor';
-import { SYSTEM_TAGS } from './shared';
+import { SYSTEM_TAGS, isEntityTag } from './shared';
 
 export function resolveUserTags(tagIds: string[], projectTags: TagDefinition[]): TagDefinition[] {
   const byId = new Map(projectTags.map((tag) => [tag.id, tag]));
@@ -79,7 +79,11 @@ export function NodeAssetTagRow({
             <span className="node-tag-placeholder">Add tags</span>
           ) : (
             resolvedTags.map((tag) => (
-              <span key={tag.id} className="node-tag-pill" style={{ backgroundColor: tag.color }}>
+              <span
+                key={tag.id}
+                className={`node-tag-pill ${isEntityTag(tag.id, projectTags) ? 'entity-tag-pill' : ''}`}
+                style={{ backgroundColor: tag.color }}
+              >
                 {tag.name}
               </span>
             ))

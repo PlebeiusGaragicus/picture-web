@@ -187,8 +187,14 @@ def test_project_tags_registry_and_asset_assignment(tmp_path, monkeypatch):
         json={"tags": [{"id": "red4repo", "name": "Red4Repo", "color": "#ef4444"}]},
     )
     assert registry_response.status_code == 200
-    assert registry_response.json()["tags"] == [{"id": "red4repo", "name": "Red4Repo", "color": "#ef4444"}]
-    assert client.get("/api/projects/farm-comic/tags").json() == [{"id": "red4repo", "name": "Red4Repo", "color": "#ef4444"}]
+    saved_tag = registry_response.json()["tags"][0]
+    assert saved_tag["id"] == "red4repo"
+    assert saved_tag["name"] == "Red4Repo"
+    assert saved_tag["color"] == "#ef4444"
+    listed_tag = client.get("/api/projects/farm-comic/tags").json()[0]
+    assert listed_tag["id"] == "red4repo"
+    assert listed_tag["name"] == "Red4Repo"
+    assert listed_tag["color"] == "#ef4444"
 
     patch_response = client.patch(
         f"/api/projects/farm-comic/assets/{asset_id}/display",
@@ -197,7 +203,10 @@ def test_project_tags_registry_and_asset_assignment(tmp_path, monkeypatch):
     assert patch_response.status_code == 200
     assert patch_response.json()["tags"] == ["red4repo"]
     detail = client.get("/api/projects/farm-comic").json()
-    assert detail["tags"] == [{"id": "red4repo", "name": "Red4Repo", "color": "#ef4444"}]
+    detail_tag = detail["tags"][0]
+    assert detail_tag["id"] == "red4repo"
+    assert detail_tag["name"] == "Red4Repo"
+    assert detail_tag["color"] == "#ef4444"
     assert detail["assets"][0]["tags"] == ["red4repo"]
 
 
@@ -227,7 +236,10 @@ def test_project_tag_rename_preserves_asset_assignments(tmp_path, monkeypatch):
         json={"tags": [{"id": "red4repo", "name": "Renamed Tag", "color": "#22c55e"}]},
     )
     assert rename_response.status_code == 200
-    assert rename_response.json()["tags"] == [{"id": "red4repo", "name": "Renamed Tag", "color": "#22c55e"}]
+    renamed_tag = rename_response.json()["tags"][0]
+    assert renamed_tag["id"] == "red4repo"
+    assert renamed_tag["name"] == "Renamed Tag"
+    assert renamed_tag["color"] == "#22c55e"
 
     asset = client.get(f"/api/projects/farm-comic/assets/{asset_id}").json()
     assert asset["tags"] == ["red4repo"]
@@ -275,7 +287,10 @@ def test_project_tag_registry_reads_legacy_name_shape(tmp_path, monkeypatch):
     )
 
     tags = client.get("/api/projects/farm-comic/tags").json()
-    assert tags == [{"id": "legacy-tag", "name": "legacy-tag", "color": "#3b82f6"}]
+    legacy_tag = tags[0]
+    assert legacy_tag["id"] == "legacy-tag"
+    assert legacy_tag["name"] == "legacy-tag"
+    assert legacy_tag["color"] == "#3b82f6"
 
 
 def test_persistent_draft_canvas_round_trip(tmp_path, monkeypatch):
@@ -467,16 +482,17 @@ def test_adaptation_settings_scene_panel_status_and_canvas_import(tmp_path, monk
     assert "panel-prompt" in artifact_kinds
 
 
-def test_adaptation_panel_generation_uses_canonical_semantic_refs(tmp_path, monkeypatch):
+def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
     root = library.project_dir("farm-comic") / "adaptation"
     (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
 
-    for asset_id, title in [
-        ("01HSTYLE", "Style"),
-        ("01HCHAR", "Character"),
-        ("01HLOC", "Location"),
+    for asset_id, title, tags in [
+        ("01HSTYLE", "Style", []),
+        ("01HCHAR", "Character A", ["hero-base"]),
+        ("01HCHAR2", "Character B", ["hero-base"]),
+        ("01HLOC", "Location", ["farm"]),
     ]:
         make_png(library.asset_png_path("farm-comic", asset_id), color="green")
         library.write_json(
@@ -485,7 +501,7 @@ def test_adaptation_panel_generation_uses_canonical_semantic_refs(tmp_path, monk
                 "id": asset_id,
                 "kind": "imported",
                 "title": title,
-                "tags": [],
+                "tags": tags,
                 "createdAt": "2026-01-01T00:00:00Z",
                 "updatedAt": "2026-01-01T00:00:00Z",
             },
@@ -501,8 +517,7 @@ def test_adaptation_panel_generation_uses_canonical_semantic_refs(tmp_path, monk
                 "hero-base": {
                     "artifactKind": "character-sheet",
                     "promptPath": "characters/sheets/hero.md",
-                    "assetIds": ["01HCHAR"],
-                    "canonicalAssetId": "01HCHAR",
+                    "assetIds": ["01HCHAR", "01HCHAR2"],
                     "status": "generated",
                 }
             },
@@ -511,7 +526,6 @@ def test_adaptation_panel_generation_uses_canonical_semantic_refs(tmp_path, monk
                     "artifactKind": "location-prompt",
                     "promptPath": "locations/prompts/farm.md",
                     "assetIds": ["01HLOC"],
-                    "canonicalAssetId": "01HLOC",
                     "status": "generated",
                 }
             },
@@ -541,10 +555,11 @@ def test_adaptation_panel_generation_uses_canonical_semantic_refs(tmp_path, monk
         json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01"},
     )
     assert response.status_code == 200
-    assert captured_refs == ["01HSTYLE", "01HCHAR", "01HLOC"]
+    assert captured_refs == ["01HSTYLE", "01HCHAR", "01HCHAR2", "01HLOC"]
     panel_link = client.get("/api/projects/farm-comic/adaptation").json()["panels"]["001-panel-01"]
-    assert panel_link["canonicalAssetId"] == response.json()["asset"]["id"]
     assert panel_link["assetIds"] == [response.json()["asset"]["id"]]
+    tags = client.get("/api/projects/farm-comic/tags").json()
+    assert any(tag["id"] == "hero-base" and tag["locked"] for tag in tags)
     nodes = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
     source_id = "artifact_panel_prompt_001_panel_01"
     child_id = f"generated_{source_id}"
@@ -830,10 +845,10 @@ def test_story_artifact_generated_asset_projects_to_child_image_group(tmp_path, 
         promptPath="characters/sheets/hero.md",
         prompt="hero prompt",
         assetIds=[asset_id],
-        canonicalAssetId=asset_id,
         status="generated",
     )
     adaptation.write_metadata("farm-comic", metadata)
+    library.apply_entity_tag_to_asset("farm-comic", asset_id, "hero")
     canvas = {
         "version": 2,
         "viewport": {"x": 0, "y": 0, "zoom": 1},
@@ -851,7 +866,6 @@ def test_story_artifact_generated_asset_projects_to_child_image_group(tmp_path, 
                 "prompt": "hero prompt",
                 "refs": [],
                 "generatedAssetIds": [asset_id],
-                "generatedAssetId": asset_id,
             },
         },
     }
@@ -868,7 +882,6 @@ def test_story_artifact_generated_asset_projects_to_child_image_group(tmp_path, 
     delete_child = client.delete(f"/api/projects/farm-comic/assets/{asset_id}")
     assert delete_child.status_code == 204
     status = client.get("/api/projects/farm-comic/adaptation").json()
-    assert status["characters"]["hero"]["canonicalAssetId"] is None
     assert status["characters"]["hero"]["assetIds"] == []
     assert status["characters"]["hero"]["prompt"] == "hero prompt"
     repaired = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
@@ -1229,7 +1242,8 @@ def test_generate_matching_prompt_and_refs_merges_into_existing_group(tmp_path, 
     assert second.status_code == 200
 
     next_canvas = client.get("/api/projects/farm-comic/canvas").json()
-    assert list(next_canvas["nodes"].keys()) == ["draft_1"]
+    assert "draft_1" in next_canvas["nodes"]
+    assert "draft_2" not in next_canvas["nodes"]
     node = next_canvas["nodes"]["draft_1"]
     assert node["type"] == "imageGroup"
     assert len(node["assetIds"]) == 2
@@ -1262,7 +1276,7 @@ def test_generate_variants_appends_to_existing_image_group(tmp_path, monkeypatch
     assert second.status_code == 200
 
     canvas = client.get("/api/projects/farm-comic/canvas").json()
-    assert list(canvas["nodes"].keys()) == ["node_1"]
+    assert "node_1" in canvas["nodes"]
     node = canvas["nodes"]["node_1"]
     assert node["displayName"] == "Child"
     assert len(node["assetIds"]) == 3

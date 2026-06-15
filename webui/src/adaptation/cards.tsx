@@ -160,6 +160,8 @@ export function PhaseWorkflowActions({
   validation,
   onStartWorkflow,
   onStartValidation,
+  workflowDisabled = false,
+  workflowDisabledReason = 'Workflow not available for this phase yet.',
 }: {
   kind: 'characters' | 'locations';
   adaptation: AdaptationStatus;
@@ -167,6 +169,8 @@ export function PhaseWorkflowActions({
   validation: AdaptationWorkflowStatus | null;
   onStartWorkflow: () => Promise<void>;
   onStartValidation: () => Promise<void>;
+  workflowDisabled?: boolean;
+  workflowDisabledReason?: string;
 }) {
   return (
     <div className="assets-row">
@@ -176,12 +180,15 @@ export function PhaseWorkflowActions({
             <h2>Extract From Book</h2>
             <HelpTip text={`Run Pi to populate ${kind} files from the ingested book session.`} />
           </div>
-          <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBookSession || workflow?.running}>
+          <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={workflowDisabled || !adaptation.hasBookSession || workflow?.running}>
             {workflow?.running && <span className="spinner" aria-hidden="true" />}
             {workflow?.running ? 'Running extraction...' : 'Run extraction'}
           </button>
         </div>
-        {!adaptation.hasBookSession && (
+        {workflowDisabled && (
+          <p className="assets-extract-hint">{workflowDisabledReason}</p>
+        )}
+        {!workflowDisabled && !adaptation.hasBookSession && (
           <p className="assets-extract-hint">Create the read-book session in Phase 0 first, or author files manually below.</p>
         )}
       </section>
@@ -190,7 +197,7 @@ export function PhaseWorkflowActions({
           <h2>Validate</h2>
           <HelpTip text={`Check that ${kind} files are well-formed.`} />
         </div>
-        <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
+        <button className="secondary" onClick={onStartValidation} disabled={workflowDisabled || validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
       </section>
     </div>
   );

@@ -50,7 +50,7 @@ export function PhaseAssetType({
         />
       </div>
 
-      <PhaseWorkflowActions kind={kind} adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={onStartWorkflow} onStartValidation={onStartValidation} />
+      <PhaseWorkflowActions kind={kind} adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={onStartWorkflow} onStartValidation={onStartValidation} workflowDisabled={!isCharacters} />
 
       {fileEditor}
 
@@ -86,9 +86,9 @@ export function PhaseScenes({ adaptation, workflow, validation, isSavingSettings
       </section>
       <section className="story-card">
         <h2>Acts And Scenes</h2>
-        <p className="muted">Optionally generate play-by-play and scene files from an ingested book context.</p>
-        <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBookSession || workflow?.running}>
-          {workflow?.running ? 'Running scene creation...' : 'Run scene workflow'}
+        <p className="muted">Scene extraction workflow is not available yet. Author scene files manually or wait for a later release.</p>
+        <button className="generate-button workflow-run-button" disabled>
+          Run scene workflow
         </button>
       </section>
       <section className="story-card">
@@ -100,7 +100,7 @@ export function PhaseScenes({ adaptation, workflow, validation, isSavingSettings
       </section>
       <section className="story-card">
         <h2>Validate Scenes</h2>
-        <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
+        <button className="secondary" disabled>Run validation</button>
       </section>
     </>
   );
@@ -120,9 +120,9 @@ export function PhaseMoments({ adaptation, workflow, validation, onStartWorkflow
     <>
       <section className="story-card">
         <h2>Moments, Beats, Panels</h2>
-        <p className="muted">Break scene artifacts into story-kind page plans or comic panel prompts.</p>
-        <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={(adaptation.counts.sceneArtifacts ?? 0) === 0 || workflow?.running}>
-          {workflow?.running ? 'Planning moments...' : 'Run moment planning'}
+        <p className="muted">Moment planning workflow is not available yet.</p>
+        <button className="generate-button workflow-run-button" disabled>
+          Run moment planning
         </button>
       </section>
       <section className="story-card">
@@ -134,7 +134,7 @@ export function PhaseMoments({ adaptation, workflow, validation, onStartWorkflow
       </section>
       <section className="story-card">
         <h2>Validate Moment Prompts</h2>
-        <button className="secondary" onClick={onStartValidation} disabled={validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
+        <button className="secondary" disabled>Run validation</button>
       </section>
     </>
   );

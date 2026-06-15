@@ -18,8 +18,10 @@ def story_artifact_refs(entries: dict[str, object], entry: object) -> list[str]:
         return []
     base_key = Path(style_ref).stem
     base = entries.get(base_key)
-    base_asset_id = getattr(base, "canonicalAssetId", None) if base is not None else None
-    return [base_asset_id] if base_asset_id else []
+    if base is None:
+        return []
+    asset_ids = getattr(base, "assetIds", None) or []
+    return list(asset_ids)
 
 
 def story_artifact_base_tags(kind: str) -> list[str]:
@@ -31,6 +33,11 @@ def story_artifact_base_tags(kind: str) -> list[str]:
         "panel-prompt": ["adaptation", "panel"],
     }
     return tags_by_kind.get(kind, ["adaptation"])
+
+
+def entry_has_assets(entry: object) -> bool:
+    asset_ids = getattr(entry, "assetIds", None) or []
+    return len(asset_ids) > 0
 
 
 def sync_visual_style_node(slug: str, canvas: CanvasDocument) -> CanvasDocument:
@@ -79,9 +86,11 @@ def sync_existing_story_artifacts(slug: str, canvas: CanvasDocument) -> CanvasDo
         node.promptPath = entry.promptPath
         node.prompt = entry.prompt
         node.refs = story_artifact_refs(entries, entry)
-        node.generatedAssetIds = entry.assetIds
-        node.generatedAssetId = entry.canonicalAssetId
-        node.tags = library.node_tags(*story_artifact_base_tags(node.artifactKind), "generated" if entry.canonicalAssetId else "missing")
+        node.generatedAssetIds = list(entry.assetIds)
+        node.tags = library.node_tags(
+            *story_artifact_base_tags(node.artifactKind),
+            "generated" if entry_has_assets(entry) else "missing",
+        )
         node.role = ArtifactSourceRole(artifactKind=node.artifactKind, artifactKey=node.artifactKey)
         next_canvas.nodes[node_id] = node
     return next_canvas
@@ -174,14 +183,18 @@ def sync_story_artifact_nodes(
     y_gap = 230
     for index, (key, entry) in enumerate(entries.items()):
         refs = story_artifact_refs(entries, entry)
+        asset_ids = list(getattr(entry, "assetIds", None) or [])
+        has_assets = len(asset_ids) > 0
         for node_id, node in list(next_canvas.nodes.items()):
             if isinstance(node, StoryArtifactCanvasNode) and node.artifactKind == artifact_kind and node.artifactKey == key:
                 node.promptPath = entry.promptPath
                 node.prompt = entry.prompt
                 node.refs = refs
-                node.generatedAssetIds = entry.assetIds
-                node.generatedAssetId = entry.canonicalAssetId
-                node.tags = library.node_tags(*story_artifact_base_tags(artifact_kind), "generated" if entry.canonicalAssetId else "missing")
+                node.generatedAssetIds = asset_ids
+                node.tags = library.node_tags(
+                    *story_artifact_base_tags(artifact_kind),
+                    "generated" if has_assets else "missing",
+                )
                 node.role = ArtifactSourceRole(artifactKind=artifact_kind, artifactKey=key)
                 next_canvas.nodes[node_id] = node
                 break
@@ -194,15 +207,14 @@ def sync_story_artifact_nodes(
                 x=start_x + (index % columns) * x_gap,
                 y=start_y + (index // columns) * y_gap,
                 width=240,
-                tags=library.node_tags(*base_tags, "generated" if entry.canonicalAssetId else "missing"),
+                tags=library.node_tags(*base_tags, "generated" if has_assets else "missing"),
                 role=ArtifactSourceRole(artifactKind=artifact_kind, artifactKey=key),
                 artifactKind=artifact_kind,
                 artifactKey=key,
                 promptPath=entry.promptPath,
                 prompt=entry.prompt,
                 refs=refs,
-                generatedAssetIds=entry.assetIds,
-                generatedAssetId=entry.canonicalAssetId,
+                generatedAssetIds=asset_ids,
             )
         source_node_id = next(
             (
@@ -215,13 +227,12 @@ def sync_story_artifact_nodes(
             library.story_artifact_node_id(artifact_kind, key),
         )
         child_node_id = library.generated_result_node_id(source_node_id)
-        if entry.canonicalAssetId:
+        if asset_ids:
             source_node = next_canvas.nodes[source_node_id]
             existing_child = next_canvas.nodes.get(child_node_id)
             if isinstance(existing_child, ImageGroupCanvasNode):
                 child = existing_child
-                if entry.canonicalAssetId not in child.assetIds:
-                    child.assetIds = [entry.canonicalAssetId, *child.assetIds]
+                child.assetIds = list(dict.fromkeys([*asset_ids, *child.assetIds]))
             else:
                 child = ImageGroupCanvasNode(
                     displayName=getattr(entry, "promptPath", key) or key,
@@ -230,10 +241,10 @@ def sync_story_artifact_nodes(
                     width=240,
                     tags=library.node_tags(*base_tags, "generated-image"),
                     role=GeneratedResultRole(sourceNodeId=source_node_id),
-                    assetIds=[entry.canonicalAssetId],
-                    activeAssetId=entry.canonicalAssetId,
+                    assetIds=asset_ids,
+                    activeAssetId=asset_ids[-1],
                 )
-            child.activeAssetId = entry.canonicalAssetId
+            child.activeAssetId = asset_ids[-1]
             child.tags = library.node_tags(*base_tags, "generated-image")
             child.role = GeneratedResultRole(sourceNodeId=source_node_id)
             next_canvas.nodes[child_node_id] = child

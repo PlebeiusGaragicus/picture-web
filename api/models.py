@@ -133,10 +133,15 @@ class ProjectMetadata(ProjectCreate):
     coverThumbnailUrl: str | None = None
 
 
+EntityKind = Literal["character", "location"]
+
+
 class TagDefinition(BaseModel):
     id: str = Field(pattern=TAG_RE)
     name: str = Field(min_length=1)
     color: str = Field(pattern=TAG_COLOR_RE)
+    locked: bool = False
+    entityKind: EntityKind | None = None
 
 
 class TagRegistryDocument(BaseModel):
@@ -170,7 +175,6 @@ class AdaptationAssetLink(BaseModel):
     styleRef: str = ""
     prompt: str = ""
     assetIds: list[str] = Field(default_factory=list)
-    canonicalAssetId: str | None = None
     status: Literal["missing", "ready", "generated"] = "missing"
 
 
@@ -225,6 +229,7 @@ class AdaptationWorkflowStatus(BaseModel):
     startedAt: str | None = None
     completedAt: str | None = None
     log: str = ""
+    logFiles: dict[str, str] = Field(default_factory=dict)
 
 
 class AdaptationCanvasImportResponse(BaseModel):
@@ -246,7 +251,7 @@ class AdaptationSettingsPatch(BaseModel):
 
 
 class AdaptationWorkflowStartRequest(BaseModel):
-    stage: Literal["ingest", "characters", "locations", "scenes", "moments", "all"] = "all"
+    stage: Literal["ingest", "characters", "all"] = "all"
 
 
 class AdaptationFileBase(BaseModel):
@@ -272,7 +277,6 @@ class AdaptationFileDocument(AdaptationFileBase):
     promptPath: str
     artifactKind: ArtifactKind
     status: Literal["missing", "ready", "generated"] = "missing"
-    canonicalAssetId: str | None = None
 
 
 class AdaptationStyleRefAssetRequest(BaseModel):
@@ -467,7 +471,6 @@ class StoryArtifactCanvasNode(CanvasNodeLayout):
     refs: list[str] = Field(default_factory=list)
     params: GenerationParams = Field(default_factory=GenerationParams)
     generatedAssetIds: list[str] = Field(default_factory=list)
-    generatedAssetId: str | None = None
 
 
 class ImageGroupCanvasNode(CanvasNodeLayout):

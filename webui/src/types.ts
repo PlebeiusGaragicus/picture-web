@@ -47,10 +47,14 @@ export interface Project {
   coverThumbnailUrl?: string | null;
 }
 
+export type EntityKind = 'character' | 'location';
+
 export interface TagDefinition {
   id: string;
   name: string;
   color: string;
+  locked?: boolean;
+  entityKind?: EntityKind | null;
 }
 
 export interface TagRegistryDocument {
@@ -120,7 +124,6 @@ export interface StoryArtifactCanvasNode extends CanvasNodeLayout {
   refs: string[];
   params: GenerationParams;
   generatedAssetIds: string[];
-  generatedAssetId?: string | null;
 }
 
 export interface ImageGroupCanvasNode extends CanvasNodeLayout {
@@ -151,7 +154,6 @@ export interface AdaptationAssetLink {
   styleRef: string;
   prompt: string;
   assetIds: string[];
-  canonicalAssetId?: string | null;
   status: 'missing' | 'ready' | 'generated';
 }
 
@@ -184,7 +186,7 @@ export interface AdaptationStatus {
   panels: Record<string, AdaptationAssetLink>;
 }
 
-export type AdaptationStage = 'ingest' | 'characters' | 'locations' | 'scenes' | 'moments' | 'all';
+export type AdaptationStage = 'ingest' | 'characters' | 'all';
 
 export interface AdaptationWorkflowStatus {
   running: boolean;
@@ -192,6 +194,7 @@ export interface AdaptationWorkflowStatus {
   startedAt?: string | null;
   completedAt?: string | null;
   log: string;
+  logFiles?: Record<string, string>;
 }
 
 export interface AdaptationGenerateResponse {
@@ -217,7 +220,6 @@ export interface AdaptationFileDocument {
   mode: string;
   styleRef: string;
   status: 'missing' | 'ready' | 'generated';
-  canonicalAssetId?: string | null;
 }
 
 export interface AdaptationFilePayload {
