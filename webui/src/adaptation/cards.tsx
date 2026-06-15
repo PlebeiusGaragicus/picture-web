@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { api } from '../api';
 import { HelpTip, Modal } from '../ui';
-import type { AdaptationStatus, AdaptationWorkflowStatus, Asset, StyleRefKind, StyleRefStatus } from '../types';
+import type { AdaptationStatus, AdaptationWorkflowStatus, Asset, StyleRefKind, StyleRefStatus, VisualStyleDefinition } from '../types';
 
 export function StyleRefCard({
   status,
@@ -104,48 +105,144 @@ export function StyleRefCard({
   );
 }
 
-export function VisualStyleCard({
-  value,
-  isSaving,
-  onChange,
-  onSave,
+export const DEFAULT_VISUAL_STYLE_TEMPLATE = `Style:
+Color palette:
+Realism:
+Lighting:
+`;
+
+export function VisualStyleList({
+  projectSlug,
+  styles,
+  onReload,
 }: {
-  value: string;
-  isSaving: boolean;
-  onChange: (value: string) => void;
-  onSave: (value: string) => Promise<void>;
+  projectSlug: string;
+  styles: VisualStyleDefinition[];
+  onReload: () => Promise<void>;
 }) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  useEffect(() => {
-    setDraft(value);
-  }, [value]);
-  const hasStyle = value.trim().length > 0;
-  const save = async () => {
-    onChange(draft);
-    await onSave(draft);
-    setIsEditing(false);
+  const [editingStyle, setEditingStyle] = useState<VisualStyleDefinition | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [draftName, setDraftName] = useState('');
+  const [draftPrompt, setDraftPrompt] = useState(DEFAULT_VISUAL_STYLE_TEMPLATE);
+  const [isSaving, setIsSaving] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<VisualStyleDefinition | null>(null);
+
+  const openCreate = () => {
+    setDraftName('');
+    setDraftPrompt(DEFAULT_VISUAL_STYLE_TEMPLATE);
+    setCreating(true);
   };
+
+  const openEdit = (style: VisualStyleDefinition) => {
+    setDraftName(style.name);
+    setDraftPrompt(style.prompt);
+    setEditingStyle(style);
+  };
+
+  const saveCreate = async () => {
+    const name = draftName.trim();
+    if (!name) return;
+    setIsSaving(true);
+    try {
+      await api.createVisualStyle(projectSlug, { name, prompt: draftPrompt });
+      setCreating(false);
+      await onReload();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editingStyle) return;
+    const name = draftName.trim();
+    if (!name) return;
+    setIsSaving(true);
+    try {
+      await api.updateVisualStyle(projectSlug, editingStyle.id, { name, prompt: draftPrompt });
+      setEditingStyle(null);
+      await onReload();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setIsSaving(true);
+    try {
+      await api.deleteVisualStyle(projectSlug, pendingDelete.id);
+      setPendingDelete(null);
+      await onReload();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
-    <section className="story-card archetype-card">
+    <section className="story-card visual-style-list-card">
       <div className="archetype-card-head">
         <div className="archetype-card-title">
-          <h2>Visual Style</h2>
-          <HelpTip text="The shared style guide appended to every generated image." />
+          <h2>Visual Styles</h2>
+          <HelpTip text="Reusable style snippets appended to canvas image prompts when you pick a style on a draft or image." />
         </div>
-        <span className={`status-pill ${hasStyle ? 'is-ready' : 'is-pending'}`}>{hasStyle ? 'Set' : 'Empty'}</span>
+        <button className="secondary" type="button" onClick={openCreate}>Add style</button>
       </div>
-      {hasStyle ? <p className="archetype-prompt-preview">{value}</p> : <p className="muted">No visual style yet.</p>}
-      <div className="archetype-card-actions">
-        <button className="secondary" onClick={() => setIsEditing(true)}>{hasStyle ? 'Edit style' : 'Write style'}</button>
-      </div>
-      {isEditing && (
-        <Modal title="Edit Visual Style" onClose={() => setIsEditing(false)}>
-          <p className="muted">This style guide is appended to every generated image prompt.</p>
-          <textarea className="modal-textarea" value={draft} onChange={(event) => setDraft(event.target.value)} rows={12} />
+      {styles.length === 0 ? (
+        <p className="muted">No visual styles yet. Add one to reuse a consistent look across generated images.</p>
+      ) : (
+        <div className="visual-style-list">
+          {styles.map((style) => (
+            <article key={style.id} className="visual-style-list-item">
+              <div className="visual-style-list-item-head">
+                <strong>{style.name}</strong>
+                <div className="visual-style-list-item-actions">
+                  <button className="secondary" type="button" onClick={() => openEdit(style)}>Edit</button>
+                  <button className="danger" type="button" onClick={() => setPendingDelete(style)}>Delete</button>
+                </div>
+              </div>
+              <p className="archetype-prompt-preview">{style.prompt.trim() || 'Empty style snippet.'}</p>
+            </article>
+          ))}
+        </div>
+      )}
+      {creating && (
+        <Modal title="Add visual style" onClose={() => !isSaving && setCreating(false)}>
+          <label className="field-label">
+            Name
+            <input value={draftName} onChange={(event) => setDraftName(event.target.value)} />
+          </label>
+          <label className="field-label">
+            Style snippet
+            <textarea className="modal-textarea" value={draftPrompt} onChange={(event) => setDraftPrompt(event.target.value)} rows={10} />
+          </label>
           <div className="modal-actions">
-            <button className="secondary" onClick={() => setIsEditing(false)} disabled={isSaving}>Cancel</button>
-            <button className="generate-button" onClick={save} disabled={isSaving}>{isSaving ? 'Saving...' : 'Save style'}</button>
+            <button className="secondary" onClick={() => setCreating(false)} disabled={isSaving}>Cancel</button>
+            <button className="generate-button" onClick={saveCreate} disabled={isSaving || !draftName.trim()}>{isSaving ? 'Saving...' : 'Create style'}</button>
+          </div>
+        </Modal>
+      )}
+      {editingStyle && (
+        <Modal title={`Edit ${editingStyle.name}`} onClose={() => !isSaving && setEditingStyle(null)}>
+          <label className="field-label">
+            Name
+            <input value={draftName} onChange={(event) => setDraftName(event.target.value)} />
+          </label>
+          <label className="field-label">
+            Style snippet
+            <textarea className="modal-textarea" value={draftPrompt} onChange={(event) => setDraftPrompt(event.target.value)} rows={10} />
+          </label>
+          <div className="modal-actions">
+            <button className="secondary" onClick={() => setEditingStyle(null)} disabled={isSaving}>Cancel</button>
+            <button className="generate-button" onClick={saveEdit} disabled={isSaving || !draftName.trim()}>{isSaving ? 'Saving...' : 'Save style'}</button>
+          </div>
+        </Modal>
+      )}
+      {pendingDelete && (
+        <Modal title="Delete visual style?" onClose={() => !isSaving && setPendingDelete(null)}>
+          <p>Remove <strong>{pendingDelete.name}</strong>? Existing images keep their recorded style id; drafts may reference a missing style.</p>
+          <div className="modal-actions">
+            <button className="danger" onClick={confirmDelete} disabled={isSaving}>{isSaving ? 'Deleting...' : 'Delete style'}</button>
+            <button className="secondary" onClick={() => setPendingDelete(null)} disabled={isSaving}>Cancel</button>
           </div>
         </Modal>
       )}

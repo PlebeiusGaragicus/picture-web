@@ -894,6 +894,24 @@ def image_path(slug: str, asset_id: str) -> Path:
     return path
 
 
+def compose_generation_prompt(user_prompt: str, style_prompt: str | None) -> str:
+    user = user_prompt.strip()
+    style = (style_prompt or "").strip()
+    if not style:
+        return f"{user}\n" if user else ""
+    if not user:
+        return f"{style}\n"
+    return f"{user}\n\n{style}\n"
+
+
+def resolve_visual_style_prompt(slug: str, visual_style_id: str | None) -> str | None:
+    if not visual_style_id:
+        return None
+    import adaptation
+
+    return adaptation.visual_style_prompt(slug, visual_style_id).strip() or None
+
+
 def create_generated_assets(
     slug: str,
     payload: GenerateRequest,
@@ -909,9 +927,11 @@ def create_generated_assets(
     model = payload.model or gemini.default_model()
     aspect_ratio = payload.aspectRatio or gemini.default_aspect_ratio()
     image_size = payload.imageSize or gemini.default_image_size()
+    style_prompt = resolve_visual_style_prompt(slug, payload.visualStyleId)
+    provider_prompt = compose_generation_prompt(payload.prompt, style_prompt)
 
     logger.debug(
-        "create generation run slug=%s run_id=%s canvas_node=%s refs=%s parent_paths=%s model=%s aspect_ratio=%s image_size=%s base_seed=%s batch_count=%s",
+        "create generation run slug=%s run_id=%s canvas_node=%s refs=%s parent_paths=%s model=%s aspect_ratio=%s image_size=%s base_seed=%s batch_count=%s visual_style_id=%s",
         slug,
         run_id,
         payload.canvasNodeId,
@@ -922,6 +942,7 @@ def create_generated_assets(
         image_size,
         base_seed,
         payload.batchCount,
+        payload.visualStyleId,
     )
     for index in range(payload.batchCount):
         asset_id = new_ulid()
@@ -938,7 +959,7 @@ def create_generated_assets(
         )
         try:
             result = generate_one(
-                prompt_text=payload.prompt,
+                prompt_text=provider_prompt,
                 parent_png_paths=parent_paths,
                 output_png=out_png,
                 seed=seed,
@@ -968,6 +989,7 @@ def create_generated_assets(
                 aspectRatio=aspect_ratio,
                 imageSize=image_size,
                 seed=seed,
+                visualStyleId=payload.visualStyleId,
             ),
             provider=ProviderCapture(
                 name="google-genai",

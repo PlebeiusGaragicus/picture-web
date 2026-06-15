@@ -33,8 +33,9 @@ from models import (
     AdaptationSettingsPatch,
     AdaptationStatus,
     AdaptationStyleRefAssetRequest,
-    AdaptationStylePatch,
     AdaptationStylePromptPatch,
+    VisualStyleCreate,
+    VisualStylePatch,
     AdaptationWorkflowStartRequest,
     AdaptationWorkflowStatus,
     DisplayPatch,
@@ -158,9 +159,19 @@ def get_adaptation(slug: str) -> AdaptationStatus:
     return adaptation.status(slug)
 
 
-@app.put("/api/projects/{slug}/adaptation/style", response_model=AdaptationStatus)
-def put_adaptation_style(slug: str, payload: AdaptationStylePatch) -> AdaptationStatus:
-    return adaptation.write_visual_style(slug, payload.visualStyle)
+@app.post("/api/projects/{slug}/adaptation/visual-styles", response_model=AdaptationStatus)
+def create_adaptation_visual_style(slug: str, payload: VisualStyleCreate) -> AdaptationStatus:
+    return adaptation.create_visual_style(slug, payload)
+
+
+@app.patch("/api/projects/{slug}/adaptation/visual-styles/{style_id}", response_model=AdaptationStatus)
+def patch_adaptation_visual_style(slug: str, style_id: str, payload: VisualStylePatch) -> AdaptationStatus:
+    return adaptation.update_visual_style(slug, style_id, payload)
+
+
+@app.delete("/api/projects/{slug}/adaptation/visual-styles/{style_id}", response_model=AdaptationStatus)
+def delete_adaptation_visual_style(slug: str, style_id: str) -> AdaptationStatus:
+    return adaptation.delete_visual_style(slug, style_id)
 
 
 @app.put("/api/projects/{slug}/adaptation/style-ref-prompt", response_model=AdaptationStatus)

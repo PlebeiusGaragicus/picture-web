@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import os
@@ -35,11 +36,91 @@ from models import (
     StyleRefKind,
     StyleRefStatus,
     StoryArtifactCanvasNode,
+    VisualStyleCreate,
+    VisualStyleDefinition,
+    VisualStylePatch,
     utc_now,
 )
 
 
 STYLE_TEMPLATE = "Style:\nColor palette:\nRealism:\nLighting:\n"
+
+
+def visual_styles_path(root: Path) -> Path:
+    return root / "style-refs" / "visual-styles.json"
+
+
+def read_visual_styles(root: Path) -> list[VisualStyleDefinition]:
+    path = visual_styles_path(root)
+    if not path.is_file():
+        return []
+    data = library.read_json(path)
+    if not isinstance(data, list):
+        return []
+    return [VisualStyleDefinition.model_validate(item) for item in data]
+
+
+def write_visual_styles(root: Path, styles: list[VisualStyleDefinition]) -> None:
+    library.write_json(visual_styles_path(root), [style.model_dump() for style in styles])
+
+
+def slugify_style_name(name: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return base or "style"
+
+
+def unique_style_id(root: Path, name: str) -> str:
+    styles = read_visual_styles(root)
+    existing = {style.id for style in styles}
+    candidate = slugify_style_name(name)
+    if candidate not in existing:
+        return candidate
+    index = 2
+    while f"{candidate}-{index}" in existing:
+        index += 1
+    return f"{candidate}-{index}"
+
+
+def visual_style_prompt(slug: str, style_id: str) -> str:
+    root = ensure_adaptation(slug)
+    for style in read_visual_styles(root):
+        if style.id == style_id:
+            return style.prompt
+    raise HTTPException(status_code=404, detail=f"Visual style not found: {style_id}")
+
+
+def create_visual_style(slug: str, payload: VisualStyleCreate) -> AdaptationStatus:
+    root = ensure_adaptation(slug)
+    styles = read_visual_styles(root)
+    style_id = unique_style_id(root, payload.name)
+    prompt = payload.prompt if payload.prompt is not None else STYLE_TEMPLATE
+    styles.append(VisualStyleDefinition(id=style_id, name=payload.name.strip(), prompt=prompt.rstrip() + "\n"))
+    write_visual_styles(root, styles)
+    return status(slug)
+
+
+def update_visual_style(slug: str, style_id: str, payload: VisualStylePatch) -> AdaptationStatus:
+    root = ensure_adaptation(slug)
+    styles = read_visual_styles(root)
+    index = next((item for item, style in enumerate(styles) if style.id == style_id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail=f"Visual style not found: {style_id}")
+    current = styles[index]
+    name = payload.name.strip() if payload.name is not None else current.name
+    prompt = payload.prompt if payload.prompt is not None else current.prompt
+    styles[index] = VisualStyleDefinition(id=style_id, name=name, prompt=prompt.rstrip() + "\n")
+    write_visual_styles(root, styles)
+    return status(slug)
+
+
+def delete_visual_style(slug: str, style_id: str) -> AdaptationStatus:
+    root = ensure_adaptation(slug)
+    styles = read_visual_styles(root)
+    next_styles = [style for style in styles if style.id != style_id]
+    if len(next_styles) == len(styles):
+        raise HTTPException(status_code=404, detail=f"Visual style not found: {style_id}")
+    write_visual_styles(root, next_styles)
+    return status(slug)
 
 
 def adaptation_dir(slug: str) -> Path:
@@ -260,9 +341,9 @@ def ensure_adaptation(slug: str) -> Path:
         root / "locations" / "prompts",
     ]:
         path.mkdir(parents=True, exist_ok=True)
-    visual_style = root / "style-refs" / "visual-style.md"
-    if not visual_style.exists():
-        visual_style.write_text(STYLE_TEMPLATE)
+    styles_path = visual_styles_path(root)
+    if not styles_path.is_file():
+        write_visual_styles(root, [])
     if not metadata_path(slug).exists():
         write_metadata(slug, AdaptationMetadata())
     return root
@@ -837,7 +918,6 @@ def status(slug: str) -> AdaptationStatus:
         hasBook=(root / "book.txt").is_file(),
         hasBookSession=_has_book_session(root),
         styleRefs={
-            "visualStyle": (root / "style-refs" / "visual-style.md").is_file(),
             "archetypeCharacterPrompt": (root / "style-refs" / "archetype-character.md").is_file(),
             "archetypeCharacterPng": (root / "style-refs" / "archetype-character.png").is_file(),
             "archetypeScenePrompt": (root / "style-refs" / "archetype-scene.md").is_file(),
@@ -861,7 +941,7 @@ def status(slug: str) -> AdaptationStatus:
             "pagePlans": len(list((root / "pages" / "plans").glob("*.md"))),
             "panelPrompts": len(list((root / "panels" / "prompts").glob("*.md"))),
         },
-        visualStyle=read_text(root / "style-refs" / "visual-style.md"),
+        visualStyles=read_visual_styles(root),
         characters=metadata.characters,
         locations=metadata.locations,
         scenes=metadata.scenes,
@@ -872,12 +952,6 @@ def status(slug: str) -> AdaptationStatus:
 
 def count_nonempty_lines(path: Path) -> int:
     return sum(1 for line in read_text(path).splitlines() if line.strip())
-
-
-def write_visual_style(slug: str, value: str) -> AdaptationStatus:
-    root = ensure_adaptation(slug)
-    (root / "style-refs" / "visual-style.md").write_text(value.rstrip() + "\n")
-    return status(slug)
 
 
 def write_style_ref_prompt(slug: str, request: AdaptationStylePromptPatch) -> AdaptationStatus:
@@ -965,8 +1039,7 @@ def generate_style_ref(slug: str, request: AdaptationGenerateStyleRefRequest) ->
     prompt_text = read_text(prompt_path).strip()
     if not prompt_text:
         raise HTTPException(status_code=400, detail=f"Missing prompt: {prompt_path}")
-    visual_style = read_text(root / "style-refs" / "visual-style.md").strip()
-    prompt = f"{prompt_text}\n\n{visual_style}\n" if visual_style else f"{prompt_text}\n"
+    prompt = f"{prompt_text}\n"
     title = str(style_ref_config(kind)["display_name"])
     tags = ["comic-adaptation", *style_ref_tags(kind)[1:]]
     payload = GenerateRequest(
@@ -1141,8 +1214,7 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
     if request.artifactKind == "scene-artifact":
         raise HTTPException(status_code=400, detail="Scene artifacts are planning artifacts and cannot be generated directly")
     ref_asset_ids = artifact_ref_asset_ids(slug, metadata, request.artifactKind, link)
-    visual_style = read_text(root / "style-refs" / "visual-style.md")
-    prompt = f"{link.prompt.strip()}\n\n{visual_style.strip()}\n"
+    prompt = f"{link.prompt.strip()}\n"
     canvas_node_id = request.canvasNodeId
     if canvas_node_id is None:
         canvas = library.read_stored_canvas(slug)

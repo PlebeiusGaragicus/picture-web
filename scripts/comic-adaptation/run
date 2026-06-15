@@ -269,13 +269,13 @@ require_book_session() {
 
 # --- Individual generation steps -------------------------------------------
 
-step_visual_style() {
-  if [[ -f "$BOOK_ROOT/style-refs/visual-style.md" && -f "$BOOK_ROOT/style-refs/archetype-character.md" && -f "$BOOK_ROOT/style-refs/archetype-scene.md" ]]; then
+step_archetype_prompts() {
+  if [[ -f "$BOOK_ROOT/style-refs/archetype-character.md" && -f "$BOOK_ROOT/style-refs/archetype-scene.md" ]]; then
     echo
-    echo "[ingest] visual style (skip)"
+    echo "[ingest] archetype prompts (skip)"
     echo "    output: $BOOK_ROOT/style-refs/"
   else
-    run_pi_step "ingest" "visual style $(basename "$BOOK_ROOT")" "$BOOK_ROOT/style-refs/" "/skill:visual-style $BOOK_ROOT_ABS"
+    run_pi_step "ingest" "archetype prompts $(basename "$BOOK_ROOT")" "$BOOK_ROOT/style-refs/" "/skill:visual-style $BOOK_ROOT_ABS"
   fi
 }
 
@@ -548,7 +548,7 @@ SESSION_ENV="$BOOK_ROOT/sessions/book-load.env"
 case "$STAGE" in
   ingest)
     ensure_book_session
-    step_visual_style
+    step_archetype_prompts
     echo
     echo "[ingest] Book session and visual style ready for $PROJECT_SLUG"
     echo "Session:   $BOOK_LOAD_ID"
@@ -581,7 +581,7 @@ case "$STAGE" in
     ;;
   all)
     ensure_book_session
-    step_visual_style
+    step_archetype_prompts
     echo
     echo "Book root: $BOOK_ROOT"
     echo "Project:   $PROJECT_SLUG"
@@ -594,7 +594,7 @@ case "$STAGE" in
     echo
     echo "Done. Current outputs are under $BOOK_ROOT."
     echo
-    echo "Before image generation, fill in $BOOK_ROOT/style-refs/visual-style.md and create reference images as needed:"
+    echo "Before image generation, add visual styles in Phase 0 and create reference images as needed:"
     echo "  - $BOOK_ROOT/style-refs/archetype-character.png for character sheet images"
     echo "  - $BOOK_ROOT/style-refs/archetype-scene.png for location images"
     ;;

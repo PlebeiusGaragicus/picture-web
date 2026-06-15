@@ -77,15 +77,6 @@ validate_style_refs() {
   echo
   echo "Style refs"
 
-  validate_common_file "$BOOK_ROOT/style-refs/visual-style.md" || true
-  for label in "Style:" "Color palette:" "Realism:" "Lighting:"; do
-    if [[ -f "$BOOK_ROOT/style-refs/visual-style.md" ]] && file_has "$BOOK_ROOT/style-refs/visual-style.md" "$label"; then
-      pass "visual-style.md has $label"
-    else
-      fail "visual-style.md missing $label"
-    fi
-  done
-
   validate_common_file "$BOOK_ROOT/style-refs/archetype-character.md" && pass "archetype-character.md present" || true
   validate_common_file "$BOOK_ROOT/style-refs/archetype-scene.md" && pass "archetype-scene.md present" || true
 }

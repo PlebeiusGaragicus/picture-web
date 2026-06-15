@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail, StoryKind, StyleRefKind, TagDefinition, TagRegistryDocument } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail, StoryKind, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = true;
 
@@ -82,10 +82,19 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getAdaptation: (slug: string) => request<AdaptationStatus>(`/api/projects/${slug}/adaptation`),
-  saveAdaptationStyle: (slug: string, visualStyle: string) =>
-    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/style`, {
-      method: 'PUT',
-      body: JSON.stringify({ visualStyle }),
+  createVisualStyle: (slug: string, payload: { name: string; prompt?: string }) =>
+    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/visual-styles`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateVisualStyle: (slug: string, styleId: string, payload: { name?: string; prompt?: string }) =>
+    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/visual-styles/${styleId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteVisualStyle: (slug: string, styleId: string) =>
+    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/visual-styles/${styleId}`, {
+      method: 'DELETE',
     }),
   saveAdaptationStyleRefPrompt: (slug: string, kind: StyleRefKind, prompt: string) =>
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/style-ref-prompt`, {

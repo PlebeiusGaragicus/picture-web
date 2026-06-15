@@ -764,31 +764,66 @@ def test_style_ref_status_clears_stale_asset_and_repairs_canvas(tmp_path, monkey
     assert "archetype_archetype_character_image" not in nodes
 
 
-def test_visual_style_prompt_is_durable_canvas_source_node(tmp_path, monkeypatch):
+def test_visual_styles_crud_and_generate_composition(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    (root / "style-refs").mkdir(parents=True, exist_ok=True)
-    (root / "style-refs" / "visual-style.md").write_text("Soft watercolor, cinematic light.\n")
 
-    sync = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas")
-    assert sync.status_code == 200
-    visual_style = sync.json()["canvas"]["nodes"]["style_visual_style"]
-    assert visual_style["type"] == "draft"
-    assert visual_style["displayName"] == "Visual Style"
-    assert visual_style["prompt"] == "Soft watercolor, cinematic light.\n"
-    assert visual_style["role"] == {"type": "visual-style-source"}
-    assert "visual-style" in visual_style["tags"]
+    created = client.post(
+        "/api/projects/farm-comic/adaptation/visual-styles",
+        json={"name": "Watercolor", "prompt": "Style: soft wash\nColor palette: pastels\n"},
+    )
+    assert created.status_code == 200
+    styles = created.json()["visualStyles"]
+    assert len(styles) == 1
+    style_id = styles[0]["id"]
+    assert styles[0]["name"] == "Watercolor"
 
-    canvas = client.get("/api/projects/farm-comic/canvas").json()
-    canvas["nodes"]["style_visual_style"]["x"] = 222
-    canvas["nodes"]["style_visual_style"]["y"] = 333
-    assert client.put("/api/projects/farm-comic/canvas", json=canvas).status_code == 200
+    updated = client.patch(
+        f"/api/projects/farm-comic/adaptation/visual-styles/{style_id}",
+        json={"name": "Soft Watercolor"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["visualStyles"][0]["name"] == "Soft Watercolor"
 
-    repaired = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]["style_visual_style"]
-    assert repaired["x"] == 222
-    assert repaired["y"] == 333
-    assert repaired["prompt"] == "Soft watercolor, cinematic light.\n"
+    captured = {}
+
+    def fake_generate(**kwargs):
+        captured["prompt_text"] = kwargs["prompt_text"]
+        make_png(kwargs["output_png"], color="blue")
+
+        class Result:
+            provider_response = {"imageFile": kwargs["output_png"].name, "response": {"candidates": [{"finishReason": "STOP"}]}}
+
+        return Result()
+
+    monkeypatch.setattr(gemini, "generate_image", fake_generate)
+    generated = client.post(
+        "/api/projects/farm-comic/generate",
+        json={
+            "prompt": "A red barn",
+            "refs": [],
+            "seed": 7,
+            "batchCount": 1,
+            "tags": [],
+            "visualStyleId": style_id,
+        },
+    )
+    assert generated.status_code == 200
+    assert "A red barn" in captured["prompt_text"]
+    assert "soft wash" in captured["prompt_text"].lower()
+    asset = generated.json()["assets"][0]
+    assert asset["prompt"]["text"] == "A red barn"
+    assert asset["generation"]["visualStyleId"] == style_id
+
+    deleted = client.delete(f"/api/projects/farm-comic/adaptation/visual-styles/{style_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["visualStyles"] == []
+
+    missing = client.post(
+        "/api/projects/farm-comic/generate",
+        json={"prompt": "no style", "refs": [], "batchCount": 1, "tags": [], "visualStyleId": style_id},
+    )
+    assert missing.status_code == 404
 
 
 def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_path, monkeypatch):
@@ -797,7 +832,6 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
     root = library.project_dir("farm-comic") / "adaptation"
     (root / "style-refs").mkdir(parents=True, exist_ok=True)
     (root / "style-refs" / "archetype-character.md").write_text("Character archetype prompt.\n")
-    (root / "style-refs" / "visual-style.md").write_text("Ink wash style.\n")
 
     imported = client.post(
         "/api/projects/farm-comic/adaptation/import-style-ref",
@@ -859,7 +893,7 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
     assert generated.status_code == 200
     generated_asset_id = generated.json()["asset"]["id"]
     assert "Character archetype prompt." in captured["prompt"]
-    assert "Ink wash style." in captured["prompt"]
+    assert "Ink wash style." not in captured["prompt"]
     assert generated.json()["status"]["styleRefStatuses"]["archetype-character"]["assetId"] == generated_asset_id
     canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
     assert canvas_nodes["archetype_archetype_character"]["type"] == "draft"

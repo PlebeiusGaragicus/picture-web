@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Node } from 'reactflow';
 import { isCanonicalStyleRefAsset, styleRefKindForTags } from '../styleRefs';
-import type { AdaptationStatus, ArtifactKind, Asset, DraftCanvasNode, GenerationParams, ImageGroupCanvasNode, StyleRefKind, TagDefinition } from '../types';
-import { canDeleteNode } from './roles';
+import type { AdaptationStatus, ArtifactKind, Asset, DraftCanvasNode, GenerationParams, ImageGroupCanvasNode, StyleRefKind, TagDefinition, VisualStyleDefinition } from '../types';
+import { VisualStyleSelect } from '../adaptation/visualStyleSelect';
 import { TagControlButton } from './assetTagRow';
+import { canDeleteNode } from './roles';
 import { artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, uniqueOptions, visibleDisplayName } from './shared';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './types';
 
@@ -41,7 +42,7 @@ export function NodeSidebar({
   onImageGroupChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onGenerateArtifact: (id: string, artifact: StoryArtifactNodeData) => void;
-  onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
+  onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams, visualStyleId?: string | null) => void;
   onCreateChildText: (node: Node<DraftNodeData> | Node<StoryArtifactNodeData>) => void;
   onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
   onSetProjectCover: (assetId: string) => void;
@@ -62,6 +63,7 @@ export function NodeSidebar({
       <DraftSidebar
         node={draftNode}
         assets={assets}
+        visualStyles={adaptation?.visualStyles ?? []}
         onDraftChange={onDraftChange}
         onGenerate={onGenerate}
         onCreateChildText={onCreateChildText}
@@ -119,6 +121,7 @@ export function NodeSidebar({
 function DraftSidebar({
   node,
   assets,
+  visualStyles,
   onDraftChange,
   onGenerate,
   onCreateChildText,
@@ -126,6 +129,7 @@ function DraftSidebar({
 }: {
   node: Node<DraftNodeData>;
   assets: Asset[];
+  visualStyles: VisualStyleDefinition[];
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onCreateChildText: (node: Node<DraftNodeData>) => void;
@@ -133,8 +137,8 @@ function DraftSidebar({
 }) {
   const draft = node.data;
   const canDelete = canDeleteNode(node);
-  const isDurableSource = draft.role?.type === 'style-ref-source' || draft.role?.type === 'visual-style-source';
-  const isFileBackedPrompt = draft.role?.type === 'style-ref-source' || draft.role?.type === 'visual-style-source';
+  const isDurableSource = draft.role?.type === 'style-ref-source';
+  const isFileBackedPrompt = draft.role?.type === 'style-ref-source';
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const [isParentPickerOpen, setIsParentPickerOpen] = useState(false);
   const parents = draft.refs.map((ref) => assets.find((asset) => asset.id === ref) ?? null);
@@ -143,7 +147,7 @@ function DraftSidebar({
   const draftCapabilities = capabilitiesForModel(draftModel);
   const styleRefKind = styleRefKindForTags(draft.tags);
   const styleRefLabel = styleRefKind === 'archetype-character' ? 'character' : styleRefKind === 'archetype-scene' ? 'scene' : null;
-  const sourceLabel = draft.role?.type === 'visual-style-source' ? 'visual style' : styleRefLabel ? `${styleRefLabel} archetype` : null;
+  const sourceLabel = styleRefLabel ? `${styleRefLabel} archetype` : null;
   const [isEditingName, setIsEditingName] = useState(false);
   const [draftName, setDraftName] = useState(visibleDisplayName(draft.displayName));
   useEffect(() => {
@@ -193,7 +197,6 @@ function DraftSidebar({
           Durable {styleRefLabel} archetype prompt
         </div>
       )}
-      {draft.role?.type === 'visual-style-source' && <div className="canvas-role-badge">Durable visual style prompt</div>}
       {isDurableSource && <p className="muted">This {sourceLabel ?? 'source'} prompt is backed by an adaptation file. Sync will recreate it if it is missing from the canvas.</p>}
       {isDurableSource && <button className="secondary" onClick={() => onCreateChildText(node)}>Create child text artifact</button>}
       {!isFileBackedPrompt && (
@@ -257,6 +260,11 @@ function DraftSidebar({
       </section>
       {!isFileBackedPrompt && <section className="sidebar-section generation-section">
         <h3>Parameters</h3>
+      <VisualStyleSelect
+        styles={visualStyles}
+        value={draft.visualStyleId}
+        onChange={(styleId) => onDraftChange(node.id, { visualStyleId: styleId })}
+      />
       <div className="row">
         <select
           value={draftModel ?? ''}
@@ -402,7 +410,7 @@ function ImageSidebar({
   onNodeChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
-  onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams) => void;
+  onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams, visualStyleId?: string | null) => void;
   onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
   onSetProjectCover: (assetId: string) => void;
   onFindOnCanvas: (nodeId: string) => void;
@@ -410,6 +418,7 @@ function ImageSidebar({
 }) {
   const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
   const [variantParams, setVariantParams] = useState(defaultDraftParams);
+  const [variantVisualStyleId, setVariantVisualStyleId] = useState<string | null>(null);
   const prompt = asset.prompt?.text ?? '';
   const refs = asset.generation?.refs ?? [];
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
@@ -441,6 +450,7 @@ function ImageSidebar({
       seed: null,
       batchCount: 1,
     });
+    setVariantVisualStyleId(asset.generation?.visualStyleId ?? null);
   }, [asset]);
   const isArchived = Boolean(asset.archivedAt);
   return (
@@ -625,11 +635,17 @@ function ImageSidebar({
               />
             </label>
           </div>
+          <VisualStyleSelect
+            styles={adaptation?.visualStyles ?? []}
+            value={isVariantPanelOpen ? variantVisualStyleId : asset.generation.visualStyleId}
+            disabled={!isVariantPanelOpen}
+            onChange={setVariantVisualStyleId}
+          />
           {styleRefKind ? (
             <p className="muted">Generate style reference replacements from the adaptation style reference action so canonical metadata stays in sync.</p>
           ) : isVariantPanelOpen ? (
             <div className="generate-control">
-              <button className="generate-button" onClick={() => onGenerateVariants(node.id, node.data, variantParams)} disabled={!prompt.trim() || node.data.isGenerating}>
+              <button className="generate-button" onClick={() => onGenerateVariants(node.id, node.data, variantParams, variantVisualStyleId)} disabled={!prompt.trim() || node.data.isGenerating}>
                 {node.data.isGenerating && <span className="spinner" aria-hidden="true" />}
                 {node.data.isGenerating ? 'Generating...' : 'Generate variants'}
               </button>

@@ -1,15 +1,13 @@
 ---
 name: visual-style
 description: >-
-  After the full book is loaded, write a blank visual style template plus
-  book-scoped archetype character and scene image prompts. The human fills in
-  the style template for later image generation.
+  After the full book is loaded, write book-scoped archetype character and scene image prompts.
 disable-model-invocation: false
 ---
 
-# Visual Style Template And Style Anchors
+# Archetype Style Anchors
 
-The full book is already loaded in context. Create a user-fillable visual style template and two archetype prompts that help the user generate and refine style anchor images.
+The full book is already loaded in context. Create two archetype prompts that help the user generate and refine style anchor images.
 
 Examples: a children's story may call for bright scenes and friendly forms; cyberpunk may call for dark neon, grime, hard shadows, and dense future tech.
 
@@ -19,30 +17,14 @@ The user provides a book root path, usually `books/<book-id>`, and may add optio
 
 ## Delivery
 
-Use the **`write` tool** to save exactly these three files under the provided book root:
+Use the **`write` tool** to save exactly these two files under the provided book root:
 
-1. `<book-root>/style-refs/visual-style.md` — blank template for the user to fill in.
-2. `<book-root>/style-refs/archetype-character.md` — one image prompt only.
-3. `<book-root>/style-refs/archetype-scene.md` — one image prompt only.
+1. `<book-root>/style-refs/archetype-character.md` — one image prompt only.
+2. `<book-root>/style-refs/archetype-scene.md` — one image prompt only.
 
 Create `<book-root>/style-refs/` if needed.
 
-Do **not** paste file bodies in the assistant reply. After writing, reply with exactly `Wrote <book-root>/style-refs/.` and nothing else.
-
-## `<book-root>/style-refs/visual-style.md`
-
-Terse **labeled lines only**. No headings, bullets, code fences, or summary paragraph.
-
-Write exactly this template, with blank values:
-
-```text
-Style:
-Color palette:
-Realism:
-Lighting:
-```
-
-Do not fill in the values. This is the only user-edited input file. Later image-generation code can append these lines to generated prompt files.
+Do **not** paste file bodies in the assistant reply. After writing, reply with exactly `Wrote <book-root>/style-refs/archetype-*.md` and nothing else.
 
 ## Archetype Character Prompt
 
@@ -88,7 +70,7 @@ End with: `No characters, no text, no labels, no watermarks.`
 ## Forbidden In Written Files
 
 - Commentary, rationale, or "production decision" notes in prompt files
-- Pasting all of `<book-root>/style-refs/visual-style.md` into the archetype prompts
+- Pasting reusable visual style snippets into the archetype prompts (canvas generation tooling appends a chosen style when the user selects one)
 - Vague expression placeholders (`appropriate expressions`, `various moods`, `fitting temperament`)
 - Code fences around prompt files
 
@@ -99,6 +81,6 @@ End with: `No characters, no text, no labels, no watermarks.`
 
 # User Request
 
-Extract visual style from the book and write all three files under the provided book root. Optional user notes:
+Write archetype character and scene prompts under the provided book root. Optional user notes:
 
 **User:** `@$`

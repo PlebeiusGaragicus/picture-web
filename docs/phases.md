@@ -2,21 +2,20 @@
 
 This workflow turns story source material into reusable visual references, scene plans, and final panel/page images.
 
-## Phase 0: Ingest
+## Phase 0: Story & Style
 
-Upload `book.txt`, create the project-local Pi read-book session, and build the shared visual style.
+Upload `book.txt`, create the project-local Pi read-book session, manage reusable visual styles, and build archetype prompts.
 
-- The `ingest` stage creates the read-book session and runs `visual-style` to produce `style-refs/visual-style.md`, `style-refs/archetype-character.md`, and `style-refs/archetype-scene.md`.
-- The visual style is generated here; it is edited in Phase 1.
+- The `ingest` stage creates the read-book session and runs `visual-style` to produce `style-refs/archetype-character.md` and `style-refs/archetype-scene.md`.
+- Visual styles live in `style-refs/visual-styles.json` and are edited on this screen.
 - Projects may skip ingestion and manually author story files in later phases.
 
 ## Phase 1: Characters
 
-Owns visual style editing, both style archetypes, editable character files, and their canonical images. Toggle between **List** and **Canvas** views.
+Owns both style archetypes, editable character files, and their canonical images. Toggle between **List** and **Canvas** views.
 
-- Edit the shared visual style (`style-refs/visual-style.md`) here.
 - Shows both the character archetype (`archetype-character`) and scene archetype (`archetype-scene`) references; each can be generated on the canvas or imported.
-- The archetype nodes are auto-published to this canvas once the `visual-style` step has run, so you can go straight to generating them.
+- The archetype nodes are auto-published to this canvas once the ingest archetype step has run, so you can go straight to generating them.
 - Characters live in `adaptation/characters/sheets/*.md`. List view edits the files; canvas view shows the archetypes plus character-sheet nodes for generating and marking canonical images.
 - Pi extraction (`characters` stage) is optional and only populates the character files from the book session.
 

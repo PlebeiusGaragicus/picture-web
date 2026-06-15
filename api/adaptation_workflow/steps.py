@@ -139,21 +139,20 @@ class StepRunner:
         )
         self._notify_progress()
 
-    def step_visual_style(self) -> None:
+    def step_archetype_prompts(self) -> None:
         style_refs = self.ctx.book_root_abs / "style-refs"
         required = [
-            style_refs / "visual-style.md",
             style_refs / "archetype-character.md",
             style_refs / "archetype-scene.md",
         ]
         if all(path.is_file() for path in required):
-            self.logger.write_skip("ingest", "visual style", f"{self.ctx.book_root}/style-refs/")
-            self.logger.record_task(name="visual style", skipped=True, duration_ms=0)
+            self.logger.write_skip("ingest", "archetype prompts", f"{self.ctx.book_root}/style-refs/")
+            self.logger.record_task(name="archetype prompts", skipped=True, duration_ms=0)
             self._notify_progress()
             return
         self.run_pi_step(
             "ingest",
-            f"visual style {self.ctx.book_root.name}",
+            f"archetype prompts {self.ctx.book_root.name}",
             f"{self.ctx.book_root}/style-refs/",
             f"/skill:visual-style {self.ctx.book_root_abs}",
         )

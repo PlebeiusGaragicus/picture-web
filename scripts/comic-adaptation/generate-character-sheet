@@ -81,10 +81,8 @@ need_command tr
 api_get "/api/health" >/dev/null || die "API is not reachable at $API_BASE"
 
 STYLE_REF="$BOOK_ROOT/style-refs/archetype-character.png"
-VISUAL_STYLE="$BOOK_ROOT/style-refs/visual-style.md"
 
 [[ -f "$STYLE_REF" ]] || die "Missing character style reference: $STYLE_REF"
-[[ -f "$VISUAL_STYLE" ]] || die "Missing visual style file: $VISUAL_STYLE"
 [[ -f "photo-library/projects/$PROJECT_SLUG/project.json" ]] || die "Project not found: $PROJECT_SLUG"
 
 if ! api_get "/api/projects/$PROJECT_SLUG/adaptation" | jq -e '.styleRefs.archetypeCharacterAsset' >/dev/null; then

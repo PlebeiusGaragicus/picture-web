@@ -14,6 +14,7 @@ export interface GenerationReceipt {
   seed?: number | null;
   chatSessionId?: string | null;
   chatTurnId?: string | null;
+  visualStyleId?: string | null;
 }
 
 export interface ProviderCapture {
@@ -100,7 +101,6 @@ export interface CanvasNodeLayout {
 export type CanvasRole =
   | { type: 'style-ref-source'; kind: StyleRefKind }
   | { type: 'artifact-source'; artifactKind: ArtifactKind; artifactKey: string }
-  | { type: 'visual-style-source' }
   | { type: 'text-result'; sourceNodeId: string }
   | { type: 'generated-result'; sourceNodeId: string }
   | { type: 'refinement'; sourceNodeId: string; sourceAssetId?: string | null };
@@ -110,6 +110,7 @@ export interface DraftCanvasNode extends CanvasNodeLayout {
   refs: string[];
   prompt: string;
   params: GenerationParams;
+  visualStyleId?: string | null;
 }
 
 export type ArtifactKind = 'character-sheet' | 'location-prompt' | 'scene-artifact' | 'page-plan' | 'panel-prompt';
@@ -145,6 +146,13 @@ export interface GeneratePayload {
   title?: string | null;
   tags: string[];
   canvasNodeId?: string | null;
+  visualStyleId?: string | null;
+}
+
+export interface VisualStyleDefinition {
+  id: string;
+  name: string;
+  prompt: string;
 }
 
 export interface AdaptationAssetLink {
@@ -178,7 +186,7 @@ export interface AdaptationStatus {
   archetypeCharacterPromptText?: string;
   archetypeScenePromptText?: string;
   counts: Record<string, number>;
-  visualStyle: string;
+  visualStyles: VisualStyleDefinition[];
   characters: Record<string, AdaptationAssetLink>;
   locations: Record<string, AdaptationAssetLink>;
   scenes: Record<string, AdaptationAssetLink>;

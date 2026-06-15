@@ -18,7 +18,7 @@ import 'reactflow/dist/style.css';
 import './style.css';
 import { api } from './api';
 import { exportProjectAssetsToFolder, saveAssetImageToDisk } from './exportAssets';
-import { VisualStyleCard } from './adaptation/cards';
+import { VisualStyleList } from './adaptation/cards';
 import { WorkflowLogPanel } from './adaptation/workflowLog';
 import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
@@ -44,7 +44,7 @@ type ProjectPhase =
   | 'phase-5-moment-canvas';
 
 const projectPhases: Array<{ id: ProjectPhase; number: string; title: string; shortTitle: string; description: string }> = [
-  { id: 'phase-0-ingestion', number: '0', title: 'Ingest', shortTitle: 'Ingest', description: 'Book & style' },
+  { id: 'phase-0-ingestion', number: '0', title: 'Story & Style', shortTitle: 'Story & Style', description: 'Book, archetypes & styles' },
   { id: 'phase-1-characters', number: '1', title: 'Characters', shortTitle: 'Cast', description: 'Cast & sheets' },
   { id: 'phase-2-locations', number: '2', title: 'Locations', shortTitle: 'Places', description: 'Places & refs' },
   { id: 'phase-3-scenes', number: '3', title: 'Scenes', shortTitle: 'Scenes', description: 'Acts' },
@@ -1027,6 +1027,7 @@ function App() {
           title: visibleDisplayName(draft.displayName) || null,
           tags: [],
           canvasNodeId: id,
+          visualStyleId: draft.visualStyleId ?? null,
         };
         await api.generate(openProjectSlug, payload);
       }
@@ -1047,7 +1048,7 @@ function App() {
     }
   };
 
-  const generateImageVariants = async (id: string, group: ImageGroupNodeData, params: GenerationParams) => {
+  const generateImageVariants = async (id: string, group: ImageGroupNodeData, params: GenerationParams, visualStyleId?: string | null) => {
     if (styleRefKindForTags(group.tags)) {
       setError('Generate style reference replacements from the adaptation style reference action.');
       return;
@@ -1071,6 +1072,7 @@ function App() {
         title: visibleDisplayName(group.displayName) || null,
         tags: [],
         canvasNodeId: id,
+        visualStyleId: visualStyleId ?? null,
       };
       await api.generate(openProjectSlug, payload);
       await reload();
@@ -1162,11 +1164,6 @@ function App() {
     return () => window.clearInterval(timer);
   }, [adaptationValidation?.running, openProjectSlug, projectPhase]);
 
-
-  const saveAdaptationStyle = async (visualStyle: string) => {
-    if (!openProjectSlug) return;
-    setAdaptation(await api.saveAdaptationStyle(openProjectSlug, visualStyle));
-  };
 
   const saveAdaptationSettings = async (storyKind: StoryKind) => {
     if (!openProjectSlug) return;
@@ -1403,7 +1400,6 @@ function App() {
             canvas={canvas}
             workflow={adaptationWorkflow}
             validation={adaptationValidation}
-            onSaveStyle={saveAdaptationStyle}
             onSaveSettings={saveAdaptationSettings}
             onImportBook={importAdaptationBook}
             onImportStyleRef={importAdaptationStyleRef}
@@ -2159,7 +2155,6 @@ function StoryPhaseScreen({
   canvas,
   workflow,
   validation,
-  onSaveStyle,
   onSaveSettings,
   onImportBook,
   onImportStyleRef,
@@ -2178,7 +2173,6 @@ function StoryPhaseScreen({
   canvas: CanvasDocument;
   workflow: AdaptationWorkflowStatus | null;
   validation: AdaptationWorkflowStatus | null;
-  onSaveStyle: (visualStyle: string) => Promise<void>;
   onSaveSettings: (storyKind: StoryKind) => Promise<void>;
   onImportBook: (file: File) => Promise<void>;
   onImportStyleRef: (kind: StyleRefKind, file: File) => Promise<void>;
@@ -2190,21 +2184,8 @@ function StoryPhaseScreen({
   onDraftArtifactToCanvas: (artifactKind: ArtifactKind, artifactKey: string) => Promise<void>;
   onReloadAdaptation: () => Promise<void>;
 }) {
-  const [visualStyle, setVisualStyle] = useState(adaptation.visualStyle);
-  const [isSavingStyle, setIsSavingStyle] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isPublishingPhase, setIsPublishingPhase] = useState(false);
-  useEffect(() => {
-    setVisualStyle(adaptation.visualStyle);
-  }, [adaptation.visualStyle]);
-  const save = async (value: string = visualStyle) => {
-    setIsSavingStyle(true);
-    try {
-      await onSaveStyle(value);
-    } finally {
-      setIsSavingStyle(false);
-    }
-  };
   const publishPhase = async () => {
     setIsPublishingPhase(true);
     try {
@@ -2237,10 +2218,7 @@ function StoryPhaseScreen({
             workflow={workflow}
             onImportBook={onImportBook}
             onStartWorkflow={() => onStartWorkflow('ingest')}
-            visualStyle={visualStyle}
-            isSavingStyle={isSavingStyle}
-            onVisualStyleChange={setVisualStyle}
-            onSaveStyle={save}
+            onReloadAdaptation={onReloadAdaptation}
           />
         )}
         {phase === 'phase-1-characters' && (
@@ -2515,20 +2493,14 @@ function PhaseIngestion({
   workflow,
   onImportBook,
   onStartWorkflow,
-  visualStyle,
-  isSavingStyle,
-  onVisualStyleChange,
-  onSaveStyle,
+  onReloadAdaptation,
 }: {
   projectSlug: string;
   adaptation: AdaptationStatus;
   workflow: AdaptationWorkflowStatus | null;
   onImportBook: (file: File) => Promise<void>;
   onStartWorkflow: () => Promise<void>;
-  visualStyle: string;
-  isSavingStyle: boolean;
-  onVisualStyleChange: (value: string) => void;
-  onSaveStyle: (value: string) => Promise<void>;
+  onReloadAdaptation: () => Promise<void>;
 }) {
   const [bookText, setBookText] = useState<string | null>(null);
   const [isLoadingBook, setIsLoadingBook] = useState(false);
@@ -2566,22 +2538,21 @@ function PhaseIngestion({
           <li className={`ingest-step ${adaptation.hasBookSession ? 'is-done' : ''}`}>
             <span className="ingest-step-index">2</span>
             <div className="ingest-step-content">
-              <h2>Read Book &amp; Build Style</h2>
-              <p className="muted">Creates the read-book session and generates the visual style and archetypes.</p>
+              <h2>Read Book &amp; Archetype Prompts</h2>
+              <p className="muted">Creates the read-book session and generates archetype character and scene prompts.</p>
               <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBook || workflow?.running}>
                 {workflow?.running && <span className="spinner" aria-hidden="true" />}
-                {workflow?.running ? 'Loading book & style...' : adaptation.hasBookSession ? 'Rebuild session & style' : 'Load book & build style'}
+                {workflow?.running ? 'Loading book & archetypes...' : adaptation.hasBookSession ? 'Rebuild session & archetypes' : 'Load book & build archetypes'}
               </button>
             </div>
           </li>
         </ol>
       </section>
 
-      <VisualStyleCard
-        value={visualStyle}
-        isSaving={isSavingStyle}
-        onChange={onVisualStyleChange}
-        onSave={onSaveStyle}
+      <VisualStyleList
+        projectSlug={projectSlug}
+        styles={adaptation.visualStyles}
+        onReload={onReloadAdaptation}
       />
 
       {isBookOpen && (
@@ -3210,19 +3181,13 @@ function ImageViewer({
 function DraftNode({ data }: NodeProps<DraftNodeData>) {
   const styleRefKind = styleRefKindForTags(data.tags);
   const styleRole = styleRefKind === 'archetype-character' ? 'Character archetype prompt' : styleRefKind === 'archetype-scene' ? 'Scene archetype prompt' : null;
-  const roleClass = data.role?.type === 'visual-style-source'
-    ? 'visual-style-node'
-    : data.role?.type === 'text-result'
-      ? 'text-result-node'
+  const roleClass = data.role?.type === 'text-result' ? 'text-result-node' : '';
+  const nodeTitle = data.role?.type === 'text-result' ? 'Child Text' : 'Draft';
+  const nodeSubtitle = data.role?.type === 'text-result'
+    ? 'Editable child artifact'
+    : styleRefKind && data.tags.includes('generated')
+      ? 'Generated child available'
       : '';
-  const nodeTitle = data.role?.type === 'visual-style-source' ? 'Visual Style' : data.role?.type === 'text-result' ? 'Child Text' : 'Draft';
-  const nodeSubtitle = data.role?.type === 'visual-style-source'
-    ? 'Shared style source'
-    : data.role?.type === 'text-result'
-      ? 'Editable child artifact'
-      : styleRefKind && data.tags.includes('generated')
-        ? 'Generated child available'
-        : '';
   const tooltip = [
     data.prompt || 'Draft prompt not set',
     `parents: ${data.refs.length}`,
@@ -3234,7 +3199,7 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       <div className="draft-placeholder" aria-hidden="true">
         {data.prompt.trim() && <p className="draft-prompt-preview">{data.prompt.replace(/\s+/g, ' ').trim()}</p>}
-        {(styleRole || data.role?.type === 'visual-style-source' || data.role?.type === 'text-result') && <span className="node-role-badge">{styleRole ?? nodeTitle}</span>}
+        {(styleRole || data.role?.type === 'text-result') && <span className="node-role-badge">{styleRole ?? nodeTitle}</span>}
         {data.isGenerating && (
           <div className="node-generating-overlay">
             <span className="spinner" aria-hidden="true" />
@@ -3244,7 +3209,7 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
       </div>
       <strong>{nodeTitle}</strong>
       {nodeSubtitle && <small>{nodeSubtitle}</small>}
-      {(data.role?.type === 'style-ref-source' || data.role?.type === 'visual-style-source' || data.role?.type === 'text-result') && <Handle type="source" position={Position.Right} className="output-handle" />}
+      {(data.role?.type === 'style-ref-source' || data.role?.type === 'text-result') && <Handle type="source" position={Position.Right} className="output-handle" />}
     </div>
   );
 }

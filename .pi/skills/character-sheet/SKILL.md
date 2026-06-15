@@ -19,7 +19,6 @@ Read **Visual Description**, **Visual Variants**, **Personality And Performance 
 
 Style rendering comes from the **style anchor image** `<book-root>/style-refs/archetype-character.png` attached at image generation time. The PNG does not need to exist when drafting this prompt file.
 
-The user-filled `<book-root>/style-refs/visual-style.md` may be appended by later image-generation tooling. Do not paste it into this file.
 
 ## Delivery
 
@@ -111,7 +110,7 @@ Short strings for Nano Banana — **2–3 sentences** per section.
 2. `Match the reference image's rendering, palette, line weight, shadows, and sheet layout exactly.`
 3. The layout block and `Expressions:` line.
 
-Do **not** describe watercolor, palette, or mood from `<book-root>/style-refs/visual-style.md` — later image-generation tooling may append that file separately, and the reference image carries the final rendering style.
+Do **not** describe watercolor, palette, or mood from reusable visual style snippets — tooling will append a chosen style separately, and the reference image carries the final rendering style.
 
 ### `mode: edit-reference`
 
@@ -129,7 +128,7 @@ Do **not** repeat full character description or style prose.
 
 ## Forbidden In The Written File
 
-- Preamble, style paragraphs, pasted `<book-root>/style-refs/visual-style.md`
+- Preamble, style paragraphs, pasted visual style snippets
 - Repeating "match reference" more than once per prompt
 - Trailing commentary after the last prompt
 

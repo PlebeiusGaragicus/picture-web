@@ -68,17 +68,24 @@ def test_validate_character_artifact_and_sheet(tmp_path: Path) -> None:
     validate_character_sheet(sheet)
 
 
-def test_validate_style_refs_reports_missing_labels(tmp_path: Path) -> None:
+def test_validate_style_refs_reports_missing_archetypes(tmp_path: Path) -> None:
     style_refs = tmp_path / "style-refs"
     style_refs.mkdir()
-    (style_refs / "visual-style.md").write_text("Style:\n")
     (style_refs / "archetype-character.md").write_text("character")
-    (style_refs / "archetype-scene.md").write_text("scene")
-
     report = ValidationReport()
     validate_style_refs(tmp_path, report)
     assert not report.success
-    assert any("Color palette" in failure for failure in report.failures)
+    assert any("archetype-scene.md" in failure for failure in report.failures)
+
+
+def test_validate_style_refs_passes_with_both_archetypes(tmp_path: Path) -> None:
+    style_refs = tmp_path / "style-refs"
+    style_refs.mkdir()
+    (style_refs / "archetype-character.md").write_text("character")
+    (style_refs / "archetype-scene.md").write_text("scene")
+    report = ValidationReport()
+    validate_style_refs(tmp_path, report)
+    assert report.success
 
 
 def test_project_event_lifecycle_passthrough() -> None:

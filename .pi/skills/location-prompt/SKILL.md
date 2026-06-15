@@ -19,7 +19,6 @@ Create one reusable image-generation prompt for that location or location varian
 
 The style reference PNG paths in the written file are planned image-generation inputs. They do not need to exist when drafting this prompt file.
 
-The user-filled `<book-root>/style-refs/visual-style.md` may be appended by later image-generation tooling. Do not paste it into this file.
 
 ## Input
 
@@ -86,7 +85,7 @@ style_ref: <book-root>/locations/prompts/<base-location-slug>.png
 - For variants, state only the source-supported visual delta and what must remain consistent with the base image.
 - Include this sentence once for `mode: new-image`: `Match the reference image's environmental rendering, palette, lighting, and detail level.`
 - End every prompt with `No characters, no text, no labels, no watermarks.`
-- Do not paste `<book-root>/style-refs/visual-style.md`; later image-generation tooling may append that file separately, and the style reference image carries the final rendering style.
+- Do not paste reusable visual style snippets; tooling may append a chosen style separately, and the style reference image carries the final rendering style.
 - Do not include source line numbers or supporting quotes in the prompt file.
 - Do not include storyboard beats, character action, dialogue, captions, speech bubbles, or plot spoilers unless the location state itself requires the detail.
 - Do not invent named landmarks, architecture, objects, vegetation, weather, time of day, materials, lighting, or background elements not supported by the location entry.

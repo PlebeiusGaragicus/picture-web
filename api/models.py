@@ -50,6 +50,7 @@ class GenerationReceipt(BaseModel):
     seed: int | None = Field(default=None, ge=0)
     chatSessionId: str | None = None
     chatTurnId: str | None = None
+    visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
 
 
 class ProviderCapture(BaseModel):
@@ -203,6 +204,22 @@ class AdaptationMetadata(BaseModel):
     panels: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
 
 
+class VisualStyleDefinition(BaseModel):
+    id: str = Field(pattern=TAG_RE)
+    name: str = Field(min_length=1)
+    prompt: str = ""
+
+
+class VisualStyleCreate(BaseModel):
+    name: str = Field(min_length=1)
+    prompt: str | None = None
+
+
+class VisualStylePatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1)
+    prompt: str | None = None
+
+
 class AdaptationStatus(BaseModel):
     projectSlug: str
     settings: AdaptationSettings
@@ -215,7 +232,7 @@ class AdaptationStatus(BaseModel):
     archetypeCharacterPromptText: str = ""
     archetypeScenePromptText: str = ""
     counts: dict[str, int]
-    visualStyle: str
+    visualStyles: list[VisualStyleDefinition]
     characters: dict[str, AdaptationAssetLink]
     locations: dict[str, AdaptationAssetLink]
     scenes: dict[str, AdaptationAssetLink]
@@ -240,10 +257,6 @@ class AdaptationCanvasImportResponse(BaseModel):
 class AdaptationImportArtifactRequest(BaseModel):
     artifactKind: ArtifactKind
     artifactKey: str = Field(pattern=SLUG_RE)
-
-
-class AdaptationStylePatch(BaseModel):
-    visualStyle: str
 
 
 class AdaptationStylePromptPatch(BaseModel):
@@ -343,10 +356,6 @@ class ArtifactSourceRole(BaseModel):
     artifactKey: str
 
 
-class VisualStyleSourceRole(BaseModel):
-    type: Literal["visual-style-source"] = "visual-style-source"
-
-
 class TextResultRole(BaseModel):
     type: Literal["text-result"] = "text-result"
     sourceNodeId: str
@@ -363,7 +372,7 @@ class RefinementRole(BaseModel):
     sourceAssetId: str | None = None
 
 
-CanvasRole = Annotated[StyleRefSourceRole | ArtifactSourceRole | VisualStyleSourceRole | TextResultRole | GeneratedResultRole | RefinementRole, Field(discriminator="type")]
+CanvasRole = Annotated[StyleRefSourceRole | ArtifactSourceRole | TextResultRole | GeneratedResultRole | RefinementRole, Field(discriminator="type")]
 
 
 class CanvasNodeLayout(BaseModel):
@@ -465,6 +474,7 @@ class DraftCanvasNode(CanvasNodeLayout):
     refs: list[str] = Field(default_factory=list)
     prompt: str = ""
     params: GenerationParams = Field(default_factory=GenerationParams)
+    visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
 
 
 class StoryArtifactCanvasNode(CanvasNodeLayout):
@@ -512,6 +522,7 @@ class GenerateRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1)
     tags: list[str] = Field(default_factory=list)
     canvasNodeId: str | None = None
+    visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
 
     @field_validator("tags")
     @classmethod

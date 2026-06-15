@@ -114,10 +114,10 @@ def run_workflow(project_slug: str, stage: str) -> int:
         steps = StepRunner(ctx, logger, on_progress=lambda: flush_progress(running=True))
         if stage in {"ingest", "all"}:
             steps.ensure_book_session()
-            steps.step_visual_style()
+            steps.step_archetype_prompts()
             if stage == "ingest":
                 logger.write_line()
-                logger.write_line(f"[ingest] Book session and visual style ready for {ctx.project_slug}")
+                logger.write_line(f"[ingest] Book session and archetype prompts ready for {ctx.project_slug}")
                 logger.write_line(f"Session:   {steps.book_session.session_id if steps.book_session else ''}")
         if stage in {"characters", "all"}:
             steps.require_book_session()

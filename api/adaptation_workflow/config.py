@@ -139,9 +139,9 @@ def ensure_adaptation_dirs(book_root: Path) -> None:
         "locations/prompts",
     ]:
         (book_root / relative).mkdir(parents=True, exist_ok=True)
-    visual_style = book_root / "style-refs" / "visual-style.md"
-    if not visual_style.exists():
-        visual_style.write_text(STYLE_TEMPLATE)
+    visual_styles = book_root / "style-refs" / "visual-styles.json"
+    if not visual_styles.exists():
+        visual_styles.write_text("[]\n")
     metadata = book_root / "adaptation.json"
     if not metadata.exists():
         metadata.write_text(json.dumps({"version": 2, "settings": {"storyKind": "comic-book"}}, indent=2) + "\n")

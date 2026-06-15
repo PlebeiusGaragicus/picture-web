@@ -5,10 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import library
-from models import ArtifactSourceRole, CanvasDocument, DraftCanvasNode, GeneratedResultRole, ImageGroupCanvasNode, StoryArtifactCanvasNode, StyleRefSourceRole, VisualStyleSourceRole
-
-
-VISUAL_STYLE_NODE_ID = "style_visual_style"
+from models import ArtifactSourceRole, CanvasDocument, DraftCanvasNode, GeneratedResultRole, ImageGroupCanvasNode, StoryArtifactCanvasNode, StyleRefSourceRole
 
 
 def story_artifact_refs(entries: dict[str, object], entry: object) -> list[str]:
@@ -38,27 +35,6 @@ def story_artifact_base_tags(kind: str) -> list[str]:
 def entry_has_assets(entry: object) -> bool:
     asset_ids = getattr(entry, "assetIds", None) or []
     return len(asset_ids) > 0
-
-
-def sync_visual_style_node(slug: str, canvas: CanvasDocument) -> CanvasDocument:
-    """Project the shared visual style prompt as a durable source node."""
-    import adaptation
-
-    root = adaptation.ensure_adaptation(slug)
-    prompt_path = root / "style-refs" / "visual-style.md"
-    existing = canvas.nodes.get(VISUAL_STYLE_NODE_ID)
-    next_canvas = canvas.model_copy(deep=True)
-    next_canvas.nodes[VISUAL_STYLE_NODE_ID] = DraftCanvasNode(
-        displayName="Visual Style",
-        x=existing.x if isinstance(existing, DraftCanvasNode) else 80,
-        y=existing.y if isinstance(existing, DraftCanvasNode) else -120,
-        width=existing.width if isinstance(existing, DraftCanvasNode) else 300,
-        tags=library.node_tags("adaptation", "visual-style", "source-artifact"),
-        role=VisualStyleSourceRole(),
-        refs=[],
-        prompt=adaptation.read_text(prompt_path),
-    )
-    return next_canvas
 
 
 def sync_existing_story_artifacts(slug: str, canvas: CanvasDocument) -> CanvasDocument:
@@ -396,8 +372,7 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
     import adaptation
 
     status = adaptation.status(slug)
-    next_canvas = sync_visual_style_node(slug, canvas)
-    next_canvas = sync_style_ref_canvas_nodes(slug, next_canvas)
+    next_canvas = sync_style_ref_canvas_nodes(slug, canvas)
     columns = 5
     y_gap = 230
     character_start_y = 320

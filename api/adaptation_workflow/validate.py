@@ -82,13 +82,6 @@ def validate_character_sheet(path: Path) -> None:
 
 def validate_style_refs(book_root: Path, report: ValidationReport) -> None:
     report.ok("Style refs")
-    visual_style = book_root / "style-refs" / "visual-style.md"
-    validate_common_file(visual_style, report)
-    for label in ("Style:", "Color palette:", "Realism:", "Lighting:"):
-        if visual_style.is_file() and file_has(visual_style, label):
-            report.ok(f"visual-style.md has {label}")
-        else:
-            report.fail(f"visual-style.md missing {label}")
     archetype_character = book_root / "style-refs" / "archetype-character.md"
     archetype_scene = book_root / "style-refs" / "archetype-scene.md"
     if validate_common_file(archetype_character, report):
