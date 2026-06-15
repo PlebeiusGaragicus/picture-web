@@ -637,6 +637,25 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
     return story_graph.default_canvas_for_story_artifacts(slug, canvas)
 
 
+def sync_single_story_artifact_node(
+    canvas: CanvasDocument,
+    *,
+    artifact_kind: str,
+    artifact_key: str,
+    entry: object,
+    entries: dict[str, object],
+) -> tuple[CanvasDocument, bool, str]:
+    import story_graph
+
+    return story_graph.sync_single_story_artifact_node(
+        canvas,
+        artifact_kind=artifact_kind,
+        artifact_key=artifact_key,
+        entry=entry,
+        entries=entries,
+    )
+
+
 def restore_asset_to_canvas(slug: str, asset_id: str) -> None:
     canvas = read_stored_canvas(slug)
     represented = {

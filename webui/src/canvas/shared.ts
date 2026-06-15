@@ -1,4 +1,4 @@
-import type { ArtifactKind, Asset, GenerationParams, TagDefinition } from '../types';
+import type { AdaptationFileKind, ArtifactKind, Asset, EntityKind, GenerationParams, TagDefinition } from '../types';
 
 export const defaultDraftParams: GenerationParams = { model: 'gemini-3.1-flash-image', aspectRatio: '16:9', imageSize: '1K', seed: null, batchCount: 1 };
 export const SYSTEM_TAGS = new Set([
@@ -42,6 +42,129 @@ export function isEntityTag(tagId: string, projectTags: TagDefinition[]): boolea
 
 export function lockedEntityTagIds(projectTags: TagDefinition[]): Set<string> {
   return new Set(projectTags.filter((tag) => tag.locked).map((tag) => tag.id));
+}
+
+export function userProjectTags(projectTags: TagDefinition[]): TagDefinition[] {
+  return projectTags.filter((tag) => !tag.locked);
+}
+
+export function characterEntityTags(projectTags: TagDefinition[]): TagDefinition[] {
+  return projectTags.filter((tag) => tag.locked && tag.entityKind === 'character');
+}
+
+export function locationEntityTags(projectTags: TagDefinition[]): TagDefinition[] {
+  return projectTags.filter((tag) => tag.locked && tag.entityKind === 'location');
+}
+
+export function entityProjectTags(projectTags: TagDefinition[]): TagDefinition[] {
+  return projectTags.filter((tag) => tag.locked);
+}
+
+export function partitionAssetTagIds(tagIds: string[], projectTags: TagDefinition[]) {
+  const user = userTagsOnAsset(tagIds, projectTags).map((tag) => tag.id);
+  const character = characterEntityTagsOnAsset(tagIds, projectTags).map((tag) => tag.id);
+  const location = locationEntityTagsOnAsset(tagIds, projectTags).map((tag) => tag.id);
+  return { user, character, location, entity: [...character, ...location] };
+}
+
+export function nonArchivedVariants(assets: Asset[], assetIds: string[]): Asset[] {
+  const byId = new Map(assets.map((asset) => [asset.id, asset]));
+  return assetIds
+    .map((assetId) => byId.get(assetId))
+    .filter((asset): asset is Asset => asset != null && !asset.archivedAt);
+}
+
+export function mergeAvailableUserTagsOnly(projectTags: TagDefinition[], assets: Asset[]): TagDefinition[] {
+  const byId = new Map(userProjectTags(projectTags).map((tag) => [tag.id, tag]));
+  assets.forEach((asset) => {
+    asset.tags.forEach((tagId) => {
+      if (SYSTEM_TAGS.has(tagId)) return;
+      const existing = projectTags.find((tag) => tag.id === tagId);
+      if (existing?.locked) return;
+      if (!byId.has(tagId)) {
+        byId.set(tagId, { id: tagId, name: tagId, color: '#64748b' });
+      }
+    });
+  });
+  return Array.from(byId.values()).sort((first, second) => first.name.localeCompare(second.name));
+}
+
+export function countUserTagsOnAssets(assets: Asset[], projectTags: TagDefinition[], showArchived: boolean): Record<string, number> {
+  const lockedIds = lockedEntityTagIds(projectTags);
+  const counts: Record<string, number> = {};
+  assets.forEach((asset) => {
+    if (asset.archivedAt && !showArchived) return;
+    asset.tags.forEach((tagId) => {
+      if (SYSTEM_TAGS.has(tagId) || lockedIds.has(tagId)) return;
+      counts[tagId] = (counts[tagId] ?? 0) + 1;
+    });
+  });
+  return counts;
+}
+
+export function countEntityTagsOnAssets(assets: Asset[], projectTags: TagDefinition[], showArchived: boolean): Record<string, number> {
+  const lockedIds = lockedEntityTagIds(projectTags);
+  const counts: Record<string, number> = {};
+  assets.forEach((asset) => {
+    if (asset.archivedAt && !showArchived) return;
+    asset.tags.forEach((tagId) => {
+      if (!lockedIds.has(tagId)) return;
+      counts[tagId] = (counts[tagId] ?? 0) + 1;
+    });
+  });
+  return counts;
+}
+
+export function countUserTagAssignments(assets: Asset[], projectTags: TagDefinition[]): Record<string, number> {
+  return countUserTagsOnAssets(assets, projectTags, true);
+}
+
+function entityTagsOnAsset(tagIds: string[], projectTags: TagDefinition[], entityKind: EntityKind): TagDefinition[] {
+  const byId = new Map(projectTags.map((tag) => [tag.id, tag]));
+  return tagIds
+    .filter((tagId) => {
+      const tag = byId.get(tagId);
+      return tag?.locked && tag.entityKind === entityKind;
+    })
+    .map((tagId) => byId.get(tagId)!);
+}
+
+export function userTagsOnAsset(tagIds: string[], projectTags: TagDefinition[]): TagDefinition[] {
+  const byId = new Map(projectTags.map((tag) => [tag.id, tag]));
+  return tagIds
+    .filter((tagId) => !SYSTEM_TAGS.has(tagId) && !byId.get(tagId)?.locked)
+    .map((tagId) => byId.get(tagId) ?? { id: tagId, name: tagId, color: '#64748b' });
+}
+
+export function characterEntityTagsOnAsset(tagIds: string[], projectTags: TagDefinition[]): TagDefinition[] {
+  return entityTagsOnAsset(tagIds, projectTags, 'character');
+}
+
+export function locationEntityTagsOnAsset(tagIds: string[], projectTags: TagDefinition[]): TagDefinition[] {
+  return entityTagsOnAsset(tagIds, projectTags, 'location');
+}
+
+export function adaptationFileKindToArtifactKind(kind: AdaptationFileKind): ArtifactKind {
+  if (kind === 'characters') return 'character-sheet';
+  if (kind === 'locations') return 'location-prompt';
+  return 'scene-artifact';
+}
+
+export function storyArtifactNodeId(artifactKind: ArtifactKind, artifactKey: string): string {
+  const safeKind = artifactKind.replace(/-/g, '_');
+  const safeKey = artifactKey.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  return `artifact_${safeKind}_${safeKey}`;
+}
+
+export function storyArtifactKeysOnCanvas(
+  nodes: Record<string, { type?: string; artifactKind?: ArtifactKind; artifactKey?: string }>,
+  artifactKind: ArtifactKind,
+): Set<string> {
+  return new Set(
+    Object.values(nodes)
+      .filter((node) => node.type === 'storyArtifact' && node.artifactKind === artifactKind && node.artifactKey)
+      .map((node) => node.artifactKey as string),
+  );
 }
 
 export function mergeAvailableUserTags(projectTags: TagDefinition[], assets: Asset[]): TagDefinition[] {

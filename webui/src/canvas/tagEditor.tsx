@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { TagDefinition } from '../types';
+import type { EntityKind, TagDefinition } from '../types';
 import { isValidTagName, normalizeTagName, tagColorOptions, tagColors } from './shared';
 
 type TagEditorMode = 'assign' | 'filter';
@@ -94,22 +94,201 @@ export function TagColorPickerPopover({
   );
 }
 
-export function TagEditorPopover({
-  mode,
+export function EntityTagSection({
+  kind,
+  label,
+  selectedTags,
+  availableTags,
+  tagCounts = {},
+  onChange,
+}: {
+  kind: EntityKind;
+  label: string;
+  selectedTags: string[];
+  availableTags: TagDefinition[];
+  tagCounts?: Record<string, number>;
+  onChange: (tags: string[]) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const selected = new Set(selectedTags);
+  const availableById = useMemo(() => new Map(availableTags.map((tag) => [tag.id, tag])), [availableTags]);
+  const suggestions = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return availableTags
+      .filter((tag) => tag.entityKind === kind)
+      .filter((tag) => !needle || tag.name.toLowerCase().includes(needle) || tag.id.includes(needle))
+      .sort((first, second) => first.name.localeCompare(second.name));
+  }, [availableTags, kind, query]);
+
+  const toggleTag = (tagId: string) => {
+    onChange(selected.has(tagId) ? selectedTags.filter((item) => item !== tagId) : [...selectedTags, tagId]);
+    setQuery('');
+  };
+
+  const selectedInSection = selectedTags.filter((tagId) => availableById.get(tagId)?.entityKind === kind);
+
+  return (
+    <div className="entity-tag-section">
+      <div className="entity-tag-section-heading">{label}</div>
+      {selectedInSection.length > 0 && (
+        <div className="tag-editor-input tag-editor-input-compact">
+          {selectedInSection.map((tagId) => {
+            const tag = availableById.get(tagId);
+            return (
+              <button
+                key={tagId}
+                type="button"
+                className="tag-chip"
+                onClick={() => toggleTag(tagId)}
+                style={{ backgroundColor: tag?.color ?? '#64748b' }}
+              >
+                {tag?.name ?? tagId}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <input
+        className="entity-tag-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && suggestions[0]) {
+            event.preventDefault();
+            toggleTag(suggestions[0].id);
+          }
+        }}
+        placeholder={`Search ${kind === 'character' ? 'characters' : 'locations'}...`}
+      />
+      <div className="tag-suggestion-list entity-tag-section-list">
+        {suggestions.map((tag) => (
+          <button
+            key={tag.id}
+            className={`entity-tag-suggestion ${selected.has(tag.id) ? 'active' : ''}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleTag(tag.id);
+            }}
+          >
+            <span className="tag-color-dot" style={{ backgroundColor: tag.color }} />
+            <span className="tag-suggestion-name">{tag.name}</span>
+            {tagCounts[tag.id] !== undefined && <span className="tag-suggestion-count">({tagCounts[tag.id]})</span>}
+          </button>
+        ))}
+        {!suggestions.length && <p className="muted entity-tag-empty">No matching {kind === 'character' ? 'characters' : 'locations'}.</p>}
+      </div>
+    </div>
+  );
+}
+
+export function EntityTagPopover({
+  kind,
   title,
+  selectedTags,
+  availableTags,
+  onChange,
+}: {
+  kind: EntityKind;
+  title: string;
+  selectedTags: string[];
+  availableTags: TagDefinition[];
+  onChange: (tags: string[]) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const selected = new Set(selectedTags);
+  const availableById = useMemo(() => new Map(availableTags.map((tag) => [tag.id, tag])), [availableTags]);
+  const suggestions = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return availableTags
+      .filter((tag) => tag.entityKind === kind)
+      .filter((tag) => !needle || tag.name.toLowerCase().includes(needle) || tag.id.includes(needle))
+      .sort((first, second) => first.name.localeCompare(second.name));
+  }, [availableTags, kind, query]);
+
+  const toggleTag = (tagId: string) => {
+    onChange(selected.has(tagId) ? selectedTags.filter((item) => item !== tagId) : [...selectedTags, tagId]);
+    setQuery('');
+  };
+
+  const stopFlowPointer = (event: React.MouseEvent | React.PointerEvent) => {
+    event.stopPropagation();
+  };
+
+  return (
+    <div
+      className="tag-editor-popover entity-tag-editor-popover"
+      onPointerDown={stopFlowPointer}
+      onMouseDown={stopFlowPointer}
+      onClick={stopFlowPointer}
+    >
+      <h3>{title}</h3>
+      {selectedTags.length > 0 && (
+        <div className="tag-editor-input">
+          {selectedTags.map((tagId) => {
+            const tag = availableById.get(tagId);
+            return (
+              <button
+                key={tagId}
+                type="button"
+                className="tag-chip"
+                onClick={() => toggleTag(tagId)}
+                style={{ backgroundColor: tag?.color ?? '#64748b' }}
+              >
+                {tag?.name ?? tagId}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <input
+        className="entity-tag-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && suggestions[0]) {
+            event.preventDefault();
+            toggleTag(suggestions[0].id);
+          }
+        }}
+        placeholder={`Search ${kind === 'character' ? 'characters' : 'locations'}...`}
+        autoFocus
+      />
+      <div className="tag-suggestion-list">
+        {suggestions.map((tag) => (
+          <button
+            key={tag.id}
+            className={`entity-tag-suggestion ${selected.has(tag.id) ? 'active' : ''}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleTag(tag.id);
+            }}
+          >
+            <span className="tag-color-dot" style={{ backgroundColor: tag.color }} />
+            <span className="tag-suggestion-name">{tag.name}</span>
+          </button>
+        ))}
+        {!suggestions.length && <p className="muted entity-tag-empty">No matching {kind === 'character' ? 'characters' : 'locations'}.</p>}
+      </div>
+    </div>
+  );
+}
+
+export function UserTagColumn({
+  mode,
   selectedTags,
   availableTags,
   tagCounts = {},
   onChange,
   onCreateTag,
+  autoFocus = false,
 }: {
   mode: TagEditorMode;
-  title: string;
   selectedTags: string[];
   availableTags: TagDefinition[];
   tagCounts?: Record<string, number>;
   onChange: (tags: string[]) => void;
   onCreateTag?: (tag: TagDefinition) => void;
+  autoFocus?: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
@@ -142,35 +321,21 @@ export function TagEditorPopover({
   };
 
   const removeTag = (tagId: string) => {
-    if (availableById.get(tagId)?.locked) return;
     onChange(selectedTags.filter((item) => item !== tagId));
   };
 
-  const stopFlowPointer = (event: React.MouseEvent | React.PointerEvent) => {
-    event.stopPropagation();
-  };
-
   return (
-    <div
-      className="tag-editor-popover"
-      onPointerDown={stopFlowPointer}
-      onMouseDown={stopFlowPointer}
-      onClick={stopFlowPointer}
-    >
-      <h3>{title}</h3>
+    <>
       <div className="tag-editor-input">
         {selectedTags.map((tagId) => {
           const tag = availableById.get(tagId);
-          const locked = Boolean(tag?.locked);
           return (
             <button
               key={tagId}
               type="button"
-              className={`tag-chip ${locked ? 'tag-chip-locked' : ''}`}
+              className="tag-chip"
               onClick={() => removeTag(tagId)}
               style={{ backgroundColor: tag?.color ?? '#64748b' }}
-              disabled={locked}
-              title={locked ? 'Entity tags cannot be removed' : undefined}
             >
               {tag?.name ?? tagId}
             </button>
@@ -191,7 +356,7 @@ export function TagEditorPopover({
             }
           }}
           placeholder={selectedTags.length ? '' : mode === 'assign' ? 'Add tag' : 'Filter tags'}
-          autoFocus
+          autoFocus={autoFocus}
         />
       </div>
       <div className="tag-suggestion-list">
@@ -203,7 +368,7 @@ export function TagEditorPopover({
         {suggestions.map((tag) => (
           <button
             key={tag.id}
-            className={`${selected.has(tag.id) ? 'active' : ''} ${tag.locked ? 'entity-tag-suggestion' : ''}`}
+            className={selected.has(tag.id) ? 'active' : ''}
             onClick={(event) => {
               event.stopPropagation();
               toggleTag(tag.id);
@@ -234,6 +399,48 @@ export function TagEditorPopover({
           </>
         )}
       </div>
+    </>
+  );
+}
+
+export function TagEditorPopover({
+  mode,
+  title,
+  selectedTags,
+  availableTags,
+  tagCounts = {},
+  onChange,
+  onCreateTag,
+}: {
+  mode: TagEditorMode;
+  title: string;
+  selectedTags: string[];
+  availableTags: TagDefinition[];
+  tagCounts?: Record<string, number>;
+  onChange: (tags: string[]) => void;
+  onCreateTag?: (tag: TagDefinition) => void;
+}) {
+  const stopFlowPointer = (event: React.MouseEvent | React.PointerEvent) => {
+    event.stopPropagation();
+  };
+
+  return (
+    <div
+      className="tag-editor-popover"
+      onPointerDown={stopFlowPointer}
+      onMouseDown={stopFlowPointer}
+      onClick={stopFlowPointer}
+    >
+      <h3>{title}</h3>
+      <UserTagColumn
+        mode={mode}
+        selectedTags={selectedTags}
+        availableTags={availableTags}
+        tagCounts={tagCounts}
+        onChange={onChange}
+        onCreateTag={onCreateTag}
+        autoFocus
+      />
     </div>
   );
 }

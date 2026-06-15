@@ -1,4 +1,4 @@
-import { PhaseWorkflowActions, PublishToCanvasCard, StyleRefCard } from './cards';
+import { PhaseWorkflowActions, StyleRefCard } from './cards';
 import { styleRefStatusFromAdaptation } from '../styleRefs';
 import type { AdaptationStatus, AdaptationWorkflowStatus, Asset, StoryKind, StyleRefKind } from '../types';
 
@@ -14,8 +14,6 @@ export function PhaseAssetType({
   onGenerateStyleRef,
   onStartWorkflow,
   onStartValidation,
-  onPublishPhaseToCanvas,
-  isPublishingPhase,
   fileEditor,
 }: {
   kind: 'characters' | 'locations';
@@ -29,14 +27,10 @@ export function PhaseAssetType({
   onGenerateStyleRef: (refKind: StyleRefKind) => Promise<void>;
   onStartWorkflow: () => Promise<void>;
   onStartValidation: () => Promise<void>;
-  onPublishPhaseToCanvas: () => Promise<void>;
-  isPublishingPhase: boolean;
   fileEditor: React.ReactNode;
 }) {
   const isCharacters = kind === 'characters';
   const styleRefStatus = styleRefStatusFromAdaptation(isCharacters ? 'archetype-character' : 'archetype-scene', adaptation, assets);
-  const links = isCharacters ? adaptation.characters : adaptation.locations;
-  const count = Object.keys(links).length;
   return (
     <>
       <div className="archetype-row">
@@ -53,8 +47,6 @@ export function PhaseAssetType({
       <PhaseWorkflowActions kind={kind} adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={onStartWorkflow} onStartValidation={onStartValidation} workflowDisabled={!isCharacters} />
 
       {fileEditor}
-
-      <PublishToCanvasCard kind={kind} count={count} isPublishing={isPublishingPhase} onPublishToCanvas={onPublishPhaseToCanvas} />
     </>
   );
 }

@@ -1,9 +1,9 @@
 import type { TagDefinition } from '../types';
 
 export const nodeTagActionsRef: {
-  updateAssetTags: (nodeId: string, assetId: string, tags: string[]) => void;
+  updatePartitionedAssetTags: (nodeId: string, assetId: string, userTags: string[], characterTags: string[], locationTags: string[]) => void;
   createProjectTag: (tag: TagDefinition) => void;
 } = {
-  updateAssetTags: () => {},
+  updatePartitionedAssetTags: () => {},
   createProjectTag: () => {},
 };

@@ -23,15 +23,16 @@ import { WorkflowLogPanel } from './adaptation/workflowLog';
 import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
-import { SYSTEM_TAGS, artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, lockedEntityTagIds, mergeAvailableUserTags, modelCapabilities, normalizedParamsForModel, visibleDisplayName } from './canvas/shared';
+import { SYSTEM_TAGS, artifactKindLabel, assetLabel, adaptationFileKindToArtifactKind, capabilitiesForModel, characterEntityTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, storyArtifactKeysOnCanvas, storyArtifactNodeId, userProjectTags, visibleDisplayName } from './canvas/shared';
 import { NodeSidebar } from './canvas/sidebars';
-import { NodeAssetTagRow } from './canvas/assetTagRow';
+import { NodeTagButton, TagControlButton } from './canvas/assetTagRow';
 import { nodeTagActionsRef } from './canvas/nodeTagActions';
-import { TagColorPickerPopover, TagEditorPopover } from './canvas/tagEditor';
+import { SplitTagPopover } from './canvas/splitTagPopover';
+import { TagColorPickerPopover } from './canvas/tagEditor';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './canvas/types';
 import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags } from './styleRefs';
 import { HelpTip, Modal } from './ui';
-import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryKind, StyleRefKind, TagDefinition } from './types';
+import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryKind, StyleRefKind, TagDefinition } from './types';
 
 type ProjectPhase =
   | 'story-canvas'
@@ -158,7 +159,6 @@ function toFlowNodes(
   onViewAsset: (assetId: string) => void = () => undefined,
   onDisplayNameChange: (nodeId: string, displayName: string) => void = () => undefined,
   onRefineChat: (nodeId: string, assetId: string) => void = () => undefined,
-  onAssetTagsChange: (nodeId: string, assetId: string, tags: string[]) => void = () => undefined,
   onCreateTag: (tag: TagDefinition) => void = () => undefined,
 ): Node<PhotoNodeData>[] {
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
@@ -206,7 +206,6 @@ function toFlowNodes(
         onView,
         onDetails,
         onDisplayNameChange,
-        onAssetTagsChange,
         onCreateTag,
         isGenerating: generatingNodeIds.has(id),
       },
@@ -236,13 +235,11 @@ function App() {
   const [pendingDelete, setPendingDelete] = useState<{ nodeId: string; assetId?: string } | null>(null);
   const [pendingArchive, setPendingArchive] = useState<{ nodeId: string; assetId: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
-  const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
   const [activeUserTagFilters, setActiveUserTagFilters] = useState<string[]>([]);
-  const [isTagFilterMenuOpen, setIsTagFilterMenuOpen] = useState(false);
+  const [activeEntityTagFilters, setActiveEntityTagFilters] = useState<string[]>([]);
   const [isUserTagFilterMenuOpen, setIsUserTagFilterMenuOpen] = useState(false);
   const [projectPhase, setProjectPhase] = useState<ProjectPhase>('story-canvas');
   const [phaseViewMode, setPhaseViewMode] = useState<'list' | 'canvas'>('list');
-  const autoPublishingArchetypesRef = useRef(false);
   const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const [adaptation, setAdaptation] = useState<AdaptationStatus | null>(null);
@@ -263,7 +260,6 @@ function App() {
     openAssetInViewer: (_assetId: string) => {},
     updateImageGroupDisplayName: (_nodeId: string, _displayName: string) => {},
     openChatForAsset: async (_nodeId: string, _assetId: string) => {},
-    updateAssetTags: (_nodeId: string, _assetId: string, _tags: string[]) => {},
     createProjectTag: (_tag: TagDefinition) => {},
     projectTags: [] as TagDefinition[],
   });
@@ -277,10 +273,6 @@ function App() {
   }, [chatSessions]);
 
   assetsRef.current = assets;
-
-  const onAssetTagsChangeForNode = useCallback((nodeId: string, assetId: string, tags: string[]) => {
-    toFlowNodesCallbacksRef.current.updateAssetTags(nodeId, assetId, tags);
-  }, []);
 
   const onCreateTagForNode = useCallback((tag: TagDefinition) => {
     toFlowNodesCallbacksRef.current.createProjectTag(tag);
@@ -317,12 +309,15 @@ function App() {
   const changeVariant = useCallback((nodeId: string, direction: -1 | 1) => {
     setNodes((current) => {
       const next = current.map((node) => {
-        if (node.id !== nodeId || node.data.kind !== 'imageGroup' || node.data.assetIds.length < 2) return node;
-        const currentIndex = Math.max(0, node.data.assetIds.indexOf(node.data.activeAsset?.id ?? node.data.activeAssetId ?? ''));
-        const nextIndex = (currentIndex + direction + node.data.assetIds.length) % node.data.assetIds.length;
-        const activeAssetId = node.data.assetIds[nextIndex];
-        const activeAsset = node.data.assets.find((asset) => asset.id === activeAssetId) ?? node.data.activeAsset;
-        return { ...node, data: { ...node.data, activeAssetId, activeAsset } };
+        if (node.id !== nodeId || node.data.kind !== 'imageGroup') return node;
+        const visibleVariants = nonArchivedVariants(node.data.assets, node.data.assetIds);
+        if (visibleVariants.length < 2) return node;
+        const currentId = node.data.activeAsset?.id ?? node.data.activeAssetId ?? '';
+        let currentIndex = visibleVariants.findIndex((variant) => variant.id === currentId);
+        if (currentIndex < 0) currentIndex = 0;
+        const nextIndex = (currentIndex + direction + visibleVariants.length) % visibleVariants.length;
+        const activeAsset = visibleVariants[nextIndex];
+        return { ...node, data: { ...node.data, activeAssetId: activeAsset.id, activeAsset } };
       });
       void persistNodesRef.current(next);
       return next;
@@ -437,17 +432,16 @@ function App() {
       layout,
       detail.assets,
       generatingNodeIdsRef.current,
-      mergeAvailableUserTags(detail.tags, detail.assets),
+      detail.tags,
       changeVariant,
       openViewer,
       openDetails,
       openAssetInViewer,
       updateImageGroupDisplayName,
       openChatForAsset,
-      onAssetTagsChangeForNode,
       onCreateTagForNode,
     ));
-  }, [changeVariant, openAssetInViewer, openChatForAsset, openDetails, openViewer, showArchived, updateImageGroupDisplayName]);
+  }, [changeVariant, openAssetInViewer, openChatForAsset, openDetails, openViewer, onCreateTagForNode, showArchived, updateImageGroupDisplayName]);
 
   useEffect(() => {
     loadProjects().catch((err) => setError(String(err)));
@@ -463,7 +457,6 @@ function App() {
       if (event.key === 'Escape') {
         setContextMenu(null);
         setPopoverNodeId(null);
-        setIsTagFilterMenuOpen(false);
         setIsUserTagFilterMenuOpen(false);
       }
     };
@@ -475,43 +468,22 @@ function App() {
     };
   }, []);
 
-  const availableTagFilters = useMemo(() => {
-    const tags = new Set<string>();
-    nodes.forEach((node) => node.data.tags.forEach((tag) => tags.add(tag)));
-    return Array.from(tags).filter((tag) => SYSTEM_TAGS.has(tag)).sort();
-  }, [nodes]);
-  const availableUserTags = useMemo(() => mergeAvailableUserTags(projectTags, assets), [assets, projectTags]);
-  const userTagCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    assets.forEach((asset) => {
-      if (asset.archivedAt && !showArchived) return;
-      asset.tags.forEach((tag) => {
-        if (SYSTEM_TAGS.has(tag)) return;
-        counts[tag] = (counts[tag] ?? 0) + 1;
-      });
-    });
-    return counts;
-  }, [assets, showArchived]);
-  const tagAssetCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    assets.forEach((asset) => {
-      asset.tags.forEach((tagId) => {
-        if (SYSTEM_TAGS.has(tagId)) return;
-        counts[tagId] = (counts[tagId] ?? 0) + 1;
-      });
-    });
-    return counts;
-  }, [assets]);
+  const availableUserTags = useMemo(() => mergeAvailableUserTagsOnly(projectTags, assets), [assets, projectTags]);
+  const userTagsForOrganize = useMemo(() => userProjectTags(projectTags), [projectTags]);
+  const userTagCounts = useMemo(() => countUserTagsOnAssets(assets, projectTags, showArchived), [assets, projectTags, showArchived]);
+  const entityTagCounts = useMemo(() => countEntityTagsOnAssets(assets, projectTags, showArchived), [assets, projectTags, showArchived]);
+  const tagAssetCounts = useMemo(() => countUserTagAssignments(assets, projectTags), [assets, projectTags]);
   const filteredNodes = useMemo(() => {
-    const systemTagFiltered = activeTagFilters.length === 0
+    const entityTagFiltered = activeEntityTagFilters.length === 0
       ? nodes
       : nodes.filter((node) => {
-          const required = new Set(activeTagFilters);
-          return node.data.tags.some((tag) => required.has(tag));
+          if (node.data.kind !== 'imageGroup') return true;
+          const required = new Set(activeEntityTagFilters);
+          return node.data.assets.some((asset) => asset.tags.some((tag) => required.has(tag)));
         });
     const userTagFiltered = activeUserTagFilters.length === 0
-      ? systemTagFiltered
-      : systemTagFiltered.filter((node) => {
+      ? entityTagFiltered
+      : entityTagFiltered.filter((node) => {
           if (node.data.kind !== 'imageGroup') return true;
           const required = new Set(activeUserTagFilters);
           return node.data.assets.some((asset) => asset.tags.some((tag) => required.has(tag)));
@@ -522,7 +494,7 @@ function App() {
       const assetsInNode = node.data.assets.length ? node.data.assets : node.data.activeAsset ? [node.data.activeAsset] : [];
       return assetsInNode.some((asset) => !asset.archivedAt);
     });
-  }, [activeTagFilters, activeUserTagFilters, nodes, showArchived]);
+  }, [activeEntityTagFilters, activeUserTagFilters, nodes, showArchived]);
 
   const edges: Edge[] = useMemo(() => {
     return deriveStoryGraphEdges(filteredNodes);
@@ -681,13 +653,10 @@ function App() {
     }
   }, [assets, loadProject, openProjectSlug, projectTags]);
 
-  const updateAssetTags = useCallback((nodeId: string, assetId: string, tags: string[]) => {
+  const updateAssetTags = useCallback((nodeId: string, assetId: string, nextTags: string[]) => {
     if (!openProjectSlug) return;
     const asset = assetsRef.current.find((item) => item.id === assetId);
     if (!asset) return;
-    const lockedIds = lockedEntityTagIds(projectTags);
-    const preserved = asset.tags.filter((tag) => SYSTEM_TAGS.has(tag) || lockedIds.has(tag));
-    const nextTags = Array.from(new Set([...preserved, ...tags]));
     setAssets((current) => current.map((item) => (item.id === assetId ? { ...item, tags: nextTags } : item)));
     setNodes((current) => current.map((node) => {
       if (node.data.kind !== 'imageGroup' || !node.data.assetIds.includes(assetId)) return node;
@@ -699,14 +668,27 @@ function App() {
       console.error('[photo-web] failed to update asset tags', err);
       setError(String(err));
     });
-  }, [openProjectSlug, projectTags]);
+  }, [openProjectSlug]);
+
+  const updatePartitionedAssetTags = useCallback((
+    nodeId: string,
+    assetId: string,
+    userTags: string[],
+    characterTags: string[],
+    locationTags: string[],
+  ) => {
+    const asset = assetsRef.current.find((item) => item.id === assetId);
+    if (!asset) return;
+    const preserved = asset.tags.filter((tag) => SYSTEM_TAGS.has(tag));
+    updateAssetTags(nodeId, assetId, Array.from(new Set([...preserved, ...userTags, ...characterTags, ...locationTags])));
+  }, [updateAssetTags]);
 
   const openProject = async (projectSlug: string) => {
     setOpenProjectSlug(projectSlug);
     setProjectPhase('story-canvas');
     setPhaseViewMode('canvas');
-    setActiveTagFilters([]);
     setActiveUserTagFilters([]);
+    setActiveEntityTagFilters([]);
     setSelectedIds([]);
     setSelectedNodeIds([]);
     setError(null);
@@ -715,8 +697,8 @@ function App() {
   const closeProject = () => {
     setOpenProjectSlug('');
     setProjectPhase('story-canvas');
-    setActiveTagFilters([]);
     setActiveUserTagFilters([]);
+    setActiveEntityTagFilters([]);
     setAssets([]);
     setProjectTags([]);
     setChatSessions([]);
@@ -870,11 +852,10 @@ function App() {
         callbacks.openAssetInViewer,
         callbacks.updateImageGroupDisplayName,
         callbacks.openChatForAsset,
-        onAssetTagsChangeForNode,
         onCreateTagForNode,
       ));
     }
-  }, [assets, canvas, onAssetTagsChangeForNode, onCreateTagForNode, openProjectSlug]);
+  }, [assets, canvas, onCreateTagForNode, openProjectSlug]);
 
   useEffect(() => {
     persistNodesRef.current = persistNodes;
@@ -887,11 +868,10 @@ function App() {
     openAssetInViewer,
     updateImageGroupDisplayName,
     openChatForAsset,
-    updateAssetTags,
     createProjectTag,
-    projectTags: availableUserTags,
+    projectTags,
   };
-  nodeTagActionsRef.updateAssetTags = updateAssetTags;
+  nodeTagActionsRef.updatePartitionedAssetTags = updatePartitionedAssetTags;
   nodeTagActionsRef.createProjectTag = createProjectTag;
 
   useEffect(() => {
@@ -901,13 +881,12 @@ function App() {
         ...node,
         data: {
           ...node.data,
-          projectTags: availableUserTags,
-          onAssetTagsChange: onAssetTagsChangeForNode,
+          projectTags,
           onCreateTag: onCreateTagForNode,
         },
       };
     }));
-  }, [availableUserTags, onAssetTagsChangeForNode, onCreateTagForNode]);
+  }, [onCreateTagForNode, projectTags]);
 
   const deleteSelectedNodes = useCallback(async () => {
     if (!selectedNodeIds.length) return;
@@ -1183,25 +1162,6 @@ function App() {
     return () => window.clearInterval(timer);
   }, [adaptationValidation?.running, openProjectSlug, projectPhase]);
 
-  const ensureAdaptationPhasePublished = useCallback(async () => {
-    if (!openProjectSlug) return;
-    await api.publishAdaptationPhaseToCanvas(openProjectSlug);
-    await loadProject(openProjectSlug);
-  }, [openProjectSlug, loadProject]);
-
-  useEffect(() => {
-    if (projectPhase !== 'phase-1-characters' || !adaptation) return;
-    const hasStyleRefPrompt = Object.values(adaptation.styleRefStatuses).some((status) => status.promptText.trim().length > 0);
-    if (!hasStyleRefPrompt) return;
-    const hasArchetypeNodes = Object.values(canvas.nodes).some((node) => styleRefKindForTags(node.tags) !== null);
-    if (hasArchetypeNodes || autoPublishingArchetypesRef.current) return;
-    autoPublishingArchetypesRef.current = true;
-    ensureAdaptationPhasePublished()
-      .catch((err) => setError(String(err)))
-      .finally(() => {
-        autoPublishingArchetypesRef.current = false;
-      });
-  }, [projectPhase, adaptation, canvas, ensureAdaptationPhasePublished]);
 
   const saveAdaptationStyle = async (visualStyle: string) => {
     if (!openProjectSlug) return;
@@ -1297,6 +1257,21 @@ function App() {
     }
   };
 
+  const draftArtifactToCanvas = useCallback(async (artifactKind: ArtifactKind, artifactKey: string) => {
+    if (!openProjectSlug) return;
+    setError(null);
+    const result = await api.importAdaptationArtifactToCanvas(openProjectSlug, artifactKind, artifactKey);
+    setCanvas(result.canvas);
+    await loadProject(openProjectSlug);
+    setPhaseViewMode('canvas');
+    const matchingId = Object.entries(result.canvas.nodes).find(([, node]) => (
+      node.type === 'storyArtifact' && node.artifactKind === artifactKind && node.artifactKey === artifactKey
+    ))?.[0] ?? storyArtifactNodeId(artifactKind, artifactKey);
+    setSelectedNodeIds([matchingId]);
+    setPopoverNodeId(matchingId);
+    window.setTimeout(() => focusNodeOnCanvas(matchingId), 0);
+  }, [focusNodeOnCanvas, loadProject, openProjectSlug]);
+
   const generateStoryArtifact = async (id: string, artifact: StoryArtifactNodeData) => {
     if (!openProjectSlug) return;
     setGeneratingNodeIds((current) => new Set(current).add(id));
@@ -1343,7 +1318,7 @@ function App() {
         projectSlug={openProjectSlug}
         activePhase={projectPhase}
         adaptation={adaptation}
-        projectTags={availableUserTags}
+        projectTags={userTagsForOrganize}
         tagAssetCounts={tagAssetCounts}
         error={error}
         isCollapsed={isPhaseSidebarCollapsed}
@@ -1370,9 +1345,8 @@ function App() {
         onPhaseChange={(phase) => {
           setProjectPhase(phase);
           setPhaseViewMode(phase === 'story-canvas' ? 'canvas' : 'list');
-          setActiveTagFilters([]);
           setActiveUserTagFilters([]);
-          setIsTagFilterMenuOpen(false);
+          setActiveEntityTagFilters([]);
           setIsUserTagFilterMenuOpen(false);
           setPopoverNodeId(null);
           setActiveChatSessionId(null);
@@ -1426,6 +1400,7 @@ function App() {
             projectSlug={openProjectSlug}
             adaptation={adaptation}
             assets={assets}
+            canvas={canvas}
             workflow={adaptationWorkflow}
             validation={adaptationValidation}
             onSaveStyle={saveAdaptationStyle}
@@ -1437,6 +1412,7 @@ function App() {
             onStartWorkflow={startAdaptationWorkflow}
             onStartValidation={startAdaptationValidation}
             onPublishPhaseToCanvas={publishAdaptationPhaseToCanvas}
+            onDraftArtifactToCanvas={draftArtifactToCanvas}
             onReloadAdaptation={loadAdaptation}
           />
         )}
@@ -1516,7 +1492,7 @@ function App() {
               }}
               onNodeClick={(event, node) => {
                 const target = event.target;
-                if (target instanceof HTMLElement && target.closest('.tag-editor-popover, .node-tag-menu, .node-tag-row')) {
+                if (target instanceof HTMLElement && target.closest('.split-tag-popover, .tag-control-button, .node-tag-menu, .node-tag-row')) {
                   return;
                 }
                 setActiveChatSessionId(null);
@@ -1524,7 +1500,6 @@ function App() {
               }}
               onPaneClick={() => {
                 setPopoverNodeId(null);
-                setIsTagFilterMenuOpen(false);
                 setIsUserTagFilterMenuOpen(false);
               }}
               onSelectionChange={({ nodes: selected }) => {
@@ -1540,26 +1515,20 @@ function App() {
               </Panel>
             </ReactFlow>
             <FloatingTagsMenu
-              availableTags={availableUserTags}
-              tagCounts={userTagCounts}
-              activeTags={activeUserTagFilters}
+              userAvailableTags={availableUserTags}
+              characterAvailableTags={characterEntityTags(projectTags)}
+              locationAvailableTags={locationEntityTags(projectTags)}
+              userTagCounts={userTagCounts}
+              entityTagCounts={entityTagCounts}
+              activeUserTags={activeUserTagFilters}
+              activeEntityTags={activeEntityTagFilters}
+              showArchived={showArchived}
               isOpen={isUserTagFilterMenuOpen}
               onToggleOpen={() => setIsUserTagFilterMenuOpen((current) => !current)}
               onClose={() => setIsUserTagFilterMenuOpen(false)}
-              onChange={setActiveUserTagFilters}
-            />
-            <FloatingFilterMenu
-              availableTagFilters={availableTagFilters}
-              activeTagFilters={activeTagFilters}
-              showArchived={showArchived}
-              isOpen={isTagFilterMenuOpen}
-              onToggleOpen={() => setIsTagFilterMenuOpen((current) => !current)}
-              onClose={() => setIsTagFilterMenuOpen(false)}
+              onUserTagsChange={setActiveUserTagFilters}
+              onEntityTagsChange={setActiveEntityTagFilters}
               onShowArchivedChange={setShowArchived}
-              onClear={() => setActiveTagFilters([])}
-              onToggleTag={(tag) => {
-                setActiveTagFilters((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]);
-              }}
             />
             {isDraggingFile && <div className="drop-overlay">Drop photos to import</div>}
           </>
@@ -1576,7 +1545,7 @@ function App() {
           node={selectedNode}
           assets={assets}
           adaptation={adaptation}
-          projectTags={availableUserTags}
+          projectTags={projectTags}
           coverAssetId={currentProject?.coverAssetId ?? null}
           onDraftChange={updateDraft}
           onImageGroupChange={updateImageGroup}
@@ -1593,7 +1562,7 @@ function App() {
           onArchiveImage={requestArchiveImageAsset}
           onRestoreImage={restoreImageAsset}
           onOpenAsset={openAssetInSidebar}
-          onAssetTagsChange={updateAssetTags}
+          onPartitionedAssetTagsChange={updatePartitionedAssetTags}
           onCreateTag={createProjectTag}
           onRefineChat={openChatForAsset}
         />
@@ -1615,7 +1584,7 @@ function App() {
           fallbackAsset={assets.find((asset) => asset.id === viewerAssetId)}
           assets={assets}
           projectSlug={openProjectSlug}
-          projectTags={availableUserTags}
+          projectTags={projectTags}
           coverAssetId={currentProject?.coverAssetId ?? null}
           onClose={() => {
             setViewerNodeId(null);
@@ -1626,7 +1595,7 @@ function App() {
           onDetails={openViewerDetails}
           onArchiveImage={requestArchiveImageAsset}
           onRestoreImage={restoreImageAsset}
-          onAssetTagsChange={updateAssetTags}
+          onPartitionedAssetTagsChange={updatePartitionedAssetTags}
           onCreateTag={createProjectTag}
           onSetProjectCover={setProjectCover}
         />
@@ -1879,10 +1848,8 @@ function TagOrganizerRow({
           title="Double-click to rename"
         >
           {tag.name}
-          {tag.locked && <span className="tag-organizer-entity-label">{tag.entityKind ?? 'entity'}</span>}
         </span>
       )}
-      {!tag.locked && (
       <button
         type="button"
         className="tag-organizer-delete"
@@ -1891,7 +1858,6 @@ function TagOrganizerRow({
       >
         <TrashIcon />
       </button>
-      )}
     </div>
   );
 }
@@ -1991,7 +1957,7 @@ function ProjectPhaseSidebar({
       </nav>
       <div className="phase-sidebar-footer">
         <button className="secondary" disabled={deleting || exportingAssets} onClick={() => setOrganizingTags(true)}>
-          Organize Tags
+          Your tags
         </button>
         <button
           className="secondary"
@@ -2012,10 +1978,10 @@ function ProjectPhaseSidebar({
         </button>
       </div>
       {organizingTags && (
-        <Modal title="Organize Tags" onClose={() => !pendingTagDelete && setOrganizingTags(false)}>
+        <Modal title="Your tags" onClose={() => !pendingTagDelete && setOrganizingTags(false)}>
           <div className="tag-organizer-list">
             {projectTags.length === 0 ? (
-              <p className="muted">No tags yet.</p>
+              <p className="muted">No custom tags yet.</p>
             ) : projectTags.map((tag) => (
               <TagOrganizerRow
                 key={tag.id}
@@ -2025,6 +1991,7 @@ function ProjectPhaseSidebar({
               />
             ))}
           </div>
+          <p className="muted tag-organizer-footer-note">Story entity tags are created from Characters and Locations in Story Adaptation.</p>
         </Modal>
       )}
       {pendingTagDelete && (
@@ -2105,87 +2072,39 @@ function ProjectPhaseSidebar({
   );
 }
 
-function FloatingFilterMenu({
-  availableTagFilters,
-  activeTagFilters,
+function FloatingTagsMenu({
+  userAvailableTags,
+  characterAvailableTags,
+  locationAvailableTags,
+  userTagCounts,
+  entityTagCounts,
+  activeUserTags,
+  activeEntityTags,
   showArchived,
   isOpen,
   onToggleOpen,
   onClose,
+  onUserTagsChange,
+  onEntityTagsChange,
   onShowArchivedChange,
-  onClear,
-  onToggleTag,
 }: {
-  availableTagFilters: string[];
-  activeTagFilters: string[];
+  userAvailableTags: TagDefinition[];
+  characterAvailableTags: TagDefinition[];
+  locationAvailableTags: TagDefinition[];
+  userTagCounts: Record<string, number>;
+  entityTagCounts: Record<string, number>;
+  activeUserTags: string[];
+  activeEntityTags: string[];
   showArchived: boolean;
   isOpen: boolean;
   onToggleOpen: () => void;
   onClose: () => void;
+  onUserTagsChange: (tags: string[]) => void;
+  onEntityTagsChange: (tags: string[]) => void;
   onShowArchivedChange: (value: boolean) => void;
-  onClear: () => void;
-  onToggleTag: (tag: string) => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const visibleTags = ['archetype', 'character-sheet', 'location', 'page', 'panel', 'generated-image', ...availableTagFilters.filter((tag) => !['archetype', 'character-sheet', 'location', 'page', 'panel', 'generated-image'].includes(tag))];
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) return;
-      if (menuRef.current?.contains(target)) return;
-      onClose();
-    };
-    document.addEventListener('mousedown', closeOnOutsideClick, true);
-    return () => document.removeEventListener('mousedown', closeOnOutsideClick, true);
-  }, [isOpen, onClose]);
-
-  return (
-    <div ref={menuRef} className="floating-filter-menu">
-      <button className={`secondary tag-filter-toggle ${activeTagFilters.length ? 'active' : ''}`} onClick={onToggleOpen}>
-        Filters{activeTagFilters.length ? ` (${activeTagFilters.length})` : ''}
-      </button>
-      {isOpen && (
-        <div className="floating-filter-popover">
-          <div className="floating-filter-archive-section">
-            <button
-              className={showArchived ? 'active' : ''}
-              onClick={() => onShowArchivedChange(!showArchived)}
-            >
-              {showArchived ? 'Hide archived' : 'Show archived'}
-            </button>
-          </div>
-          <button className={activeTagFilters.length === 0 ? 'active' : ''} onClick={onClear}>All</button>
-          {visibleTags.map((tag) => (
-            <button key={tag} className={activeTagFilters.includes(tag) ? 'active' : ''} onClick={() => onToggleTag(tag)}>
-              {tag}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FloatingTagsMenu({
-  availableTags,
-  tagCounts,
-  activeTags,
-  isOpen,
-  onToggleOpen,
-  onClose,
-  onChange,
-}: {
-  availableTags: TagDefinition[];
-  tagCounts: Record<string, number>;
-  activeTags: string[];
-  isOpen: boolean;
-  onToggleOpen: () => void;
-  onClose: () => void;
-  onChange: (tags: string[]) => void;
-}) {
-  const menuRef = useRef<HTMLDivElement>(null);
+  const activeCount = activeUserTags.length + activeEntityTags.length;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -2201,17 +2120,31 @@ function FloatingTagsMenu({
 
   return (
     <div ref={menuRef} className="floating-tags-menu">
-      <button className={`secondary tag-filter-toggle ${activeTags.length ? 'active' : ''}`} onClick={onToggleOpen}>
-        Tags{activeTags.length ? ` (${activeTags.length})` : ''}
+      <button className={`secondary tag-filter-toggle ${activeCount ? 'active' : ''}`} onClick={onToggleOpen}>
+        Tags{activeCount ? ` (${activeCount})` : ''}
       </button>
       {isOpen && (
-        <TagEditorPopover
+        <SplitTagPopover
           mode="filter"
-          title="Filter by tags"
-          selectedTags={activeTags}
-          availableTags={availableTags}
-          tagCounts={tagCounts}
-          onChange={onChange}
+          className="split-tag-popover-floating"
+          userSelectedTags={activeUserTags}
+          userAvailableTags={userAvailableTags}
+          userTagCounts={userTagCounts}
+          onUserTagsChange={onUserTagsChange}
+          entitySelectedTags={activeEntityTags}
+          characterAvailableTags={characterAvailableTags}
+          locationAvailableTags={locationAvailableTags}
+          entityTagCounts={entityTagCounts}
+          onEntityTagsChange={onEntityTagsChange}
+          footer={(
+            <button
+              type="button"
+              className={showArchived ? 'active' : ''}
+              onClick={() => onShowArchivedChange(!showArchived)}
+            >
+              {showArchived ? 'Hide archived' : 'Show archived'}
+            </button>
+          )}
         />
       )}
     </div>
@@ -2223,6 +2156,7 @@ function StoryPhaseScreen({
   projectSlug,
   adaptation,
   assets,
+  canvas,
   workflow,
   validation,
   onSaveStyle,
@@ -2234,12 +2168,14 @@ function StoryPhaseScreen({
   onStartWorkflow,
   onStartValidation,
   onPublishPhaseToCanvas,
+  onDraftArtifactToCanvas,
   onReloadAdaptation,
 }: {
   phase: ProjectPhase;
   projectSlug: string;
   adaptation: AdaptationStatus;
   assets: Asset[];
+  canvas: CanvasDocument;
   workflow: AdaptationWorkflowStatus | null;
   validation: AdaptationWorkflowStatus | null;
   onSaveStyle: (visualStyle: string) => Promise<void>;
@@ -2251,6 +2187,7 @@ function StoryPhaseScreen({
   onStartWorkflow: (stage: AdaptationStage) => Promise<void>;
   onStartValidation: () => Promise<void>;
   onPublishPhaseToCanvas: () => Promise<void>;
+  onDraftArtifactToCanvas: (artifactKind: ArtifactKind, artifactKey: string) => Promise<void>;
   onReloadAdaptation: () => Promise<void>;
 }) {
   const [visualStyle, setVisualStyle] = useState(adaptation.visualStyle);
@@ -2319,9 +2256,16 @@ function StoryPhaseScreen({
             onGenerateStyleRef={onGenerateStyleRef}
             onStartWorkflow={() => onStartWorkflow('characters')}
             onStartValidation={onStartValidation}
-            onPublishPhaseToCanvas={publishPhase}
-            isPublishingPhase={isPublishingPhase}
-            fileEditor={<AdaptationFileEditor projectSlug={projectSlug} kind="characters" links={adaptation.characters} onReloadAdaptation={onReloadAdaptation} />}
+            fileEditor={(
+              <AdaptationFileEditor
+                projectSlug={projectSlug}
+                kind="characters"
+                links={adaptation.characters}
+                canvasKeysOnCanvas={storyArtifactKeysOnCanvas(canvas.nodes, 'character-sheet')}
+                onDraftToCanvas={(key) => onDraftArtifactToCanvas('character-sheet', key)}
+                onReloadAdaptation={onReloadAdaptation}
+              />
+            )}
           />
         )}
         {phase === 'phase-2-locations' && (
@@ -2337,9 +2281,16 @@ function StoryPhaseScreen({
             onGenerateStyleRef={onGenerateStyleRef}
             onStartWorkflow={async () => {}}
             onStartValidation={async () => {}}
-            onPublishPhaseToCanvas={publishPhase}
-            isPublishingPhase={isPublishingPhase}
-            fileEditor={<AdaptationFileEditor projectSlug={projectSlug} kind="locations" links={adaptation.locations} onReloadAdaptation={onReloadAdaptation} />}
+            fileEditor={(
+              <AdaptationFileEditor
+                projectSlug={projectSlug}
+                kind="locations"
+                links={adaptation.locations}
+                canvasKeysOnCanvas={storyArtifactKeysOnCanvas(canvas.nodes, 'location-prompt')}
+                onDraftToCanvas={(key) => onDraftArtifactToCanvas('location-prompt', key)}
+                onReloadAdaptation={onReloadAdaptation}
+              />
+            )}
           />
         )}
         {phase === 'phase-3-scenes' && (
@@ -2431,11 +2382,15 @@ function AdaptationFileEditor({
   projectSlug,
   kind,
   links,
+  canvasKeysOnCanvas,
+  onDraftToCanvas,
   onReloadAdaptation,
 }: {
   projectSlug: string;
   kind: AdaptationFileKind;
   links: Record<string, AdaptationAssetLink>;
+  canvasKeysOnCanvas?: Set<string>;
+  onDraftToCanvas?: (key: string) => Promise<void>;
   onReloadAdaptation: () => Promise<void>;
 }) {
   const files = filesFromLinks(kind, links);
@@ -2445,6 +2400,8 @@ function AdaptationFileEditor({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<AdaptationFilePayload>(() => emptyFileDraft(kind, []));
   const [isSaving, setIsSaving] = useState(false);
+  const [draftingKey, setDraftingKey] = useState<string | null>(null);
+  const supportsDraftToCanvas = kind === 'characters' || kind === 'locations';
 
   const openNew = () => {
     setIsCreating(true);
@@ -2491,12 +2448,35 @@ function AdaptationFileEditor({
         <button className="secondary" onClick={openNew}>New {singular}</button>
       </div>
       <div className="adaptation-file-grid">
-        {files.map((file) => (
-          <button key={file.key} className="adaptation-file-list-item" onClick={() => openEdit(file)}>
-            <strong>{file.key}</strong>
-            <small>{file.status} · {file.promptPath}</small>
-          </button>
-        ))}
+        {files.map((file) => {
+          const onCanvas = canvasKeysOnCanvas?.has(file.key) ?? false;
+          return (
+            <div key={file.key} className="adaptation-file-list-item">
+              <button type="button" className="adaptation-file-list-main" onClick={() => openEdit(file)}>
+                <strong>{file.key}</strong>
+                <small>{file.status} · {file.promptPath}</small>
+              </button>
+              {supportsDraftToCanvas && onDraftToCanvas && (
+                <button
+                  type="button"
+                  className="secondary adaptation-file-draft-button"
+                  disabled={onCanvas || draftingKey === file.key}
+                  onClick={async (event) => {
+                    event.stopPropagation();
+                    setDraftingKey(file.key);
+                    try {
+                      await onDraftToCanvas(file.key);
+                    } finally {
+                      setDraftingKey(null);
+                    }
+                  }}
+                >
+                  {draftingKey === file.key ? 'Drafting...' : onCanvas ? 'On canvas' : 'Draft on canvas'}
+                </button>
+              )}
+            </div>
+          );
+        })}
         {!files.length && <p className="muted">No {fileKindLabel(kind).toLowerCase()} yet.</p>}
       </div>
       {isModalOpen && (
@@ -2813,7 +2793,9 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
       </div>
     );
   }
-  const currentIndex = Math.max(0, data.assetIds.indexOf(asset.id));
+  const visibleVariants = nonArchivedVariants(data.assets, data.assetIds);
+  const currentVisibleIndex = visibleVariants.findIndex((variant) => variant.id === asset.id);
+  const hasMultipleVariants = visibleVariants.length > 1;
   const params = asset.generation;
   const styleRefKind = styleRefKindForTags(data.tags);
   const styleRole = styleRefKind === 'archetype-character' ? 'Character archetype' : styleRefKind === 'archetype-scene' ? 'Scene archetype' : null;
@@ -2821,13 +2803,13 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
     asset.prompt?.text,
     params ? `model: ${params.model}` : null,
     params ? `ratio: ${params.aspectRatio}, size: ${params.imageSize}, seed: ${params.seed ?? 'auto'}` : null,
-    `variants: ${currentIndex + 1}/${data.assetIds.length}`,
+    hasMultipleVariants && currentVisibleIndex >= 0 ? `variants: ${currentVisibleIndex + 1}/${visibleVariants.length}` : null,
   ]
     .filter(Boolean)
     .join('\n');
   const isArchived = Boolean(asset.archivedAt);
   return (
-    <div className={`node image-group-node ${styleRole ? 'style-ref-image-node' : ''} ${data.assetIds.length > 1 ? 'stacked' : ''} ${data.isGenerating ? 'generating' : ''} ${isArchived ? 'is-archived' : ''}`} title={tooltip}>
+    <div className={`node image-group-node ${styleRole ? 'style-ref-image-node' : ''} ${hasMultipleVariants ? 'stacked' : ''} ${data.isGenerating ? 'generating' : ''} ${isArchived ? 'is-archived' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       {isEditingName ? (
         <input
@@ -2863,8 +2845,10 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
             }}
           />
         )}
-        {data.assetIds.length > 1 && <small className="variant-indicator">{currentIndex + 1} / {data.assetIds.length}</small>}
-        {data.assetIds.length > 1 && (
+        {hasMultipleVariants && currentVisibleIndex >= 0 && (
+          <small className="variant-indicator">{currentVisibleIndex + 1} / {visibleVariants.length}</small>
+        )}
+        {hasMultipleVariants && (
           <div className="variant-controls">
             <button
               className="nodrag nopan"
@@ -2908,10 +2892,12 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
           </div>
         )}
       </div>
-      <NodeAssetTagRow
+      <NodeTagButton
         tagIds={asset.tags}
         projectTags={data.projectTags}
-        onChange={(tags) => nodeTagActionsRef.updateAssetTags(data.nodeId, asset.id, tags)}
+        onPartitionedTagsChange={(userTags, characterTags, locationTags) => (
+          nodeTagActionsRef.updatePartitionedAssetTags(data.nodeId, asset.id, userTags, characterTags, locationTags)
+        )}
         onCreateTag={(tag) => nodeTagActionsRef.createProjectTag(tag)}
       />
       <Handle type="source" position={Position.Right} className="output-handle" />
@@ -3029,7 +3015,7 @@ function ImageViewer({
   onDetails,
   onArchiveImage,
   onRestoreImage,
-  onAssetTagsChange,
+  onPartitionedAssetTagsChange,
   onCreateTag,
   onSetProjectCover,
 }: {
@@ -3045,17 +3031,16 @@ function ImageViewer({
   onDetails: (nodeId: string) => void;
   onArchiveImage: (nodeId: string, assetId: string) => void;
   onRestoreImage: (nodeId: string, assetId: string) => void;
-  onAssetTagsChange: (nodeId: string, assetId: string, tags: string[]) => void;
+  onPartitionedAssetTagsChange: (nodeId: string, assetId: string, userTags: string[], characterTags: string[], locationTags: string[]) => void;
   onCreateTag: (tag: TagDefinition) => void;
   onSetProjectCover: (assetId: string) => void;
 }) {
-  const [isTagEditorOpen, setIsTagEditorOpen] = useState(false);
   const [isSavingImage, setIsSavingImage] = useState(false);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
-      if (event.key === 'ArrowLeft' && node && node.data.assetIds.length > 1) onVariant(node.id, -1);
-      if (event.key === 'ArrowRight' && node && node.data.assetIds.length > 1) onVariant(node.id, 1);
+      if (event.key === 'ArrowLeft' && node && nonArchivedVariants(node.data.assets, node.data.assetIds).length > 1) onVariant(node.id, -1);
+      if (event.key === 'ArrowRight' && node && nonArchivedVariants(node.data.assets, node.data.assetIds).length > 1) onVariant(node.id, 1);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -3064,9 +3049,10 @@ function ImageViewer({
   const asset = node?.data.activeAsset ?? fallbackAsset;
   if (!asset) return null;
   const isArchived = Boolean(asset.archivedAt);
-  const userTags = asset.tags.filter((tag) => !SYSTEM_TAGS.has(tag));
   const isProjectCover = coverAssetId === asset.id;
-  const currentIndex = node ? Math.max(0, node.data.assetIds.indexOf(asset.id)) : 0;
+  const visibleVariants = node ? nonArchivedVariants(node.data.assets, node.data.assetIds) : [];
+  const currentVisibleIndex = node ? visibleVariants.findIndex((variant) => variant.id === asset.id) : -1;
+  const hasMultipleVariants = visibleVariants.length > 1;
   const imageUrl = `/api/projects/${projectSlug}/assets/${asset.id}/image`;
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
   const parentAssets = (asset.generation?.refs ?? []).map((ref) => assetById.get(ref)).filter((asset): asset is Asset => Boolean(asset));
@@ -3074,8 +3060,7 @@ function ImageViewer({
   const viewerClassName = 'image-viewer';
   const changeByClickSide = (event: React.MouseEvent<HTMLImageElement>) => {
     event.stopPropagation();
-    if (!node) return;
-    if (node.data.assetIds.length < 2) return;
+    if (!node || !hasMultipleVariants) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const direction = event.clientX < rect.left + rect.width / 2 ? -1 : 1;
     onVariant(node.id, direction);
@@ -3114,7 +3099,9 @@ function ImageViewer({
                 {isProjectCover ? 'Project cover' : 'Set as cover'}
               </button>
             )}
-            {node && <span>{currentIndex + 1} / {node.data.assetIds.length}</span>}
+            {node && hasMultipleVariants && currentVisibleIndex >= 0 && (
+              <span>{currentVisibleIndex + 1} / {visibleVariants.length}</span>
+            )}
             {asset.hasPixels && (
               <button
                 className="image-viewer-info-button secondary"
@@ -3143,23 +3130,16 @@ function ImageViewer({
             )}
             {node && (
               <div className="image-viewer-tag-menu">
-                <button
-                  className={`image-viewer-info-button secondary ${userTags.length ? 'active' : ''}`}
-                  onClick={() => setIsTagEditorOpen((current) => !current)}
-                  title="Edit tags"
-                >
-                  🏷️
-                </button>
-                {isTagEditorOpen && (
-                  <TagEditorPopover
-                    mode="assign"
-                    title="Assign tags"
-                    selectedTags={userTags}
-                    availableTags={projectTags}
-                    onChange={(tags) => onAssetTagsChange(node.id, asset.id, tags)}
-                    onCreateTag={onCreateTag}
-                  />
-                )}
+                <TagControlButton
+                  tagIds={asset.tags}
+                  projectTags={projectTags}
+                  onPartitionedTagsChange={(userTags, characterTags, locationTags) => (
+                    onPartitionedAssetTagsChange(node.id, asset.id, userTags, characterTags, locationTags)
+                  )}
+                  onCreateTag={onCreateTag}
+                  className="image-viewer-tag-controls"
+                  popoverClassName="split-tag-popover-viewer"
+                />
               </div>
             )}
             {node && (
@@ -3184,7 +3164,7 @@ function ImageViewer({
           />
         ))}
       </div>
-      {node && node.data.assetIds.length > 1 && (
+      {node && hasMultipleVariants && (
         <button
           className="image-viewer-nav previous"
           onClick={(event) => {
@@ -3197,7 +3177,7 @@ function ImageViewer({
         </button>
       )}
       <img className="image-viewer-main-image" src={imageUrl} alt={node?.data.displayName ?? assetLabel(asset)} onClick={changeByClickSide} />
-      {node && node.data.assetIds.length > 1 && (
+      {node && hasMultipleVariants && (
         <button
           className="image-viewer-nav next"
           onClick={(event) => {

@@ -439,6 +439,34 @@ def import_drafts_to_canvas(slug: str) -> AdaptationCanvasImportResponse:
     return AdaptationCanvasImportResponse(canvas=saved, importedNodeCount=imported_count)
 
 
+def import_artifact_to_canvas(slug: str, artifact_kind: str, artifact_key: str) -> AdaptationCanvasImportResponse:
+    metadata = sync_prompt_links(slug, read_metadata(slug))
+    library.sync_entity_tags(
+        slug,
+        character_keys=list(metadata.characters.keys()),
+        location_keys=list(metadata.locations.keys()),
+    )
+    if artifact_kind == "character-sheet":
+        entries = metadata.characters
+    elif artifact_kind == "location-prompt":
+        entries = metadata.locations
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for draft import: {artifact_kind}")
+    entry = entries.get(artifact_key)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Unknown adaptation artifact: {artifact_kind}:{artifact_key}")
+    before = library.read_stored_canvas(slug)
+    after, created, _node_id = library.sync_single_story_artifact_node(
+        before,
+        artifact_kind=artifact_kind,
+        artifact_key=artifact_key,
+        entry=entry,
+        entries=entries,
+    )
+    saved = library.write_canvas(slug, after)
+    return AdaptationCanvasImportResponse(canvas=saved, importedNodeCount=1 if created else 0)
+
+
 def migrate_legacy_canonical(slug: str, metadata: AdaptationMetadata) -> AdaptationMetadata:
     path = metadata_path(slug)
     if not path.is_file():

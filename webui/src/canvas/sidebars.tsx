@@ -3,8 +3,8 @@ import type { Node } from 'reactflow';
 import { isCanonicalStyleRefAsset, styleRefKindForTags } from '../styleRefs';
 import type { AdaptationStatus, ArtifactKind, Asset, DraftCanvasNode, GenerationParams, ImageGroupCanvasNode, StyleRefKind, TagDefinition } from '../types';
 import { canDeleteNode } from './roles';
-import { SYSTEM_TAGS, artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, uniqueOptions, visibleDisplayName } from './shared';
-import { TagEditorPopover } from './tagEditor';
+import { TagControlButton } from './assetTagRow';
+import { artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, uniqueOptions, visibleDisplayName } from './shared';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './types';
 
 export function NodeSidebar({
@@ -28,7 +28,7 @@ export function NodeSidebar({
   onArchiveImage,
   onRestoreImage,
   onOpenAsset,
-  onAssetTagsChange,
+  onPartitionedAssetTagsChange,
   onCreateTag,
   onRefineChat,
 }: {
@@ -52,7 +52,7 @@ export function NodeSidebar({
   onArchiveImage: (nodeId: string, assetId: string) => void;
   onRestoreImage: (nodeId: string, assetId: string) => void;
   onOpenAsset: (assetId: string) => void;
-  onAssetTagsChange: (nodeId: string, assetId: string, tags: string[]) => void;
+  onPartitionedAssetTagsChange: (nodeId: string, assetId: string, userTags: string[], characterTags: string[], locationTags: string[]) => void;
   onCreateTag: (tag: TagDefinition) => void;
   onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
@@ -102,7 +102,7 @@ export function NodeSidebar({
       onArchiveImage={onArchiveImage}
       onRestoreImage={onRestoreImage}
       onOpenAsset={onOpenAsset}
-      onAssetTagsChange={onAssetTagsChange}
+      onPartitionedAssetTagsChange={onPartitionedAssetTagsChange}
       onCreateTag={onCreateTag}
       onNodeChange={onImageGroupChange}
       onVariant={onVariant}
@@ -377,7 +377,7 @@ function ImageSidebar({
   onArchiveImage,
   onRestoreImage,
   onOpenAsset,
-  onAssetTagsChange,
+  onPartitionedAssetTagsChange,
   onCreateTag,
   onNodeChange,
   onVariant,
@@ -397,7 +397,7 @@ function ImageSidebar({
   onArchiveImage: (nodeId: string, assetId: string) => void;
   onRestoreImage: (nodeId: string, assetId: string) => void;
   onOpenAsset: (assetId: string) => void;
-  onAssetTagsChange: (nodeId: string, assetId: string, tags: string[]) => void;
+  onPartitionedAssetTagsChange: (nodeId: string, assetId: string, userTags: string[], characterTags: string[], locationTags: string[]) => void;
   onCreateTag: (tag: TagDefinition) => void;
   onNodeChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
@@ -409,12 +409,13 @@ function ImageSidebar({
   onRefineChat: (nodeId: string, assetId: string) => void;
 }) {
   const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
-  const [isTagEditorOpen, setIsTagEditorOpen] = useState(false);
   const [variantParams, setVariantParams] = useState(defaultDraftParams);
   const prompt = asset.prompt?.text ?? '';
   const refs = asset.generation?.refs ?? [];
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
-  const activeVariantIndex = Math.max(0, node.data.assetIds.indexOf(asset.id));
+  const visibleVariants = nonArchivedVariants(assets, node.data.assetIds);
+  const activeVariantIndex = Math.max(0, visibleVariants.findIndex((variant) => variant.id === asset.id));
+  const hasMultipleVariants = visibleVariants.length > 1;
   const isGeneratedResult = node.data.role?.type === 'generated-result';
   const styleRefKind = styleRefKindForTags(node.data.tags);
   const isCharacterArchetype = adaptation?.styleRefStatuses?.['archetype-character']?.assetId === asset.id;
@@ -427,7 +428,7 @@ function ImageSidebar({
   const aspectRatioOptions = isVariantPanelOpen ? activeCapabilities.aspectRatios : uniqueOptions(activeCapabilities.aspectRatios, asset.generation?.aspectRatio);
   const imageSizeOptions = isVariantPanelOpen ? activeCapabilities.imageSizes : uniqueOptions(activeCapabilities.imageSizes, asset.generation?.imageSize);
   const changeSidebarVariantByClickSide = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (node.data.assetIds.length < 2) return;
+    if (!hasMultipleVariants) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const direction = event.clientX < rect.left + rect.width / 2 ? -1 : 1;
     onVariant(node.id, direction);
@@ -442,7 +443,6 @@ function ImageSidebar({
     });
   }, [asset]);
   const isArchived = Boolean(asset.archivedAt);
-  const userTags = asset.tags.filter((tag) => !SYSTEM_TAGS.has(tag));
   return (
     <aside className="details-sidebar">
       <div className="sidebar-action-row">
@@ -464,19 +464,18 @@ function ImageSidebar({
         Group name
         <input value={node.data.displayName} onChange={(event) => onNodeChange(node.id, { displayName: event.target.value })} />
       </label>
-      <button className={`secondary sidebar-tag-button ${userTags.length ? 'active' : ''}`} onClick={() => setIsTagEditorOpen((current) => !current)} title="Edit tags">
-        🏷️ Tags{userTags.length ? ` (${userTags.length})` : ''}
-      </button>
-      {isTagEditorOpen && (
-        <TagEditorPopover
-          mode="assign"
-          title="Assign tags"
-          selectedTags={userTags}
-          availableTags={projectTags}
-          onChange={(tags) => onAssetTagsChange(node.id, asset.id, tags)}
-          onCreateTag={onCreateTag}
-        />
-      )}
+      <TagControlButton
+        tagIds={asset.tags}
+        projectTags={projectTags}
+        onPartitionedTagsChange={(userTags, characterTags, locationTags) => (
+          onPartitionedAssetTagsChange(node.id, asset.id, userTags, characterTags, locationTags)
+        )}
+        onCreateTag={onCreateTag}
+        className="sidebar-tag-controls"
+        popoverClassName="split-tag-popover-sidebar"
+        portaled
+        portaledAlign="right"
+      />
       {asset.hasPixels && (
         <div className="sidebar-cover-row">
           <button type="button" className="secondary" onClick={() => onFindOnCanvas(node.id)}>
@@ -489,7 +488,7 @@ function ImageSidebar({
       )}
       <div className="sidebar-variant-preview" onClick={changeSidebarVariantByClickSide}>
         {asset.thumbnailUrl && <img src={asset.thumbnailUrl} alt="" />}
-        <span>{activeVariantIndex + 1} / {node.data.assetIds.length}</span>
+        <span>{activeVariantIndex + 1} / {visibleVariants.length}</span>
         <button
           className="sidebar-preview-eye"
           onClick={(event) => {
@@ -500,7 +499,7 @@ function ImageSidebar({
         >
           👁️
         </button>
-        {node.data.assetIds.length > 1 && (
+        {hasMultipleVariants && (
           <>
             <button
               className="sidebar-variant-nav previous"

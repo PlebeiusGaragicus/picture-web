@@ -237,6 +237,11 @@ class AdaptationCanvasImportResponse(BaseModel):
     importedNodeCount: int
 
 
+class AdaptationImportArtifactRequest(BaseModel):
+    artifactKind: ArtifactKind
+    artifactKey: str = Field(pattern=SLUG_RE)
+
+
 class AdaptationStylePatch(BaseModel):
     visualStyle: str
 

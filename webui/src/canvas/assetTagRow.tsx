@@ -1,33 +1,95 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { TagDefinition } from '../types';
-import { TagEditorPopover } from './tagEditor';
-import { SYSTEM_TAGS, isEntityTag } from './shared';
+import { SplitTagPopover } from './splitTagPopover';
+import {
+  characterEntityTags,
+  characterEntityTagsOnAsset,
+  locationEntityTags,
+  locationEntityTagsOnAsset,
+  mergeAvailableUserTagsOnly,
+  partitionAssetTagIds,
+  userTagsOnAsset,
+} from './shared';
 
-export function resolveUserTags(tagIds: string[], projectTags: TagDefinition[]): TagDefinition[] {
-  const byId = new Map(projectTags.map((tag) => [tag.id, tag]));
-  return tagIds
-    .filter((tagId) => !SYSTEM_TAGS.has(tagId))
-    .map((tagId) => byId.get(tagId) ?? { id: tagId, name: tagId, color: '#64748b' });
-}
-
-export function NodeAssetTagRow({
+function TagSummary({
   tagIds,
   projectTags,
-  onChange,
-  onCreateTag,
 }: {
   tagIds: string[];
   projectTags: TagDefinition[];
-  onChange: (tags: string[]) => void;
-  onCreateTag: (tag: TagDefinition) => void;
 }) {
-  const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [isTruncated, setIsTruncated] = useState(false);
-  const rowRef = useRef<HTMLButtonElement>(null);
+  const userResolved = useMemo(() => userTagsOnAsset(tagIds, projectTags), [tagIds, projectTags]);
+  const characterResolved = useMemo(() => characterEntityTagsOnAsset(tagIds, projectTags), [tagIds, projectTags]);
+  const locationResolved = useMemo(() => locationEntityTagsOnAsset(tagIds, projectTags), [tagIds, projectTags]);
+  const hasAny = userResolved.length > 0 || characterResolved.length > 0 || locationResolved.length > 0;
+
+  if (!hasAny) {
+    return <span className="node-tag-placeholder">Add tags</span>;
+  }
+
+  return (
+    <span className="node-tag-summary">
+      {userResolved.map((tag) => (
+        <span key={tag.id} className="node-tag-pill" style={{ backgroundColor: tag.color }}>
+          {tag.name}
+        </span>
+      ))}
+      {characterResolved.map((tag) => (
+        <span key={tag.id} className="node-tag-pill entity-tag-pill" style={{ backgroundColor: tag.color }}>
+          {tag.name}
+        </span>
+      ))}
+      {locationResolved.map((tag) => (
+        <span key={tag.id} className="node-tag-pill entity-tag-pill" style={{ backgroundColor: tag.color }}>
+          {tag.name}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+export function TagControlButton({
+  tagIds,
+  projectTags,
+  onPartitionedTagsChange,
+  onCreateTag,
+  buttonLabel = 'Tags',
+  className = '',
+  popoverClassName = '',
+  portaled = false,
+  portaledAlign = 'left',
+}: {
+  tagIds: string[];
+  projectTags: TagDefinition[];
+  onPartitionedTagsChange: (userTags: string[], characterTags: string[], locationTags: string[]) => void;
+  onCreateTag: (tag: TagDefinition) => void;
+  buttonLabel?: string;
+  className?: string;
+  popoverClassName?: string;
+  portaled?: boolean;
+  portaledAlign?: 'left' | 'right';
+}) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const resolvedTags = useMemo(() => resolveUserTags(tagIds, projectTags), [tagIds, projectTags]);
-  const selectedTagIds = useMemo(() => resolvedTags.map((tag) => tag.id), [resolvedTags]);
-  const hoverLabel = resolvedTags.map((tag) => tag.name).join(', ');
+  const rowRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [isTruncated, setIsTruncated] = useState(false);
+  const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
+  const [isPopoverPositioned, setIsPopoverPositioned] = useState(false);
+
+  const partitioned = useMemo(() => partitionAssetTagIds(tagIds, projectTags), [tagIds, projectTags]);
+  const userAvailable = useMemo(() => {
+    const base = mergeAvailableUserTagsOnly(projectTags, []);
+    const byId = new Map(base.map((tag) => [tag.id, tag]));
+    partitioned.user.forEach((tagId) => {
+      if (!byId.has(tagId)) byId.set(tagId, { id: tagId, name: tagId, color: '#64748b' });
+    });
+    return Array.from(byId.values()).sort((first, second) => first.name.localeCompare(second.name));
+  }, [partitioned.user, projectTags]);
+  const characterAvailable = useMemo(() => characterEntityTags(projectTags), [projectTags]);
+  const locationAvailable = useMemo(() => locationEntityTags(projectTags), [projectTags]);
+  const totalCount = partitioned.user.length + partitioned.character.length + partitioned.location.length;
 
   useLayoutEffect(() => {
     const row = rowRef.current;
@@ -37,74 +99,155 @@ export function NodeAssetTagRow({
     const observer = new ResizeObserver(check);
     observer.observe(row);
     return () => observer.disconnect();
-  }, [resolvedTags]);
+  }, [tagIds, projectTags]);
+
+  const updatePopoverPosition = useCallback(() => {
+    const anchor = rowRef.current;
+    const popover = popoverRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const popoverHeight = popover?.offsetHeight ?? 280;
+    const popoverWidth = popover?.offsetWidth ?? 300;
+    const gap = 6;
+    const padding = 8;
+    let top = rect.bottom + gap;
+    if (top + popoverHeight > window.innerHeight - padding) {
+      top = Math.max(padding, rect.top - popoverHeight - gap);
+    }
+    let left = portaledAlign === 'right' ? rect.right - popoverWidth : rect.left;
+    if (left + popoverWidth > window.innerWidth - padding) {
+      left = window.innerWidth - popoverWidth - padding;
+    }
+    left = Math.max(padding, left);
+    setPopoverPosition({ top, left });
+    setIsPopoverPositioned(true);
+  }, [portaledAlign]);
+
+  useLayoutEffect(() => {
+    if (!isOpen || !portaled) {
+      setIsPopoverPositioned(false);
+      return;
+    }
+    updatePopoverPosition();
+  }, [isOpen, portaled, tagIds, updatePopoverPosition]);
 
   useEffect(() => {
-    if (!isEditorOpen) return;
+    if (!isOpen || !portaled || !popoverRef.current) return;
+    const observer = new ResizeObserver(() => updatePopoverPosition());
+    observer.observe(popoverRef.current);
+    return () => observer.disconnect();
+  }, [isOpen, portaled, updatePopoverPosition]);
+
+  useEffect(() => {
+    if (!isOpen || !portaled) return;
+    const reposition = () => updatePopoverPosition();
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [isOpen, portaled, updatePopoverPosition]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     const closeOnOutsideClick = (event: MouseEvent) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
       if (menuRef.current?.contains(target)) return;
-      setIsEditorOpen(false);
+      if (popoverRef.current?.contains(target)) return;
+      setIsOpen(false);
     };
     document.addEventListener('click', closeOnOutsideClick, true);
     return () => document.removeEventListener('click', closeOnOutsideClick, true);
-  }, [isEditorOpen]);
+  }, [isOpen]);
+
+  const applyEntityTags = (entityTags: string[]) => {
+    const characterTags = entityTags.filter((tagId) => characterAvailable.some((tag) => tag.id === tagId));
+    const locationTags = entityTags.filter((tagId) => locationAvailable.some((tag) => tag.id === tagId));
+    onPartitionedTagsChange(partitioned.user, characterTags, locationTags);
+  };
 
   return (
+    <div ref={menuRef} className={`tag-control-button ${isOpen ? 'is-open' : ''} ${className}`.trim()}>
+      <button
+        ref={rowRef}
+        type="button"
+        className={`node-tag-row tag-control-trigger ${isTruncated ? 'is-truncated' : ''} ${totalCount ? 'has-tags' : ''}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          setIsOpen((current) => !current);
+        }}
+        aria-expanded={isOpen}
+        aria-label={totalCount ? `Edit tags (${totalCount})` : 'Add tags'}
+      >
+        <span className="node-tag-label">{buttonLabel}</span>
+        <TagSummary tagIds={tagIds} projectTags={projectTags} />
+      </button>
+      {isOpen && (() => {
+        const popover = (
+          <SplitTagPopover
+            mode="assign"
+            className={`${popoverClassName}${portaled ? ' is-portaled' : ''}`.trim()}
+            style={portaled ? {
+              top: popoverPosition.top,
+              left: popoverPosition.left,
+              visibility: isPopoverPositioned ? 'visible' : 'hidden',
+            } : undefined}
+            userSelectedTags={partitioned.user}
+            userAvailableTags={userAvailable}
+            onUserTagsChange={(userTags) => onPartitionedTagsChange(userTags, partitioned.character, partitioned.location)}
+            onCreateTag={onCreateTag}
+            entitySelectedTags={partitioned.entity}
+            characterAvailableTags={characterAvailable}
+            locationAvailableTags={locationAvailable}
+            onEntityTagsChange={applyEntityTags}
+          />
+        );
+        if (portaled) {
+          return createPortal(
+            <div ref={popoverRef} className="split-tag-popover-portal-host">
+              {popover}
+            </div>,
+            document.body,
+          );
+        }
+        return popover;
+      })()}
+    </div>
+  );
+}
+
+export function NodeTagButton({
+  tagIds,
+  projectTags,
+  onPartitionedTagsChange,
+  onCreateTag,
+}: {
+  tagIds: string[];
+  projectTags: TagDefinition[];
+  onPartitionedTagsChange: (userTags: string[], characterTags: string[], locationTags: string[]) => void;
+  onCreateTag: (tag: TagDefinition) => void;
+}) {
+  return (
     <div
-      ref={menuRef}
       className="node-tag-menu nodrag nopan"
       onPointerDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
-      <div
-        className="node-tag-row-wrap"
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        <button
-          ref={rowRef}
-          type="button"
-          className={`node-tag-row ${isTruncated ? 'is-truncated' : ''}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            setIsEditorOpen((current) => !current);
-          }}
-          aria-expanded={isEditorOpen}
-          aria-label={resolvedTags.length ? `Edit tags: ${hoverLabel}` : 'Add tags'}
-        >
-          <span className="node-tag-label">tags:</span>
-          {resolvedTags.length === 0 ? (
-            <span className="node-tag-placeholder">Add tags</span>
-          ) : (
-            resolvedTags.map((tag) => (
-              <span
-                key={tag.id}
-                className={`node-tag-pill ${isEntityTag(tag.id, projectTags) ? 'entity-tag-pill' : ''}`}
-                style={{ backgroundColor: tag.color }}
-              >
-                {tag.name}
-              </span>
-            ))
-          )}
-        </button>
-        {resolvedTags.length > 0 && (isTruncated || resolvedTags.length > 1) && (
-          <span className="node-tag-row-bubble" role="tooltip">
-            {hoverLabel}
-          </span>
-        )}
-      </div>
-      {isEditorOpen && (
-        <TagEditorPopover
-          mode="assign"
-          title="Assign tags"
-          selectedTags={selectedTagIds}
-          availableTags={projectTags}
-          onChange={onChange}
-          onCreateTag={onCreateTag}
-        />
-      )}
+      <TagControlButton
+        tagIds={tagIds}
+        projectTags={projectTags}
+        onPartitionedTagsChange={onPartitionedTagsChange}
+        onCreateTag={onCreateTag}
+        buttonLabel="tags:"
+        popoverClassName="split-tag-popover-node"
+        portaled
+      />
     </div>
   );
 }
+
+export const NodeAssetTagRows = NodeTagButton;
+export const NodeAssetTagRow = NodeTagButton;

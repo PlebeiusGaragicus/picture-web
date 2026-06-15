@@ -127,6 +127,11 @@ export const api = {
     request<AdaptationCanvasImportResponse>(`/api/projects/${slug}/adaptation/import-drafts-to-canvas`, {
       method: 'POST',
     }),
+  importAdaptationArtifactToCanvas: (slug: string, artifactKind: ArtifactKind, artifactKey: string) =>
+    request<AdaptationCanvasImportResponse>(`/api/projects/${slug}/adaptation/import-artifact-to-canvas`, {
+      method: 'POST',
+      body: JSON.stringify({ artifactKind, artifactKey }),
+    }),
   getAdaptationBook: (slug: string) =>
     request<{ text: string }>(`/api/projects/${slug}/adaptation/book`),
   importAdaptationBook: (slug: string, file: File) => {

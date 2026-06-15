@@ -17,7 +17,6 @@ export interface ImageGroupNodeData extends ImageGroupCanvasNode {
   onView: (nodeId: string) => void;
   onDetails: (nodeId: string) => void;
   onDisplayNameChange: (nodeId: string, displayName: string) => void;
-  onAssetTagsChange: (nodeId: string, assetId: string, tags: string[]) => void;
   onCreateTag: (tag: TagDefinition) => void;
   projectTags: TagDefinition[];
   isGenerating?: boolean;

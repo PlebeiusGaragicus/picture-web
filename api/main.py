@@ -15,6 +15,7 @@ import chat_sessions
 from models import (
     ArchivePatch,
     AdaptationCanvasImportResponse,
+    AdaptationImportArtifactRequest,
     AdaptationFileCreate,
     AdaptationFileDocument,
     AdaptationFileKind,
@@ -212,6 +213,11 @@ def start_adaptation_validation(slug: str, payload: AdaptationWorkflowStartReque
 @app.post("/api/projects/{slug}/adaptation/import-drafts-to-canvas", response_model=AdaptationCanvasImportResponse)
 def import_adaptation_drafts_to_canvas(slug: str) -> AdaptationCanvasImportResponse:
     return adaptation.import_drafts_to_canvas(slug)
+
+
+@app.post("/api/projects/{slug}/adaptation/import-artifact-to-canvas", response_model=AdaptationCanvasImportResponse)
+def import_adaptation_artifact_to_canvas(slug: str, payload: AdaptationImportArtifactRequest) -> AdaptationCanvasImportResponse:
+    return adaptation.import_artifact_to_canvas(slug, payload.artifactKind, payload.artifactKey)
 
 
 @app.post("/api/projects/{slug}/adaptation/import-book", response_model=AdaptationStatus)

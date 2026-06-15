@@ -633,6 +633,76 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     assert {"character-sheet", "location-prompt", "scene-artifact"}.issubset(artifact_kinds)
 
 
+def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    character = client.post(
+        "/api/projects/farm-comic/adaptation/files/characters",
+        json={
+            "key": "hero-base",
+            "mode": "new-image",
+            "styleRef": "",
+            "body": "Full body character sheet for the farm hero.",
+        },
+    )
+    assert character.status_code == 200
+
+    location = client.post(
+        "/api/projects/farm-comic/adaptation/files/locations",
+        json={
+            "key": "barn",
+            "mode": "new-image",
+            "styleRef": "",
+            "body": "Wide establishing image prompt for a red barn.",
+        },
+    )
+    assert location.status_code == 200
+
+    first = client.post(
+        "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
+        json={"artifactKind": "character-sheet", "artifactKey": "hero-base"},
+    )
+    assert first.status_code == 200
+    assert first.json()["importedNodeCount"] == 1
+    nodes = first.json()["canvas"]["nodes"]
+    character_nodes = [
+        node
+        for node in nodes.values()
+        if node.get("type") == "storyArtifact" and node.get("artifactKind") == "character-sheet"
+    ]
+    assert len(character_nodes) == 1
+    assert character_nodes[0]["artifactKey"] == "hero-base"
+
+    second = client.post(
+        "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
+        json={"artifactKind": "character-sheet", "artifactKey": "hero-base"},
+    )
+    assert second.status_code == 200
+    assert second.json()["importedNodeCount"] == 0
+    nodes_after = second.json()["canvas"]["nodes"]
+    character_nodes_after = [
+        node
+        for node in nodes_after.values()
+        if node.get("type") == "storyArtifact" and node.get("artifactKind") == "character-sheet"
+    ]
+    assert len(character_nodes_after) == 1
+
+    location_import = client.post(
+        "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
+        json={"artifactKind": "location-prompt", "artifactKey": "barn"},
+    )
+    assert location_import.status_code == 200
+    assert location_import.json()["importedNodeCount"] == 1
+    location_nodes = [
+        node
+        for node in location_import.json()["canvas"]["nodes"].values()
+        if node.get("type") == "storyArtifact" and node.get("artifactKind") == "location-prompt"
+    ]
+    assert len(location_nodes) == 1
+    assert location_nodes[0]["artifactKey"] == "barn"
+
+
 def test_style_ref_status_clears_stale_asset_and_repairs_canvas(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
