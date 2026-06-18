@@ -269,7 +269,7 @@ class AdaptationSettingsPatch(BaseModel):
 
 
 class AdaptationWorkflowStartRequest(BaseModel):
-    stage: Literal["ingest", "characters", "all"] = "all"
+    stage: Literal["ingest", "characters", "locations", "all"] = "all"
 
 
 class AdaptationFileBase(BaseModel):
