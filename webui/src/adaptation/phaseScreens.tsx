@@ -11,7 +11,7 @@ export function PhaseAssetType({
   validation,
   onImportStyleRef,
   onSaveStylePrompt,
-  onGenerateStyleRef,
+  onOpenStyleRefOnCanvas,
   onStartWorkflow,
   onStartValidation,
   fileEditor,
@@ -24,12 +24,13 @@ export function PhaseAssetType({
   validation: AdaptationWorkflowStatus | null;
   onImportStyleRef: (refKind: StyleRefKind, file: File) => Promise<void>;
   onSaveStylePrompt: (refKind: StyleRefKind, prompt: string) => Promise<void>;
-  onGenerateStyleRef: (refKind: StyleRefKind) => Promise<void>;
+  onOpenStyleRefOnCanvas: (refKind: StyleRefKind) => Promise<void>;
   onStartWorkflow: () => Promise<void>;
   onStartValidation: () => Promise<void>;
   fileEditor: React.ReactNode;
 }) {
   const isCharacters = kind === 'characters';
+  const workflowEnabled = kind === 'characters' || kind === 'locations';
   const styleRefStatus = styleRefStatusFromAdaptation(isCharacters ? 'archetype-character' : 'archetype-scene', adaptation, assets);
   return (
     <>
@@ -40,11 +41,11 @@ export function PhaseAssetType({
           asset={styleRefStatus.asset}
           onImportStyleRef={onImportStyleRef}
           onSavePrompt={onSaveStylePrompt}
-          onGenerateStyleRef={onGenerateStyleRef}
+          onOpenStyleRefOnCanvas={onOpenStyleRefOnCanvas}
         />
       </div>
 
-      <PhaseWorkflowActions kind={kind} adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={onStartWorkflow} onStartValidation={onStartValidation} workflowDisabled={!isCharacters} />
+      <PhaseWorkflowActions kind={kind} adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={onStartWorkflow} onStartValidation={onStartValidation} workflowDisabled={!workflowEnabled} />
 
       {fileEditor}
     </>

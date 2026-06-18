@@ -32,7 +32,7 @@ import { TagColorPickerPopover } from './canvas/tagEditor';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './canvas/types';
 import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags } from './styleRefs';
 import { HelpTip, Modal } from './ui';
-import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryKind, StyleRefKind, TagDefinition } from './types';
+import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StoryKind, StyleRefKind, TagDefinition } from './types';
 
 type ProjectPhase =
   | 'story-canvas'
@@ -66,6 +66,8 @@ function phaseStage(phase: ProjectPhase): AdaptationStage | null {
       return 'ingest';
     case 'phase-1-characters':
       return 'characters';
+    case 'phase-2-locations':
+      return 'locations';
     default:
       return null;
   }
@@ -804,6 +806,19 @@ function App() {
     });
   };
 
+  const updateStoryArtifact = async (id: string, patch: Partial<StoryArtifactCanvasNode>) => {
+    setNodes((current) => {
+      const nextNodes = current.map((node) =>
+        node.id === id && node.data.kind === 'storyArtifact' ? { ...node, data: { ...node.data, ...patch } } : node,
+      );
+      persistNodes(nextNodes, { refresh: false }).catch((err) => {
+        console.error('[photo-web] failed to persist story artifact update', err);
+        setError(String(err));
+      });
+      return nextNodes;
+    });
+  };
+
   const updateImageGroup = async (id: string, patch: Partial<ImageGroupCanvasNode>) => {
     setNodes((current) => {
       const updatedNode = current.find((node) => node.id === id && node.data.kind === 'imageGroup') as Node<ImageGroupNodeData> | undefined;
@@ -1013,7 +1028,20 @@ function App() {
       setGeneratingNodeIds((current) => new Set(current).add(generatingId));
       setNodes((current) => current.map((node) => (node.id === generatingId || node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
       if (styleRefKind) {
-        const result = await api.generateAdaptationStyleRef(openProjectSlug, styleRefKind, generatingId);
+        if (!draft.visualStyleId) {
+          setError('Pick a visual style before generating the canonical reference.');
+          return;
+        }
+        const result = await api.generateAdaptationStyleRef(openProjectSlug, {
+          kind: styleRefKind,
+          canvasNodeId: id,
+          visualStyleId: draft.visualStyleId,
+          model: draft.params.model,
+          aspectRatio: draft.params.aspectRatio,
+          imageSize: draft.params.imageSize,
+          seed: draft.params.seed,
+          batchCount: draft.params.batchCount,
+        });
         if (result.status) setAdaptation(result.status);
       } else {
         const payload: GeneratePayload = {
@@ -1031,7 +1059,7 @@ function App() {
         };
         await api.generate(openProjectSlug, payload);
       }
-      setPopoverNodeId(null);
+      setPopoverNodeId(styleRefKind ? generatedResultNodeId(id) : null);
       await reload();
     } catch (err) {
       setError(String(err));
@@ -1199,32 +1227,23 @@ function App() {
     setProjects((current) => current.map((project) => (project.slug === updated.slug ? updated : project)));
   };
 
-  const generateAdaptationStyleRef = async (kind: StyleRefKind) => {
+  const openStyleRefOnCanvas = useCallback(async (kind: StyleRefKind) => {
     if (!openProjectSlug) return;
     setError(null);
-    const draftNodeId = styleRefDraftNodeId(kind, adaptation);
-    const imageNodeId = styleRefImageNodeId(kind, adaptation);
-    setProjectPhase(kind === 'archetype-character' ? 'phase-1-characters' : 'phase-2-locations');
-    setPhaseViewMode('canvas');
-    setPopoverNodeId(imageNodeId);
-    setGeneratingNodeIds((current) => new Set(current).add(draftNodeId));
-    setNodes((current) => current.map((node) => (node.id === imageNodeId || node.id === draftNodeId ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
     try {
-      const result = await api.generateAdaptationStyleRef(openProjectSlug, kind, draftNodeId);
-      if (result.status) setAdaptation(result.status);
-      await reload();
-      setPopoverNodeId(generatedResultNodeId(draftNodeId));
+      const result = await api.syncAdaptationStyleRefToCanvas(openProjectSlug, kind);
+      setCanvas(result.canvas);
+      await loadProject(openProjectSlug);
+      const draftNodeId = styleRefDraftNodeId(kind, null);
+      setProjectPhase(kind === 'archetype-character' ? 'phase-1-characters' : 'phase-2-locations');
+      setPhaseViewMode('canvas');
+      setSelectedNodeIds([draftNodeId]);
+      setPopoverNodeId(draftNodeId);
+      window.setTimeout(() => focusNodeOnCanvas(draftNodeId), 0);
     } catch (err) {
       setError(String(err));
-    } finally {
-      setGeneratingNodeIds((current) => {
-        const next = new Set(current);
-        next.delete(draftNodeId);
-        return next;
-      });
-      setNodes((current) => current.map((node) => (node.id === imageNodeId || node.id === draftNodeId ? { ...node, data: { ...node.data, isGenerating: false } } : node)));
     }
-  };
+  }, [focusNodeOnCanvas, loadProject, openProjectSlug]);
 
   const startAdaptationWorkflow = async (stage: AdaptationStage = 'all') => {
     if (!openProjectSlug) return;
@@ -1271,11 +1290,25 @@ function App() {
 
   const generateStoryArtifact = async (id: string, artifact: StoryArtifactNodeData) => {
     if (!openProjectSlug) return;
+    if (!artifact.visualStyleId) {
+      setError('Pick a visual style before generating.');
+      return;
+    }
     setGeneratingNodeIds((current) => new Set(current).add(id));
     setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
     try {
       setError(null);
-      const result = await api.generateAdaptationArtifact(openProjectSlug, artifact.artifactKind, artifact.artifactKey, id);
+      const result = await api.generateAdaptationArtifact(openProjectSlug, {
+        artifactKind: artifact.artifactKind,
+        artifactKey: artifact.artifactKey,
+        canvasNodeId: id,
+        visualStyleId: artifact.visualStyleId,
+        model: artifact.params.model,
+        aspectRatio: artifact.params.aspectRatio,
+        imageSize: artifact.params.imageSize,
+        seed: artifact.params.seed,
+        batchCount: artifact.params.batchCount,
+      });
       if (result.status) setAdaptation(result.status);
       await reload();
       setPopoverNodeId(generatedResultNodeId(id));
@@ -1404,7 +1437,7 @@ function App() {
             onImportBook={importAdaptationBook}
             onImportStyleRef={importAdaptationStyleRef}
             onSaveStylePrompt={saveAdaptationStyleRefPrompt}
-            onGenerateStyleRef={generateAdaptationStyleRef}
+            onOpenStyleRefOnCanvas={openStyleRefOnCanvas}
             onStartWorkflow={startAdaptationWorkflow}
             onStartValidation={startAdaptationValidation}
             onPublishPhaseToCanvas={publishAdaptationPhaseToCanvas}
@@ -1544,6 +1577,7 @@ function App() {
           projectTags={projectTags}
           coverAssetId={currentProject?.coverAssetId ?? null}
           onDraftChange={updateDraft}
+          onStoryArtifactChange={updateStoryArtifact}
           onImageGroupChange={updateImageGroup}
           onGenerate={generateDraft}
           onGenerateArtifact={generateStoryArtifact}
@@ -2159,7 +2193,7 @@ function StoryPhaseScreen({
   onImportBook,
   onImportStyleRef,
   onSaveStylePrompt,
-  onGenerateStyleRef,
+  onOpenStyleRefOnCanvas,
   onStartWorkflow,
   onStartValidation,
   onPublishPhaseToCanvas,
@@ -2177,7 +2211,7 @@ function StoryPhaseScreen({
   onImportBook: (file: File) => Promise<void>;
   onImportStyleRef: (kind: StyleRefKind, file: File) => Promise<void>;
   onSaveStylePrompt: (kind: StyleRefKind, prompt: string) => Promise<void>;
-  onGenerateStyleRef: (kind: StyleRefKind) => Promise<void>;
+  onOpenStyleRefOnCanvas: (kind: StyleRefKind) => Promise<void>;
   onStartWorkflow: (stage: AdaptationStage) => Promise<void>;
   onStartValidation: () => Promise<void>;
   onPublishPhaseToCanvas: () => Promise<void>;
@@ -2231,7 +2265,7 @@ function StoryPhaseScreen({
             validation={validation}
             onImportStyleRef={onImportStyleRef}
             onSaveStylePrompt={onSaveStylePrompt}
-            onGenerateStyleRef={onGenerateStyleRef}
+            onOpenStyleRefOnCanvas={onOpenStyleRefOnCanvas}
             onStartWorkflow={() => onStartWorkflow('characters')}
             onStartValidation={onStartValidation}
             fileEditor={(
@@ -2256,9 +2290,9 @@ function StoryPhaseScreen({
             validation={validation}
             onImportStyleRef={onImportStyleRef}
             onSaveStylePrompt={onSaveStylePrompt}
-            onGenerateStyleRef={onGenerateStyleRef}
-            onStartWorkflow={async () => {}}
-            onStartValidation={async () => {}}
+            onOpenStyleRefOnCanvas={onOpenStyleRefOnCanvas}
+            onStartWorkflow={() => onStartWorkflow('locations')}
+            onStartValidation={onStartValidation}
             fileEditor={(
               <AdaptationFileEditor
                 projectSlug={projectSlug}
@@ -2279,7 +2313,7 @@ function StoryPhaseScreen({
         )}
       </div>
       {workflow && (workflow.log || workflow.running || workflow.returnCode !== null) && (
-        <div className="story-log-card story-log-card-fill">
+        <div className="story-log-card">
           <WorkflowLogPanel
             title="Workflow Output"
             workflow={workflow}
@@ -3178,16 +3212,30 @@ function ImageViewer({
   );
 }
 
+function truncateDraftPreview(text: string, max = 120) {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, max)}…`;
+}
+
 function DraftNode({ data }: NodeProps<DraftNodeData>) {
   const styleRefKind = styleRefKindForTags(data.tags);
   const styleRole = styleRefKind === 'archetype-character' ? 'Character archetype prompt' : styleRefKind === 'archetype-scene' ? 'Scene archetype prompt' : null;
   const roleClass = data.role?.type === 'text-result' ? 'text-result-node' : '';
-  const nodeTitle = data.role?.type === 'text-result' ? 'Child Text' : 'Draft';
+  const isArchetype = data.tags.includes('archetype');
+  const nodeTitle = styleRefKind
+    ? visibleDisplayName(data.displayName) || (styleRefKind === 'archetype-character' ? 'Character Archetype' : 'Scene Archetype')
+    : data.role?.type === 'text-result'
+      ? 'Child Text'
+      : 'Draft';
   const nodeSubtitle = data.role?.type === 'text-result'
     ? 'Editable child artifact'
     : styleRefKind && data.tags.includes('generated')
       ? 'Generated child available'
       : '';
+  const promptPreview = data.prompt.trim()
+    ? (isArchetype ? truncateDraftPreview(data.prompt) : data.prompt.replace(/\s+/g, ' ').trim())
+    : '';
   const tooltip = [
     data.prompt || 'Draft prompt not set',
     `parents: ${data.refs.length}`,
@@ -3198,7 +3246,7 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
     <div className={`node draft-node ${data.tags.includes('archetype') ? 'archetype-draft-node' : ''} ${roleClass} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       <div className="draft-placeholder" aria-hidden="true">
-        {data.prompt.trim() && <p className="draft-prompt-preview">{data.prompt.replace(/\s+/g, ' ').trim()}</p>}
+        {promptPreview && <p className="draft-prompt-preview">{promptPreview}</p>}
         {(styleRole || data.role?.type === 'text-result') && <span className="node-role-badge">{styleRole ?? nodeTitle}</span>}
         {data.isGenerating && (
           <div className="node-generating-overlay">

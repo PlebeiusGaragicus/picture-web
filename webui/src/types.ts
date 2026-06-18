@@ -124,6 +124,7 @@ export interface StoryArtifactCanvasNode extends CanvasNodeLayout {
   prompt: string;
   refs: string[];
   params: GenerationParams;
+  visualStyleId?: string | null;
   generatedAssetIds: string[];
 }
 
@@ -147,6 +148,29 @@ export interface GeneratePayload {
   tags: string[];
   canvasNodeId?: string | null;
   visualStyleId?: string | null;
+}
+
+export interface GenerateStyleRefPayload {
+  kind: StyleRefKind;
+  canvasNodeId?: string | null;
+  visualStyleId: string;
+  model?: string | null;
+  aspectRatio?: string | null;
+  imageSize?: string | null;
+  seed?: number | null;
+  batchCount?: number;
+}
+
+export interface GenerateArtifactPayload {
+  artifactKind: ArtifactKind;
+  artifactKey: string;
+  canvasNodeId?: string | null;
+  visualStyleId?: string | null;
+  model?: string | null;
+  aspectRatio?: string | null;
+  imageSize?: string | null;
+  seed?: number | null;
+  batchCount?: number;
 }
 
 export interface VisualStyleDefinition {
@@ -194,7 +218,7 @@ export interface AdaptationStatus {
   panels: Record<string, AdaptationAssetLink>;
 }
 
-export type AdaptationStage = 'ingest' | 'characters' | 'all';
+export type AdaptationStage = 'ingest' | 'characters' | 'locations' | 'all';
 
 export interface AdaptationWorkflowStatus {
   running: boolean;

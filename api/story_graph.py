@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import library
-from models import ArtifactSourceRole, CanvasDocument, DraftCanvasNode, GeneratedResultRole, ImageGroupCanvasNode, StoryArtifactCanvasNode, StyleRefSourceRole
+from models import ArtifactSourceRole, CanvasDocument, DraftCanvasNode, GeneratedResultRole, GenerationParams, ImageGroupCanvasNode, StoryArtifactCanvasNode, StyleRefSourceRole
 
 
 def story_artifact_refs(entries: dict[str, object], entry: object) -> list[str]:
@@ -96,6 +96,8 @@ def sync_style_ref_canvas_nodes(slug: str, canvas: CanvasDocument, kind: str | N
         source_x = existing.x if isinstance(existing, DraftCanvasNode | ImageGroupCanvasNode) else float(config["x"])
         source_y = existing.y if isinstance(existing, DraftCanvasNode | ImageGroupCanvasNode) else float(config["y"])
         source_width = existing.width if isinstance(existing, DraftCanvasNode | ImageGroupCanvasNode) else 240
+        preserved_visual_style_id = existing.visualStyleId if isinstance(existing, DraftCanvasNode) else None
+        preserved_params = existing.params if isinstance(existing, DraftCanvasNode) else None
         next_canvas.nodes[node_id] = DraftCanvasNode(
             displayName=str(config["display_name"]),
             x=source_x,
@@ -105,6 +107,8 @@ def sync_style_ref_canvas_nodes(slug: str, canvas: CanvasDocument, kind: str | N
             role=StyleRefSourceRole(kind=ref_kind),
             refs=[],
             prompt=status.promptText,
+            visualStyleId=preserved_visual_style_id,
+            params=preserved_params if preserved_params is not None else GenerationParams(),
         )
         legacy_image = next_canvas.nodes.get(legacy_image_node_id)
         if asset_id is not None:

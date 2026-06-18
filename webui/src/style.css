@@ -686,8 +686,6 @@ button {
   flex-direction: column;
   gap: 16px;
   width: 100%;
-  max-width: 560px;
-  margin-inline: auto;
 }
 
 .story-adaptation-grid.is-ingest .story-card textarea {
@@ -1101,25 +1099,20 @@ button {
 
 .story-log-card {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  min-height: 0;
+  width: 100%;
+  min-height: 480px;
+  max-height: min(75vh, 900px);
   overflow: hidden;
   background: #020617;
   border: 1px solid #1e293b;
   border-radius: 14px;
 }
 
-/* The workflow output fills the remaining viewport height below the phase content. */
-.story-log-card-fill {
-  flex: 1 1 auto;
+.story-adaptation-screen:has(.story-log-card + .story-log-card) .story-log-card {
   min-height: 320px;
-  max-height: min(52vh, 640px);
-}
-
-.story-adaptation-screen:has(.story-adaptation-grid.is-ingest) .story-log-card-fill {
-  width: 100%;
-  max-width: 560px;
-  margin-inline: auto;
+  max-height: min(42vh, 480px);
 }
 
 .workflow-log-panel {

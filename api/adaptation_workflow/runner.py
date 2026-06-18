@@ -125,6 +125,12 @@ def run_workflow(project_slug: str, stage: str) -> int:
             if stage == "characters":
                 logger.write_line()
                 logger.write_line(f"[characters] Done. Character sheets are under {ctx.book_root}/characters/sheets.")
+        if stage in {"locations", "all"}:
+            steps.require_book_session()
+            steps.stage_locations()
+            if stage == "locations":
+                logger.write_line()
+                logger.write_line(f"[locations] Done. Location prompts are under {ctx.book_root}/locations/prompts.")
         if stage == "all":
             logger.write_line()
             logger.write_line(f"Book root: {ctx.book_root}")

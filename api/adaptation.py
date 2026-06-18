@@ -32,6 +32,7 @@ from models import (
     AdaptationWorkflowStatus,
     ArtifactKind,
     AssetSummary,
+    DraftCanvasNode,
     GenerateRequest,
     StyleRefKind,
     StyleRefStatus,
@@ -145,7 +146,7 @@ def metadata_path(slug: str) -> Path:
     return adaptation_dir(slug) / "adaptation.json"
 
 
-WORKFLOW_STAGES = ("ingest", "characters", "all")
+WORKFLOW_STAGES = ("ingest", "characters", "locations", "all")
 STYLE_REF_KINDS: tuple[StyleRefKind, StyleRefKind] = ("archetype-character", "archetype-scene")
 
 
@@ -504,6 +505,14 @@ def start_validation(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
         script_command=f"cd api && {workflow_python()} -m adaptation_workflow validate \"$SLUG\" \"{stage}\"",
         validation=True,
     )
+
+
+def sync_style_ref_to_canvas(slug: str, kind: str) -> AdaptationCanvasImportResponse:
+    ref_kind = require_style_ref_kind(kind)
+    before = library.read_stored_canvas(slug)
+    after = library.sync_style_ref_canvas_nodes(slug, before, ref_kind)
+    saved = library.write_canvas(slug, after)
+    return AdaptationCanvasImportResponse(canvas=saved, importedNodeCount=0)
 
 
 def import_drafts_to_canvas(slug: str) -> AdaptationCanvasImportResponse:
@@ -1034,7 +1043,12 @@ def generate_style_ref(slug: str, request: AdaptationGenerateStyleRefRequest) ->
     root = ensure_adaptation(slug)
     kind = require_style_ref_kind(request.kind)
     source_node_id, _ = style_ref_node_ids(kind)
-    library.write_canvas(slug, library.sync_style_ref_canvas_nodes(slug, library.read_stored_canvas(slug), kind))
+    canvas = library.sync_style_ref_canvas_nodes(slug, library.read_stored_canvas(slug), kind)
+    library.write_canvas(slug, canvas)
+    if not request.visualStyleId:
+        raise HTTPException(status_code=400, detail="visualStyleId is required to generate a style reference")
+    draft_node = canvas.nodes.get(source_node_id)
+    draft_params = draft_node.params if isinstance(draft_node, DraftCanvasNode) else None
     prompt_path = style_ref_prompt_path(root, kind)
     prompt_text = read_text(prompt_path).strip()
     if not prompt_text:
@@ -1045,12 +1059,15 @@ def generate_style_ref(slug: str, request: AdaptationGenerateStyleRefRequest) ->
     payload = GenerateRequest(
         prompt=prompt,
         refs=[],
-        aspectRatio="1:1",
-        imageSize="1K",
-        batchCount=1,
+        model=request.model or (draft_params.model if draft_params else None),
+        aspectRatio=request.aspectRatio or (draft_params.aspectRatio if draft_params else None) or "1:1",
+        imageSize=request.imageSize or (draft_params.imageSize if draft_params else None) or "1K",
+        seed=request.seed if request.seed is not None else (draft_params.seed if draft_params else None),
+        batchCount=request.batchCount,
         title=title,
         tags=tags,
         canvasNodeId=source_node_id,
+        visualStyleId=request.visualStyleId,
     )
     response = library.create_generated_assets(slug, payload, gemini.generate_image)
     asset = response.assets[0]
@@ -1215,9 +1232,9 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
         raise HTTPException(status_code=400, detail="Scene artifacts are planning artifacts and cannot be generated directly")
     ref_asset_ids = artifact_ref_asset_ids(slug, metadata, request.artifactKind, link)
     prompt = f"{link.prompt.strip()}\n"
+    canvas = library.read_stored_canvas(slug)
     canvas_node_id = request.canvasNodeId
     if canvas_node_id is None:
-        canvas = library.read_stored_canvas(slug)
         canvas_node_id = next(
             (
                 node_id
@@ -1228,6 +1245,13 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
             ),
             None,
         )
+    artifact_node = canvas.nodes.get(canvas_node_id) if canvas_node_id else None
+    artifact_params = artifact_node.params if isinstance(artifact_node, StoryArtifactCanvasNode) else None
+    visual_style_id = request.visualStyleId or (
+        artifact_node.visualStyleId if isinstance(artifact_node, StoryArtifactCanvasNode) else None
+    )
+    if not visual_style_id:
+        raise HTTPException(status_code=400, detail="visualStyleId is required to generate a story artifact image")
     entity_tags = (
         [request.artifactKey]
         if request.artifactKind in {"character-sheet", "location-prompt"}
@@ -1236,12 +1260,15 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
     payload = GenerateRequest(
         prompt=prompt,
         refs=ref_asset_ids,
-        aspectRatio="16:9",
-        imageSize="1K",
-        batchCount=1,
+        model=request.model or (artifact_params.model if artifact_params else None),
+        aspectRatio=request.aspectRatio or (artifact_params.aspectRatio if artifact_params else None) or "16:9",
+        imageSize=request.imageSize or (artifact_params.imageSize if artifact_params else None) or "1K",
+        seed=request.seed if request.seed is not None else (artifact_params.seed if artifact_params else None),
+        batchCount=request.batchCount,
         title=f"{link.artifactKind.replace('-', ' ').title()}: {request.artifactKey}",
         tags=list(dict.fromkeys(["comic-adaptation", link.artifactKind, *entity_tags])),
         canvasNodeId=canvas_node_id,
+        visualStyleId=visual_style_id,
     )
     response = library.create_generated_assets(slug, payload, gemini.generate_image)
     asset = response.assets[0]

@@ -302,15 +302,31 @@ class AdaptationStyleRefAssetRequest(BaseModel):
     assetId: str
 
 
+class AdaptationSyncStyleRefRequest(BaseModel):
+    kind: StyleRefKind
+
+
 class AdaptationGenerateStyleRefRequest(BaseModel):
     kind: StyleRefKind
     canvasNodeId: str | None = None
+    visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
+    model: str | None = None
+    aspectRatio: str | None = None
+    imageSize: str | None = None
+    seed: int | None = Field(default=None, ge=0)
+    batchCount: int = Field(default=1, ge=1, le=8)
 
 
 class AdaptationGenerateArtifactRequest(BaseModel):
     artifactKind: ArtifactKind
     artifactKey: str = Field(min_length=1)
     canvasNodeId: str | None = None
+    visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
+    model: str | None = None
+    aspectRatio: str | None = None
+    imageSize: str | None = None
+    seed: int | None = Field(default=None, ge=0)
+    batchCount: int = Field(default=1, ge=1, le=8)
 
 
 class AdaptationGenerateResponse(BaseModel):
@@ -485,6 +501,7 @@ class StoryArtifactCanvasNode(CanvasNodeLayout):
     prompt: str = ""
     refs: list[str] = Field(default_factory=list)
     params: GenerationParams = Field(default_factory=GenerationParams)
+    visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
     generatedAssetIds: list[str] = Field(default_factory=list)
 
 

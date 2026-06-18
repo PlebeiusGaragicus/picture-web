@@ -539,9 +539,11 @@ def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, mon
     )
 
     captured_refs = []
+    captured_prompt = {}
 
     def fake_generate(**kwargs):
         captured_refs[:] = [path.stem for path in kwargs["parent_png_paths"]]
+        captured_prompt["text"] = kwargs["prompt_text"]
         make_png(kwargs["output_png"], color="blue")
 
         class Result:
@@ -550,12 +552,22 @@ def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, mon
         return Result()
 
     monkeypatch.setattr(gemini, "generate_image", fake_generate)
-    response = client.post(
+    style_id = client.post(
+        "/api/projects/farm-comic/adaptation/visual-styles",
+        json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
+    ).json()["visualStyles"][0]["id"]
+    missing_style = client.post(
         "/api/projects/farm-comic/adaptation/generate-artifact",
         json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01"},
     )
+    assert missing_style.status_code == 400
+    response = client.post(
+        "/api/projects/farm-comic/adaptation/generate-artifact",
+        json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01", "visualStyleId": style_id},
+    )
     assert response.status_code == 200
     assert captured_refs == ["01HSTYLE", "01HCHAR", "01HCHAR2", "01HLOC"]
+    assert "bold comic ink" in captured_prompt["text"].lower()
     panel_link = client.get("/api/projects/farm-comic/adaptation").json()["panels"]["001-panel-01"]
     assert panel_link["assetIds"] == [response.json()["asset"]["id"]]
     tags = client.get("/api/projects/farm-comic/tags").json()
@@ -886,14 +898,25 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
         return Result()
 
     monkeypatch.setattr(gemini, "generate_image", fake_generate)
-    generated = client.post(
+    style_created = client.post(
+        "/api/projects/farm-comic/adaptation/visual-styles",
+        json={"name": "Ink wash", "prompt": "Style: Ink wash style.\n"},
+    )
+    assert style_created.status_code == 200
+    style_id = style_created.json()["visualStyles"][0]["id"]
+    missing_style = client.post(
         "/api/projects/farm-comic/adaptation/generate-style-ref",
         json={"kind": "archetype-character"},
+    )
+    assert missing_style.status_code == 400
+    generated = client.post(
+        "/api/projects/farm-comic/adaptation/generate-style-ref",
+        json={"kind": "archetype-character", "visualStyleId": style_id},
     )
     assert generated.status_code == 200
     generated_asset_id = generated.json()["asset"]["id"]
     assert "Character archetype prompt." in captured["prompt"]
-    assert "Ink wash style." not in captured["prompt"]
+    assert "ink wash" in captured["prompt"].lower()
     assert generated.json()["status"]["styleRefStatuses"]["archetype-character"]["assetId"] == generated_asset_id
     canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
     assert canvas_nodes["archetype_archetype_character"]["type"] == "draft"
@@ -914,6 +937,34 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
     assert delete_child.status_code == 204
     assert (root / "style-refs" / "archetype-character.md").read_text() == "Character archetype prompt.\n"
     assert client.get("/api/projects/farm-comic/adaptation").json()["styleRefStatuses"]["archetype-character"]["assetId"] is None
+
+
+def test_sync_style_ref_to_canvas_preserves_visual_style_selection(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    (root / "style-refs").mkdir(parents=True, exist_ok=True)
+    (root / "style-refs" / "archetype-character.md").write_text("Character archetype prompt.\n")
+    style_id = client.post(
+        "/api/projects/farm-comic/adaptation/visual-styles",
+        json={"name": "Crayon", "prompt": "Style: crayon\n"},
+    ).json()["visualStyles"][0]["id"]
+    synced = client.post(
+        "/api/projects/farm-comic/adaptation/sync-style-ref-to-canvas",
+        json={"kind": "archetype-character"},
+    )
+    assert synced.status_code == 200
+    node_id = synced.json()["canvas"]["nodes"]["archetype_archetype_character"]
+    assert node_id["type"] == "draft"
+    canvas = client.get("/api/projects/farm-comic/canvas").json()
+    canvas["nodes"]["archetype_archetype_character"]["visualStyleId"] = style_id
+    assert client.put("/api/projects/farm-comic/canvas", json=canvas).status_code == 200
+    resynced = client.post(
+        "/api/projects/farm-comic/adaptation/sync-style-ref-to-canvas",
+        json={"kind": "archetype-character"},
+    )
+    assert resynced.status_code == 200
+    assert resynced.json()["canvas"]["nodes"]["archetype_archetype_character"]["visualStyleId"] == style_id
 
 
 def test_story_artifact_generated_asset_projects_to_child_image_group(tmp_path, monkeypatch):

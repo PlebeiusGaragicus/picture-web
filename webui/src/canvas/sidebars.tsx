@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Node } from 'reactflow';
 import { isCanonicalStyleRefAsset, styleRefKindForTags } from '../styleRefs';
-import type { AdaptationStatus, ArtifactKind, Asset, DraftCanvasNode, GenerationParams, ImageGroupCanvasNode, StyleRefKind, TagDefinition, VisualStyleDefinition } from '../types';
+import type { AdaptationStatus, ArtifactKind, Asset, DraftCanvasNode, GenerationParams, ImageGroupCanvasNode, StoryArtifactCanvasNode, StyleRefKind, TagDefinition, VisualStyleDefinition } from '../types';
 import { VisualStyleSelect } from '../adaptation/visualStyleSelect';
 import { TagControlButton } from './assetTagRow';
 import { canDeleteNode } from './roles';
@@ -15,6 +15,7 @@ export function NodeSidebar({
   projectTags,
   coverAssetId,
   onDraftChange,
+  onStoryArtifactChange,
   onImageGroupChange,
   onGenerate,
   onGenerateArtifact,
@@ -39,6 +40,7 @@ export function NodeSidebar({
   projectTags: TagDefinition[];
   coverAssetId?: string | null;
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
+  onStoryArtifactChange: (id: string, patch: Partial<StoryArtifactCanvasNode>) => void;
   onImageGroupChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onGenerateArtifact: (id: string, artifact: StoryArtifactNodeData) => void;
@@ -77,6 +79,8 @@ export function NodeSidebar({
     return (
       <StoryArtifactSidebar
         node={artifactNode}
+        visualStyles={adaptation?.visualStyles ?? []}
+        onStoryArtifactChange={onStoryArtifactChange}
         onGenerate={onGenerateArtifact}
         onCreateChildText={onCreateChildText}
         onDelete={onDelete}
@@ -148,6 +152,7 @@ function DraftSidebar({
   const styleRefKind = styleRefKindForTags(draft.tags);
   const styleRefLabel = styleRefKind === 'archetype-character' ? 'character' : styleRefKind === 'archetype-scene' ? 'scene' : null;
   const sourceLabel = styleRefLabel ? `${styleRefLabel} archetype` : null;
+  const showArchetypeControls = Boolean(styleRefKind);
   const [isEditingName, setIsEditingName] = useState(false);
   const [draftName, setDraftName] = useState(visibleDisplayName(draft.displayName));
   useEffect(() => {
@@ -197,7 +202,11 @@ function DraftSidebar({
           Durable {styleRefLabel} archetype prompt
         </div>
       )}
-      {isDurableSource && <p className="muted">This {sourceLabel ?? 'source'} prompt is backed by an adaptation file. Sync will recreate it if it is missing from the canvas.</p>}
+      {isDurableSource && (
+        <p className="muted">
+          This {sourceLabel ?? 'source'} prompt is backed by an adaptation file. Pick a visual style below, then generate the canonical reference image.
+        </p>
+      )}
       {isDurableSource && <button className="secondary" onClick={() => onCreateChildText(node)}>Create child text artifact</button>}
       {!isFileBackedPrompt && (
         <section className="sidebar-section parent-section">
@@ -243,6 +252,13 @@ function DraftSidebar({
           )}
         </section>
       )}
+      {(!isFileBackedPrompt || showArchetypeControls) && (
+        <VisualStyleSelect
+          styles={visualStyles}
+          value={draft.visualStyleId}
+          onChange={(styleId) => onDraftChange(node.id, { visualStyleId: styleId })}
+        />
+      )}
       <section className={`sidebar-section ${isFileBackedPrompt ? 'style-ref-sidebar-section' : ''}`}>
         <label className="field-label">
           {isFileBackedPrompt ? 'File-backed prompt' : 'Prompt'}
@@ -256,15 +272,12 @@ function DraftSidebar({
             readOnly={isFileBackedPrompt}
           />
         </label>
-        {isFileBackedPrompt && <p className="muted">Edit this prompt from the adaptation style controls or source file. The canvas node is synced from disk.</p>}
+        {isFileBackedPrompt && !showArchetypeControls && (
+          <p className="muted">Edit this prompt from the adaptation style controls or source file. The canvas node is synced from disk.</p>
+        )}
       </section>
-      {!isFileBackedPrompt && <section className="sidebar-section generation-section">
+      {(!isFileBackedPrompt || showArchetypeControls) && <section className="sidebar-section generation-section">
         <h3>Parameters</h3>
-      <VisualStyleSelect
-        styles={visualStyles}
-        value={draft.visualStyleId}
-        onChange={(styleId) => onDraftChange(node.id, { visualStyleId: styleId })}
-      />
       <div className="row">
         <select
           value={draftModel ?? ''}
@@ -281,7 +294,10 @@ function DraftSidebar({
         />
       </div>
       <div className="row">
-        <select value={draft.params.aspectRatio ?? '16:9'} onChange={(event) => onDraftChange(node.id, { params: { ...draft.params, aspectRatio: event.target.value } })}>
+        <select
+          value={draft.params.aspectRatio ?? (showArchetypeControls ? '1:1' : '16:9')}
+          onChange={(event) => onDraftChange(node.id, { params: { ...draft.params, aspectRatio: event.target.value } })}
+        >
           {draftCapabilities.aspectRatios.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
         <select value={draft.params.imageSize ?? '1K'} onChange={(event) => onDraftChange(node.id, { params: { ...draft.params, imageSize: event.target.value } })}>
@@ -289,30 +305,32 @@ function DraftSidebar({
         </select>
       </div>
       <div className="generate-control">
-        <button className="generate-button" onClick={() => onGenerate(node.id, draft)} disabled={!draft.prompt.trim() || draft.isGenerating}>
+        <button
+          className="generate-button"
+          onClick={() => onGenerate(node.id, draft)}
+          disabled={
+            !draft.prompt.trim()
+            || draft.isGenerating
+            || (showArchetypeControls && !draft.visualStyleId)
+          }
+        >
           {draft.isGenerating && <span className="spinner" aria-hidden="true" />}
-          {draft.isGenerating ? 'Generating...' : 'Generate'}
+          {draft.isGenerating ? 'Generating...' : showArchetypeControls ? 'Generate canonical reference' : 'Generate'}
         </button>
-        <label>
-          Batch size
-          <input
-            type="number"
-            min={1}
-            max={8}
-            value={draft.params.batchCount}
-            onChange={(event) => onDraftChange(node.id, { params: { ...draft.params, batchCount: Number(event.target.value) } })}
-          />
-        </label>
+        {!showArchetypeControls && (
+          <label>
+            Batch size
+            <input
+              type="number"
+              min={1}
+              max={8}
+              value={draft.params.batchCount}
+              onChange={(event) => onDraftChange(node.id, { params: { ...draft.params, batchCount: Number(event.target.value) } })}
+            />
+          </label>
+        )}
       </div>
       </section>}
-      {styleRefKind && (
-        <section className="sidebar-section generation-section style-ref-sidebar-section">
-          <button className="generate-button" onClick={() => onGenerate(node.id, draft)} disabled={!draft.prompt.trim() || draft.isGenerating}>
-            {draft.isGenerating && <span className="spinner" aria-hidden="true" />}
-            {draft.isGenerating ? 'Generating...' : 'Generate canonical reference'}
-          </button>
-        </section>
-      )}
     </aside>
   );
 }
@@ -323,11 +341,15 @@ function canGenerateArtifact(kind: ArtifactKind) {
 
 function StoryArtifactSidebar({
   node,
+  visualStyles,
+  onStoryArtifactChange,
   onGenerate,
   onCreateChildText,
   onDelete,
 }: {
   node: Node<StoryArtifactNodeData>;
+  visualStyles: VisualStyleDefinition[];
+  onStoryArtifactChange: (id: string, patch: Partial<StoryArtifactCanvasNode>) => void;
   onGenerate: (id: string, artifact: StoryArtifactNodeData) => void;
   onCreateChildText: (node: Node<StoryArtifactNodeData>) => void;
   onDelete: (id: string, assetId?: string) => void;
@@ -335,6 +357,9 @@ function StoryArtifactSidebar({
   const artifact = node.data;
   const canDelete = canDeleteNode(node);
   const isDurableSource = artifact.role?.type === 'artifact-source';
+  const artifactModel = artifact.params.model ?? defaultDraftParams.model;
+  const artifactCapabilities = capabilitiesForModel(artifactModel);
+  const canGenerate = canGenerateArtifact(artifact.artifactKind);
   return (
     <aside className="details-sidebar story-artifact-sidebar">
       <div className="popover-header">
@@ -345,30 +370,78 @@ function StoryArtifactSidebar({
         {canDelete ? <button className="danger" onClick={() => onDelete(node.id)}>Delete</button> : null}
       </div>
       {isDurableSource && <div className="canvas-role-badge">Durable story source</div>}
-      {isDurableSource && <p className="muted">This source artifact is backed by book-derived files and metadata. Generated images appear as child nodes on the canvas.</p>}
+      {isDurableSource && (
+        <p className="muted">
+          This source artifact is backed by book-derived files and metadata. Pick a visual style, then generate child images on the canvas.
+        </p>
+      )}
       {isDurableSource && <button className="secondary" onClick={() => onCreateChildText(node)}>Create child text artifact</button>}
       <section className="sidebar-section">
         <h3>Source</h3>
         <code className="path-code">{artifact.promptPath}</code>
       </section>
+      {canGenerate && (
+        <VisualStyleSelect
+          styles={visualStyles}
+          value={artifact.visualStyleId}
+          onChange={(styleId) => onStoryArtifactChange(node.id, { visualStyleId: styleId })}
+        />
+      )}
       <section className="sidebar-section">
         <h3>Prompt</h3>
         <textarea className="prompt-textarea prompt-preview locked-field" value={artifact.prompt} readOnly />
       </section>
       <section className="sidebar-section generation-section">
         <h3>Parameters</h3>
-        <div className="row">
-          <input value={artifact.params.model ?? defaultDraftParams.model ?? ''} readOnly />
-          <input value={artifact.params.aspectRatio ?? defaultDraftParams.aspectRatio ?? ''} readOnly />
-          <input value={artifact.params.imageSize ?? defaultDraftParams.imageSize ?? ''} readOnly />
-        </div>
-        {canGenerateArtifact(artifact.artifactKind) ? (
-          <button className="generate-button" onClick={() => onGenerate(node.id, artifact)} disabled={!artifact.prompt.trim() || artifact.isGenerating}>
-            {artifact.isGenerating && <span className="spinner" aria-hidden="true" />}
-            {artifact.isGenerating ? 'Generating...' : 'Generate child image'}
-          </button>
+        {canGenerate ? (
+          <>
+            <div className="row">
+              <select
+                value={artifactModel ?? ''}
+                onChange={(event) => onStoryArtifactChange(node.id, { params: normalizedParamsForModel(artifact.params, event.target.value) })}
+              >
+                {Object.keys(modelCapabilities).map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+              <input
+                value={artifact.params.seed ?? ''}
+                onChange={(event) =>
+                  onStoryArtifactChange(node.id, { params: { ...artifact.params, seed: event.target.value ? Number(event.target.value) : null } })
+                }
+                placeholder="Seed optional"
+              />
+            </div>
+            <div className="row">
+              <select
+                value={artifact.params.aspectRatio ?? defaultDraftParams.aspectRatio ?? '16:9'}
+                onChange={(event) => onStoryArtifactChange(node.id, { params: { ...artifact.params, aspectRatio: event.target.value } })}
+              >
+                {artifactCapabilities.aspectRatios.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+              <select
+                value={artifact.params.imageSize ?? defaultDraftParams.imageSize ?? '1K'}
+                onChange={(event) => onStoryArtifactChange(node.id, { params: { ...artifact.params, imageSize: event.target.value } })}
+              >
+                {artifactCapabilities.imageSizes.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </div>
+            <button
+              className="generate-button"
+              onClick={() => onGenerate(node.id, artifact)}
+              disabled={!artifact.prompt.trim() || !artifact.visualStyleId || artifact.isGenerating}
+            >
+              {artifact.isGenerating && <span className="spinner" aria-hidden="true" />}
+              {artifact.isGenerating ? 'Generating...' : 'Generate child image'}
+            </button>
+          </>
         ) : (
-          <p className="muted">Planning artifact only. Generate page or panel prompts from later layout artifacts.</p>
+          <>
+            <div className="row">
+              <input value={artifact.params.model ?? defaultDraftParams.model ?? ''} readOnly />
+              <input value={artifact.params.aspectRatio ?? defaultDraftParams.aspectRatio ?? ''} readOnly />
+              <input value={artifact.params.imageSize ?? defaultDraftParams.imageSize ?? ''} readOnly />
+            </div>
+            <p className="muted">Planning artifact only. Generate page or panel prompts from later layout artifacts.</p>
+          </>
         )}
       </section>
     </aside>
@@ -576,6 +649,14 @@ function ImageSidebar({
           </div>
         </section>
       )}
+      {asset.generation && !styleRefKind && (
+        <VisualStyleSelect
+          styles={adaptation?.visualStyles ?? []}
+          value={isVariantPanelOpen ? variantVisualStyleId : asset.generation.visualStyleId}
+          disabled={!isVariantPanelOpen}
+          onChange={setVariantVisualStyleId}
+        />
+      )}
       {prompt && (
         <section className={`sidebar-section ${styleRefKind ? 'style-ref-sidebar-section' : ''}`}>
           <label className="field-label">
@@ -635,12 +716,6 @@ function ImageSidebar({
               />
             </label>
           </div>
-          <VisualStyleSelect
-            styles={adaptation?.visualStyles ?? []}
-            value={isVariantPanelOpen ? variantVisualStyleId : asset.generation.visualStyleId}
-            disabled={!isVariantPanelOpen}
-            onChange={setVariantVisualStyleId}
-          />
           {styleRefKind ? (
             <p className="muted">Generate style reference replacements from the adaptation style reference action so canonical metadata stays in sync.</p>
           ) : isVariantPanelOpen ? (

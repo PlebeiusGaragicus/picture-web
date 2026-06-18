@@ -9,8 +9,14 @@ from typing import Callable
 from adaptation_workflow.config import AdaptationContext, BookSession, utc_now
 from adaptation_workflow.events import WorkflowLogger
 from adaptation_workflow.pi_rpc import PiRpcClient, PiRpcError
+from adaptation_workflow.sections import extract_sections
 from adaptation_workflow.slugify import slugify_name
-from adaptation_workflow.validate import ValidationError, validate_character_artifact, validate_character_sheet
+from adaptation_workflow.validate import (
+    ValidationError,
+    validate_character_artifact,
+    validate_character_sheet,
+    validate_location_prompt,
+)
 
 
 def write_multiline_prompt(skill_call: str, payload: str) -> str:
@@ -227,3 +233,48 @@ class StepRunner:
         self.step_character_list()
         self.step_character_artifacts()
         self.step_character_sheets()
+
+    def step_location_index(self) -> None:
+        out = self.ctx.book_root_abs / "locations" / "index.md"
+        rel_out = f"{self.ctx.book_root}/locations/index.md"
+        if out.is_file():
+            self.logger.write_skip("locations", "location index", rel_out)
+            self.logger.record_task(name="location index", skipped=True, duration_ms=0)
+            self._notify_progress()
+        else:
+            self.run_pi_step(
+                "locations",
+                f"location index {self.ctx.book_root.name}",
+                rel_out,
+                f"/skill:location-index {self.ctx.book_root_abs}",
+            )
+        if not out.is_file():
+            raise RuntimeError(f"Missing {out}")
+
+    def step_location_prompts(self) -> None:
+        index_path = self.ctx.book_root_abs / "locations" / "index.md"
+        tmp_dir = self.ctx.book_root_abs / "locations" / ".entries"
+        entries = extract_sections(index_path, tmp_dir)
+        total = len(entries)
+        for n, entry in enumerate(entries, start=1):
+            slug = entry.stem
+            out = self.ctx.book_root_abs / "locations" / "prompts" / f"{slug}.md"
+            rel_out = f"{self.ctx.book_root}/locations/prompts/{slug}.md"
+            if out.is_file():
+                self.logger.write_skip("locations", f"location prompt [{n}/{total}] {slug}", rel_out)
+                self.logger.record_task(name=f"location prompt {slug}", skipped=True, duration_ms=0)
+                self._notify_progress()
+                continue
+            prompt = write_multiline_prompt(
+                f"/skill:location-prompt {self.ctx.book_root_abs} {out}",
+                entry.read_text(),
+            )
+            self.run_pi_step("locations", f"location prompt {slug}", rel_out, prompt)
+            try:
+                validate_location_prompt(out)
+            except ValidationError as exc:
+                raise RuntimeError(str(exc)) from exc
+
+    def stage_locations(self) -> None:
+        self.step_location_index()
+        self.step_location_prompts()

@@ -13,6 +13,8 @@ from adaptation_workflow.validate import (
     ValidationReport,
     validate_character_artifact,
     validate_character_sheet,
+    validate_location_prompt,
+    validate_locations,
     validate_style_refs,
 )
 
@@ -145,3 +147,53 @@ def test_book_session_roundtrip(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.session_id == "abc123"
     assert json.loads(manifest.read_text())["bookPath"] == "/tmp/book.txt"
+
+
+def test_extract_sections(tmp_path: Path) -> None:
+    from adaptation_workflow.sections import extract_sections
+
+    source = tmp_path / "index.md"
+    source.write_text(
+        "# Locations\n\n"
+        "## Barn\nName: Barn\nType: interior\n"
+        "Source References:\n- ch1\nVisual Traits:\n- red\n\n"
+        "## Field\nName: Field\nType: exterior\n"
+        "Source References:\n- ch2\nVisual Traits:\n- green\n"
+    )
+    out_dir = tmp_path / "entries"
+    written = extract_sections(source, out_dir)
+    assert len(written) == 2
+    assert (out_dir / "Barn.md").read_text().startswith("## Barn")
+    assert (out_dir / "Field.md").read_text().startswith("## Field")
+
+
+def test_validate_location_prompt(tmp_path: Path) -> None:
+    prompt = tmp_path / "barn.md"
+    prompt.write_text(
+        "mode: new-image\nstyle_ref: archetype-scene\n"
+        "No characters, no text, no labels, no watermarks.\n"
+    )
+    validate_location_prompt(prompt)
+
+    bad = tmp_path / "bad.md"
+    bad.write_text("Location prompt for barn\nmode: new-image\nstyle_ref: x\nNo characters, no text, no labels, no watermarks.\n")
+    with pytest.raises(Exception):
+        validate_location_prompt(bad)
+
+
+def test_validate_locations(tmp_path: Path) -> None:
+    locations = tmp_path / "locations"
+    prompts = locations / "prompts"
+    prompts.mkdir(parents=True)
+    (locations / "index.md").write_text(
+        "## Barn\nName: Barn\nType: interior\n"
+        "Source References:\n- ch1\nVisual Traits:\n- red\n"
+    )
+    (prompts / "Barn.md").write_text(
+        "mode: new-image\nstyle_ref: archetype-scene\n"
+        "No characters, no text, no labels, no watermarks.\n"
+    )
+    report = ValidationReport()
+    validate_locations(tmp_path, report)
+    assert report.success
+    assert any("checked 1 location entries" in message for message in report.passes)

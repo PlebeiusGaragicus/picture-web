@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GeneratePayload, Project, ProjectDetail, StoryKind, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, Project, ProjectDetail, StoryKind, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = true;
 
@@ -165,15 +165,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ kind, assetId }),
     }),
-  generateAdaptationStyleRef: (slug: string, kind: StyleRefKind, canvasNodeId?: string | null) =>
+  syncAdaptationStyleRefToCanvas: (slug: string, kind: StyleRefKind) =>
+    request<AdaptationCanvasImportResponse>(`/api/projects/${slug}/adaptation/sync-style-ref-to-canvas`, {
+      method: 'POST',
+      body: JSON.stringify({ kind }),
+    }),
+  generateAdaptationStyleRef: (slug: string, payload: GenerateStyleRefPayload) =>
     request<AdaptationGenerateResponse>(`/api/projects/${slug}/adaptation/generate-style-ref`, {
       method: 'POST',
-      body: JSON.stringify({ kind, canvasNodeId }),
+      body: JSON.stringify(payload),
     }),
-  generateAdaptationArtifact: (slug: string, artifactKind: ArtifactKind, artifactKey: string, canvasNodeId?: string | null) =>
+  generateAdaptationArtifact: (slug: string, payload: GenerateArtifactPayload) =>
     request<AdaptationGenerateResponse>(`/api/projects/${slug}/adaptation/generate-artifact`, {
       method: 'POST',
-      body: JSON.stringify({ artifactKind, artifactKey, canvasNodeId }),
+      body: JSON.stringify(payload),
     }),
   patchDisplay: (slug: string, assetId: string, title: string, tags: string[]) =>
     request<Asset>(`/api/projects/${slug}/assets/${assetId}/display`, {

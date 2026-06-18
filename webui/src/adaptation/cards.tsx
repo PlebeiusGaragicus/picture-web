@@ -9,14 +9,14 @@ export function StyleRefCard({
   asset,
   onImportStyleRef,
   onSavePrompt,
-  onGenerateStyleRef,
+  onOpenStyleRefOnCanvas,
 }: {
   status: StyleRefStatus;
   projectSlug: string;
   asset: Asset | null;
   onImportStyleRef: (refKind: StyleRefKind, file: File) => Promise<void>;
   onSavePrompt: (refKind: StyleRefKind, prompt: string) => Promise<void>;
-  onGenerateStyleRef: (refKind: StyleRefKind) => Promise<void>;
+  onOpenStyleRefOnCanvas: (refKind: StyleRefKind) => Promise<void>;
 }) {
   const refKind = status.kind;
   const prompt = status.promptText;
@@ -53,7 +53,7 @@ export function StyleRefCard({
       <div className="archetype-card-head">
         <div className="archetype-card-title">
           <h2>{title}</h2>
-          <HelpTip text={`The ${styleLabel} for this project. Generate it on the canvas, edit the prompt, or import a reference image.`} />
+          <HelpTip text={`The ${styleLabel} for this project. Edit the prompt here, then open on canvas to pick a visual style and generate.`} />
         </div>
         <span className={`status-pill ${asset ? 'is-ready' : hasPrompt ? 'is-active' : 'is-pending'}`}>
           {asset ? 'Image set' : hasPrompt ? 'Prompt ready' : 'Empty'}
@@ -63,8 +63,8 @@ export function StyleRefCard({
         <div className="archetype-prompt-col">
           {hasPrompt ? <p className="archetype-prompt-preview">{prompt}</p> : <p className="muted">No prompt yet.</p>}
           <button className="secondary" onClick={() => setIsEditing(true)}>{hasPrompt ? 'Edit prompt' : 'Write prompt'}</button>
-          <button className="generate-button" onClick={() => onGenerateStyleRef(status.kind)} disabled={!hasPrompt || isSaving}>
-            Generate this {isCharacter ? 'character' : 'scene'} reference
+          <button className="generate-button" onClick={() => onOpenStyleRefOnCanvas(status.kind)} disabled={!hasPrompt || isSaving}>
+            {asset ? 'View on canvas' : 'Open on canvas to generate'}
           </button>
         </div>
         <div className="archetype-image-col">

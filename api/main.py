@@ -29,6 +29,7 @@ from models import (
     ChatTurnResponse,
     AdaptationGenerateArtifactRequest,
     AdaptationGenerateStyleRefRequest,
+    AdaptationSyncStyleRefRequest,
     AdaptationGenerateResponse,
     AdaptationSettingsPatch,
     AdaptationStatus,
@@ -258,6 +259,11 @@ def import_existing_adaptation_style_refs(slug: str) -> AdaptationStatus:
 @app.post("/api/projects/{slug}/adaptation/style-ref-asset", response_model=AdaptationStatus)
 def set_adaptation_style_ref_asset(slug: str, payload: AdaptationStyleRefAssetRequest) -> AdaptationStatus:
     return adaptation.set_style_ref_asset(slug, payload)
+
+
+@app.post("/api/projects/{slug}/adaptation/sync-style-ref-to-canvas", response_model=AdaptationCanvasImportResponse)
+def sync_adaptation_style_ref_to_canvas(slug: str, payload: AdaptationSyncStyleRefRequest) -> AdaptationCanvasImportResponse:
+    return adaptation.sync_style_ref_to_canvas(slug, payload.kind)
 
 
 @app.post("/api/projects/{slug}/adaptation/generate-style-ref", response_model=AdaptationGenerateResponse)
