@@ -3,6 +3,105 @@ import { api } from '../api';
 import { MomentRefInputsView } from './momentRefInputsView';
 import type { AdaptationStatus, MomentSequenceEntry, StoryKind, VisualStyleDefinition } from '../types';
 
+type GallerySlide = {
+  momentKey: string;
+  assetId: string;
+  caption: string | null;
+};
+
+function displayStoryText(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed || /^none\.?$/i.test(trimmed)) return null;
+  return trimmed;
+}
+
+function MomentSequenceLightbox({
+  projectSlug,
+  slides,
+  index,
+  onIndexChange,
+  onClose,
+}: {
+  projectSlug: string;
+  slides: GallerySlide[];
+  index: number;
+  onIndexChange: (index: number) => void;
+  onClose: () => void;
+}) {
+  const slide = slides[index];
+  const hasPrev = index > 0;
+  const hasNext = index < slides.length - 1;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (event.key === 'ArrowLeft' && hasPrev) {
+        onIndexChange(index - 1);
+        return;
+      }
+      if (event.key === 'ArrowRight' && hasNext) {
+        onIndexChange(index + 1);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [hasNext, hasPrev, index, onClose, onIndexChange]);
+
+  if (!slide) return null;
+
+  return (
+    <div
+      className={`moment-sequence-lightbox${slide.caption ? ' has-caption' : ''}`}
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Panel preview: ${slide.momentKey}`}
+    >
+      <button type="button" className="moment-sequence-lightbox-close" onClick={onClose} aria-label="Close">
+        ×
+      </button>
+      <div className="moment-sequence-lightbox-frame" onClick={(event) => event.stopPropagation()}>
+        <div className="moment-sequence-lightbox-viewport">
+          <div className="moment-sequence-lightbox-image-wrap">
+            <img
+              src={`/api/projects/${projectSlug}/assets/${slide.assetId}/image`}
+              alt={slide.momentKey}
+            />
+            {hasPrev && (
+              <button
+                type="button"
+                className="moment-sequence-lightbox-nav is-prev"
+                onClick={() => onIndexChange(index - 1)}
+                aria-label="Previous panel"
+              >
+                ‹
+              </button>
+            )}
+            {hasNext && (
+              <button
+                type="button"
+                className="moment-sequence-lightbox-nav is-next"
+                onClick={() => onIndexChange(index + 1)}
+                aria-label="Next panel"
+              >
+                ›
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+      {slide.caption && (
+        <footer className="moment-sequence-lightbox-page-caption">
+          <p>{slide.caption}</p>
+        </footer>
+      )}
+    </div>
+  );
+}
+
 function textFieldsForStoryKind(storyKind: StoryKind): Array<'narration' | 'dialogue' | 'caption'> {
   if (storyKind === 'comic-book') return ['dialogue', 'caption'];
   if (storyKind === 'illustrated-story') return ['narration', 'caption'];
@@ -31,6 +130,7 @@ export function MomentSequenceView({
   const [generatingKey, setGeneratingKey] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [expandedPromptKey, setExpandedPromptKey] = useState<string | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   const storyKind = adaptation.settings.storyKind;
   const textFields = textFieldsForStoryKind(storyKind);
@@ -68,6 +168,22 @@ export function MomentSequenceView({
     }
     return groups;
   }, [moments]);
+
+  const gallerySlides = useMemo(
+    () =>
+      moments.flatMap((moment) => {
+        const assetId = moment.activeAssetId ?? moment.assetIds[moment.assetIds.length - 1] ?? null;
+        return assetId
+          ? [{ momentKey: moment.momentKey, assetId, caption: displayStoryText(moment.caption) }]
+          : [];
+      }),
+    [moments],
+  );
+
+  const openLightbox = (momentKey: string) => {
+    const index = gallerySlides.findIndex((slide) => slide.momentKey === momentKey);
+    if (index >= 0) setLightboxIndex(index);
+  };
 
   const updateMoment = (updated: MomentSequenceEntry) => {
     setMoments((current) => current.map((moment) => (moment.momentKey === updated.momentKey ? updated : moment)));
@@ -123,6 +239,15 @@ export function MomentSequenceView({
 
   return (
     <div className="moment-sequence">
+      {lightboxIndex !== null && gallerySlides.length > 0 && (
+        <MomentSequenceLightbox
+          projectSlug={projectSlug}
+          slides={gallerySlides}
+          index={lightboxIndex}
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
       <section className="story-card moment-sequence-header">
         <div>
           <h2>Moment Sequence</h2>
@@ -153,10 +278,21 @@ export function MomentSequenceView({
                 <article key={moment.momentKey} className={`moment-sequence-card ${moment.finalized ? 'is-finalized' : ''}`}>
                   <div className="moment-sequence-card-media">
                     {previewId ? (
-                      <img
-                        src={`/api/projects/${projectSlug}/assets/${previewId}/image`}
-                        alt={moment.momentKey}
-                      />
+                      <div className="moment-sequence-card-media-frame">
+                        <img
+                          src={`/api/projects/${projectSlug}/assets/${previewId}/image`}
+                          alt={moment.momentKey}
+                        />
+                        <button
+                          type="button"
+                          className="moment-sequence-preview-eye"
+                          onClick={() => openLightbox(moment.momentKey)}
+                          title="View full screen"
+                          aria-label={`View ${moment.momentKey} full screen`}
+                        >
+                          👁️
+                        </button>
+                      </div>
                     ) : (
                       <div className="moment-sequence-placeholder">No image yet</div>
                     )}
