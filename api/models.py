@@ -175,7 +175,12 @@ class AdaptationAssetLink(BaseModel):
     mode: str = ""
     styleRef: str = ""
     prompt: str = ""
+    narration: str = ""
+    dialogue: str = ""
+    caption: str = ""
     assetIds: list[str] = Field(default_factory=list)
+    activeAssetId: str | None = None
+    finalized: bool = False
     status: Literal["missing", "ready", "generated"] = "missing"
 
 
@@ -269,7 +274,7 @@ class AdaptationSettingsPatch(BaseModel):
 
 
 class AdaptationWorkflowStartRequest(BaseModel):
-    stage: Literal["ingest", "characters", "scene-list", "scenes", "locations", "all"] = "all"
+    stage: Literal["ingest", "characters", "scene-list", "scenes", "locations", "moments", "all"] = "all"
 
 
 class SceneListLine(BaseModel):
@@ -288,6 +293,54 @@ class SceneListReplace(BaseModel):
 class SceneListLineCreate(BaseModel):
     slug: str = Field(pattern=SLUG_RE)
     description: str = ""
+
+
+class SceneMomentsDocument(BaseModel):
+    sceneSlug: str
+    path: str
+    body: str
+    sectionCount: int
+    storyKind: StoryKind
+    exists: bool = False
+
+
+class SceneMomentsUpdate(BaseModel):
+    body: str
+
+
+class MomentSequenceEntry(BaseModel):
+    momentKey: str
+    sceneSlug: str
+    artifactKind: ArtifactKind
+    promptPath: str
+    prompt: str = ""
+    narration: str = ""
+    dialogue: str = ""
+    caption: str = ""
+    refs: str = ""
+    assetIds: list[str] = Field(default_factory=list)
+    activeAssetId: str | None = None
+    finalized: bool = False
+    status: Literal["missing", "ready", "generated"] = "ready"
+
+
+class MomentSequenceCounts(BaseModel):
+    total: int = 0
+    illustrated: int = 0
+    finalized: int = 0
+
+
+class MomentSequenceDocument(BaseModel):
+    moments: list[MomentSequenceEntry] = Field(default_factory=list)
+    counts: MomentSequenceCounts = Field(default_factory=MomentSequenceCounts)
+
+
+class MomentPatch(BaseModel):
+    narration: str | None = None
+    dialogue: str | None = None
+    caption: str | None = None
+    activeAssetId: str | None = None
+    finalized: bool | None = None
 
 
 class AdaptationFileBase(BaseModel):

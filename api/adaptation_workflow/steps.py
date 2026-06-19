@@ -9,6 +9,7 @@ from typing import Callable
 from adaptation_workflow.config import AdaptationContext, BookSession, utc_now
 from adaptation_workflow.events import WorkflowLogger
 from adaptation_workflow.pi_rpc import PiRpcClient, PiRpcError
+from adaptation_workflow.moments import moment_output_path, read_story_kind
 from adaptation_workflow.locations import cleanup_staging, merge_staging_into_index, staging_dir
 from adaptation_workflow.scene_list import find_scene_list_line
 from adaptation_workflow.sections import parse_index_sections_file
@@ -18,6 +19,7 @@ from adaptation_workflow.validate import (
     validate_character_artifact,
     validate_character_sheet,
     validate_location_prompt,
+    validate_moment_file,
     validate_scene_artifact,
 )
 
@@ -321,3 +323,37 @@ class StepRunner:
         new_slugs = merge_staging_into_index(self.ctx.book_root_abs, scene_slug)
         self.ensure_location_prompts(new_slugs)
         cleanup_staging(self.ctx.book_root_abs, scene_slug)
+
+    def plan_scene(self, scene_slug: str) -> None:
+        list_path = self.ctx.book_root_abs / "scenes" / "list.txt"
+        if not list_path.is_file():
+            raise RuntimeError(f"Missing {list_path}")
+        scene_line = find_scene_list_line(list_path, scene_slug)
+        if scene_line is None:
+            raise RuntimeError(f"Scene slug not found in list.txt: {scene_slug}")
+
+        artifact_path = self.ctx.book_root_abs / "scenes" / "artifacts" / f"{scene_slug}.md"
+        if not artifact_path.is_file():
+            raise RuntimeError(f"Missing scene artifact: {artifact_path}")
+
+        story_kind = read_story_kind(self.ctx.book_root_abs)
+        output_path = moment_output_path(self.ctx.book_root_abs, story_kind, scene_slug)
+        rel_output = f"{self.ctx.book_root}/{output_path.relative_to(self.ctx.book_root_abs).as_posix()}"
+        artifact_text = artifact_path.read_text().rstrip()
+        prompt = (
+            f"/skill:story-layout {self.ctx.book_root_abs} {story_kind} {output_path}\n\n"
+            f"{artifact_text}\n"
+        )
+
+        if output_path.is_file():
+            self.logger.write_skip("moments", f"plan scene {scene_slug}", rel_output)
+            self.logger.record_task(name=f"plan scene {scene_slug}", skipped=True, duration_ms=0)
+            self._notify_progress()
+            return
+
+        self.run_pi_step("moments", f"plan scene {scene_slug}", rel_output, prompt)
+        if output_path.is_file() and output_path.stat().st_size > 0:
+            try:
+                validate_moment_file(output_path)
+            except ValidationError as exc:
+                raise RuntimeError(str(exc)) from exc

@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, Project, ProjectDetail, SceneListDocument, SceneListLine, StoryKind, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = true;
 
@@ -139,6 +139,26 @@ export const api = {
     }),
   getSceneExtract: (slug: string, sceneKey: string) =>
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/extract`),
+  startScenePlan: (slug: string, sceneKey: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/plan`, {
+      method: 'POST',
+    }),
+  getScenePlan: (slug: string, sceneKey: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/plan`),
+  getSceneMoments: (slug: string, sceneKey: string) =>
+    request<SceneMomentsDocument>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/moments`),
+  putSceneMoments: (slug: string, sceneKey: string, body: string) =>
+    request<SceneMomentsDocument>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/moments`, {
+      method: 'PUT',
+      body: JSON.stringify({ body }),
+    }),
+  getMomentSequence: (slug: string) =>
+    request<MomentSequenceDocument>(`/api/projects/${slug}/adaptation/moments/sequence`),
+  patchMoment: (slug: string, momentKey: string, patch: MomentPatch) =>
+    request<MomentSequenceEntry>(`/api/projects/${slug}/adaptation/moments/${momentKey}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
   getAdaptationWorkflow: (slug: string, stage: AdaptationStage = 'all') =>
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/workflow?stage=${stage}`),
   startAdaptationWorkflow: (slug: string, stage: AdaptationStage = 'all') =>

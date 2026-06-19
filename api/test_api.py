@@ -462,7 +462,13 @@ def test_adaptation_settings_scene_panel_status_and_canvas_import(tmp_path, monk
         "# Test Scene\n\nScene Id: 001-test-scene\nSource Lines: L001-L002\nMajor Act: act-01\nPrimary Location: test-location\n\n## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: test-character-base\n- Locations: test-location\n- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n\n## Text Candidates\n\n- Narration: None.\n- Dialogue: None.\n- Caption: None.\n\n## Adaptation Notes\n\nNone.\n"
     )
     (root / "panels" / "prompts" / "001-test-scene.md").write_text(
-        "## 001-test-scene-panel-01\nmode: story-layout\nrefs: character:test-character-base, location:test-location\n\nComic panel of a test scene. No watermarks.\n"
+        "## 001-test-scene-panel-01\n"
+        "mode: story-layout\n"
+        "refs: character:test-character-base, location:test-location\n"
+        "narration: None.\n"
+        "dialogue: \"Hello.\"\n"
+        "caption: None.\n\n"
+        "Comic panel of a test scene. No watermarks.\n"
     )
     (root / "scenes" / "list.txt").write_text("001-test-scene: Test scene summary.\n")
 
@@ -536,7 +542,13 @@ def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, mon
         },
     )
     (root / "panels" / "prompts" / "001-panel.md").write_text(
-        "## 001-panel-01\nmode: story-layout\nrefs: character:hero-base, location:farm\n\nHero crosses the farm in a comic panel. No watermarks.\n"
+        "## 001-panel-01\n"
+        "mode: story-layout\n"
+        "refs: character:hero-base, location:farm\n"
+        "narration: None.\n"
+        "dialogue: None.\n"
+        "caption: None.\n\n"
+        "Hero crosses the farm in a comic panel. No watermarks.\n"
     )
 
     captured_refs = []
@@ -749,6 +761,200 @@ def test_scene_list_api(tmp_path, monkeypatch):
 
     bad_extract = client.post("/api/projects/farm-comic/adaptation/scenes/missing-scene/extract")
     assert bad_extract.status_code == 404
+
+
+def test_moment_output_path_helpers():
+    from pathlib import Path
+
+    from adaptation_workflow.moments import moment_output_path, moment_section_count, moment_uses_pages
+
+    root = Path("/tmp/adaptation")
+    assert moment_uses_pages("picture-book") is True
+    assert moment_uses_pages("illustrated-story") is True
+    assert moment_uses_pages("comic-book") is False
+    assert moment_output_path(root, "comic-book", "001-opening") == root / "panels" / "prompts" / "001-opening.md"
+    assert moment_output_path(root, "picture-book", "001-opening") == root / "pages" / "plans" / "001-opening.md"
+
+
+def test_scene_moments_file_api(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Once upon a time.\n")
+    (root / "scenes" / "artifacts").mkdir(parents=True, exist_ok=True)
+    (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
+    (root / "scenes" / "artifacts" / "001-opening.md").write_text(
+        "# Opening\n\nScene Id: 001-opening\nSource Lines: L001-L002\nPrimary Location: barn\n\n"
+        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: hero-base\n- Locations: barn\n"
+        "- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n"
+        "## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n"
+    )
+    library.write_json(
+        root / "adaptation.json",
+        {
+            "version": 2,
+            "settings": {"storyKind": "comic-book"},
+            "styleRefs": {},
+            "characters": {},
+            "locations": {},
+            "scenes": {},
+            "pages": {},
+            "panels": {},
+        },
+    )
+
+    missing = client.get("/api/projects/farm-comic/adaptation/scenes/001-opening/moments")
+    assert missing.status_code == 200
+    assert missing.json()["sectionCount"] == 0
+    assert missing.json()["path"] == "panels/prompts/001-opening.md"
+
+    body = (
+        "## 001-opening-panel-01\n"
+        "mode: story-layout\n"
+        "refs: character:hero-base, location:barn\n\n"
+        "Opening panel. No watermarks.\n"
+    )
+    saved = client.put(
+        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
+        json={"body": body},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["sectionCount"] == 1
+    assert saved.json()["body"].strip() == body.strip()
+
+    status = client.get("/api/projects/farm-comic/adaptation")
+    assert status.json()["counts"]["momentSections"] == 1
+    assert "001-opening-panel-01" in status.json()["panels"]
+
+
+def test_plan_scene_api_guards(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Once upon a time.\n")
+    (root / "scenes").mkdir(parents=True, exist_ok=True)
+    (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
+
+    missing_scene = client.post("/api/projects/farm-comic/adaptation/scenes/missing-scene/plan")
+    assert missing_scene.status_code == 404
+
+    missing_artifact = client.post("/api/projects/farm-comic/adaptation/scenes/001-opening/plan")
+    assert missing_artifact.status_code == 409
+
+
+def test_validate_moments(tmp_path):
+    from adaptation_workflow.validate import ValidationError, run_validation, validate_moment_file
+
+    root = tmp_path / "adaptation"
+    panels = root / "panels" / "prompts"
+    panels.mkdir(parents=True)
+    valid = panels / "001-opening.md"
+    valid.write_text(
+        "## 001-opening-panel-01\n"
+        "mode: story-layout\n"
+        "refs: character:hero-base, location:barn\n\n"
+        "Opening panel. No watermarks.\n"
+    )
+    validate_moment_file(valid)
+
+    invalid = panels / "002-bad.md"
+    invalid.write_text("## bad-panel\nmode: wrong\nrefs:\n\nMissing ending.\n")
+    try:
+        validate_moment_file(invalid)
+        raise AssertionError("expected validation failure")
+    except ValidationError:
+        pass
+
+    report = run_validation(root, "moments")
+    assert report.failures
+
+
+def test_layout_sections_round_trip(tmp_path):
+    from adaptation_workflow.moments import format_layout_section, parse_layout_sections, write_layout_sections
+
+    path = tmp_path / "panels" / "prompts" / "001-opening.md"
+    section = {
+        "mode": "story-layout",
+        "style_ref": "character:hero-base, location:barn",
+        "narration": "Once upon a time.",
+        "dialogue": "\"Hi!\"",
+        "caption": "None.",
+        "prompt": "Opening panel. No watermarks.",
+    }
+    write_layout_sections(path, {"001-opening-panel-01": section})
+    parsed = parse_layout_sections(path)["001-opening-panel-01"]
+    assert parsed["narration"] == "Once upon a time."
+    assert parsed["dialogue"] == "\"Hi!\""
+    assert parsed["caption"] == "None."
+    assert parsed["prompt"] == "Opening panel. No watermarks."
+    assert format_layout_section("001-opening-panel-01", parsed) == path.read_text()
+
+
+def test_moment_sequence_and_patch_api(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "scenes").mkdir(parents=True, exist_ok=True)
+    (root / "scenes" / "list.txt").write_text("001-opening: Opening.\n002-later: Later.\n")
+    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
+    (root / "panels" / "prompts" / "001-opening.md").write_text(
+        "## 001-opening-panel-01\n"
+        "mode: story-layout\n"
+        "refs: character:hero-base, location:barn\n"
+        "narration: None.\n"
+        "dialogue: First line.\n"
+        "caption: None.\n\n"
+        "First panel. No watermarks.\n"
+    )
+    (root / "panels" / "prompts" / "002-later.md").write_text(
+        "## 002-later-panel-01\n"
+        "mode: story-layout\n"
+        "refs:\n"
+        "narration: None.\n"
+        "dialogue: Second line.\n"
+        "caption: None.\n\n"
+        "Second panel. No watermarks.\n"
+    )
+    library.write_json(
+        root / "adaptation.json",
+        {
+            "version": 2,
+            "settings": {"storyKind": "comic-book"},
+            "styleRefs": {},
+            "characters": {},
+            "locations": {},
+            "scenes": {},
+            "pages": {},
+            "panels": {},
+        },
+    )
+
+    sequence = client.get("/api/projects/farm-comic/adaptation/moments/sequence")
+    assert sequence.status_code == 200
+    payload = sequence.json()
+    assert [moment["momentKey"] for moment in payload["moments"]] == [
+        "001-opening-panel-01",
+        "002-later-panel-01",
+    ]
+    assert payload["counts"]["total"] == 2
+
+    patched = client.patch(
+        "/api/projects/farm-comic/adaptation/moments/001-opening-panel-01",
+        json={"narration": "Updated narration.", "finalized": True},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["narration"] == "Updated narration."
+    assert patched.json()["finalized"] is True
+
+    on_disk = (root / "panels" / "prompts" / "001-opening.md").read_text()
+    assert "narration: Updated narration." in on_disk
+
+    status = client.get("/api/projects/farm-comic/adaptation")
+    assert status.json()["panels"]["001-opening-panel-01"]["finalized"] is True
+    assert status.json()["counts"]["finalizedMoments"] == 1
 
 
 def test_style_ref_status_clears_stale_asset_and_repairs_canvas(tmp_path, monkeypatch):

@@ -37,19 +37,24 @@ Owns location files discovered from scene extraction (plus manual edits) and the
 
 ## Phase 4: Moments
 
-Owns story-kind layout planning.
+Owns moment planning, illustration, and story text in reading order.
 
-- Scene artifacts are broken into page plans and/or panel prompts.
-- `picture-book`, `illustrated-story`, and `comic-book` should produce different density and layout expectations.
-- Output files live in `adaptation/pages/plans/*.md` and `adaptation/panels/prompts/*.md`.
+**List mode**
 
-## Phase 5: Moment Canvas
+- **Story Kind** (chosen in Phase 2) controls output shape:
+  - `picture-book` and `illustrated-story` → `adaptation/pages/plans/<scene-slug>.md`
+  - `comic-book` → `adaptation/panels/prompts/<scene-slug>.md`
+- Plan moments **one scene at a time** with the per-row **Plan** button (Pi `story-layout` skill).
+- Each moment section includes `narration:`, `dialogue:`, `caption:` lines plus an image prompt.
+- Use **View** to edit markdown per scene; **Validate** checks moment files.
 
-Owns image generation for Phase 4 visual moments.
+**View mode**
 
-- Page and panel prompt nodes become image work items.
-- Generated images attach back to their page/panel nodes.
-- Character and location canonical references should be used as semantic refs where relevant.
+- Shows an ordered **moment sequence** (scene list order × section order)—not book page layout.
+- Per moment: generate image, edit narration/dialogue/caption, pick the active image, mark **Finalized**.
+- Metadata stores `activeAssetId` and `finalized` per moment for future page-layout phases.
+
+A future phase will compose finalized moments into proper book pages/spreads.
 
 ## Ownership Rule
 

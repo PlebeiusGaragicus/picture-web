@@ -1,4 +1,5 @@
 import { PhaseWorkflowActions, StyleRefCard } from './cards';
+import { MomentSceneList } from './momentSceneList';
 import { SceneListEditor } from './sceneListEditor';
 import { styleRefStatusFromAdaptation } from '../styleRefs';
 import type { AdaptationStatus, AdaptationWorkflowStatus, Asset, StoryKind, StyleRefKind } from '../types';
@@ -131,35 +132,54 @@ export function PhaseScenes({
   );
 }
 
-export function PhaseMoments({ adaptation, workflow, validation, onStartWorkflow, onStartValidation, onPublishPhaseToCanvas, isPublishingPhase }: {
+export function PhaseMoments({
+  projectSlug,
+  adaptation,
+  workflow,
+  validation,
+  onStartValidation,
+  onReloadAdaptation,
+}: {
+  projectSlug: string;
   adaptation: AdaptationStatus;
   workflow: AdaptationWorkflowStatus | null;
   validation: AdaptationWorkflowStatus | null;
-  onStartWorkflow: () => Promise<void>;
   onStartValidation: () => Promise<void>;
-  onPublishPhaseToCanvas: () => Promise<void>;
-  isPublishingPhase: boolean;
+  onReloadAdaptation: () => Promise<void>;
 }) {
-  const momentNodeCount = Object.keys(adaptation.pages).length + Object.keys(adaptation.panels).length;
+  const storyKind = adaptation.settings.storyKind;
+  const storyKindLabel = storyKind === 'picture-book' ? 'Picture book' : storyKind === 'illustrated-story' ? 'Illustrated story' : 'Comic book';
+  const plannedFiles = (adaptation.counts.pagePlans ?? 0) + (adaptation.counts.panelPrompts ?? 0);
+  const extractedScenes = adaptation.counts.sceneArtifacts ?? 0;
+
   return (
     <>
       <section className="story-card">
-        <h2>Moments, Beats, Panels</h2>
-        <p className="muted">Moment planning workflow is not available yet.</p>
-        <button className="generate-button workflow-run-button" disabled>
-          Run moment planning
-        </button>
+        <h2>Story Kind</h2>
+        <p className="muted">
+          Moment density follows the story kind chosen in Phase 2. {storyKindLabel} plans go to{' '}
+          {storyKind === 'comic-book' ? 'panel prompts' : 'page plans'}.
+        </p>
+        <p className="muted">
+          {plannedFiles} scene moment file{plannedFiles === 1 ? '' : 's'} · {adaptation.counts.momentSections ?? 0} generatable moment
+          {(adaptation.counts.momentSections ?? 0) === 1 ? '' : 's'}
+          {extractedScenes ? ` · ${extractedScenes} extracted scene${extractedScenes === 1 ? '' : 's'} ready` : ''}
+        </p>
+        <p className="muted">Switch to View to generate images and edit narration in story order.</p>
       </section>
+
+      <MomentSceneList
+        projectSlug={projectSlug}
+        adaptation={adaptation}
+        workflow={workflow}
+        onReloadAdaptation={onReloadAdaptation}
+      />
+
       <section className="story-card">
-        <h2>Moment Canvas</h2>
-        <p className="muted">{momentNodeCount ? `${momentNodeCount} page/panel prompts are ready for the moment image canvas.` : 'No page or panel prompts yet.'}</p>
-        <button className="generate-button" onClick={onPublishPhaseToCanvas} disabled={!momentNodeCount || isPublishingPhase}>
-          {isPublishingPhase ? 'Publishing...' : 'Publish moment nodes'}
+        <h2>Validate Moments</h2>
+        <button className="secondary" type="button" onClick={onStartValidation} disabled={validation?.running}>
+          {validation?.running ? 'Validating...' : 'Run validation'}
         </button>
-      </section>
-      <section className="story-card">
-        <h2>Validate Moment Prompts</h2>
-        <button className="secondary" disabled>Run validation</button>
       </section>
     </>
   );

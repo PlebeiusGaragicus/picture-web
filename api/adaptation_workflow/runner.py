@@ -158,6 +158,10 @@ def scene_extract_stage(scene_slug: str) -> str:
     return f"scene-extract-{scene_slug}"
 
 
+def scene_plan_stage(scene_slug: str) -> str:
+    return f"scene-plan-{scene_slug}"
+
+
 def run_extract_scene(project_slug: str, scene_slug: str) -> int:
     stage = scene_extract_stage(scene_slug)
     try:
@@ -225,6 +229,85 @@ def run_extract_scene(project_slug: str, scene_slug: str) -> int:
         steps.extract_scene(scene_slug)
         logger.write_line()
         logger.write_line(f"[scenes] Done. Scene artifact and locations updated for {scene_slug}.")
+    except Exception as exc:
+        return_code = 1
+        error = str(exc)
+        logger.write_line(f"error: {error}")
+        print(f"error: {error}", file=sys.stderr)
+    finally:
+        logger.close()
+        flush_progress(error=error, return_code=return_code, running=False)
+
+    return return_code
+
+
+def run_plan_scene(project_slug: str, scene_slug: str) -> int:
+    stage = scene_plan_stage(scene_slug)
+    try:
+        ctx = AdaptationContext.for_slug(project_slug)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    diagnostics = RunDiagnostics.create(ctx.book_root_abs, stage, validation=False)
+    logger = WorkflowLogger(diagnostics)
+
+    try:
+        node_path, node_ver = ensure_node_runtime()
+    except RuntimeError as exc:
+        logger.write_line(f"error: {exc}")
+        logger.close()
+        write_summary(
+            diagnostics,
+            stage=stage,
+            return_code=1,
+            tasks=[],
+            pi_binary="missing",
+            error=str(exc),
+            running=False,
+        )
+        diagnostics.write_manifest(ctx.book_root_abs, extra={"project": ctx.project_slug, "sceneSlug": scene_slug, "error": str(exc)})
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    pi_binary = find_pi_binary()
+
+    def flush_progress(*, error: str | None = None, return_code: int = 0, running: bool = True) -> None:
+        write_summary(
+            diagnostics,
+            stage=stage,
+            return_code=return_code,
+            tasks=logger.task_records,
+            pi_binary=pi_binary,
+            error=error,
+            running=running,
+        )
+        diagnostics.write_manifest(
+            ctx.book_root_abs,
+            extra={
+                "project": ctx.project_slug,
+                "sceneSlug": scene_slug,
+                "returnCode": return_code,
+                "running": running,
+                "error": error,
+            },
+        )
+
+    logger.write_line(f"[start] pi: {pi_binary} ({pi_version(pi_binary)})")
+    logger.write_line(f"[start] node: {node_ver} ({node_path})")
+    logger.write_line(f"[start] project: {ctx.project_slug}")
+    logger.write_line(f"[start] scene: {scene_slug}")
+    logger.write_line(f"[start] log: {diagnostics.rel(diagnostics.ui_log_path, ctx.book_root_abs)}")
+    flush_progress(running=True)
+
+    return_code = 0
+    error: str | None = None
+    try:
+        steps = StepRunner(ctx, logger, on_progress=lambda: flush_progress(running=True))
+        steps.require_book_session()
+        steps.plan_scene(scene_slug)
+        logger.write_line()
+        logger.write_line(f"[moments] Done. Moment plan written for {scene_slug}.")
     except Exception as exc:
         return_code = 1
         error = str(exc)

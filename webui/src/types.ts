@@ -185,7 +185,12 @@ export interface AdaptationAssetLink {
   mode: string;
   styleRef: string;
   prompt: string;
+  narration: string;
+  dialogue: string;
+  caption: string;
   assetIds: string[];
+  activeAssetId?: string | null;
+  finalized: boolean;
   status: 'missing' | 'ready' | 'generated';
 }
 
@@ -218,7 +223,49 @@ export interface AdaptationStatus {
   panels: Record<string, AdaptationAssetLink>;
 }
 
-export type AdaptationStage = 'ingest' | 'characters' | 'scene-list' | 'scenes' | 'locations' | 'all';
+export type AdaptationStage = 'ingest' | 'characters' | 'scene-list' | 'scenes' | 'locations' | 'moments' | 'all';
+
+export interface SceneMomentsDocument {
+  sceneSlug: string;
+  path: string;
+  body: string;
+  sectionCount: number;
+  storyKind: StoryKind;
+  exists: boolean;
+}
+
+export interface MomentSequenceEntry {
+  momentKey: string;
+  sceneSlug: string;
+  artifactKind: ArtifactKind;
+  promptPath: string;
+  prompt: string;
+  narration: string;
+  dialogue: string;
+  caption: string;
+  refs: string;
+  assetIds: string[];
+  activeAssetId?: string | null;
+  finalized: boolean;
+  status: 'missing' | 'ready' | 'generated';
+}
+
+export interface MomentSequenceDocument {
+  moments: MomentSequenceEntry[];
+  counts: {
+    total: number;
+    illustrated: number;
+    finalized: number;
+  };
+}
+
+export interface MomentPatch {
+  narration?: string;
+  dialogue?: string;
+  caption?: string;
+  activeAssetId?: string | null;
+  finalized?: boolean;
+}
 
 export interface SceneListLine {
   slug: string;

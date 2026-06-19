@@ -102,6 +102,33 @@ def validate_scene_artifact(path: Path) -> None:
         validate_contains(path, required)
 
 
+def validate_moment_file(path: Path) -> None:
+    from adaptation_workflow.moments import parse_layout_sections
+
+    validate_no_chat_wrappers(path)
+    text = path.read_text()
+    sections = parse_layout_sections(path)
+    if not sections:
+        return
+    blocks = re.split(r"(?=^## )", text, flags=re.MULTILINE)
+    blocks = [block for block in blocks if block.startswith("## ")]
+    if len(blocks) != len(sections):
+        raise ValidationError(f"Could not parse all moment sections in {path}")
+    for block in blocks:
+        heading = block.splitlines()[0]
+        slug = heading.removeprefix("## ").strip().split()[0]
+        if not re.search(r"^refs:", block, flags=re.MULTILINE):
+            raise ValidationError(f"Section {slug} missing refs: line in {path}")
+    for slug, section in sections.items():
+        if section.get("mode") != "story-layout":
+            raise ValidationError(f"Section {slug} missing mode: story-layout in {path}")
+        prompt = section.get("prompt", "").strip()
+        if not prompt:
+            raise ValidationError(f"Section {slug} has empty prompt in {path}")
+        if "No watermarks." not in prompt:
+            raise ValidationError(f"Section {slug} prompt must contain 'No watermarks.' in {path}")
+
+
 def validate_style_refs(book_root: Path, report: ValidationReport) -> None:
     report.ok("Style refs")
     archetype_character = book_root / "style-refs" / "archetype-character.md"
@@ -228,6 +255,23 @@ def validate_scenes(book_root: Path, report: ValidationReport) -> None:
     report.ok(f"checked {extracted} extracted scene artifacts")
 
 
+def validate_moments(book_root: Path, report: ValidationReport) -> None:
+    report.ok("Moments")
+    checked = 0
+    for directory in (book_root / "pages" / "plans", book_root / "panels" / "prompts"):
+        if not directory.is_dir():
+            continue
+        for moment_file in sorted(directory.glob("*.md")):
+            if not validate_common_file(moment_file, report):
+                continue
+            try:
+                validate_moment_file(moment_file)
+            except ValidationError as exc:
+                report.fail(str(exc))
+            checked += 1
+    report.ok(f"checked {checked} moment files")
+
+
 def run_validation(book_root: Path, stage: str) -> ValidationReport:
     report = ValidationReport()
     if stage in {"ingest", "all"}:
@@ -240,4 +284,6 @@ def run_validation(book_root: Path, stage: str) -> ValidationReport:
         validate_scenes(book_root, report)
     if stage in {"locations", "all"}:
         validate_locations(book_root, report)
+    if stage in {"moments", "all"}:
+        validate_moments(book_root, report)
     return report

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from adaptation_workflow.runner import run_extract_scene, run_validate, run_workflow
+from adaptation_workflow.runner import run_extract_scene, run_plan_scene, run_validate, run_workflow
 
 
 def usage() -> None:
@@ -13,6 +13,7 @@ def usage() -> None:
   python -m adaptation_workflow run <project-slug> [stage]
   python -m adaptation_workflow validate <project-slug> [stage]
   python -m adaptation_workflow extract-scene <project-slug> <scene-slug>
+  python -m adaptation_workflow plan-scene <project-slug> <scene-slug>
 
 Run stages:
   ingest       Phase 0: read-book session + visual style.
@@ -21,7 +22,7 @@ Run stages:
   all          Run ingest, characters, and scene-list (default).
 
 Validate stages:
-  ingest, characters, scene-list, scenes, locations, all
+  ingest, characters, scene-list, scenes, locations, moments, all
 """,
         file=sys.stderr,
     )
@@ -38,6 +39,11 @@ def main(argv: list[str] | None = None) -> int:
             usage()
             return 2
         return run_extract_scene(args[1], args[2])
+    if command == "plan-scene":
+        if len(args) != 3:
+            usage()
+            return 2
+        return run_plan_scene(args[1], args[2])
     if len(args) < 2 or len(args) > 3:
         usage()
         return 2

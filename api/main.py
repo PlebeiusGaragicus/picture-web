@@ -42,6 +42,11 @@ from models import (
     SceneListDocument,
     SceneListLineCreate,
     SceneListReplace,
+    SceneMomentsDocument,
+    SceneMomentsUpdate,
+    MomentSequenceDocument,
+    MomentSequenceEntry,
+    MomentPatch,
     DisplayPatch,
     GenerateRequest,
     GenerateResponse,
@@ -231,6 +236,36 @@ def start_scene_extract(slug: str, key: str) -> AdaptationWorkflowStatus:
 @app.get("/api/projects/{slug}/adaptation/scenes/{key}/extract", response_model=AdaptationWorkflowStatus)
 def get_scene_extract(slug: str, key: str) -> AdaptationWorkflowStatus:
     return adaptation.scene_extract_status(slug, key)
+
+
+@app.post("/api/projects/{slug}/adaptation/scenes/{key}/plan", response_model=AdaptationWorkflowStatus)
+def start_scene_plan(slug: str, key: str) -> AdaptationWorkflowStatus:
+    return adaptation.start_scene_plan(slug, key)
+
+
+@app.get("/api/projects/{slug}/adaptation/scenes/{key}/plan", response_model=AdaptationWorkflowStatus)
+def get_scene_plan(slug: str, key: str) -> AdaptationWorkflowStatus:
+    return adaptation.scene_plan_status(slug, key)
+
+
+@app.get("/api/projects/{slug}/adaptation/scenes/{key}/moments", response_model=SceneMomentsDocument)
+def get_scene_moments(slug: str, key: str) -> SceneMomentsDocument:
+    return adaptation.scene_moments_document(slug, key)
+
+
+@app.put("/api/projects/{slug}/adaptation/scenes/{key}/moments", response_model=SceneMomentsDocument)
+def put_scene_moments(slug: str, key: str, payload: SceneMomentsUpdate) -> SceneMomentsDocument:
+    return adaptation.put_scene_moments(slug, key, payload)
+
+
+@app.get("/api/projects/{slug}/adaptation/moments/sequence", response_model=MomentSequenceDocument)
+def get_moment_sequence(slug: str) -> MomentSequenceDocument:
+    return adaptation.moment_sequence_document(slug)
+
+
+@app.patch("/api/projects/{slug}/adaptation/moments/{key}", response_model=MomentSequenceEntry)
+def patch_moment(slug: str, key: str, payload: MomentPatch) -> MomentSequenceEntry:
+    return adaptation.patch_moment(slug, key, payload)
 
 
 @app.get("/api/projects/{slug}/adaptation/workflow", response_model=AdaptationWorkflowStatus)

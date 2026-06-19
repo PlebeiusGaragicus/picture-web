@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException, UploadFile
 
@@ -34,6 +34,12 @@ from models import (
     SceneListLine,
     SceneListLineCreate,
     SceneListReplace,
+    SceneMomentsDocument,
+    SceneMomentsUpdate,
+    MomentSequenceEntry,
+    MomentSequenceDocument,
+    MomentSequenceCounts,
+    MomentPatch,
     ArtifactKind,
     AssetSummary,
     DraftCanvasNode,
@@ -150,7 +156,7 @@ def metadata_path(slug: str) -> Path:
     return adaptation_dir(slug) / "adaptation.json"
 
 
-WORKFLOW_STAGES = ("ingest", "characters", "scene-list", "scenes", "locations", "all")
+WORKFLOW_STAGES = ("ingest", "characters", "scene-list", "scenes", "locations", "moments", "all")
 RUN_WORKFLOW_STAGES = ("ingest", "characters", "scene-list", "all")
 STYLE_REF_KINDS: tuple[StyleRefKind, StyleRefKind] = ("archetype-character", "archetype-scene")
 
@@ -234,11 +240,13 @@ def clear_stale_artifact_assets(slug: str, metadata: AdaptationMetadata) -> tupl
     for group in artifact_link_groups(metadata):
         for key, link in list(group.items()):
             asset_ids = [asset_id for asset_id in link.assetIds if asset_exists(slug, asset_id)]
+            active_asset_id = link.activeAssetId if link.activeAssetId in asset_ids else (asset_ids[-1] if asset_ids else None)
             next_status = "generated" if asset_ids else ("ready" if link.prompt else "missing")
-            if asset_ids != link.assetIds or next_status != link.status:
+            if asset_ids != link.assetIds or active_asset_id != link.activeAssetId or next_status != link.status:
                 group[key] = link.model_copy(
                     update={
                         "assetIds": asset_ids,
+                        "activeAssetId": active_asset_id,
                         "status": next_status,
                     }
                 )
@@ -901,47 +909,213 @@ def scene_extract_status(slug: str, scene_slug: str) -> AdaptationWorkflowStatus
     )
 
 
+def scene_plan_stage_name(scene_slug: str) -> str:
+    from adaptation_workflow.runner import scene_plan_stage
+
+    return scene_plan_stage(scene_slug)
+
+
+def scene_plan_status_path(slug: str, scene_slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{scene_plan_stage_name(scene_slug)}-status.json"
+
+
+def scene_plan_log_path(slug: str, scene_slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{scene_plan_stage_name(scene_slug)}.log"
+
+
+def scene_plan_launcher_log_path(slug: str, scene_slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{scene_plan_stage_name(scene_slug)}-launcher.log"
+
+
+def _require_scene_list_line(slug: str, scene_slug: str) -> str:
+    from adaptation_workflow.scene_list import find_scene_list_line
+
+    scene_line = find_scene_list_line(scene_list_path(slug), scene_slug)
+    if scene_line is None:
+        raise HTTPException(status_code=404, detail=f"Scene not in list: {scene_slug}")
+    return scene_line
+
+
+def _require_scene_artifact(slug: str, scene_slug: str) -> Path:
+    artifact = ensure_adaptation(slug) / "scenes" / "artifacts" / f"{scene_slug}.md"
+    if not artifact.is_file():
+        raise HTTPException(status_code=409, detail=f"Extract scene before planning moments: {scene_slug}")
+    return artifact
+
+
+def scene_moments_document(slug: str, scene_slug: str) -> SceneMomentsDocument:
+    from adaptation_workflow.moments import moment_output_path, moment_section_count, read_story_kind
+
+    target = scene_slug.strip().lower()
+    _require_scene_list_line(slug, target)
+    root = ensure_adaptation(slug)
+    story_kind = read_story_kind(root)
+    moment_path = moment_output_path(root, story_kind, target)
+    body = read_text(moment_path)
+    return SceneMomentsDocument(
+        sceneSlug=target,
+        path=relpath(root, moment_path),
+        body=body,
+        sectionCount=moment_section_count(moment_path),
+        storyKind=story_kind,  # type: ignore[arg-type]
+        exists=moment_path.is_file(),
+    )
+
+
+def put_scene_moments(slug: str, scene_slug: str, payload: SceneMomentsUpdate) -> SceneMomentsDocument:
+    from adaptation_workflow.moments import moment_output_path, read_story_kind
+
+    target = scene_slug.strip().lower()
+    _require_scene_list_line(slug, target)
+    _require_scene_artifact(slug, target)
+    root = ensure_adaptation(slug)
+    story_kind = read_story_kind(root)
+    moment_path = moment_output_path(root, story_kind, target)
+    moment_path.parent.mkdir(parents=True, exist_ok=True)
+    moment_path.write_text(payload.body.rstrip() + ("\n" if payload.body.strip() else ""))
+    sync_prompt_links(slug, read_metadata(slug))
+    return scene_moments_document(slug, target)
+
+
+def start_scene_plan(slug: str, scene_slug: str) -> AdaptationWorkflowStatus:
+    target = scene_slug.strip().lower()
+    root = ensure_adaptation(slug)
+    if not (root / "book.txt").is_file():
+        raise HTTPException(status_code=400, detail="Upload book.txt before planning moments")
+    _require_scene_list_line(slug, target)
+    _require_scene_artifact(slug, target)
+    return start_logged_process(
+        slug,
+        log_path=scene_plan_log_path(slug, target),
+        launcher_log_path=scene_plan_launcher_log_path(slug, target),
+        status_path=scene_plan_status_path(slug, target),
+        start_line=f"Starting scene plan for {target} in {slug}",
+        script_command=f'cd api && {workflow_python()} -m adaptation_workflow plan-scene "$SLUG" "{target}"',
+        validation=False,
+    )
+
+
+def scene_plan_status(slug: str, scene_slug: str) -> AdaptationWorkflowStatus:
+    target = scene_slug.strip().lower()
+    return process_status(
+        slug,
+        scene_plan_status_path(slug, target),
+        scene_plan_log_path(slug, target),
+        validation=False,
+    )
+
+
+def _find_moment_link(metadata: AdaptationMetadata, moment_key: str) -> tuple[ArtifactKind, AdaptationAssetLink] | None:
+    if moment_key in metadata.pages:
+        return "page-plan", metadata.pages[moment_key]
+    if moment_key in metadata.panels:
+        return "panel-prompt", metadata.panels[moment_key]
+    return None
+
+
+def _moment_link_to_entry(scene_slug: str, moment_key: str, artifact_kind: ArtifactKind, link: AdaptationAssetLink) -> MomentSequenceEntry:
+    illustrated = bool(link.activeAssetId or link.assetIds)
+    status_value: Literal["missing", "ready", "generated"] = "generated" if illustrated else "ready"
+    return MomentSequenceEntry(
+        momentKey=moment_key,
+        sceneSlug=scene_slug,
+        artifactKind=artifact_kind,
+        promptPath=link.promptPath,
+        prompt=link.prompt,
+        narration=link.narration,
+        dialogue=link.dialogue,
+        caption=link.caption,
+        refs=link.styleRef,
+        assetIds=list(link.assetIds),
+        activeAssetId=link.activeAssetId,
+        finalized=link.finalized,
+        status=status_value,
+    )
+
+
+def _moment_progress_counts(metadata: AdaptationMetadata) -> MomentSequenceCounts:
+    total = 0
+    illustrated = 0
+    finalized = 0
+    for group in (metadata.pages, metadata.panels):
+        for link in group.values():
+            total += 1
+            if link.activeAssetId or link.assetIds:
+                illustrated += 1
+            if link.finalized:
+                finalized += 1
+    return MomentSequenceCounts(total=total, illustrated=illustrated, finalized=finalized)
+
+
+def moment_sequence_document(slug: str) -> MomentSequenceDocument:
+    from adaptation_workflow.moments import ordered_moment_sequence
+
+    root = ensure_adaptation(slug)
+    metadata = sync_prompt_links(slug, read_metadata(slug))
+    moments: list[MomentSequenceEntry] = []
+    for item in ordered_moment_sequence(root):
+        found = _find_moment_link(metadata, item.moment_key)
+        if found is None:
+            continue
+        artifact_kind, link = found
+        moments.append(_moment_link_to_entry(item.scene_slug, item.moment_key, artifact_kind, link))
+    return MomentSequenceDocument(moments=moments, counts=_moment_progress_counts(metadata))
+
+
+def patch_moment(slug: str, moment_key: str, payload: MomentPatch) -> MomentSequenceEntry:
+    from adaptation_workflow.moments import ordered_moment_sequence, update_layout_section
+
+    target = moment_key.strip()
+    metadata = read_metadata(slug)
+    found = _find_moment_link(metadata, target)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"Moment not found: {target}")
+    artifact_kind, link = found
+    root = ensure_adaptation(slug)
+    moment_path = root / link.promptPath
+    scene_slug = next((item.scene_slug for item in ordered_moment_sequence(root) if item.moment_key == target), "")
+
+    file_updates: dict[str, str] = {}
+    if payload.narration is not None:
+        file_updates["narration"] = payload.narration
+    if payload.dialogue is not None:
+        file_updates["dialogue"] = payload.dialogue
+    if payload.caption is not None:
+        file_updates["caption"] = payload.caption
+    if file_updates:
+        if not moment_path.is_file():
+            raise HTTPException(status_code=404, detail=f"Moment file missing: {link.promptPath}")
+        update_layout_section(moment_path, target, file_updates)
+
+    meta_updates: dict[str, object] = {}
+    if payload.activeAssetId is not None:
+        if payload.activeAssetId and payload.activeAssetId not in link.assetIds:
+            raise HTTPException(status_code=400, detail=f"Asset not attached to moment: {payload.activeAssetId}")
+        meta_updates["activeAssetId"] = payload.activeAssetId
+    if payload.finalized is not None:
+        meta_updates["finalized"] = payload.finalized
+    if meta_updates:
+        updated = link.model_copy(update=meta_updates)
+        if artifact_kind == "page-plan":
+            metadata.pages[target] = updated
+        else:
+            metadata.panels[target] = updated
+        write_metadata(slug, metadata)
+
+    metadata = sync_prompt_links(slug, read_metadata(slug))
+    found = _find_moment_link(metadata, target)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"Moment not found after update: {target}")
+    artifact_kind, link = found
+    if not scene_slug:
+        scene_slug = next((item.scene_slug for item in ordered_moment_sequence(root) if item.moment_key == target), "")
+    return _moment_link_to_entry(scene_slug, target, artifact_kind, link)
+
+
 def parse_layout_sections(path: Path) -> dict[str, dict[str, str]]:
-    sections: dict[str, dict[str, str]] = {}
-    current: str | None = None
-    mode = ""
-    refs = ""
-    prompt_lines: list[str] = []
-    in_prompt = False
-    for raw_line in read_text(path).splitlines():
-        if raw_line.startswith("## "):
-            if current is not None:
-                sections[current] = {
-                    "mode": mode,
-                    "style_ref": refs,
-                    "prompt": "\n".join(prompt_lines).strip(),
-                }
-            current = slug_from_heading(raw_line)
-            mode = ""
-            refs = ""
-            prompt_lines = []
-            in_prompt = False
-            continue
-        if current is None:
-            continue
-        if raw_line.startswith("mode:"):
-            mode = raw_line.split(":", 1)[1].strip()
-            continue
-        if raw_line.startswith("refs:"):
-            refs = raw_line.split(":", 1)[1].strip()
-            continue
-        if raw_line == "" and mode:
-            in_prompt = True
-            continue
-        if in_prompt:
-            prompt_lines.append(raw_line)
-    if current is not None:
-        sections[current] = {
-            "mode": mode,
-            "style_ref": refs,
-            "prompt": "\n".join(prompt_lines).strip(),
-        }
-    return sections
+    from adaptation_workflow.moments import parse_layout_sections as workflow_parse_layout_sections
+
+    return workflow_parse_layout_sections(path)
 
 
 def prompt_link(
@@ -952,13 +1126,23 @@ def prompt_link(
     existing: AdaptationAssetLink | None,
 ) -> AdaptationAssetLink:
     asset_ids = list(existing.assetIds) if existing else []
+    active_asset_id = existing.activeAssetId if existing else None
+    if active_asset_id and active_asset_id not in asset_ids:
+        active_asset_id = asset_ids[-1] if asset_ids else None
+    elif not active_asset_id and asset_ids:
+        active_asset_id = asset_ids[-1]
     return AdaptationAssetLink(
         artifactKind=artifact_kind,
         promptPath=prompt_path,
         mode=section.get("mode", ""),
         styleRef=section.get("style_ref", ""),
         prompt=section.get("prompt", ""),
+        narration=section.get("narration", ""),
+        dialogue=section.get("dialogue", ""),
+        caption=section.get("caption", ""),
         assetIds=asset_ids,
+        activeAssetId=active_asset_id,
+        finalized=existing.finalized if existing else False,
         status="generated" if asset_ids else "ready",
     )
 
@@ -1029,6 +1213,7 @@ def status(slug: str) -> AdaptationStatus:
     if changed or artifact_changed:
         metadata = write_metadata(slug, metadata)
     statuses = style_ref_statuses(slug, metadata)
+    moment_counts = _moment_progress_counts(metadata)
     return AdaptationStatus(
         projectSlug=slug,
         settings=metadata.settings,
@@ -1056,6 +1241,9 @@ def status(slug: str) -> AdaptationStatus:
             "locationPrompts": len(list((root / "locations" / "prompts").glob("*.md"))),
             "pagePlans": len(list((root / "pages" / "plans").glob("*.md"))),
             "panelPrompts": len(list((root / "panels" / "prompts").glob("*.md"))),
+            "momentSections": _count_moment_sections(root),
+            "illustratedMoments": moment_counts.illustrated,
+            "finalizedMoments": moment_counts.finalized,
         },
         visualStyles=read_visual_styles(root),
         characters=metadata.characters,
@@ -1068,6 +1256,18 @@ def status(slug: str) -> AdaptationStatus:
 
 def count_nonempty_lines(path: Path) -> int:
     return sum(1 for line in read_text(path).splitlines() if line.strip())
+
+
+def _count_moment_sections(root: Path) -> int:
+    from adaptation_workflow.moments import moment_section_count
+
+    total = 0
+    for directory in (root / "pages" / "plans", root / "panels" / "prompts"):
+        if not directory.is_dir():
+            continue
+        for moment_file in directory.glob("*.md"):
+            total += moment_section_count(moment_file)
+    return total
 
 
 def write_style_ref_prompt(slug: str, request: AdaptationStylePromptPatch) -> AdaptationStatus:
@@ -1385,6 +1585,7 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
     entries[request.artifactKey] = link.model_copy(
         update={
             "assetIds": next_asset_ids,
+            "activeAssetId": asset.id,
             "status": "generated",
         }
     )

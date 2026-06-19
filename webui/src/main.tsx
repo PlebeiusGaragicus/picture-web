@@ -21,6 +21,7 @@ import { exportProjectAssetsToFolder, saveAssetImageToDisk } from './exportAsset
 import { VisualStyleList } from './adaptation/cards';
 import { WorkflowLogPanel } from './adaptation/workflowLog';
 import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
+import { MomentSequenceView } from './adaptation/momentSequenceView';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
 import { SYSTEM_TAGS, artifactKindLabel, assetLabel, adaptationFileKindToArtifactKind, capabilitiesForModel, characterEntityTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, storyArtifactKeysOnCanvas, storyArtifactNodeId, userProjectTags, visibleDisplayName } from './canvas/shared';
@@ -40,24 +41,32 @@ type ProjectPhase =
   | 'phase-1-characters'
   | 'phase-2-scenes'
   | 'phase-3-locations'
-  | 'phase-4-moments'
-  | 'phase-5-moment-canvas';
+  | 'phase-4-moments';
+
+type PhaseViewMode = 'list' | 'canvas' | 'view';
 
 const projectPhases: Array<{ id: ProjectPhase; number: string; title: string; shortTitle: string; description: string }> = [
   { id: 'phase-0-ingestion', number: '0', title: 'Story & Style', shortTitle: 'Story & Style', description: 'Book, archetypes & styles' },
   { id: 'phase-1-characters', number: '1', title: 'Characters', shortTitle: 'Cast', description: 'Cast & sheets' },
   { id: 'phase-2-scenes', number: '2', title: 'Scenes', shortTitle: 'Scenes', description: 'Story map' },
   { id: 'phase-3-locations', number: '3', title: 'Locations', shortTitle: 'Places', description: 'Places & refs' },
-  { id: 'phase-4-moments', number: '4', title: 'Moments', shortTitle: 'Moments', description: 'Beats' },
-  { id: 'phase-5-moment-canvas', number: '5', title: 'Images', shortTitle: 'Images', description: 'Panels' },
+  { id: 'phase-4-moments', number: '4', title: 'Moments', shortTitle: 'Moments', description: 'Beats & images' },
 ];
 
 function phaseHasCanvas(phase: ProjectPhase) {
-  return phase === 'story-canvas' || phase === 'phase-1-characters' || phase === 'phase-3-locations' || phase === 'phase-5-moment-canvas';
+  return phase === 'story-canvas' || phase === 'phase-1-characters' || phase === 'phase-3-locations';
 }
 
 function phaseHasList(phase: ProjectPhase) {
-  return phase !== 'phase-5-moment-canvas' && phase !== 'story-canvas';
+  return phase !== 'story-canvas';
+}
+
+function phaseHasViewToggle(phase: ProjectPhase) {
+  return phase === 'phase-4-moments';
+}
+
+function phaseAlternateViewLabel(phase: ProjectPhase) {
+  return phase === 'phase-4-moments' ? 'View' : 'Canvas';
 }
 
 function phaseWorkflowStage(phase: ProjectPhase): AdaptationStage | null {
@@ -83,6 +92,8 @@ function phaseValidationStage(phase: ProjectPhase): AdaptationStage | null {
       return 'scenes';
     case 'phase-3-locations':
       return 'locations';
+    case 'phase-4-moments':
+      return 'moments';
     default:
       return null;
   }
@@ -260,7 +271,7 @@ function App() {
   const [activeEntityTagFilters, setActiveEntityTagFilters] = useState<string[]>([]);
   const [isUserTagFilterMenuOpen, setIsUserTagFilterMenuOpen] = useState(false);
   const [projectPhase, setProjectPhase] = useState<ProjectPhase>('story-canvas');
-  const [phaseViewMode, setPhaseViewMode] = useState<'list' | 'canvas'>('list');
+  const [phaseViewMode, setPhaseViewMode] = useState<PhaseViewMode>('list');
   const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const [adaptation, setAdaptation] = useState<AdaptationStatus | null>(null);
@@ -1284,10 +1295,7 @@ function App() {
     const result = await api.publishAdaptationPhaseToCanvas(openProjectSlug);
     setCanvas(result.canvas);
     await loadProject(openProjectSlug);
-    if (projectPhase === 'phase-4-moments') {
-      setProjectPhase('phase-5-moment-canvas');
-      setPhaseViewMode('list');
-    } else if (phaseHasCanvas(projectPhase)) {
+    if (phaseHasCanvas(projectPhase)) {
       setPhaseViewMode('canvas');
     }
   };
@@ -1357,8 +1365,10 @@ function App() {
     );
   }
 
-  const showViewToggle = phaseHasCanvas(projectPhase) && phaseHasList(projectPhase);
-  const isCanvasActive = phaseHasCanvas(projectPhase) && (phaseHasList(projectPhase) ? phaseViewMode === 'canvas' : true);
+  const showViewToggle = (phaseHasCanvas(projectPhase) && phaseHasList(projectPhase)) || phaseHasViewToggle(projectPhase);
+  const isCanvasActive = phaseHasCanvas(projectPhase) && phaseViewMode === 'canvas';
+  const isMomentViewActive = phaseHasViewToggle(projectPhase) && phaseViewMode === 'view';
+  const isAdaptationListActive = !isCanvasActive && !isMomentViewActive;
 
   return (
     <div className="app">
@@ -1428,7 +1438,14 @@ function App() {
         {showViewToggle && (
           <div className="phase-view-toggle" role="tablist" aria-label="Phase view">
             <button role="tab" aria-selected={phaseViewMode === 'list'} className={phaseViewMode === 'list' ? 'active' : ''} onClick={() => setPhaseViewMode('list')}>List</button>
-            <button role="tab" aria-selected={phaseViewMode === 'canvas'} className={phaseViewMode === 'canvas' ? 'active' : ''} onClick={() => setPhaseViewMode('canvas')}>Canvas</button>
+            <button
+              role="tab"
+              aria-selected={phaseViewMode === 'canvas' || phaseViewMode === 'view'}
+              className={phaseViewMode === 'canvas' || phaseViewMode === 'view' ? 'active' : ''}
+              onClick={() => setPhaseViewMode(phaseHasViewToggle(projectPhase) ? 'view' : 'canvas')}
+            >
+              {phaseAlternateViewLabel(projectPhase)}
+            </button>
           </div>
         )}
         <input
@@ -1443,7 +1460,7 @@ function App() {
             event.currentTarget.value = '';
           }}
         />
-        {!isCanvasActive && adaptation && (
+        {isAdaptationListActive && adaptation && (
           <StoryPhaseScreen
             phase={projectPhase}
             projectSlug={openProjectSlug}
@@ -1463,6 +1480,17 @@ function App() {
             onDraftArtifactToCanvas={draftArtifactToCanvas}
             onReloadAdaptation={loadAdaptation}
           />
+        )}
+        {isMomentViewActive && adaptation && (
+          <div className="story-adaptation-screen">
+            <div className="story-adaptation-grid is-moments">
+              <MomentSequenceView
+                projectSlug={openProjectSlug}
+                adaptation={adaptation}
+                onReloadAdaptation={loadAdaptation}
+              />
+            </div>
+          </div>
         )}
         {isCanvasActive && (
           <>
@@ -1790,8 +1818,13 @@ function phaseStatus(adaptation: AdaptationStatus | null, phase: ProjectPhase) {
   if (phase === 'phase-1-characters') return (counts.characterSheets ?? 0) > 0 ? 'ready' : (counts.characterListLines ?? 0) > 0 || (counts.characterArtifacts ?? 0) > 0 ? 'active' : 'pending';
   if (phase === 'phase-2-scenes') return (counts.sceneArtifacts ?? 0) > 0 ? 'ready' : (counts.sceneListLines ?? 0) > 0 ? 'active' : 'pending';
   if (phase === 'phase-3-locations') return (counts.locationPrompts ?? 0) > 0 ? 'ready' : 'pending';
-  if (phase === 'phase-4-moments') return (counts.panelPrompts ?? 0) > 0 || (counts.pagePlans ?? 0) > 0 ? 'ready' : 'pending';
-  return (counts.panelPrompts ?? 0) > 0 || (counts.pagePlans ?? 0) > 0 ? 'active' : 'pending';
+  if (phase === 'phase-4-moments') {
+    const total = counts.momentSections ?? 0;
+    const illustrated = counts.illustratedMoments ?? 0;
+    if (!total) return (counts.sceneArtifacts ?? 0) > 0 ? 'active' : 'pending';
+    return illustrated >= total ? 'ready' : 'active';
+  }
+  return 'pending';
 }
 
 function PhaseSidebarToggleIcon({ variant }: { variant: 'collapse' | 'expand' }) {
@@ -2263,7 +2296,7 @@ function StoryPhaseScreen({
           Validation found issues in the adaptation artifacts. You can continue, but review the log before importing drafts to the canvas.
         </div>
       )}
-      <div className={`story-adaptation-grid ${phase === 'phase-0-ingestion' ? 'is-ingest' : ''} ${phase === 'phase-1-characters' || phase === 'phase-3-locations' ? 'is-assets' : ''}`}>
+      <div className={`story-adaptation-grid ${phase === 'phase-0-ingestion' ? 'is-ingest' : ''} ${phase === 'phase-1-characters' || phase === 'phase-3-locations' ? 'is-assets' : ''} ${phase === 'phase-2-scenes' ? 'is-scenes' : ''} ${phase === 'phase-4-moments' ? 'is-moments' : ''}`}>
         {phase === 'phase-0-ingestion' && (
           <PhaseIngestion
             projectSlug={projectSlug}
@@ -2348,7 +2381,14 @@ function StoryPhaseScreen({
           />
         )}
         {phase === 'phase-4-moments' && (
-          <PhaseMoments adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={async () => {}} onStartValidation={async () => {}} onPublishPhaseToCanvas={publishPhase} isPublishingPhase={isPublishingPhase} />
+          <PhaseMoments
+            projectSlug={projectSlug}
+            adaptation={adaptation}
+            workflow={workflow}
+            validation={validation}
+            onStartValidation={onStartValidation}
+            onReloadAdaptation={onReloadAdaptation}
+          />
         )}
       </div>
       {workflow && (workflow.log || workflow.running || workflow.returnCode !== null) && (
