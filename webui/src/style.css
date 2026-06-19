@@ -1008,6 +1008,18 @@ button {
   border-color: rgb(148 163 184 / 0.24);
 }
 
+.visual-style-default-badge {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #86efac;
+  vertical-align: middle;
+  background: rgb(34 197 94 / 0.12);
+  border: 1px solid rgb(34 197 94 / 0.28);
+  border-radius: 999px;
+}
+
 .archetype-prompt-preview {
   margin: 0;
   width: 100%;
@@ -4137,31 +4149,28 @@ pre {
 }
 
 .image-viewer-toolbar-main {
-  display: flex;
-  flex: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
-  justify-content: space-between;
+  width: 100%;
   min-width: 0;
 }
 
 .image-viewer-toolbar strong {
-  position: absolute;
-  left: 50%;
-  max-width: 42%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: center;
-  transform: translateX(-50%);
 }
 
 .image-viewer-toolbar-actions {
   display: flex;
+  flex-shrink: 0;
   gap: 12px;
   align-items: center;
-  margin-left: auto;
+  justify-self: end;
 }
 
 .image-viewer-tag-menu {

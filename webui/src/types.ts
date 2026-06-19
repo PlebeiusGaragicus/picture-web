@@ -177,6 +177,7 @@ export interface VisualStyleDefinition {
   id: string;
   name: string;
   prompt: string;
+  default?: boolean;
 }
 
 export interface AdaptationAssetLink {
@@ -216,6 +217,7 @@ export interface AdaptationStatus {
   archetypeScenePromptText?: string;
   counts: Record<string, number>;
   visualStyles: VisualStyleDefinition[];
+  defaultVisualStyleId?: string | null;
   characters: Record<string, AdaptationAssetLink>;
   locations: Record<string, AdaptationAssetLink>;
   scenes: Record<string, AdaptationAssetLink>;

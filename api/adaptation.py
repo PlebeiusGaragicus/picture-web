@@ -78,6 +78,27 @@ def write_visual_styles(root: Path, styles: list[VisualStyleDefinition]) -> None
     library.write_json(visual_styles_path(root), [style.model_dump() for style in styles])
 
 
+def resolve_default_visual_style_id(styles: list[VisualStyleDefinition]) -> str | None:
+    marked = [style.id for style in styles if style.default]
+    if len(marked) == 1:
+        return marked[0]
+    if styles:
+        return styles[0].id
+    return None
+
+
+def _mark_default_visual_style(styles: list[VisualStyleDefinition], style_id: str) -> list[VisualStyleDefinition]:
+    return [
+        VisualStyleDefinition(
+            id=style.id,
+            name=style.name,
+            prompt=style.prompt,
+            default=style.id == style_id,
+        )
+        for style in styles
+    ]
+
+
 def slugify_style_name(name: str) -> str:
     base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return base or "style"
@@ -108,7 +129,15 @@ def create_visual_style(slug: str, payload: VisualStyleCreate) -> AdaptationStat
     styles = read_visual_styles(root)
     style_id = unique_style_id(root, payload.name)
     prompt = payload.prompt if payload.prompt is not None else STYLE_TEMPLATE
-    styles.append(VisualStyleDefinition(id=style_id, name=payload.name.strip(), prompt=prompt.rstrip() + "\n"))
+    is_first = not styles
+    styles.append(
+        VisualStyleDefinition(
+            id=style_id,
+            name=payload.name.strip(),
+            prompt=prompt.rstrip() + "\n",
+            default=is_first,
+        )
+    )
     write_visual_styles(root, styles)
     return status(slug)
 
@@ -122,7 +151,14 @@ def update_visual_style(slug: str, style_id: str, payload: VisualStylePatch) -> 
     current = styles[index]
     name = payload.name.strip() if payload.name is not None else current.name
     prompt = payload.prompt if payload.prompt is not None else current.prompt
-    styles[index] = VisualStyleDefinition(id=style_id, name=name, prompt=prompt.rstrip() + "\n")
+    styles[index] = VisualStyleDefinition(
+        id=style_id,
+        name=name,
+        prompt=prompt.rstrip() + "\n",
+        default=current.default,
+    )
+    if payload.default is True:
+        styles = _mark_default_visual_style(styles, style_id)
     write_visual_styles(root, styles)
     return status(slug)
 
@@ -130,9 +166,12 @@ def update_visual_style(slug: str, style_id: str, payload: VisualStylePatch) -> 
 def delete_visual_style(slug: str, style_id: str) -> AdaptationStatus:
     root = ensure_adaptation(slug)
     styles = read_visual_styles(root)
-    next_styles = [style for style in styles if style.id != style_id]
-    if len(next_styles) == len(styles):
+    removed = next((style for style in styles if style.id == style_id), None)
+    if removed is None:
         raise HTTPException(status_code=404, detail=f"Visual style not found: {style_id}")
+    next_styles = [style for style in styles if style.id != style_id]
+    if removed.default and next_styles:
+        next_styles = _mark_default_visual_style(next_styles, next_styles[0].id)
     write_visual_styles(root, next_styles)
     return status(slug)
 
@@ -1341,7 +1380,8 @@ def status(slug: str) -> AdaptationStatus:
             "illustratedMoments": moment_counts.illustrated,
             "finalizedMoments": moment_counts.finalized,
         },
-        visualStyles=read_visual_styles(root),
+        visualStyles=(styles := read_visual_styles(root)),
+        defaultVisualStyleId=resolve_default_visual_style_id(styles),
         characters=metadata.characters,
         locations=metadata.locations,
         scenes=metadata.scenes,

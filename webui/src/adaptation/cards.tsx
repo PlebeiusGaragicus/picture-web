@@ -194,8 +194,29 @@ export function VisualStyleList({
           {styles.map((style) => (
             <article key={style.id} className="visual-style-list-item">
               <div className="visual-style-list-item-head">
-                <strong>{style.name}</strong>
+                <strong>
+                  {style.name}
+                  {style.default ? <span className="visual-style-default-badge">Default</span> : null}
+                </strong>
                 <div className="visual-style-list-item-actions">
+                  {!style.default && (
+                    <button
+                      className="secondary"
+                      type="button"
+                      disabled={isSaving}
+                      onClick={async () => {
+                        setIsSaving(true);
+                        try {
+                          await api.updateVisualStyle(projectSlug, style.id, { default: true });
+                          await onReload();
+                        } finally {
+                          setIsSaving(false);
+                        }
+                      }}
+                    >
+                      Set as default
+                    </button>
+                  )}
                   <button className="secondary" type="button" onClick={() => openEdit(style)}>Edit</button>
                   <button className="danger" type="button" onClick={() => setPendingDelete(style)}>Delete</button>
                 </div>

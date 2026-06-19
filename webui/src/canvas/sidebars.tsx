@@ -66,6 +66,7 @@ export function NodeSidebar({
         node={draftNode}
         assets={assets}
         visualStyles={adaptation?.visualStyles ?? []}
+        defaultVisualStyleId={adaptation?.defaultVisualStyleId}
         onDraftChange={onDraftChange}
         onGenerate={onGenerate}
         onCreateChildText={onCreateChildText}
@@ -80,6 +81,7 @@ export function NodeSidebar({
       <StoryArtifactSidebar
         node={artifactNode}
         visualStyles={adaptation?.visualStyles ?? []}
+        defaultVisualStyleId={adaptation?.defaultVisualStyleId}
         onStoryArtifactChange={onStoryArtifactChange}
         onGenerate={onGenerateArtifact}
         onCreateChildText={onCreateChildText}
@@ -126,6 +128,7 @@ function DraftSidebar({
   node,
   assets,
   visualStyles,
+  defaultVisualStyleId,
   onDraftChange,
   onGenerate,
   onCreateChildText,
@@ -134,6 +137,7 @@ function DraftSidebar({
   node: Node<DraftNodeData>;
   assets: Asset[];
   visualStyles: VisualStyleDefinition[];
+  defaultVisualStyleId?: string | null;
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onCreateChildText: (node: Node<DraftNodeData>) => void;
@@ -256,6 +260,7 @@ function DraftSidebar({
         <VisualStyleSelect
           styles={visualStyles}
           value={draft.visualStyleId}
+          defaultStyleId={defaultVisualStyleId}
           onChange={(styleId) => onDraftChange(node.id, { visualStyleId: styleId })}
         />
       )}
@@ -342,6 +347,7 @@ function canGenerateArtifact(kind: ArtifactKind) {
 function StoryArtifactSidebar({
   node,
   visualStyles,
+  defaultVisualStyleId,
   onStoryArtifactChange,
   onGenerate,
   onCreateChildText,
@@ -349,6 +355,7 @@ function StoryArtifactSidebar({
 }: {
   node: Node<StoryArtifactNodeData>;
   visualStyles: VisualStyleDefinition[];
+  defaultVisualStyleId?: string | null;
   onStoryArtifactChange: (id: string, patch: Partial<StoryArtifactCanvasNode>) => void;
   onGenerate: (id: string, artifact: StoryArtifactNodeData) => void;
   onCreateChildText: (node: Node<StoryArtifactNodeData>) => void;
@@ -384,6 +391,7 @@ function StoryArtifactSidebar({
         <VisualStyleSelect
           styles={visualStyles}
           value={artifact.visualStyleId}
+          defaultStyleId={defaultVisualStyleId}
           onChange={(styleId) => onStoryArtifactChange(node.id, { visualStyleId: styleId })}
         />
       )}
@@ -523,8 +531,8 @@ function ImageSidebar({
       seed: null,
       batchCount: 1,
     });
-    setVariantVisualStyleId(asset.generation?.visualStyleId ?? null);
-  }, [asset]);
+    setVariantVisualStyleId(asset.generation?.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null);
+  }, [adaptation?.defaultVisualStyleId, asset]);
   const isArchived = Boolean(asset.archivedAt);
   return (
     <aside className="details-sidebar">
@@ -653,6 +661,7 @@ function ImageSidebar({
         <VisualStyleSelect
           styles={adaptation?.visualStyles ?? []}
           value={isVariantPanelOpen ? variantVisualStyleId : asset.generation.visualStyleId}
+          defaultStyleId={adaptation?.defaultVisualStyleId}
           disabled={!isVariantPanelOpen}
           onChange={setVariantVisualStyleId}
         />

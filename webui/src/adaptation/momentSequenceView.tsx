@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { MomentRefInputsView } from './momentRefInputsView';
+import { defaultVisualStyleId } from './visualStyleUtils';
 import type { AdaptationStatus, MomentSequenceEntry, StoryKind, VisualStyleDefinition } from '../types';
 
 type GallerySlide = {
@@ -151,10 +152,10 @@ export function MomentSequenceView({
   }, [loadSequence, adaptation.counts.illustratedMoments, adaptation.counts.finalizedMoments, adaptation.counts.momentSections]);
 
   useEffect(() => {
-    if (!visualStyleId && adaptation.visualStyles.length) {
-      setVisualStyleId(adaptation.visualStyles[0].id);
-    }
-  }, [adaptation.visualStyles, visualStyleId]);
+    if (visualStyleId) return;
+    const resolved = adaptation.defaultVisualStyleId ?? defaultVisualStyleId(adaptation.visualStyles);
+    if (resolved) setVisualStyleId(resolved);
+  }, [adaptation.defaultVisualStyleId, adaptation.visualStyles, visualStyleId]);
 
   const grouped = useMemo(() => {
     const groups: Array<{ sceneSlug: string; moments: MomentSequenceEntry[] }> = [];
@@ -259,7 +260,10 @@ export function MomentSequenceView({
           Visual style
           <select value={visualStyleId} onChange={(event) => setVisualStyleId(event.target.value)}>
             {adaptation.visualStyles.map((style: VisualStyleDefinition) => (
-              <option key={style.id} value={style.id}>{style.name}</option>
+              <option key={style.id} value={style.id}>
+                {style.name}
+                {style.default ? ' (default)' : ''}
+              </option>
             ))}
           </select>
         </label>

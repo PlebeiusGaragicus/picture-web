@@ -1058,14 +1058,15 @@ function App() {
       setGeneratingNodeIds((current) => new Set(current).add(generatingId));
       setNodes((current) => current.map((node) => (node.id === generatingId || node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
       if (styleRefKind) {
-        if (!draft.visualStyleId) {
+        const visualStyleId = draft.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null;
+        if (!visualStyleId) {
           setError('Pick a visual style before generating the canonical reference.');
           return;
         }
         const result = await api.generateAdaptationStyleRef(openProjectSlug, {
           kind: styleRefKind,
           canvasNodeId: id,
-          visualStyleId: draft.visualStyleId,
+          visualStyleId,
           model: draft.params.model,
           aspectRatio: draft.params.aspectRatio,
           imageSize: draft.params.imageSize,
@@ -1317,7 +1318,8 @@ function App() {
 
   const generateStoryArtifact = async (id: string, artifact: StoryArtifactNodeData) => {
     if (!openProjectSlug) return;
-    if (!artifact.visualStyleId) {
+    const visualStyleId = artifact.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null;
+    if (!visualStyleId) {
       setError('Pick a visual style before generating.');
       return;
     }
@@ -1329,7 +1331,7 @@ function App() {
         artifactKind: artifact.artifactKind,
         artifactKey: artifact.artifactKey,
         canvasNodeId: id,
-        visualStyleId: artifact.visualStyleId,
+        visualStyleId: visualStyleId,
         model: artifact.params.model,
         aspectRatio: artifact.params.aspectRatio,
         imageSize: artifact.params.imageSize,
@@ -3163,7 +3165,7 @@ function ImageViewer({
                 if (node) void onRestoreImage(node.id, asset.id);
               }}
             >
-              Unarchive variant
+              Unarchive
             </button>
           ) : (
             <button
@@ -3174,7 +3176,7 @@ function ImageViewer({
                 if (node) onArchiveImage(node.id, asset.id);
               }}
             >
-              Archive variant
+              Archive
             </button>
           )}
           <strong>{node?.data.displayName ?? assetLabel(asset)}</strong>

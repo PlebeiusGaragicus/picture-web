@@ -87,7 +87,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  updateVisualStyle: (slug: string, styleId: string, payload: { name?: string; prompt?: string }) =>
+  updateVisualStyle: (slug: string, styleId: string, payload: { name?: string; prompt?: string; default?: boolean }) =>
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/visual-styles/${styleId}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),

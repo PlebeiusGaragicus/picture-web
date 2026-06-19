@@ -1468,6 +1468,8 @@ def test_visual_styles_crud_and_generate_composition(tmp_path, monkeypatch):
     assert len(styles) == 1
     style_id = styles[0]["id"]
     assert styles[0]["name"] == "Watercolor"
+    assert styles[0]["default"] is True
+    assert created.json()["defaultVisualStyleId"] == style_id
 
     updated = client.patch(
         f"/api/projects/farm-comic/adaptation/visual-styles/{style_id}",
@@ -1475,6 +1477,23 @@ def test_visual_styles_crud_and_generate_composition(tmp_path, monkeypatch):
     )
     assert updated.status_code == 200
     assert updated.json()["visualStyles"][0]["name"] == "Soft Watercolor"
+    assert updated.json()["defaultVisualStyleId"] == style_id
+
+    second = client.post(
+        "/api/projects/farm-comic/adaptation/visual-styles",
+        json={"name": "Ink", "prompt": "Style: ink lines\n"},
+    )
+    assert second.status_code == 200
+    ink_id = next(style["id"] for style in second.json()["visualStyles"] if style["name"] == "Ink")
+    assert second.json()["defaultVisualStyleId"] == style_id
+
+    set_default = client.patch(
+        f"/api/projects/farm-comic/adaptation/visual-styles/{ink_id}",
+        json={"default": True},
+    )
+    assert set_default.status_code == 200
+    assert set_default.json()["defaultVisualStyleId"] == ink_id
+    assert sum(1 for style in set_default.json()["visualStyles"] if style.get("default")) == 1
 
     captured = {}
 
@@ -1508,7 +1527,13 @@ def test_visual_styles_crud_and_generate_composition(tmp_path, monkeypatch):
 
     deleted = client.delete(f"/api/projects/farm-comic/adaptation/visual-styles/{style_id}")
     assert deleted.status_code == 200
-    assert deleted.json()["visualStyles"] == []
+    assert len(deleted.json()["visualStyles"]) == 1
+    assert deleted.json()["defaultVisualStyleId"] == ink_id
+
+    deleted_ink = client.delete(f"/api/projects/farm-comic/adaptation/visual-styles/{ink_id}")
+    assert deleted_ink.status_code == 200
+    assert deleted_ink.json()["visualStyles"] == []
+    assert deleted_ink.json()["defaultVisualStyleId"] is None
 
     missing = client.post(
         "/api/projects/farm-comic/generate",

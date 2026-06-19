@@ -213,6 +213,7 @@ class VisualStyleDefinition(BaseModel):
     id: str = Field(pattern=TAG_RE)
     name: str = Field(min_length=1)
     prompt: str = ""
+    default: bool = False
 
 
 class VisualStyleCreate(BaseModel):
@@ -223,6 +224,7 @@ class VisualStyleCreate(BaseModel):
 class VisualStylePatch(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     prompt: str | None = None
+    default: bool | None = None
 
 
 class AdaptationStatus(BaseModel):
@@ -238,6 +240,7 @@ class AdaptationStatus(BaseModel):
     archetypeScenePromptText: str = ""
     counts: dict[str, int]
     visualStyles: list[VisualStyleDefinition]
+    defaultVisualStyleId: str | None = Field(default=None, pattern=TAG_RE)
     characters: dict[str, AdaptationAssetLink]
     locations: dict[str, AdaptationAssetLink]
     scenes: dict[str, AdaptationAssetLink]
