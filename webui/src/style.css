@@ -2124,6 +2124,67 @@ pre {
   white-space: nowrap;
 }
 
+.scene-list-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scene-list-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.scene-list-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: rgb(15 23 42 / 0.55);
+}
+
+.scene-list-row.is-dragging {
+  opacity: 0.55;
+}
+
+.scene-list-drag-handle {
+  cursor: grab;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  padding: 0 4px;
+  font-size: 14px;
+}
+
+.scene-list-row-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.scene-list-row-body strong {
+  font-size: 13px;
+}
+
+.scene-list-row-body small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.scene-list-row-status {
+  color: #94a3b8 !important;
+}
+
+.scene-list-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .adaptation-file-form {
   display: grid;
   gap: 12px;

@@ -30,6 +30,10 @@ from models import (
     AdaptationStylePromptPatch,
     AdaptationStyleRefAssetRequest,
     AdaptationWorkflowStatus,
+    SceneListDocument,
+    SceneListLine,
+    SceneListLineCreate,
+    SceneListReplace,
     ArtifactKind,
     AssetSummary,
     DraftCanvasNode,
@@ -146,7 +150,8 @@ def metadata_path(slug: str) -> Path:
     return adaptation_dir(slug) / "adaptation.json"
 
 
-WORKFLOW_STAGES = ("ingest", "characters", "locations", "all")
+WORKFLOW_STAGES = ("ingest", "characters", "scene-list", "scenes", "locations", "all")
+RUN_WORKFLOW_STAGES = ("ingest", "characters", "scene-list", "all")
 STYLE_REF_KINDS: tuple[StyleRefKind, StyleRefKind] = ("archetype-character", "archetype-scene")
 
 
@@ -269,6 +274,12 @@ def require_stage(stage: str) -> str:
     return stage
 
 
+def require_run_stage(stage: str) -> str:
+    if stage not in RUN_WORKFLOW_STAGES:
+        raise HTTPException(status_code=400, detail=f"Unknown workflow stage: {stage}")
+    return stage
+
+
 def workflow_status_path(slug: str, stage: str) -> Path:
     return adaptation_dir(slug) / "sessions" / f"run-{stage}-status.json"
 
@@ -336,7 +347,10 @@ def ensure_adaptation(slug: str) -> Path:
         root / "characters" / "artifacts",
         root / "characters" / "sheets",
         root / "acts",
+        root / "scenes",
         root / "scenes" / "artifacts",
+        root / "locations",
+        root / "locations" / "staging",
         root / "pages" / "plans",
         root / "panels" / "prompts",
         root / "locations" / "prompts",
@@ -478,7 +492,7 @@ def start_logged_process(
 
 def start_workflow(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
     root = ensure_adaptation(slug)
-    require_stage(stage)
+    require_run_stage(stage)
     if not (root / "book.txt").is_file():
         raise HTTPException(status_code=400, detail="Upload book.txt before running adaptation")
     # stage is validated against WORKFLOW_STAGES above, so it is safe to interpolate.
@@ -793,6 +807,100 @@ def update_adaptation_file(slug: str, kind: AdaptationFileKind, key: str, payloa
     return files[next_key]
 
 
+def scene_list_path(slug: str) -> Path:
+    return ensure_adaptation(slug) / "scenes" / "list.txt"
+
+
+def scene_list_document(slug: str) -> SceneListDocument:
+    from adaptation_workflow.scene_list import parse_scene_list
+
+    entries = parse_scene_list(scene_list_path(slug))
+    return SceneListDocument(lines=[SceneListLine(slug=entry.slug, description=entry.description) for entry in entries])
+
+
+def replace_scene_list(slug: str, payload: SceneListReplace) -> SceneListDocument:
+    from adaptation_workflow.scene_list import SceneListEntry, write_scene_list
+
+    write_scene_list(
+        scene_list_path(slug),
+        [SceneListEntry(slug=line.slug, description=line.description, line_no=index) for index, line in enumerate(payload.lines, start=1)],
+    )
+    return scene_list_document(slug)
+
+
+def add_scene_list_line(slug: str, payload: SceneListLineCreate) -> SceneListDocument:
+    from adaptation_workflow.scene_list import SceneListEntry, parse_scene_list, write_scene_list
+
+    path = scene_list_path(slug)
+    entries = parse_scene_list(path)
+    if any(entry.slug == payload.slug for entry in entries):
+        raise HTTPException(status_code=409, detail=f"Scene already in list: {payload.slug}")
+    entries.append(SceneListEntry(slug=payload.slug, description=payload.description, line_no=len(entries) + 1))
+    write_scene_list(path, entries)
+    return scene_list_document(slug)
+
+
+def delete_scene_list_line(slug: str, key: str) -> SceneListDocument:
+    from adaptation_workflow.scene_list import parse_scene_list, write_scene_list
+
+    path = scene_list_path(slug)
+    entries = parse_scene_list(path)
+    target = key.strip().lower()
+    if not any(entry.slug == target for entry in entries):
+        raise HTTPException(status_code=404, detail=f"Scene not in list: {key}")
+    artifact = ensure_adaptation(slug) / "scenes" / "artifacts" / f"{target}.md"
+    if artifact.is_file():
+        raise HTTPException(status_code=409, detail=f"Remove or keep scene artifact before deleting list entry: {key}")
+    write_scene_list(path, [entry for entry in entries if entry.slug != target])
+    return scene_list_document(slug)
+
+
+def scene_extract_stage_name(scene_slug: str) -> str:
+    from adaptation_workflow.runner import scene_extract_stage
+
+    return scene_extract_stage(scene_slug)
+
+
+def scene_extract_status_path(slug: str, scene_slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{scene_extract_stage_name(scene_slug)}-status.json"
+
+
+def scene_extract_log_path(slug: str, scene_slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{scene_extract_stage_name(scene_slug)}.log"
+
+
+def scene_extract_launcher_log_path(slug: str, scene_slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{scene_extract_stage_name(scene_slug)}-launcher.log"
+
+
+def start_scene_extract(slug: str, scene_slug: str) -> AdaptationWorkflowStatus:
+    root = ensure_adaptation(slug)
+    if not (root / "book.txt").is_file():
+        raise HTTPException(status_code=400, detail="Upload book.txt before extracting scenes")
+    from adaptation_workflow.scene_list import find_scene_list_line
+
+    if find_scene_list_line(scene_list_path(slug), scene_slug) is None:
+        raise HTTPException(status_code=404, detail=f"Scene not in list: {scene_slug}")
+    return start_logged_process(
+        slug,
+        log_path=scene_extract_log_path(slug, scene_slug),
+        launcher_log_path=scene_extract_launcher_log_path(slug, scene_slug),
+        status_path=scene_extract_status_path(slug, scene_slug),
+        start_line=f"Starting scene extract for {scene_slug} in {slug}",
+        script_command=f'cd api && {workflow_python()} -m adaptation_workflow extract-scene "$SLUG" "{scene_slug}"',
+        validation=False,
+    )
+
+
+def scene_extract_status(slug: str, scene_slug: str) -> AdaptationWorkflowStatus:
+    return process_status(
+        slug,
+        scene_extract_status_path(slug, scene_slug),
+        scene_extract_log_path(slug, scene_slug),
+        validation=False,
+    )
+
+
 def parse_layout_sections(path: Path) -> dict[str, dict[str, str]]:
     sections: dict[str, dict[str, str]] = {}
     current: str | None = None
@@ -943,8 +1051,7 @@ def status(slug: str) -> AdaptationStatus:
             "characterListLines": count_nonempty_lines(root / "characters" / "list.txt"),
             "characterArtifacts": len(list((root / "characters" / "artifacts").glob("*.md"))),
             "characterSheets": len(list((root / "characters" / "sheets").glob("*.md"))),
-            "sceneManifest": 1 if (root / "scenes" / "manifest.md").is_file() else 0,
-            "playByPlay": 1 if (root / "acts" / "play-by-play.md").is_file() else 0,
+            "sceneListLines": count_nonempty_lines(root / "scenes" / "list.txt"),
             "sceneArtifacts": len(list((root / "scenes" / "artifacts").glob("*.md"))),
             "locationPrompts": len(list((root / "locations" / "prompts").glob("*.md"))),
             "pagePlans": len(list((root / "pages" / "plans").glob("*.md"))),

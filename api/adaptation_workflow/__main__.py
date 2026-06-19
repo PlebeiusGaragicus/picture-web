@@ -1,10 +1,10 @@
-"""CLI entry: python -m adaptation_workflow run|validate <slug> [stage]"""
+"""CLI entry: python -m adaptation_workflow run|validate|extract-scene ..."""
 
 from __future__ import annotations
 
 import sys
 
-from adaptation_workflow.runner import run_validate, run_workflow
+from adaptation_workflow.runner import run_extract_scene, run_validate, run_workflow
 
 
 def usage() -> None:
@@ -12,11 +12,16 @@ def usage() -> None:
         """Usage:
   python -m adaptation_workflow run <project-slug> [stage]
   python -m adaptation_workflow validate <project-slug> [stage]
+  python -m adaptation_workflow extract-scene <project-slug> <scene-slug>
 
-Stages:
-  ingest      Phase 0: read-book session + visual style.
-  characters  Phase 1: character list, artifacts, and sheets.
-  all         Run ingest and characters (default).
+Run stages:
+  ingest       Phase 0: read-book session + visual style.
+  characters   Phase 1: character list, artifacts, and sheets.
+  scene-list   Phase 2: scene list for the story.
+  all          Run ingest, characters, and scene-list (default).
+
+Validate stages:
+  ingest, characters, scene-list, scenes, locations, all
 """,
         file=sys.stderr,
     )
@@ -24,10 +29,18 @@ Stages:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) < 2 or len(args) > 3:
+    if not args:
         usage()
         return 2
     command = args[0]
+    if command == "extract-scene":
+        if len(args) != 3:
+            usage()
+            return 2
+        return run_extract_scene(args[1], args[2])
+    if len(args) < 2 or len(args) > 3:
+        usage()
+        return 2
     project_slug = args[1]
     stage = args[2] if len(args) == 3 else "all"
     if command == "run":

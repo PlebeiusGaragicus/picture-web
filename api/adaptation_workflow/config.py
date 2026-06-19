@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = REPO_ROOT / ".pi" / "skills"
 LIBRARY_ROOT = REPO_ROOT / "photo-library"
 
-WORKFLOW_STAGES = ("ingest", "characters", "locations", "all")
+WORKFLOW_STAGES = ("ingest", "characters", "scene-list", "scenes", "locations", "all")
 STYLE_TEMPLATE = "Style:\nColor palette:\nRealism:\nLighting:\n"
 NODE22_BIN_CANDIDATES = (
     Path("/opt/homebrew/opt/node@22/bin"),
@@ -134,6 +134,8 @@ def ensure_adaptation_dirs(book_root: Path) -> None:
         "characters/sheets",
         "acts",
         "locations",
+        "locations/staging",
+        "scenes",
         "scenes/artifacts",
         "pages/plans",
         "panels/prompts",

@@ -363,6 +363,22 @@ def sync_location_nodes(canvas: CanvasDocument, entries: dict[str, object], star
     return sync_story_artifact_nodes(canvas, artifact_kind="location-prompt", entries=entries, start_x=80, start_y=start_y, base_tags=["adaptation", "location"])
 
 
+def ordered_scene_entries(slug: str, entries: dict[str, object]) -> dict[str, object]:
+    import adaptation
+    from adaptation_workflow.scene_list import parse_scene_list
+
+    list_path = adaptation.adaptation_dir(slug) / "scenes" / "list.txt"
+    ordered_keys = [entry.slug for entry in parse_scene_list(list_path)]
+    ordered: dict[str, object] = {}
+    for key in ordered_keys:
+        if key in entries:
+            ordered[key] = entries[key]
+    for key in sorted(entries):
+        if key not in ordered:
+            ordered[key] = entries[key]
+    return ordered
+
+
 def sync_scene_nodes(canvas: CanvasDocument, entries: dict[str, object], start_y: int) -> CanvasDocument:
     return sync_story_artifact_nodes(canvas, artifact_kind="scene-artifact", entries=entries, start_x=80, start_y=start_y, base_tags=["adaptation", "scene"])
 
@@ -387,6 +403,6 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
     panel_start_y = location_start_y + max(1, (len(status.locations) + len(status.scenes) + len(status.pages) + columns - 1) // columns) * y_gap + 540
     next_canvas = sync_character_nodes(next_canvas, status.characters, character_start_y)
     next_canvas = sync_location_nodes(next_canvas, status.locations, location_start_y)
-    next_canvas = sync_scene_nodes(next_canvas, status.scenes, scene_start_y)
+    next_canvas = sync_scene_nodes(next_canvas, ordered_scene_entries(slug, status.scenes), scene_start_y)
     next_canvas = sync_moment_nodes(next_canvas, status.pages, status.panels, page_start_y, panel_start_y)
     return next_canvas

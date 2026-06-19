@@ -197,3 +197,52 @@ def test_validate_locations(tmp_path: Path) -> None:
     validate_locations(tmp_path, report)
     assert report.success
     assert any("checked 1 location entries" in message for message in report.passes)
+
+
+def test_parse_scene_list_and_reorder(tmp_path: Path) -> None:
+    from adaptation_workflow.scene_list import SceneListEntry, parse_scene_list, reorder_scene_list, write_scene_list
+
+    path = tmp_path / "scenes" / "list.txt"
+    write_scene_list(
+        path,
+        [
+            SceneListEntry(slug="001-alpha", description="First.", line_no=1),
+            SceneListEntry(slug="002-beta", description="Second.", line_no=2),
+        ],
+    )
+    entries = parse_scene_list(path)
+    assert [entry.slug for entry in entries] == ["001-alpha", "002-beta"]
+    reorder_scene_list(path, ["002-beta", "001-alpha"])
+    assert [entry.slug for entry in parse_scene_list(path)] == ["002-beta", "001-alpha"]
+
+
+def test_merge_staging_into_index(tmp_path: Path) -> None:
+    from adaptation_workflow.locations import merge_staging_into_index
+
+    book_root = tmp_path
+    (book_root / "locations").mkdir()
+    (book_root / "locations" / "index.md").write_text(
+        "## barn\nName: Barn\nType: location\nBase Location: none\nSource References:\n- `L1`: \"x\"\nVisual Traits:\n- red\n"
+    )
+    staging = book_root / "locations" / "staging" / "001-scene"
+    staging.mkdir(parents=True)
+    (staging / "garden.md").write_text(
+        "## garden\nName: Garden\nType: location\nBase Location: none\nSource References:\n- `L2`: \"y\"\nVisual Traits:\n- green\n"
+    )
+    (staging / "barn.md").write_text("## barn\nName: Barn duplicate\nType: location\n")
+    new_slugs = merge_staging_into_index(book_root, "001-scene")
+    assert new_slugs == ["garden"]
+    text = (book_root / "locations" / "index.md").read_text()
+    assert "## garden" in text
+    assert "duplicate" not in text
+
+
+def test_validate_scene_list(tmp_path: Path) -> None:
+    from adaptation_workflow.validate import validate_scene_list
+
+    scenes = tmp_path / "scenes"
+    scenes.mkdir()
+    (scenes / "list.txt").write_text("001-alpha: First scene.\n002-beta: Second scene.\n")
+    report = ValidationReport()
+    validate_scene_list(tmp_path, report)
+    assert report.success

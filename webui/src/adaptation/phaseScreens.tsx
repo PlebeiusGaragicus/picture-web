@@ -1,4 +1,5 @@
 import { PhaseWorkflowActions, StyleRefCard } from './cards';
+import { SceneListEditor } from './sceneListEditor';
 import { styleRefStatusFromAdaptation } from '../styleRefs';
 import type { AdaptationStatus, AdaptationWorkflowStatus, Asset, StoryKind, StyleRefKind } from '../types';
 
@@ -30,7 +31,7 @@ export function PhaseAssetType({
   fileEditor: React.ReactNode;
 }) {
   const isCharacters = kind === 'characters';
-  const workflowEnabled = kind === 'characters' || kind === 'locations';
+  const workflowEnabled = isCharacters;
   const styleRefStatus = styleRefStatusFromAdaptation(isCharacters ? 'archetype-character' : 'archetype-scene', adaptation, assets);
   return (
     <>
@@ -45,29 +46,53 @@ export function PhaseAssetType({
         />
       </div>
 
-      <PhaseWorkflowActions kind={kind} adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={onStartWorkflow} onStartValidation={onStartValidation} workflowDisabled={!workflowEnabled} />
+      <PhaseWorkflowActions
+        kind={kind}
+        adaptation={adaptation}
+        workflow={workflow}
+        validation={validation}
+        onStartWorkflow={onStartWorkflow}
+        onStartValidation={onStartValidation}
+        workflowDisabled={!workflowEnabled}
+        workflowDisabledReason={kind === 'locations' ? 'Locations are added when you extract scenes. Add or edit location files manually below.' : 'Workflow not available for this phase yet.'}
+        validateEnabled
+      />
 
       {fileEditor}
     </>
   );
 }
 
-export function PhaseScenes({ adaptation, workflow, validation, isSavingSettings, onSaveStoryKind, onStartWorkflow, onStartValidation, onPublishPhaseToCanvas, isPublishingPhase, fileEditor }: {
+export function PhaseScenes({
+  projectSlug,
+  adaptation,
+  workflow,
+  validation,
+  isSavingSettings,
+  onSaveStoryKind,
+  onGenerateSceneList,
+  onStartValidation,
+  onPublishPhaseToCanvas,
+  isPublishingPhase,
+  onReloadAdaptation,
+  artifactEditor,
+}: {
+  projectSlug: string;
   adaptation: AdaptationStatus;
   workflow: AdaptationWorkflowStatus | null;
   validation: AdaptationWorkflowStatus | null;
   isSavingSettings: boolean;
   onSaveStoryKind: (kind: StoryKind) => Promise<void>;
-  onStartWorkflow: () => Promise<void>;
+  onGenerateSceneList: () => Promise<void>;
   onStartValidation: () => Promise<void>;
   onPublishPhaseToCanvas: () => Promise<void>;
   isPublishingPhase: boolean;
-  fileEditor: React.ReactNode;
+  onReloadAdaptation: () => Promise<void>;
+  artifactEditor: React.ReactNode;
 }) {
   const sceneCount = Object.keys(adaptation.scenes).length;
   return (
     <>
-      {fileEditor}
       <section className="story-card">
         <h2>Story Kind</h2>
         <p className="muted">Choose the adaptation shape. This drives how scenes break down into pages or panels in later phases.</p>
@@ -77,23 +102,30 @@ export function PhaseScenes({ adaptation, workflow, validation, isSavingSettings
           <option value="comic-book">Comic book</option>
         </select>
       </section>
+
+      <SceneListEditor
+        projectSlug={projectSlug}
+        adaptation={adaptation}
+        workflow={workflow}
+        onGenerateList={onGenerateSceneList}
+        onReloadAdaptation={onReloadAdaptation}
+      />
+
       <section className="story-card">
-        <h2>Acts And Scenes</h2>
-        <p className="muted">Scene extraction workflow is not available yet. Author scene files manually or wait for a later release.</p>
-        <button className="generate-button workflow-run-button" disabled>
-          Run scene workflow
+        <h2>Validate Scenes</h2>
+        <button className="secondary" type="button" onClick={onStartValidation} disabled={validation?.running}>
+          {validation?.running ? 'Validating...' : 'Run validation'}
         </button>
       </section>
+
+      {artifactEditor}
+
       <section className="story-card">
         <h2>Scene Canvas</h2>
-        <p className="muted">{sceneCount ? `${sceneCount} scene files are ready to publish as planning nodes.` : 'No scene files yet.'}</p>
+        <p className="muted">{sceneCount ? `${sceneCount} scene files are ready to publish as planning nodes.` : 'Extract scenes to create scene artifacts.'}</p>
         <button className="generate-button" onClick={onPublishPhaseToCanvas} disabled={!sceneCount || isPublishingPhase}>
           {isPublishingPhase ? 'Publishing...' : 'Publish scene nodes'}
         </button>
-      </section>
-      <section className="story-card">
-        <h2>Validate Scenes</h2>
-        <button className="secondary" disabled>Run validation</button>
       </section>
     </>
   );

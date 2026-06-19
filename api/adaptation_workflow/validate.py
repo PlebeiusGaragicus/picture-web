@@ -95,6 +95,13 @@ def validate_location_prompt(path: Path) -> None:
         raise ValidationError(f"File contains source citation text: {path}")
 
 
+def validate_scene_artifact(path: Path) -> None:
+    validate_nonempty_file(path)
+    validate_no_chat_wrappers(path)
+    for required in ("Scene Id:", "## Story Function", "## Visual Continuity", "## Dramatic Beats", "## Staging Notes"):
+        validate_contains(path, required)
+
+
 def validate_style_refs(book_root: Path, report: ValidationReport) -> None:
     report.ok("Style refs")
     archetype_character = book_root / "style-refs" / "archetype-character.md"
@@ -165,12 +172,72 @@ def validate_locations(book_root: Path, report: ValidationReport) -> None:
     report.ok(f"checked {len(entries)} location entries")
 
 
+def validate_scene_list(book_root: Path, report: ValidationReport) -> None:
+    from adaptation_workflow.scene_list import SceneListError, scene_slug_from_line
+
+    report.ok("Scene list")
+    list_path = book_root / "scenes" / "list.txt"
+    if not validate_common_file(list_path, report):
+        return
+    seen: set[str] = set()
+    count = 0
+    for line in list_path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        count += 1
+        try:
+            slug = scene_slug_from_line(stripped)
+        except SceneListError as exc:
+            report.fail(str(exc))
+            continue
+        if slug in seen:
+            report.fail(f"duplicate scene slug in list.txt: {slug}")
+            continue
+        seen.add(slug)
+    if count == 0:
+        report.fail("scenes/list.txt has no scene lines")
+        return
+    report.ok(f"checked {count} scene list entries")
+
+
+def validate_scenes(book_root: Path, report: ValidationReport) -> None:
+    from adaptation_workflow.scene_list import SceneListError, scene_slug_from_line
+
+    validate_scene_list(book_root, report)
+    list_path = book_root / "scenes" / "list.txt"
+    if not list_path.is_file():
+        return
+    report.ok("Scene artifacts")
+    for line in list_path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            slug = scene_slug_from_line(stripped)
+        except SceneListError:
+            continue
+        artifact = book_root / "scenes" / "artifacts" / f"{slug}.md"
+        if not artifact.is_file():
+            continue
+        try:
+            validate_scene_artifact(artifact)
+        except ValidationError as exc:
+            report.fail(str(exc))
+    extracted = len(list((book_root / "scenes" / "artifacts").glob("*.md")))
+    report.ok(f"checked {extracted} extracted scene artifacts")
+
+
 def run_validation(book_root: Path, stage: str) -> ValidationReport:
     report = ValidationReport()
     if stage in {"ingest", "all"}:
         validate_style_refs(book_root, report)
     if stage in {"characters", "all"}:
         validate_character_list(book_root, report)
+    if stage in {"scene-list", "all"}:
+        validate_scene_list(book_root, report)
+    if stage in {"scenes", "all"}:
+        validate_scenes(book_root, report)
     if stage in {"locations", "all"}:
         validate_locations(book_root, report)
     return report

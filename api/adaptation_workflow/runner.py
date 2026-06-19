@@ -46,8 +46,11 @@ def write_summary(
     diagnostics.summary_path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
+RUN_WORKFLOW_STAGES = ("ingest", "characters", "scene-list", "all")
+
+
 def run_workflow(project_slug: str, stage: str) -> int:
-    if stage not in WORKFLOW_STAGES:
+    if stage not in RUN_WORKFLOW_STAGES:
         print(f"error: Unknown workflow stage: {stage}", file=sys.stderr)
         return 2
 
@@ -125,12 +128,12 @@ def run_workflow(project_slug: str, stage: str) -> int:
             if stage == "characters":
                 logger.write_line()
                 logger.write_line(f"[characters] Done. Character sheets are under {ctx.book_root}/characters/sheets.")
-        if stage in {"locations", "all"}:
+        if stage in {"scene-list", "all"}:
             steps.require_book_session()
-            steps.stage_locations()
-            if stage == "locations":
+            steps.step_scene_list()
+            if stage == "scene-list":
                 logger.write_line()
-                logger.write_line(f"[locations] Done. Location prompts are under {ctx.book_root}/locations/prompts.")
+                logger.write_line(f"[scene-list] Done. Scene list is at {ctx.book_root}/scenes/list.txt.")
         if stage == "all":
             logger.write_line()
             logger.write_line(f"Book root: {ctx.book_root}")
@@ -139,6 +142,89 @@ def run_workflow(project_slug: str, stage: str) -> int:
                 logger.write_line(f"Session:   {steps.book_session.session_id}")
             logger.write_line()
             logger.write_line(f"Done. Current outputs are under {ctx.book_root}.")
+    except Exception as exc:
+        return_code = 1
+        error = str(exc)
+        logger.write_line(f"error: {error}")
+        print(f"error: {error}", file=sys.stderr)
+    finally:
+        logger.close()
+        flush_progress(error=error, return_code=return_code, running=False)
+
+    return return_code
+
+
+def scene_extract_stage(scene_slug: str) -> str:
+    return f"scene-extract-{scene_slug}"
+
+
+def run_extract_scene(project_slug: str, scene_slug: str) -> int:
+    stage = scene_extract_stage(scene_slug)
+    try:
+        ctx = AdaptationContext.for_slug(project_slug)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    diagnostics = RunDiagnostics.create(ctx.book_root_abs, stage, validation=False)
+    logger = WorkflowLogger(diagnostics)
+
+    try:
+        node_path, node_ver = ensure_node_runtime()
+    except RuntimeError as exc:
+        logger.write_line(f"error: {exc}")
+        logger.close()
+        write_summary(
+            diagnostics,
+            stage=stage,
+            return_code=1,
+            tasks=[],
+            pi_binary="missing",
+            error=str(exc),
+            running=False,
+        )
+        diagnostics.write_manifest(ctx.book_root_abs, extra={"project": ctx.project_slug, "sceneSlug": scene_slug, "error": str(exc)})
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    pi_binary = find_pi_binary()
+
+    def flush_progress(*, error: str | None = None, return_code: int = 0, running: bool = True) -> None:
+        write_summary(
+            diagnostics,
+            stage=stage,
+            return_code=return_code,
+            tasks=logger.task_records,
+            pi_binary=pi_binary,
+            error=error,
+            running=running,
+        )
+        diagnostics.write_manifest(
+            ctx.book_root_abs,
+            extra={
+                "project": ctx.project_slug,
+                "sceneSlug": scene_slug,
+                "returnCode": return_code,
+                "running": running,
+                "error": error,
+            },
+        )
+
+    logger.write_line(f"[start] pi: {pi_binary} ({pi_version(pi_binary)})")
+    logger.write_line(f"[start] node: {node_ver} ({node_path})")
+    logger.write_line(f"[start] project: {ctx.project_slug}")
+    logger.write_line(f"[start] scene: {scene_slug}")
+    logger.write_line(f"[start] log: {diagnostics.rel(diagnostics.ui_log_path, ctx.book_root_abs)}")
+    flush_progress(running=True)
+
+    return_code = 0
+    error: str | None = None
+    try:
+        steps = StepRunner(ctx, logger, on_progress=lambda: flush_progress(running=True))
+        steps.require_book_session()
+        steps.extract_scene(scene_slug)
+        logger.write_line()
+        logger.write_line(f"[scenes] Done. Scene artifact and locations updated for {scene_slug}.")
     except Exception as exc:
         return_code = 1
         error = str(exc)

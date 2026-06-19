@@ -15,8 +15,9 @@ Validates generated comic-adaptation text artifacts without invoking Pi.
 Stages:
   ingest      Phase 0: style refs.
   characters  Phase 1: character list, artifacts, and sheets.
-  locations   Phase 2: location index and prompts.
-  scenes      Phase 3: play-by-play, scene manifest, and scene artifacts.
+  scene-list  Phase 2: scene list.
+  scenes      Phase 2: scene list and extracted artifacts.
+  locations   Phase 3: location index and prompts.
   moments     Phase 4: page/panel story layouts.
   all         Validate every phase (default).
 EOF
@@ -136,6 +137,46 @@ validate_character_sheet() {
       fail "$path missing $required"
     fi
   done
+}
+
+validate_scene_list() {
+  echo
+  echo "Scene list"
+  local path="$BOOK_ROOT/scenes/list.txt"
+  validate_common_file "$path" || return
+  local count=0
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "$line" ]] && continue
+    count=$((count + 1))
+    if [[ "$line" != *:* ]]; then
+      fail "scene list line missing colon: $line"
+    fi
+  done < "$path"
+  if [[ "$count" -eq 0 ]]; then
+    fail "scenes/list.txt has no scene lines"
+    return
+  fi
+  pass "checked $count scene list entries"
+}
+
+validate_scene_list_and_artifacts() {
+  validate_scene_list
+  local list_path="$BOOK_ROOT/scenes/list.txt"
+  [[ -f "$list_path" ]] || return
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "$line" ]] || [[ "$line" != *:* ]] && continue
+    slug="${line%%:*}"
+    slug="${slug#"${slug%%[![:space:]]*}"}"
+    slug="${slug%"${slug##*[![:space:]]}"}"
+    slug="$(echo "$slug" | tr '[:upper:]' '[:lower:]')"
+    artifact="$BOOK_ROOT/scenes/artifacts/$slug.md"
+    [[ -f "$artifact" ]] || continue
+    validate_scene_artifact "$artifact"
+  done < "$list_path"
 }
 
 validate_play_by_play() {
@@ -319,7 +360,7 @@ fi
 
 STAGE="${2:-all}"
 case "$STAGE" in
-  ingest | characters | locations | scenes | moments | all) ;;
+  ingest | characters | scene-list | scenes | locations | moments | all) ;;
   *) usage; echo "error: Unknown validation stage: $STAGE" >&2; exit 2 ;;
 esac
 
@@ -342,12 +383,14 @@ case "$STAGE" in
   characters)
     validate_character_list
     ;;
+  scene-list)
+    validate_scene_list
+    ;;
   locations)
     validate_locations
     ;;
   scenes)
-    validate_play_by_play
-    validate_scene_manifest_and_artifacts
+    validate_scene_list_and_artifacts
     ;;
   moments)
     validate_story_layouts
@@ -355,9 +398,8 @@ case "$STAGE" in
   all)
     validate_style_refs
     validate_character_list
+    validate_scene_list_and_artifacts
     validate_locations
-    validate_play_by_play
-    validate_scene_manifest_and_artifacts
     validate_story_layouts
     ;;
 esac

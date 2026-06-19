@@ -464,11 +464,12 @@ def test_adaptation_settings_scene_panel_status_and_canvas_import(tmp_path, monk
     (root / "panels" / "prompts" / "001-test-scene.md").write_text(
         "## 001-test-scene-panel-01\nmode: story-layout\nrefs: character:test-character-base, location:test-location\n\nComic panel of a test scene. No watermarks.\n"
     )
+    (root / "scenes" / "list.txt").write_text("001-test-scene: Test scene summary.\n")
 
     status = client.get("/api/projects/farm-comic/adaptation")
     assert status.status_code == 200
     payload = status.json()
-    assert payload["counts"]["playByPlay"] == 1
+    assert payload["counts"]["sceneListLines"] == 1
     assert payload["counts"]["sceneArtifacts"] == 1
     assert payload["counts"]["panelPrompts"] == 1
     assert payload["scenes"]["001-test-scene"]["artifactKind"] == "scene-artifact"
@@ -713,6 +714,41 @@ def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monke
     ]
     assert len(location_nodes) == 1
     assert location_nodes[0]["artifactKey"] == "barn"
+
+
+def test_scene_list_api(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Once upon a time.\n")
+
+    empty = client.get("/api/projects/farm-comic/adaptation/scenes/list")
+    assert empty.status_code == 200
+    assert empty.json()["lines"] == []
+
+    created = client.post(
+        "/api/projects/farm-comic/adaptation/scenes/list/lines",
+        json={"slug": "001-opening", "description": "Opening beat."},
+    )
+    assert created.status_code == 200
+    assert created.json()["lines"][0]["slug"] == "001-opening"
+
+    replaced = client.put(
+        "/api/projects/farm-comic/adaptation/scenes/list",
+        json={"lines": [{"slug": "002-later", "description": "Later."}, {"slug": "001-opening", "description": "Opening beat."}]},
+    )
+    assert replaced.status_code == 200
+    assert [line["slug"] for line in replaced.json()["lines"]] == ["002-later", "001-opening"]
+
+    status = client.get("/api/projects/farm-comic/adaptation")
+    assert status.json()["counts"]["sceneListLines"] == 2
+
+    workflow = client.post("/api/projects/farm-comic/adaptation/workflow/start", json={"stage": "scene-list"})
+    assert workflow.status_code == 200
+
+    bad_extract = client.post("/api/projects/farm-comic/adaptation/scenes/missing-scene/extract")
+    assert bad_extract.status_code == 404
 
 
 def test_style_ref_status_clears_stale_asset_and_repairs_canvas(tmp_path, monkeypatch):

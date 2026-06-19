@@ -218,7 +218,16 @@ export interface AdaptationStatus {
   panels: Record<string, AdaptationAssetLink>;
 }
 
-export type AdaptationStage = 'ingest' | 'characters' | 'locations' | 'all';
+export type AdaptationStage = 'ingest' | 'characters' | 'scene-list' | 'scenes' | 'locations' | 'all';
+
+export interface SceneListLine {
+  slug: string;
+  description: string;
+}
+
+export interface SceneListDocument {
+  lines: SceneListLine[];
+}
 
 export interface AdaptationWorkflowStatus {
   running: boolean;

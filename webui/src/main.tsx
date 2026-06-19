@@ -38,39 +38,58 @@ type ProjectPhase =
   | 'story-canvas'
   | 'phase-0-ingestion'
   | 'phase-1-characters'
-  | 'phase-2-locations'
-  | 'phase-3-scenes'
+  | 'phase-2-scenes'
+  | 'phase-3-locations'
   | 'phase-4-moments'
   | 'phase-5-moment-canvas';
 
 const projectPhases: Array<{ id: ProjectPhase; number: string; title: string; shortTitle: string; description: string }> = [
   { id: 'phase-0-ingestion', number: '0', title: 'Story & Style', shortTitle: 'Story & Style', description: 'Book, archetypes & styles' },
   { id: 'phase-1-characters', number: '1', title: 'Characters', shortTitle: 'Cast', description: 'Cast & sheets' },
-  { id: 'phase-2-locations', number: '2', title: 'Locations', shortTitle: 'Places', description: 'Places & refs' },
-  { id: 'phase-3-scenes', number: '3', title: 'Scenes', shortTitle: 'Scenes', description: 'Acts' },
+  { id: 'phase-2-scenes', number: '2', title: 'Scenes', shortTitle: 'Scenes', description: 'Story map' },
+  { id: 'phase-3-locations', number: '3', title: 'Locations', shortTitle: 'Places', description: 'Places & refs' },
   { id: 'phase-4-moments', number: '4', title: 'Moments', shortTitle: 'Moments', description: 'Beats' },
   { id: 'phase-5-moment-canvas', number: '5', title: 'Images', shortTitle: 'Images', description: 'Panels' },
 ];
 
 function phaseHasCanvas(phase: ProjectPhase) {
-  return phase === 'story-canvas' || phase === 'phase-1-characters' || phase === 'phase-2-locations' || phase === 'phase-5-moment-canvas';
+  return phase === 'story-canvas' || phase === 'phase-1-characters' || phase === 'phase-3-locations' || phase === 'phase-5-moment-canvas';
 }
 
 function phaseHasList(phase: ProjectPhase) {
   return phase !== 'phase-5-moment-canvas' && phase !== 'story-canvas';
 }
 
-function phaseStage(phase: ProjectPhase): AdaptationStage | null {
+function phaseWorkflowStage(phase: ProjectPhase): AdaptationStage | null {
   switch (phase) {
     case 'phase-0-ingestion':
       return 'ingest';
     case 'phase-1-characters':
       return 'characters';
-    case 'phase-2-locations':
+    case 'phase-2-scenes':
+      return 'scene-list';
+    default:
+      return null;
+  }
+}
+
+function phaseValidationStage(phase: ProjectPhase): AdaptationStage | null {
+  switch (phase) {
+    case 'phase-0-ingestion':
+      return 'ingest';
+    case 'phase-1-characters':
+      return 'characters';
+    case 'phase-2-scenes':
+      return 'scenes';
+    case 'phase-3-locations':
       return 'locations';
     default:
       return null;
   }
+}
+
+function phaseStage(phase: ProjectPhase): AdaptationStage | null {
+  return phaseWorkflowStage(phase);
 }
 
 const emptyCanvas: CanvasDocument = {
@@ -1136,7 +1155,7 @@ function App() {
   }, [loadAdaptation, assets]);
 
   const loadAdaptationWorkflow = useCallback(async () => {
-    const stage = phaseStage(projectPhase);
+    const stage = phaseWorkflowStage(projectPhase);
     setAdaptationWorkflow(null);
     if (!openProjectSlug || !stage) {
       return;
@@ -1149,7 +1168,7 @@ function App() {
   }, [openProjectSlug, projectPhase]);
 
   const loadAdaptationValidation = useCallback(async () => {
-    const stage = phaseStage(projectPhase);
+    const stage = phaseValidationStage(projectPhase);
     if (!openProjectSlug) {
       setAdaptationValidation(null);
       return;
@@ -1170,7 +1189,7 @@ function App() {
   }, [loadAdaptationValidation]);
 
   useEffect(() => {
-    const stage = phaseStage(projectPhase);
+    const stage = phaseWorkflowStage(projectPhase);
     if (!openProjectSlug || !stage || !adaptationWorkflow?.running) return;
     const timer = window.setInterval(async () => {
       const next = await api.getAdaptationWorkflow(openProjectSlug, stage);
@@ -1184,7 +1203,7 @@ function App() {
   }, [adaptationWorkflow?.running, loadAdaptation, openProjectSlug, projectPhase]);
 
   useEffect(() => {
-    const stage = phaseStage(projectPhase);
+    const stage = phaseValidationStage(projectPhase);
     if (!openProjectSlug || !stage || !adaptationValidation?.running) return;
     const timer = window.setInterval(async () => {
       setAdaptationValidation(await api.getAdaptationValidation(openProjectSlug, stage));
@@ -1235,7 +1254,7 @@ function App() {
       setCanvas(result.canvas);
       await loadProject(openProjectSlug);
       const draftNodeId = styleRefDraftNodeId(kind, null);
-      setProjectPhase(kind === 'archetype-character' ? 'phase-1-characters' : 'phase-2-locations');
+      setProjectPhase(kind === 'archetype-character' ? 'phase-1-characters' : 'phase-3-locations');
       setPhaseViewMode('canvas');
       setSelectedNodeIds([draftNodeId]);
       setPopoverNodeId(draftNodeId);
@@ -1252,7 +1271,7 @@ function App() {
   };
 
   const startAdaptationValidation = async () => {
-    const stage = phaseStage(projectPhase);
+    const stage = phaseValidationStage(projectPhase);
     if (!openProjectSlug) return;
     if (!stage) return;
     setError(null);
@@ -1769,8 +1788,8 @@ function phaseStatus(adaptation: AdaptationStatus | null, phase: ProjectPhase) {
   const counts = adaptation.counts;
   if (phase === 'phase-0-ingestion') return adaptation.hasBookSession ? 'ready' : adaptation.hasBook ? 'active' : 'pending';
   if (phase === 'phase-1-characters') return (counts.characterSheets ?? 0) > 0 ? 'ready' : (counts.characterListLines ?? 0) > 0 || (counts.characterArtifacts ?? 0) > 0 ? 'active' : 'pending';
-  if (phase === 'phase-2-locations') return (counts.locationPrompts ?? 0) > 0 ? 'ready' : 'pending';
-  if (phase === 'phase-3-scenes') return (counts.sceneArtifacts ?? 0) > 0 ? 'ready' : (counts.sceneManifest ?? 0) > 0 ? 'active' : 'pending';
+  if (phase === 'phase-2-scenes') return (counts.sceneArtifacts ?? 0) > 0 ? 'ready' : (counts.sceneListLines ?? 0) > 0 ? 'active' : 'pending';
+  if (phase === 'phase-3-locations') return (counts.locationPrompts ?? 0) > 0 ? 'ready' : 'pending';
   if (phase === 'phase-4-moments') return (counts.panelPrompts ?? 0) > 0 || (counts.pagePlans ?? 0) > 0 ? 'ready' : 'pending';
   return (counts.panelPrompts ?? 0) > 0 || (counts.pagePlans ?? 0) > 0 ? 'active' : 'pending';
 }
@@ -2244,7 +2263,7 @@ function StoryPhaseScreen({
           Validation found issues in the adaptation artifacts. You can continue, but review the log before importing drafts to the canvas.
         </div>
       )}
-      <div className={`story-adaptation-grid ${phase === 'phase-0-ingestion' ? 'is-ingest' : ''} ${phase === 'phase-1-characters' || phase === 'phase-2-locations' ? 'is-assets' : ''}`}>
+      <div className={`story-adaptation-grid ${phase === 'phase-0-ingestion' ? 'is-ingest' : ''} ${phase === 'phase-1-characters' || phase === 'phase-3-locations' ? 'is-assets' : ''}`}>
         {phase === 'phase-0-ingestion' && (
           <PhaseIngestion
             projectSlug={projectSlug}
@@ -2280,7 +2299,30 @@ function StoryPhaseScreen({
             )}
           />
         )}
-        {phase === 'phase-2-locations' && (
+        {phase === 'phase-2-scenes' && (
+          <PhaseScenes
+            projectSlug={projectSlug}
+            adaptation={adaptation}
+            workflow={workflow}
+            validation={validation}
+            isSavingSettings={isSavingSettings}
+            onSaveStoryKind={saveStoryKind}
+            onGenerateSceneList={() => onStartWorkflow('scene-list')}
+            onStartValidation={onStartValidation}
+            onPublishPhaseToCanvas={publishPhase}
+            isPublishingPhase={isPublishingPhase}
+            onReloadAdaptation={onReloadAdaptation}
+            artifactEditor={(
+              <AdaptationFileEditor
+                projectSlug={projectSlug}
+                kind="scenes"
+                links={adaptation.scenes}
+                onReloadAdaptation={onReloadAdaptation}
+              />
+            )}
+          />
+        )}
+        {phase === 'phase-3-locations' && (
           <PhaseAssetType
             kind="locations"
             projectSlug={projectSlug}
@@ -2291,7 +2333,7 @@ function StoryPhaseScreen({
             onImportStyleRef={onImportStyleRef}
             onSaveStylePrompt={onSaveStylePrompt}
             onOpenStyleRefOnCanvas={onOpenStyleRefOnCanvas}
-            onStartWorkflow={() => onStartWorkflow('locations')}
+            onStartWorkflow={async () => {}}
             onStartValidation={onStartValidation}
             fileEditor={(
               <AdaptationFileEditor
@@ -2304,9 +2346,6 @@ function StoryPhaseScreen({
               />
             )}
           />
-        )}
-        {phase === 'phase-3-scenes' && (
-          <PhaseScenes adaptation={adaptation} workflow={workflow} validation={validation} isSavingSettings={isSavingSettings} onSaveStoryKind={saveStoryKind} onStartWorkflow={async () => {}} onStartValidation={async () => {}} onPublishPhaseToCanvas={publishPhase} isPublishingPhase={isPublishingPhase} fileEditor={<AdaptationFileEditor projectSlug={projectSlug} kind="scenes" links={adaptation.scenes} onReloadAdaptation={onReloadAdaptation} />} />
         )}
         {phase === 'phase-4-moments' && (
           <PhaseMoments adaptation={adaptation} workflow={workflow} validation={validation} onStartWorkflow={async () => {}} onStartValidation={async () => {}} onPublishPhaseToCanvas={publishPhase} isPublishingPhase={isPublishingPhase} />

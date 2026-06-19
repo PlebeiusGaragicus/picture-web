@@ -259,6 +259,7 @@ export function PhaseWorkflowActions({
   onStartValidation,
   workflowDisabled = false,
   workflowDisabledReason = 'Workflow not available for this phase yet.',
+  validateEnabled,
 }: {
   kind: 'characters' | 'locations';
   adaptation: AdaptationStatus;
@@ -268,7 +269,9 @@ export function PhaseWorkflowActions({
   onStartValidation: () => Promise<void>;
   workflowDisabled?: boolean;
   workflowDisabledReason?: string;
+  validateEnabled?: boolean;
 }) {
+  const canValidate = validateEnabled ?? !workflowDisabled;
   return (
     <div className="assets-row">
       <section className="story-card assets-extract-card">
@@ -294,7 +297,7 @@ export function PhaseWorkflowActions({
           <h2>Validate</h2>
           <HelpTip text={`Check that ${kind} files are well-formed.`} />
         </div>
-        <button className="secondary" onClick={onStartValidation} disabled={workflowDisabled || validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
+        <button className="secondary" onClick={onStartValidation} disabled={!canValidate || validation?.running}>{validation?.running ? 'Validating...' : 'Run validation'}</button>
       </section>
     </div>
   );

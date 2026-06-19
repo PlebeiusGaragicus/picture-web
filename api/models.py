@@ -269,7 +269,25 @@ class AdaptationSettingsPatch(BaseModel):
 
 
 class AdaptationWorkflowStartRequest(BaseModel):
-    stage: Literal["ingest", "characters", "locations", "all"] = "all"
+    stage: Literal["ingest", "characters", "scene-list", "scenes", "locations", "all"] = "all"
+
+
+class SceneListLine(BaseModel):
+    slug: str = Field(pattern=SLUG_RE)
+    description: str = ""
+
+
+class SceneListDocument(BaseModel):
+    lines: list[SceneListLine] = Field(default_factory=list)
+
+
+class SceneListReplace(BaseModel):
+    lines: list[SceneListLine]
+
+
+class SceneListLineCreate(BaseModel):
+    slug: str = Field(pattern=SLUG_RE)
+    description: str = ""
 
 
 class AdaptationFileBase(BaseModel):

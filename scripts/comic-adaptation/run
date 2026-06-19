@@ -13,10 +13,11 @@ Usage:
 Stages:
   ingest      Phase 0: read-book session + visual style (archetypes).
   characters  Phase 1: character list, artifacts, and sheets.
-  locations   Phase 2: location index and prompts.
-  scenes      Phase 3: scene manifest, play-by-play, and scene artifacts.
+  scene-list  Phase 2: ordered scene list (scenes/list.txt).
+  locations   Deprecated: locations come from per-scene extract.
+  scenes      Deprecated: use python -m adaptation_workflow extract-scene.
   moments     Phase 4: page/panel story layouts.
-  all         Run every stage in order (default).
+  all         Run ingest, characters, and scene-list (default).
 
 The canonical project workspace is photo-library/projects/<project-slug>/adaptation.
 It must contain book.txt. Run this command from the repo root.
@@ -347,6 +348,17 @@ step_character_sheets() {
   done
 }
 
+step_scene_list() {
+  if [[ -f "$BOOK_ROOT/scenes/list.txt" ]] && [[ -s "$BOOK_ROOT/scenes/list.txt" ]]; then
+    echo
+    echo "[scene-list] scene list (skip)"
+    echo "    output: $BOOK_ROOT/scenes/list.txt"
+  else
+    run_pi_step "scene-list" "scene list $(basename "$BOOK_ROOT")" "$BOOK_ROOT/scenes/list.txt" "/skill:scene-list $BOOK_ROOT_ABS"
+  fi
+  [[ -f "$BOOK_ROOT/scenes/list.txt" ]] || die "Missing $BOOK_ROOT/scenes/list.txt"
+}
+
 step_scene_manifest() {
   if [[ -f "$BOOK_ROOT/scenes/manifest.md" ]]; then
     echo
@@ -515,7 +527,7 @@ fi
 
 STAGE="${2:-all}"
 case "$STAGE" in
-  ingest | characters | locations | scenes | moments | all) ;;
+  ingest | characters | scene-list | locations | scenes | moments | all) ;;
   *) usage; die "Unknown stage: $STAGE" ;;
 esac
 
@@ -560,17 +572,17 @@ case "$STAGE" in
     echo "[characters] Done. Character sheets are under $BOOK_ROOT/characters/sheets."
     ;;
   locations)
+    die "locations stage removed; extract scenes to add locations (python -m adaptation_workflow extract-scene)"
+    ;;
+  scene-list)
     require_book_session
-    stage_locations
+    step_scene_list
     echo
-    echo "[locations] Done. Location prompts are under $BOOK_ROOT/locations/prompts."
+    echo "[scene-list] Done. Scene list is at $BOOK_ROOT/scenes/list.txt."
+    echo "Per-scene extract: python -m adaptation_workflow extract-scene $PROJECT_SLUG <scene-slug>"
     ;;
   scenes)
-    require_book_session
-    STORY_KIND="$(story_kind)"
-    stage_scenes
-    echo
-    echo "[scenes] Done. Scene artifacts are under $BOOK_ROOT/scenes/artifacts."
+    die "bulk scenes stage removed; use python -m adaptation_workflow extract-scene per scene slug"
     ;;
   moments)
     require_book_session
@@ -588,11 +600,10 @@ case "$STAGE" in
     echo "Session:   $BOOK_LOAD_ID"
     STORY_KIND="$(story_kind)"
     stage_characters
-    stage_locations
-    stage_scenes
-    stage_moments
+    step_scene_list
     echo
     echo "Done. Current outputs are under $BOOK_ROOT."
+    echo "Extract scenes with: python -m adaptation_workflow extract-scene $PROJECT_SLUG <scene-slug>"
     echo
     echo "Before image generation, add visual styles in Phase 0 and create reference images as needed:"
     echo "  - $BOOK_ROOT/style-refs/archetype-character.png for character sheet images"

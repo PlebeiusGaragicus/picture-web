@@ -9,13 +9,16 @@ from typing import Callable
 from adaptation_workflow.config import AdaptationContext, BookSession, utc_now
 from adaptation_workflow.events import WorkflowLogger
 from adaptation_workflow.pi_rpc import PiRpcClient, PiRpcError
-from adaptation_workflow.sections import extract_sections
+from adaptation_workflow.locations import cleanup_staging, merge_staging_into_index, staging_dir
+from adaptation_workflow.scene_list import find_scene_list_line
+from adaptation_workflow.sections import parse_index_sections_file
 from adaptation_workflow.slugify import slugify_name
 from adaptation_workflow.validate import (
     ValidationError,
     validate_character_artifact,
     validate_character_sheet,
     validate_location_prompt,
+    validate_scene_artifact,
 )
 
 
@@ -234,40 +237,43 @@ class StepRunner:
         self.step_character_artifacts()
         self.step_character_sheets()
 
-    def step_location_index(self) -> None:
-        out = self.ctx.book_root_abs / "locations" / "index.md"
-        rel_out = f"{self.ctx.book_root}/locations/index.md"
-        if out.is_file():
-            self.logger.write_skip("locations", "location index", rel_out)
-            self.logger.record_task(name="location index", skipped=True, duration_ms=0)
+    def step_scene_list(self) -> None:
+        out = self.ctx.book_root_abs / "scenes" / "list.txt"
+        rel_out = f"{self.ctx.book_root}/scenes/list.txt"
+        if out.is_file() and out.read_text().strip():
+            self.logger.write_skip("scene-list", "scene list", rel_out)
+            self.logger.record_task(name="scene list", skipped=True, duration_ms=0)
             self._notify_progress()
         else:
             self.run_pi_step(
-                "locations",
-                f"location index {self.ctx.book_root.name}",
+                "scene-list",
+                f"scene list {self.ctx.book_root.name}",
                 rel_out,
-                f"/skill:location-index {self.ctx.book_root_abs}",
+                f"/skill:scene-list {self.ctx.book_root_abs}",
             )
-        if not out.is_file():
-            raise RuntimeError(f"Missing {out}")
+        if not out.is_file() or not out.read_text().strip():
+            raise RuntimeError(f"Missing or empty {out}")
 
-    def step_location_prompts(self) -> None:
-        index_path = self.ctx.book_root_abs / "locations" / "index.md"
-        tmp_dir = self.ctx.book_root_abs / "locations" / ".entries"
-        entries = extract_sections(index_path, tmp_dir)
-        total = len(entries)
-        for n, entry in enumerate(entries, start=1):
-            slug = entry.stem
-            out = self.ctx.book_root_abs / "locations" / "prompts" / f"{slug}.md"
+    def ensure_location_prompts(self, new_slugs: list[str]) -> None:
+        if not new_slugs:
+            return
+        book_root = self.ctx.book_root_abs
+        index_path = book_root / "locations" / "index.md"
+        sections = parse_index_sections_file(index_path)
+        for slug in new_slugs:
+            out = book_root / "locations" / "prompts" / f"{slug}.md"
             rel_out = f"{self.ctx.book_root}/locations/prompts/{slug}.md"
             if out.is_file():
-                self.logger.write_skip("locations", f"location prompt [{n}/{total}] {slug}", rel_out)
+                self.logger.write_skip("locations", f"location prompt {slug}", rel_out)
                 self.logger.record_task(name=f"location prompt {slug}", skipped=True, duration_ms=0)
                 self._notify_progress()
                 continue
+            section = sections.get(slug)
+            if not section:
+                raise RuntimeError(f"Missing index section for new location slug: {slug}")
             prompt = write_multiline_prompt(
                 f"/skill:location-prompt {self.ctx.book_root_abs} {out}",
-                entry.read_text(),
+                section,
             )
             self.run_pi_step("locations", f"location prompt {slug}", rel_out, prompt)
             try:
@@ -275,6 +281,43 @@ class StepRunner:
             except ValidationError as exc:
                 raise RuntimeError(str(exc)) from exc
 
-    def stage_locations(self) -> None:
-        self.step_location_index()
-        self.step_location_prompts()
+    def extract_scene(self, scene_slug: str) -> None:
+        list_path = self.ctx.book_root_abs / "scenes" / "list.txt"
+        if not list_path.is_file():
+            raise RuntimeError(f"Missing {list_path}")
+        scene_line = find_scene_list_line(list_path, scene_slug)
+        if scene_line is None:
+            raise RuntimeError(f"Scene slug not found in list.txt: {scene_slug}")
+
+        artifact_out = self.ctx.book_root_abs / "scenes" / "artifacts" / f"{scene_slug}.md"
+        rel_artifact = f"{self.ctx.book_root}/scenes/artifacts/{scene_slug}.md"
+        stage_path = staging_dir(self.ctx.book_root_abs, scene_slug)
+        stage_path.mkdir(parents=True, exist_ok=True)
+
+        characters_list = self.ctx.book_root_abs / "characters" / "list.txt"
+        locations_index = self.ctx.book_root_abs / "locations" / "index.md"
+        context_lines = [
+            f"/skill:scene-extract {self.ctx.book_root_abs} {artifact_out} {stage_path}",
+            "",
+            scene_line,
+        ]
+        if characters_list.is_file():
+            context_lines.extend(["", f"Existing characters list:\n{characters_list.read_text().rstrip()}"])
+        if locations_index.is_file():
+            context_lines.extend(["", f"Existing location index slugs:\n{locations_index.read_text().rstrip()}"])
+        prompt = "\n".join(context_lines).rstrip() + "\n"
+
+        if artifact_out.is_file():
+            self.logger.write_skip("scenes", f"scene extract {scene_slug}", rel_artifact)
+            self.logger.record_task(name=f"scene extract {scene_slug}", skipped=True, duration_ms=0)
+            self._notify_progress()
+        else:
+            self.run_pi_step("scenes", f"scene extract {scene_slug}", rel_artifact, prompt)
+            try:
+                validate_scene_artifact(artifact_out)
+            except ValidationError as exc:
+                raise RuntimeError(str(exc)) from exc
+
+        new_slugs = merge_staging_into_index(self.ctx.book_root_abs, scene_slug)
+        self.ensure_location_prompts(new_slugs)
+        cleanup_staging(self.ctx.book_root_abs, scene_slug)

@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, Project, ProjectDetail, StoryKind, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, Project, ProjectDetail, SceneListDocument, SceneListLine, StoryKind, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = true;
 
@@ -118,6 +118,27 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+  getSceneList: (slug: string) => request<SceneListDocument>(`/api/projects/${slug}/adaptation/scenes/list`),
+  putSceneList: (slug: string, lines: SceneListLine[]) =>
+    request<SceneListDocument>(`/api/projects/${slug}/adaptation/scenes/list`, {
+      method: 'PUT',
+      body: JSON.stringify({ lines }),
+    }),
+  addSceneListLine: (slug: string, line: SceneListLine) =>
+    request<SceneListDocument>(`/api/projects/${slug}/adaptation/scenes/list/lines`, {
+      method: 'POST',
+      body: JSON.stringify(line),
+    }),
+  deleteSceneListLine: (slug: string, key: string) =>
+    request<SceneListDocument>(`/api/projects/${slug}/adaptation/scenes/list/lines/${key}`, {
+      method: 'DELETE',
+    }),
+  startSceneExtract: (slug: string, sceneKey: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/extract`, {
+      method: 'POST',
+    }),
+  getSceneExtract: (slug: string, sceneKey: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/extract`),
   getAdaptationWorkflow: (slug: string, stage: AdaptationStage = 'all') =>
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/workflow?stage=${stage}`),
   startAdaptationWorkflow: (slug: string, stage: AdaptationStage = 'all') =>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AdaptationWorkflowStatus } from '../types';
 
-const WORKFLOW_STAGES = new Set(['ingest', 'characters', 'locations', 'scenes', 'moments']);
+const WORKFLOW_STAGES = new Set(['ingest', 'characters', 'scene-list', 'scenes', 'locations', 'moments']);
 const LIFECYCLE_TYPES = new Set([
   'agent_start',
   'turn_start',

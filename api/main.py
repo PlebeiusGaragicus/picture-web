@@ -39,6 +39,9 @@ from models import (
     VisualStylePatch,
     AdaptationWorkflowStartRequest,
     AdaptationWorkflowStatus,
+    SceneListDocument,
+    SceneListLineCreate,
+    SceneListReplace,
     DisplayPatch,
     GenerateRequest,
     GenerateResponse,
@@ -198,6 +201,36 @@ def create_adaptation_file(slug: str, kind: AdaptationFileKind, payload: Adaptat
 @app.put("/api/projects/{slug}/adaptation/files/{kind}/{key}", response_model=AdaptationFileDocument)
 def update_adaptation_file(slug: str, kind: AdaptationFileKind, key: str, payload: AdaptationFileUpdate) -> AdaptationFileDocument:
     return adaptation.update_adaptation_file(slug, kind, key, payload)
+
+
+@app.get("/api/projects/{slug}/adaptation/scenes/list", response_model=SceneListDocument)
+def get_scene_list(slug: str) -> SceneListDocument:
+    return adaptation.scene_list_document(slug)
+
+
+@app.put("/api/projects/{slug}/adaptation/scenes/list", response_model=SceneListDocument)
+def put_scene_list(slug: str, payload: SceneListReplace) -> SceneListDocument:
+    return adaptation.replace_scene_list(slug, payload)
+
+
+@app.post("/api/projects/{slug}/adaptation/scenes/list/lines", response_model=SceneListDocument)
+def add_scene_list_line(slug: str, payload: SceneListLineCreate) -> SceneListDocument:
+    return adaptation.add_scene_list_line(slug, payload)
+
+
+@app.delete("/api/projects/{slug}/adaptation/scenes/list/lines/{key}", response_model=SceneListDocument)
+def delete_scene_list_line(slug: str, key: str) -> SceneListDocument:
+    return adaptation.delete_scene_list_line(slug, key)
+
+
+@app.post("/api/projects/{slug}/adaptation/scenes/{key}/extract", response_model=AdaptationWorkflowStatus)
+def start_scene_extract(slug: str, key: str) -> AdaptationWorkflowStatus:
+    return adaptation.start_scene_extract(slug, key)
+
+
+@app.get("/api/projects/{slug}/adaptation/scenes/{key}/extract", response_model=AdaptationWorkflowStatus)
+def get_scene_extract(slug: str, key: str) -> AdaptationWorkflowStatus:
+    return adaptation.scene_extract_status(slug, key)
 
 
 @app.get("/api/projects/{slug}/adaptation/workflow", response_model=AdaptationWorkflowStatus)
