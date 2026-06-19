@@ -17,14 +17,17 @@ Owns both style archetypes, editable character files, and their canonical images
 - Shows both the character archetype (`archetype-character`) and scene archetype (`archetype-scene`) references; each can be generated on the canvas or imported.
 - The archetype nodes are auto-published to this canvas once the ingest archetype step has run, so you can go straight to generating them.
 - Characters live in `adaptation/characters/sheets/*.md`. List view edits the files; canvas view shows the archetypes plus character-sheet nodes for generating and marking canonical images.
+- Base character entity keys use the character stem (`rainbow-dash`), matching artifact/sheet filenames. Variants add a suffix (`rainbow-dash-injured`).
 - Pi extraction (`characters` stage) is optional and only populates the character files from the book session.
+- **Scene extract and moment plan are blocked until character sheets exist** (entity registry is empty without them).
 
 ## Phase 2: Scenes
 
 Owns the ordered scene list and per-scene planning artifacts.
 
 - Scenes live in `adaptation/scenes/list.txt` (ordered registry) and `adaptation/scenes/artifacts/*.md`.
-- Generate the scene list from the book session, reorder rows, then **Extract** one scene at a time.
+- Generate the scene list from the book session, reorder rows, then **Extract** one scene at a time (requires Phase 1 character sheets).
+- Each extract injects the entity registry into the Pi prompt so **Visual Continuity** uses exact character/location keys from metadata.
 - Each extract writes the scene artifact and upserts any new locations the scene needs into `locations/index.md` and `locations/prompts/`.
 
 ## Phase 3: Locations
@@ -44,9 +47,9 @@ Owns moment planning, illustration, and story text in reading order.
 - **Story Kind** (chosen in Phase 2) controls output shape:
   - `picture-book` and `illustrated-story` → `adaptation/pages/plans/<scene-slug>.md`
   - `comic-book` → `adaptation/panels/prompts/<scene-slug>.md`
-- Plan moments **one scene at a time** with the per-row **Plan** button (Pi `story-layout` skill).
+- Plan moments **one scene at a time** with the per-row **Plan** button (Pi `story-layout` skill; requires character sheets).
 - Each moment section includes `narration:`, `dialogue:`, `caption:` lines plus an image prompt.
-- Panel `refs:` keys must match locked entity tag ids from Visual Continuity (for example `character:rainbow-dash-base` → canvas tag `rainbow-dash-base`). Tag reference images on the canvas; **all** tagged images per ref are sent to generation.
+- Panel `refs:` keys must match locked entity tag ids from Visual Continuity (for example `character:rainbow-dash` → canvas tag `rainbow-dash`). Tag reference images on the canvas; **all** tagged images per ref are sent to generation.
 - Archetype scene/character images are style references for character and location generation only — they are **not** panel/page inputs.
 - Generation is blocked until every `character:` / `location:` ref has at least one tagged PNG, `refs:` is non-empty, and the total tagged image count is within the model limit (14 for default `gemini-3.1-flash-image`, 3 for `gemini-2.5-flash-image`).
 - Use **View** to edit markdown per scene; **Validate** checks moment files.

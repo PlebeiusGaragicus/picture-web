@@ -299,7 +299,7 @@ The script:
 - Calls `POST /api/projects/{slug}/generate`.
 - Skips existing PNGs.
 - Generates only `mode: new-image` base sheets.
-- Writes the generated PNG beside the source prompt file, for example `characters/sheets/butterscotch-base.png`.
+- Writes the generated PNG beside the source prompt file, for example `characters/sheets/butterscotch.png`.
 - Stops after one generated image.
 
 ## Runner Behavior

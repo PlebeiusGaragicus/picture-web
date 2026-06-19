@@ -162,7 +162,7 @@ def scene_plan_stage(scene_slug: str) -> str:
     return f"scene-plan-{scene_slug}"
 
 
-def run_extract_scene(project_slug: str, scene_slug: str) -> int:
+def run_extract_scene(project_slug: str, scene_slug: str, *, force: bool = False) -> int:
     stage = scene_extract_stage(scene_slug)
     try:
         ctx = AdaptationContext.for_slug(project_slug)
@@ -226,7 +226,7 @@ def run_extract_scene(project_slug: str, scene_slug: str) -> int:
     try:
         steps = StepRunner(ctx, logger, on_progress=lambda: flush_progress(running=True))
         steps.require_book_session()
-        steps.extract_scene(scene_slug)
+        steps.extract_scene(scene_slug, force=force)
         logger.write_line()
         logger.write_line(f"[scenes] Done. Scene artifact and locations updated for {scene_slug}.")
     except Exception as exc:

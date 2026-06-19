@@ -76,7 +76,7 @@ style_ref: <book-root>/characters/sheets/<base-variant-slug>.png
 
 Do not add a `# Character Sheets: …` title line.
 
-Use variant slugs from **Visual Variants** when present; otherwise `character-slug-base`.
+Use variant slugs from **Visual Variants** when present; otherwise use the character stem (the sheet filename without `.md`).
 
 For `edit-reference`, `style_ref` is the **approved base character sheet image** for this character. Generated character sheet PNGs are saved beside the sheet prompt files under `<book-root>/characters/sheets/`.
 
@@ -139,15 +139,15 @@ Do **not** repeat full character description or style prose.
 ## Example
 
 ```markdown
-## jekyll-base
+## jekyll
 mode: new-image
 style_ref: books/example/style-refs/archetype-character.png
 
 Character reference sheet for Dr Jekyll, respectable middle-aged Victorian doctor, neat beard, tired eyes, conservative dark clothing. Match the reference image's rendering, palette, line weight, shadows, and sheet layout exactly. Layout: top row — front full-body, three-quarter full-body, back full-body, same neutral standing pose, consistent scale. Bottom row — four head close-ups. White background. No text, no labels, no watermarks. Expressions: calm neutral, tired concern, restrained unease, quiet determination.
 
-## hyde-variant
+## jekyll-hyde
 mode: edit-reference
-style_ref: books/example/characters/sheets/jekyll-base.png
+style_ref: books/example/characters/sheets/jekyll.png
 
 Character sheet for this character. Same design as reference. Transform into Mr Hyde: bulkier frame, cruel expression, disheveled hair, more violent posture. Layout: top row — front full-body, three-quarter full-body, back full-body, same neutral standing pose, consistent scale. Bottom row — four head close-ups. White background. No text, no labels, no watermarks. Expressions: neutral, cruel sneer, rage, contempt.
 ```

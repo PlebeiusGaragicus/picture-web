@@ -14,6 +14,11 @@ from adaptation_workflow.locations import cleanup_staging, merge_staging_into_in
 from adaptation_workflow.scene_list import find_scene_list_line
 from adaptation_workflow.sections import parse_index_sections_file
 from adaptation_workflow.slugify import slugify_name
+from adaptation_workflow.entity_registry import (
+    assert_character_registry_ready,
+    format_entity_registry_prompt,
+    read_metadata_entity_keys,
+)
 from adaptation_workflow.validate import (
     ValidationError,
     validate_character_artifact,
@@ -283,13 +288,16 @@ class StepRunner:
             except ValidationError as exc:
                 raise RuntimeError(str(exc)) from exc
 
-    def extract_scene(self, scene_slug: str) -> None:
+    def extract_scene(self, scene_slug: str, *, force: bool = False) -> None:
         list_path = self.ctx.book_root_abs / "scenes" / "list.txt"
         if not list_path.is_file():
             raise RuntimeError(f"Missing {list_path}")
         scene_line = find_scene_list_line(list_path, scene_slug)
         if scene_line is None:
             raise RuntimeError(f"Scene slug not found in list.txt: {scene_slug}")
+
+        metadata_characters, metadata_locations = read_metadata_entity_keys(self.ctx.book_root_abs)
+        assert_character_registry_ready(self.ctx.book_root_abs, metadata_characters)
 
         artifact_out = self.ctx.book_root_abs / "scenes" / "artifacts" / f"{scene_slug}.md"
         rel_artifact = f"{self.ctx.book_root}/scenes/artifacts/{scene_slug}.md"
@@ -298,6 +306,11 @@ class StepRunner:
 
         characters_list = self.ctx.book_root_abs / "characters" / "list.txt"
         locations_index = self.ctx.book_root_abs / "locations" / "index.md"
+        registry_block = format_entity_registry_prompt(
+            self.ctx.book_root_abs,
+            metadata_characters,
+            metadata_locations,
+        )
         context_lines = [
             f"/skill:scene-extract {self.ctx.book_root_abs} {artifact_out} {stage_path}",
             "",
@@ -305,15 +318,18 @@ class StepRunner:
         ]
         if characters_list.is_file():
             context_lines.extend(["", f"Existing characters list:\n{characters_list.read_text().rstrip()}"])
+        context_lines.extend(["", registry_block.rstrip()])
         if locations_index.is_file():
             context_lines.extend(["", f"Existing location index slugs:\n{locations_index.read_text().rstrip()}"])
         prompt = "\n".join(context_lines).rstrip() + "\n"
 
-        if artifact_out.is_file():
+        if artifact_out.is_file() and not force:
             self.logger.write_skip("scenes", f"scene extract {scene_slug}", rel_artifact)
             self.logger.record_task(name=f"scene extract {scene_slug}", skipped=True, duration_ms=0)
             self._notify_progress()
         else:
+            if artifact_out.is_file() and force:
+                artifact_out.unlink()
             self.run_pi_step("scenes", f"scene extract {scene_slug}", rel_artifact, prompt)
             try:
                 validate_scene_artifact(artifact_out)
@@ -332,6 +348,9 @@ class StepRunner:
         if scene_line is None:
             raise RuntimeError(f"Scene slug not found in list.txt: {scene_slug}")
 
+        metadata_characters, metadata_locations = read_metadata_entity_keys(self.ctx.book_root_abs)
+        assert_character_registry_ready(self.ctx.book_root_abs, metadata_characters)
+
         artifact_path = self.ctx.book_root_abs / "scenes" / "artifacts" / f"{scene_slug}.md"
         if not artifact_path.is_file():
             raise RuntimeError(f"Missing scene artifact: {artifact_path}")
@@ -340,8 +359,15 @@ class StepRunner:
         output_path = moment_output_path(self.ctx.book_root_abs, story_kind, scene_slug)
         rel_output = f"{self.ctx.book_root}/{output_path.relative_to(self.ctx.book_root_abs).as_posix()}"
         artifact_text = artifact_path.read_text().rstrip()
+        registry_block = format_entity_registry_prompt(
+            self.ctx.book_root_abs,
+            metadata_characters,
+            metadata_locations,
+        )
         prompt = (
             f"/skill:story-layout {self.ctx.book_root_abs} {story_kind} {output_path}\n\n"
+            f"{registry_block.rstrip()}\n\n"
+            "Copy Visual Continuity keys verbatim into panel refs. Do not invent slugs.\n\n"
             f"{artifact_text}\n"
         )
 

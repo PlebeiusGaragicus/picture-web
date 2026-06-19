@@ -74,6 +74,10 @@ def validate_character_artifact(path: Path) -> None:
     validate_no_chat_wrappers(path)
     for required in ("## Summary", "## Visual Description", "## Visual Variants", "## Source References"):
         validate_contains(path, required)
+    stem = path.stem
+    text = path.read_text()
+    if f"`{stem}-base`" in text:
+        raise ValidationError(f"Base variant key should be '{stem}', not '{stem}-base': {path}")
 
 
 def validate_character_sheet(path: Path) -> None:
@@ -236,12 +240,14 @@ def validate_scene_list(book_root: Path, report: ValidationReport) -> None:
 
 
 def validate_scenes(book_root: Path, report: ValidationReport) -> None:
+    from adaptation_workflow.entity_registry import entity_keys_for_validation, validate_entity_refs_in_text
     from adaptation_workflow.scene_list import SceneListError, scene_slug_from_line
 
     validate_scene_list(book_root, report)
     list_path = book_root / "scenes" / "list.txt"
     if not list_path.is_file():
         return
+    character_keys, location_keys = entity_keys_for_validation(book_root)
     report.ok("Scene artifacts")
     for line in list_path.read_text().splitlines():
         stripped = line.strip()
@@ -258,12 +264,25 @@ def validate_scenes(book_root: Path, report: ValidationReport) -> None:
             validate_scene_artifact(artifact)
         except ValidationError as exc:
             report.fail(str(exc))
+            continue
+        if character_keys or location_keys:
+            text = artifact.read_text()
+            for message in validate_entity_refs_in_text(
+                text,
+                character_keys,
+                location_keys,
+                path_label=str(artifact),
+            ):
+                report.fail(message)
     extracted = len(list((book_root / "scenes" / "artifacts").glob("*.md")))
     report.ok(f"checked {extracted} extracted scene artifacts")
 
 
 def validate_moments(book_root: Path, report: ValidationReport) -> None:
+    from adaptation_workflow.entity_registry import entity_keys_for_validation, validate_entity_refs_in_text
+
     report.ok("Moments")
+    character_keys, location_keys = entity_keys_for_validation(book_root)
     checked = 0
     for directory in (book_root / "pages" / "plans", book_root / "panels" / "prompts"):
         if not directory.is_dir():
@@ -275,6 +294,16 @@ def validate_moments(book_root: Path, report: ValidationReport) -> None:
                 validate_moment_file(moment_file)
             except ValidationError as exc:
                 report.fail(str(exc))
+                continue
+            if character_keys or location_keys:
+                text = moment_file.read_text()
+                for message in validate_entity_refs_in_text(
+                    text,
+                    character_keys,
+                    location_keys,
+                    path_label=str(moment_file),
+                ):
+                    report.fail(message)
             checked += 1
     report.ok(f"checked {checked} moment files")
 

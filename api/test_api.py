@@ -459,12 +459,12 @@ def test_adaptation_settings_scene_panel_status_and_canvas_import(tmp_path, monk
     (root / "acts").mkdir(parents=True, exist_ok=True)
     (root / "acts" / "play-by-play.md").write_text("# Play By Play\n\n## act-01\n\nScene Range: 001-001\nPurpose: Test.\nKey Beats:\n- `L001-L002`: Test. \"Quote.\"\n")
     (root / "scenes" / "artifacts" / "001-test-scene.md").write_text(
-        "# Test Scene\n\nScene Id: 001-test-scene\nSource Lines: L001-L002\nMajor Act: act-01\nPrimary Location: test-location\n\n## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: test-character-base\n- Locations: test-location\n- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n\n## Text Candidates\n\n- Narration: None.\n- Dialogue: None.\n- Caption: None.\n\n## Adaptation Notes\n\nNone.\n"
+        "# Test Scene\n\nScene Id: 001-test-scene\nSource Lines: L001-L002\nMajor Act: act-01\nPrimary Location: test-location\n\n## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: test-character\n- Locations: test-location\n- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n\n## Text Candidates\n\n- Narration: None.\n- Dialogue: None.\n- Caption: None.\n\n## Adaptation Notes\n\nNone.\n"
     )
     (root / "panels" / "prompts" / "001-test-scene.md").write_text(
         "## 001-test-scene-panel-01\n"
         "mode: story-layout\n"
-        "refs: character:test-character-base, location:test-location\n"
+        "refs: character:test-character, location:test-location\n"
         "narration: None.\n"
         "dialogue: \"Hello.\"\n"
         "caption: None.\n\n"
@@ -499,8 +499,8 @@ def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, mon
 
     for asset_id, title, tags in [
         ("01HSTYLE", "Style", []),
-        ("01HCHAR", "Character A", ["hero-base"]),
-        ("01HCHAR2", "Character B", ["hero-base"]),
+        ("01HCHAR", "Character A", ["hero"]),
+        ("01HCHAR2", "Character B", ["hero"]),
         ("01HLOC", "Location", ["farm"]),
     ]:
         make_png(library.asset_png_path("farm-comic", asset_id), color="green")
@@ -523,7 +523,7 @@ def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, mon
             "settings": {"storyKind": "comic-book"},
             "styleRefs": {"archetypeSceneAssetId": "01HSTYLE"},
             "characters": {
-                "hero-base": {
+                "hero": {
                     "artifactKind": "character-sheet",
                     "promptPath": "characters/sheets/hero.md",
                     "assetIds": ["01HCHAR", "01HCHAR2"],
@@ -546,7 +546,7 @@ def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, mon
     (root / "panels" / "prompts" / "001-panel.md").write_text(
         "## 001-panel-01\n"
         "mode: story-layout\n"
-        "refs: character:hero-base, location:farm\n"
+        "refs: character:hero, location:farm\n"
         "narration: None.\n"
         "dialogue: None.\n"
         "caption: None.\n\n"
@@ -587,7 +587,7 @@ def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, mon
     panel_link = client.get("/api/projects/farm-comic/adaptation").json()["panels"]["001-panel-01"]
     assert panel_link["assetIds"] == [response.json()["asset"]["id"]]
     tags = client.get("/api/projects/farm-comic/tags").json()
-    assert any(tag["id"] == "hero-base" and tag["locked"] for tag in tags)
+    assert any(tag["id"] == "hero" and tag["locked"] for tag in tags)
     nodes = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
     source_id = "artifact_panel_prompt_001_panel_01"
     child_id = f"generated_{source_id}"
@@ -601,7 +601,7 @@ def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, mon
     moment = next(item for item in sequence["moments"] if item["momentKey"] == "001-panel-01")
     assert moment["canGenerate"] is True
     assert moment["referenceImageCount"] == 3
-    assert {item["ref"] for item in moment["refInputs"]} == {"character:hero-base", "location:farm"}
+    assert {item["ref"] for item in moment["refInputs"]} == {"character:hero", "location:farm"}
     assert all(item["ready"] for item in moment["refInputs"] if item["kind"] in {"character", "location"})
 
 
@@ -617,7 +617,7 @@ def test_adaptation_panel_generation_blocks_empty_refs(tmp_path, monkeypatch):
             "id": "01HCHAR",
             "kind": "imported",
             "title": "Character",
-            "tags": ["hero-base"],
+            "tags": ["hero"],
             "createdAt": "2026-01-01T00:00:00Z",
             "updatedAt": "2026-01-01T00:00:00Z",
         },
@@ -628,7 +628,7 @@ def test_adaptation_panel_generation_blocks_empty_refs(tmp_path, monkeypatch):
             "version": 2,
             "settings": {"storyKind": "comic-book"},
             "styleRefs": {},
-            "characters": {"hero-base": {"artifactKind": "character-sheet", "promptPath": "x.md", "assetIds": ["01HCHAR"], "status": "generated"}},
+            "characters": {"hero": {"artifactKind": "character-sheet", "promptPath": "x.md", "assetIds": ["01HCHAR"], "status": "generated"}},
             "locations": {},
             "scenes": {},
             "pages": {},
@@ -679,7 +679,7 @@ def test_adaptation_panel_generation_blocks_untagged_assets(tmp_path, monkeypatc
             "version": 2,
             "settings": {"storyKind": "comic-book"},
             "styleRefs": {},
-            "characters": {"hero-base": {"artifactKind": "character-sheet", "promptPath": "x.md", "assetIds": ["01HCHAR"], "status": "generated"}},
+            "characters": {"hero": {"artifactKind": "character-sheet", "promptPath": "x.md", "assetIds": ["01HCHAR"], "status": "generated"}},
             "locations": {},
             "scenes": {},
             "pages": {},
@@ -689,7 +689,7 @@ def test_adaptation_panel_generation_blocks_untagged_assets(tmp_path, monkeypatc
     (root / "panels" / "prompts" / "001-panel.md").write_text(
         "## 001-panel-01\n"
         "mode: story-layout\n"
-        "refs: character:hero-base\n"
+        "refs: character:hero\n"
         "narration: None.\n"
         "dialogue: None.\n"
         "caption: None.\n\n"
@@ -704,7 +704,7 @@ def test_adaptation_panel_generation_blocks_untagged_assets(tmp_path, monkeypatc
         json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01", "visualStyleId": style_id},
     )
     assert response.status_code == 400
-    assert "hero-base" in response.json()["detail"]
+    assert "hero" in response.json()["detail"]
 
 
 def test_adaptation_panel_generation_blocks_over_reference_limit(tmp_path, monkeypatch):
@@ -723,7 +723,7 @@ def test_adaptation_panel_generation_blocks_over_reference_limit(tmp_path, monke
                 "id": asset_id,
                 "kind": "imported",
                 "title": f"Ref {index}",
-                "tags": ["hero-base"],
+                "tags": ["hero"],
                 "createdAt": "2026-01-01T00:00:00Z",
                 "updatedAt": "2026-01-01T00:00:00Z",
             },
@@ -734,7 +734,7 @@ def test_adaptation_panel_generation_blocks_over_reference_limit(tmp_path, monke
             "version": 2,
             "settings": {"storyKind": "comic-book"},
             "styleRefs": {},
-            "characters": {"hero-base": {"artifactKind": "character-sheet", "promptPath": "x.md", "assetIds": asset_ids, "status": "generated"}},
+            "characters": {"hero": {"artifactKind": "character-sheet", "promptPath": "x.md", "assetIds": asset_ids, "status": "generated"}},
             "locations": {},
             "scenes": {},
             "pages": {},
@@ -744,7 +744,7 @@ def test_adaptation_panel_generation_blocks_over_reference_limit(tmp_path, monke
     (root / "panels" / "prompts" / "001-panel.md").write_text(
         "## 001-panel-01\n"
         "mode: story-layout\n"
-        "refs: character:hero-base\n"
+        "refs: character:hero\n"
         "narration: None.\n"
         "dialogue: None.\n"
         "caption: None.\n\n"
@@ -782,7 +782,7 @@ def test_moment_ref_asset_order_is_stable(tmp_path, monkeypatch):
                 "id": asset_id,
                 "kind": "imported",
                 "title": asset_id,
-                "tags": ["hero-base"],
+                "tags": ["hero"],
                 "createdAt": "2026-01-01T00:00:00Z",
                 "updatedAt": "2026-01-01T00:00:00Z",
             },
@@ -799,7 +799,7 @@ def test_moment_ref_asset_order_is_stable(tmp_path, monkeypatch):
             "updatedAt": "2026-01-01T00:00:00Z",
         },
     )
-    style_ref = "character:hero-base, location:farm"
+    style_ref = "character:hero, location:farm"
     first = ordered_moment_ref_asset_ids("farm-comic", style_ref)
     second = ordered_moment_ref_asset_ids("farm-comic", style_ref)
     assert first == second == ["01HA", "01HM", "01HZ", "01HLOC"]
@@ -812,14 +812,14 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     character = client.post(
         "/api/projects/farm-comic/adaptation/files/characters",
         json={
-            "key": "hero-base",
+            "key": "hero",
             "mode": "new-image",
             "styleRef": "",
             "body": "Full body character sheet for the farm hero.",
         },
     )
     assert character.status_code == 200
-    assert character.json()["promptPath"] == "characters/sheets/hero-base.md"
+    assert character.json()["promptPath"] == "characters/sheets/hero.md"
 
     location = client.post(
         "/api/projects/farm-comic/adaptation/files/locations",
@@ -843,7 +843,7 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     assert scene.json()["artifactKind"] == "scene-artifact"
 
     update = client.put(
-        "/api/projects/farm-comic/adaptation/files/characters/hero-base",
+        "/api/projects/farm-comic/adaptation/files/characters/hero",
         json={"key": "hero-primary", "body": "Updated character sheet prompt.", "mode": "new-image", "styleRef": ""},
     )
     assert update.status_code == 200
@@ -875,7 +875,7 @@ def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monke
     character = client.post(
         "/api/projects/farm-comic/adaptation/files/characters",
         json={
-            "key": "hero-base",
+            "key": "hero",
             "mode": "new-image",
             "styleRef": "",
             "body": "Full body character sheet for the farm hero.",
@@ -896,7 +896,7 @@ def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monke
 
     first = client.post(
         "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
-        json={"artifactKind": "character-sheet", "artifactKey": "hero-base"},
+        json={"artifactKind": "character-sheet", "artifactKey": "hero"},
     )
     assert first.status_code == 200
     assert first.json()["importedNodeCount"] == 1
@@ -907,11 +907,11 @@ def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monke
         if node.get("type") == "storyArtifact" and node.get("artifactKind") == "character-sheet"
     ]
     assert len(character_nodes) == 1
-    assert character_nodes[0]["artifactKey"] == "hero-base"
+    assert character_nodes[0]["artifactKey"] == "hero"
 
     second = client.post(
         "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
-        json={"artifactKind": "character-sheet", "artifactKey": "hero-base"},
+        json={"artifactKind": "character-sheet", "artifactKey": "hero"},
     )
     assert second.status_code == 200
     assert second.json()["importedNodeCount"] == 0
@@ -996,7 +996,7 @@ def test_scene_moments_file_api(tmp_path, monkeypatch):
     (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
     (root / "scenes" / "artifacts" / "001-opening.md").write_text(
         "# Opening\n\nScene Id: 001-opening\nSource Lines: L001-L002\nPrimary Location: barn\n\n"
-        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: hero-base\n- Locations: barn\n"
+        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: hero\n- Locations: barn\n"
         "- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n"
         "## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n"
     )
@@ -1023,7 +1023,7 @@ def test_scene_moments_file_api(tmp_path, monkeypatch):
     body = (
         "## 001-opening-panel-01\n"
         "mode: story-layout\n"
-        "refs: character:hero-base, location:barn\n"
+        "refs: character:hero, location:barn\n"
         "narration: None.\n"
         "dialogue: None.\n"
         "caption: None.\n\n"
@@ -1054,7 +1054,7 @@ def test_scene_moments_sections_api(tmp_path, monkeypatch):
     (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
     (root / "scenes" / "artifacts" / "001-opening.md").write_text(
         "# Opening\n\nScene Id: 001-opening\nSource Lines: L001-L002\nPrimary Location: barn\n\n"
-        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: hero-base\n- Locations: barn\n"
+        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: hero\n- Locations: barn\n"
         "- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n"
         "## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n"
     )
@@ -1075,7 +1075,7 @@ def test_scene_moments_sections_api(tmp_path, monkeypatch):
     sections = [
         {
             "key": "001-opening-panel-01",
-            "refs": "character:hero-base, location:barn",
+            "refs": "character:hero, location:barn",
             "narration": "None.",
             "dialogue": "First.",
             "caption": "None.",
@@ -1083,7 +1083,7 @@ def test_scene_moments_sections_api(tmp_path, monkeypatch):
         },
         {
             "key": "001-opening-panel-02",
-            "refs": "character:hero-base, location:barn",
+            "refs": "character:hero, location:barn",
             "narration": "None.",
             "dialogue": "Second.",
             "caption": "None.",
@@ -1091,7 +1091,7 @@ def test_scene_moments_sections_api(tmp_path, monkeypatch):
         },
         {
             "key": "001-opening-panel-03",
-            "refs": "character:hero-base, location:barn",
+            "refs": "character:hero, location:barn",
             "narration": "None.",
             "dialogue": "Third.",
             "caption": "None.",
@@ -1159,7 +1159,7 @@ def test_scene_moments_prune_metadata(tmp_path, monkeypatch):
     (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
     (root / "scenes" / "artifacts" / "001-opening.md").write_text(
         "# Opening\n\nScene Id: 001-opening\nSource Lines: L001-L002\nPrimary Location: barn\n\n"
-        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: hero-base\n- Locations: barn\n"
+        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: hero\n- Locations: barn\n"
         "- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n"
         "## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n"
     )
@@ -1198,7 +1198,7 @@ def test_scene_moments_prune_metadata(tmp_path, monkeypatch):
             "sections": [
                 {
                     "key": "001-opening-panel-new",
-                    "refs": "character:hero-base, location:barn",
+                    "refs": "character:hero, location:barn",
                     "narration": "None.",
                     "dialogue": "None.",
                     "caption": "None.",
@@ -1224,11 +1224,11 @@ def test_validate_moment_duplicate_slug(tmp_path):
     path.write_text(
         "## 001-sunny-day\n"
         "mode: story-layout\n"
-        "refs: character:hero-base, location:barn\n\n"
+        "refs: character:hero, location:barn\n\n"
         "Panel 1. No watermarks.\n\n"
         "## 001-sunny-day\n"
         "mode: story-layout\n"
-        "refs: character:hero-base, location:barn\n\n"
+        "refs: character:hero, location:barn\n\n"
         "Panel 2. No watermarks.\n"
     )
     try:
@@ -1254,6 +1254,87 @@ def test_plan_scene_api_guards(tmp_path, monkeypatch):
     assert missing_artifact.status_code == 409
 
 
+def test_entity_registry_prompt(tmp_path):
+    from adaptation_workflow.entity_registry import format_entity_registry_prompt
+
+    root = tmp_path / "adaptation"
+    sheets = root / "characters" / "sheets"
+    sheets.mkdir(parents=True)
+    (sheets / "hero.md").write_text(
+        "## hero\nmode: new-image\nstyle_ref: x\n\nprompt\n\n"
+        "## hero-armor\nmode: edit-reference\nstyle_ref: y\n\nprompt2\n"
+    )
+    (root / "characters" / "list.txt").write_text("Hero: A hero.\n")
+
+    block = format_entity_registry_prompt(root)
+    assert "Entity registry" in block
+    assert "- hero (base)" in block
+    assert "- hero-armor (variant of hero)" in block
+
+
+def test_character_registry_gate_blocks_extract_and_plan(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Once upon a time.\n")
+    (root / "scenes").mkdir(parents=True, exist_ok=True)
+    (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
+    (root / "scenes" / "artifacts").mkdir(parents=True, exist_ok=True)
+    (root / "scenes" / "artifacts" / "001-opening.md").write_text(
+        "# Scene\n\nScene Id: 001-opening\nSource Lines: L001\nPrimary Location: barn\n\n"
+        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n"
+        "- Characters: hero\n- Locations: barn\n- Props And Visual Assets: None.\n"
+        "- Character States: None.\n- Location State: None.\n\n## Dramatic Beats\n\n"
+        "- `L001`: Test.\n\n## Staging Notes\n\nTest.\n\n## Text Candidates\n\n"
+        "- Narration: None.\n- Dialogue: None.\n- Caption: None.\n\n## Adaptation Notes\n\nNone.\n"
+    )
+
+    extract = client.post("/api/projects/farm-comic/adaptation/scenes/001-opening/extract")
+    assert extract.status_code == 409
+    assert "character" in extract.json()["detail"].lower()
+
+    plan = client.post("/api/projects/farm-comic/adaptation/scenes/001-opening/plan")
+    assert plan.status_code == 409
+    assert "character" in plan.json()["detail"].lower()
+
+
+def test_validate_unknown_entity_refs(tmp_path):
+    from adaptation_workflow.validate import run_validation
+
+    root = tmp_path / "adaptation"
+    sheets = root / "characters" / "sheets"
+    sheets.mkdir(parents=True)
+    (sheets / "hero.md").write_text("## hero\nmode: new-image\nstyle_ref: x\n\nprompt\n")
+    (root / "adaptation.json").write_text('{"characters":{"hero":{}},"locations":{"barn":{}}}')
+    panels = root / "panels" / "prompts"
+    panels.mkdir(parents=True)
+    (panels / "001-opening.md").write_text(
+        "## 001-opening-panel-01\n"
+        "mode: story-layout\n"
+        "refs: character:unknown-slug, location:barn\n\n"
+        "Panel. No watermarks.\n"
+    )
+
+    report = run_validation(root, "moments")
+    assert any("unknown-slug" in failure for failure in report.failures)
+
+
+def test_validate_character_artifact_rejects_base_suffix(tmp_path):
+    from adaptation_workflow.validate import ValidationError, validate_character_artifact
+
+    path = tmp_path / "hero.md"
+    path.write_text(
+        "# Hero\n\n## Summary\n\nX.\n\n## Visual Description\n\nX.\n\n"
+        "## Visual Variants\n\n- `hero-base`: Base.\n\n## Source References\n\n- `L001`: \"Hi.\"\n"
+    )
+    try:
+        validate_character_artifact(path)
+        raise AssertionError("expected validation failure")
+    except ValidationError as exc:
+        assert "hero-base" in str(exc)
+
+
 def test_validate_moments(tmp_path):
     from adaptation_workflow.validate import ValidationError, run_validation, validate_moment_file
 
@@ -1264,7 +1345,7 @@ def test_validate_moments(tmp_path):
     valid.write_text(
         "## 001-opening-panel-01\n"
         "mode: story-layout\n"
-        "refs: character:hero-base, location:barn\n\n"
+        "refs: character:hero, location:barn\n\n"
         "Opening panel. No watermarks.\n"
     )
     validate_moment_file(valid)
@@ -1293,7 +1374,7 @@ def test_layout_sections_round_trip(tmp_path):
     path = tmp_path / "panels" / "prompts" / "001-opening.md"
     section = {
         "mode": "story-layout",
-        "style_ref": "character:hero-base, location:barn",
+        "style_ref": "character:hero, location:barn",
         "narration": "Once upon a time.",
         "dialogue": "\"Hi!\"",
         "caption": "None.",
@@ -1332,7 +1413,7 @@ def test_moment_sequence_and_patch_api(tmp_path, monkeypatch):
     (root / "panels" / "prompts" / "001-opening.md").write_text(
         "## 001-opening-panel-01\n"
         "mode: story-layout\n"
-        "refs: character:hero-base, location:barn\n"
+        "refs: character:hero, location:barn\n"
         "narration: None.\n"
         "dialogue: First line.\n"
         "caption: None.\n\n"

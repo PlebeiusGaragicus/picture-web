@@ -923,7 +923,22 @@ def scene_extract_launcher_log_path(slug: str, scene_slug: str) -> Path:
     return adaptation_dir(slug) / "sessions" / f"run-{scene_extract_stage_name(scene_slug)}-launcher.log"
 
 
-def start_scene_extract(slug: str, scene_slug: str) -> AdaptationWorkflowStatus:
+def _require_character_registry(slug: str) -> None:
+    from adaptation_workflow.entity_registry import (
+        CharacterRegistryNotReadyError,
+        assert_character_registry_ready,
+        read_metadata_entity_keys,
+    )
+
+    root = ensure_adaptation(slug)
+    metadata_characters, _metadata_locations = read_metadata_entity_keys(root)
+    try:
+        assert_character_registry_ready(root, metadata_characters)
+    except CharacterRegistryNotReadyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def start_scene_extract(slug: str, scene_slug: str, *, force: bool = False) -> AdaptationWorkflowStatus:
     root = ensure_adaptation(slug)
     if not (root / "book.txt").is_file():
         raise HTTPException(status_code=400, detail="Upload book.txt before extracting scenes")
@@ -931,13 +946,17 @@ def start_scene_extract(slug: str, scene_slug: str) -> AdaptationWorkflowStatus:
 
     if find_scene_list_line(scene_list_path(slug), scene_slug) is None:
         raise HTTPException(status_code=404, detail=f"Scene not in list: {scene_slug}")
+    _require_character_registry(slug)
+    force_flag = " --force" if force else ""
     return start_logged_process(
         slug,
         log_path=scene_extract_log_path(slug, scene_slug),
         launcher_log_path=scene_extract_launcher_log_path(slug, scene_slug),
         status_path=scene_extract_status_path(slug, scene_slug),
         start_line=f"Starting scene extract for {scene_slug} in {slug}",
-        script_command=f'cd api && {workflow_python()} -m adaptation_workflow extract-scene "$SLUG" "{scene_slug}"',
+        script_command=(
+            f'cd api && {workflow_python()} -m adaptation_workflow extract-scene "$SLUG" "{scene_slug}"{force_flag}'
+        ),
         validation=False,
     )
 
@@ -1092,6 +1111,7 @@ def start_scene_plan(slug: str, scene_slug: str) -> AdaptationWorkflowStatus:
         raise HTTPException(status_code=400, detail="Upload book.txt before planning moments")
     _require_scene_list_line(slug, target)
     _require_scene_artifact(slug, target)
+    _require_character_registry(slug)
     return start_logged_process(
         slug,
         log_path=scene_plan_log_path(slug, target),

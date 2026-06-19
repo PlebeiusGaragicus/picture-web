@@ -40,7 +40,7 @@ Each image-generatable section must use this parseable format:
 ```markdown
 ## unique-section-slug
 mode: story-layout
-refs: character:character-slug-base, location:location-slug
+refs: character:character-slug, location:location-slug
 narration: Candidate narration for this beat, or None.
 dialogue: Important dialogue for this beat, or None.
 caption: Caption idea for this beat, or None.
@@ -62,7 +62,7 @@ Multi-panel comic example (one file, three unique headings):
 ```markdown
 ## 001-opening-panel-01
 mode: story-layout
-refs: character:hero-base, location:barn
+refs: character:hero, location:barn
 narration: None.
 dialogue: None.
 caption: None.
@@ -71,7 +71,7 @@ Wide establishing panel of the barn at sunrise. No watermarks.
 
 ## 001-opening-panel-02
 mode: story-layout
-refs: character:hero-base, location:barn
+refs: character:hero, location:barn
 narration: None.
 dialogue: "Hello!"
 caption: None.
@@ -80,7 +80,7 @@ Medium shot of the hero waving from the barn door. Speech bubble on the right. N
 
 ## 001-opening-panel-03
 mode: story-layout
-refs: character:hero-base, location:barn
+refs: character:hero, location:barn
 narration: None.
 dialogue: None.
 caption: Later that morning.
@@ -88,7 +88,7 @@ caption: Later that morning.
 Close-up reaction panel. Caption box at top. No watermarks.
 ```
 
-The `refs:` line must include at least one `character:` or `location:` reference per section. Use **exact entity keys** from the scene artifact **Visual Continuity** section (for example `character:rainbow-dash-base`, not shortened story names). Those keys are the tag ids users apply on the canvas (`rainbow-dash-base` without the `character:` prefix).
+The `refs:` line must include at least one `character:` or `location:` reference per section. Use **exact entity keys** from the entity registry and scene artifact **Visual Continuity** section (for example `character:rainbow-dash`, not shortened story names). Those keys are the tag ids users apply on the canvas (`rainbow-dash` without the `character:` prefix).
 
 Put readable story text in `narration:`, `dialogue:`, and `caption:` lines. Do not rely on the image prompt as the only copy of the story text.
 
@@ -119,7 +119,7 @@ Seed `narration:`, `dialogue:`, and `caption:` from the scene artifact **Text Ca
 
 - Use source-supported facts from the scene artifact.
 - Do not invent major events, dialogue, props, or visual designs.
-- Use canonical character and location semantic refs from **Visual Continuity** using exact adaptation keys (for example `character:hero-base`, `location:barn`).
+- Use canonical character and location semantic refs from **Visual Continuity** using exact adaptation keys (for example `character:hero`, `location:barn`).
 - End each image prompt with: `No watermarks.`
 - If speech bubbles or captions are needed, describe their placement in the image prompt; put the readable text in `dialogue:` or `caption:`.
 

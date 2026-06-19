@@ -229,8 +229,8 @@ def delete_scene_list_line(slug: str, key: str) -> SceneListDocument:
 
 
 @app.post("/api/projects/{slug}/adaptation/scenes/{key}/extract", response_model=AdaptationWorkflowStatus)
-def start_scene_extract(slug: str, key: str) -> AdaptationWorkflowStatus:
-    return adaptation.start_scene_extract(slug, key)
+def start_scene_extract(slug: str, key: str, force: bool = False) -> AdaptationWorkflowStatus:
+    return adaptation.start_scene_extract(slug, key, force=force)
 
 
 @app.get("/api/projects/{slug}/adaptation/scenes/{key}/extract", response_model=AdaptationWorkflowStatus)

@@ -139,6 +139,10 @@ export function MomentSceneList({
 
   const extractedCount = lines.filter((line) => Boolean(adaptation.scenes[line.slug])).length;
   const plannedCount = lines.filter((line) => momentsBySlug[line.slug]?.exists).length;
+  const hasCharacterSheets = (adaptation.counts.characterSheets ?? 0) > 0;
+  const planBlockedReason = hasCharacterSheets
+    ? undefined
+    : 'Complete Phase 1 character sheets before planning moments.';
 
   return (
     <section className="story-card adaptation-file-card">
@@ -147,7 +151,9 @@ export function MomentSceneList({
           <h2>Scene Moments</h2>
           <p className="muted">
             {lines.length
-              ? `${plannedCount} / ${extractedCount || lines.length} scenes planned · plan one scene at a time`
+              ? `${plannedCount} / ${extractedCount || lines.length} scenes planned · plan one scene at a time${
+                  hasCharacterSheets ? '' : ' · finish character sheets first'
+                }`
               : 'Extract scenes in Phase 2 before planning moments.'}
           </p>
         </div>
@@ -181,7 +187,16 @@ export function MomentSceneList({
                   <button
                     type="button"
                     className="generate-button"
-                    disabled={!adaptation.hasBookSession || !extracted || planning || Boolean(planningSlug) || workflow?.running || planned}
+                    disabled={
+                      !adaptation.hasBookSession ||
+                      !hasCharacterSheets ||
+                      !extracted ||
+                      planning ||
+                      Boolean(planningSlug) ||
+                      workflow?.running ||
+                      planned
+                    }
+                    title={planBlockedReason}
                     onClick={() => void planScene(line.slug)}
                   >
                     {planning ? 'Planning...' : 'Plan'}

@@ -76,7 +76,7 @@ Use this structure:
 
 ## Visual Variants
 
-- `character-slug-base`: [Baseline design.]
+- `character-slug`: [Baseline design.]
 - `character-slug-variant`: [Variant description and when it appears.]
 
 ## Continuity Notes
@@ -120,15 +120,15 @@ Do **not** create variants for temporary performance states:
 
 Temporary performance states belong in `Personality And Performance Notes`, not `Visual Variants`.
 
-If there are no durable major visual changes, include only one base variant.
+If there are no durable major visual changes, include only the base variant keyed by the character stem (the artifact filename without `.md`).
 
 ## Variant Slug Rules
 
 Use lowercase asset ids with hyphens:
 
-- `molly-millions-base`
+- `molly-millions` (base — matches artifact stem)
 - `molly-millions-mission-gear`
-- `henry-dorsett-case-base`
+- `henry-dorsett-case` (base)
 
 Variant slugs should describe durable visual forms, not emotions or momentary actions.
 

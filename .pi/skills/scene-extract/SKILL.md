@@ -14,7 +14,7 @@ The full book is already loaded in context. The user provides:
 2. An exact output path for the scene artifact under `<book-root>/scenes/artifacts/`.
 3. A staging directory under `<book-root>/locations/staging/<scene-slug>/` for new location index fragments.
 4. One line from `<book-root>/scenes/list.txt`.
-5. Optionally, the existing character list and location index for reference.
+5. Optionally, the existing character list, entity registry, and location index for reference.
 
 Create one scene planning artifact and any **new** illustratable environments this scene needs.
 
@@ -106,8 +106,10 @@ Location rules:
 
 ## Character Rules
 
-- Reference characters using slugs consistent with the existing character list when provided.
-- Do not invent a separate cast list.
+- Use **exact character entity keys** from the provided entity registry in **Visual Continuity**.
+- Base characters use the character stem (for example `rainbow-dash`); variants use `{stem}-{variant}` (for example `rainbow-dash-injured`).
+- When **Character States** requires a non-base look, list the matching variant key, not the base stem.
+- Do not invent slugs or shorten names from the character list.
 
 ## Source Rules
 

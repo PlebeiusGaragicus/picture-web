@@ -133,10 +133,13 @@ export const api = {
     request<SceneListDocument>(`/api/projects/${slug}/adaptation/scenes/list/lines/${key}`, {
       method: 'DELETE',
     }),
-  startSceneExtract: (slug: string, sceneKey: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/extract`, {
-      method: 'POST',
-    }),
+  startSceneExtract: (slug: string, sceneKey: string, force = false) =>
+    request<AdaptationWorkflowStatus>(
+      `/api/projects/${slug}/adaptation/scenes/${sceneKey}/extract${force ? '?force=true' : ''}`,
+      {
+        method: 'POST',
+      },
+    ),
   getSceneExtract: (slug: string, sceneKey: string) =>
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/extract`),
   startScenePlan: (slug: string, sceneKey: string) =>

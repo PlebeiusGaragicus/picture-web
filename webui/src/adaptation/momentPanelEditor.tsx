@@ -228,7 +228,7 @@ export function MomentPanelEditor({
                             value={section.refs}
                             disabled={isSaving}
                             onChange={(event) => updateSection(index, { refs: event.target.value })}
-                            placeholder="character:hero-base, location:barn"
+                            placeholder="character:hero, location:barn"
                           />
                         </label>
                         {textFields.map((field) => (

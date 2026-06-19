@@ -12,7 +12,7 @@ def usage() -> None:
         """Usage:
   python -m adaptation_workflow run <project-slug> [stage]
   python -m adaptation_workflow validate <project-slug> [stage]
-  python -m adaptation_workflow extract-scene <project-slug> <scene-slug>
+  python -m adaptation_workflow extract-scene <project-slug> <scene-slug> [--force]
   python -m adaptation_workflow plan-scene <project-slug> <scene-slug>
 
 Run stages:
@@ -35,10 +35,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     command = args[0]
     if command == "extract-scene":
-        if len(args) != 3:
+        if len(args) not in {3, 4}:
             usage()
             return 2
-        return run_extract_scene(args[1], args[2])
+        force = len(args) == 4 and args[3] == "--force"
+        if len(args) == 4 and not force:
+            usage()
+            return 2
+        return run_extract_scene(args[1], args[2], force=force)
     if command == "plan-scene":
         if len(args) != 3:
             usage()

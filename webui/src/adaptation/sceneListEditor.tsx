@@ -122,6 +122,10 @@ export function SceneListEditor({
   };
 
   const isExtracted = (slug: string) => Boolean(adaptation.scenes[slug]);
+  const hasCharacterSheets = (adaptation.counts.characterSheets ?? 0) > 0;
+  const extractBlockedReason = hasCharacterSheets
+    ? undefined
+    : 'Complete Phase 1 character sheets before extracting scenes.';
 
   return (
     <section className="story-card adaptation-file-card">
@@ -129,7 +133,9 @@ export function SceneListEditor({
         <div>
           <h2>Scene List</h2>
           <p className="muted">
-            {lines.length ? `${lines.length} scenes · drag to reorder` : 'Generate or add scenes, then extract one at a time.'}
+            {lines.length
+              ? `${lines.length} scenes · drag to reorder${hasCharacterSheets ? '' : ' · finish character sheets before extract'}`
+              : 'Generate or add scenes, then extract one at a time.'}
           </p>
         </div>
         <div className="scene-list-header-actions">
@@ -184,7 +190,15 @@ export function SceneListEditor({
                   <button
                     type="button"
                     className="generate-button"
-                    disabled={!adaptation.hasBookSession || extracting || Boolean(extractingSlug) || workflow?.running || extracted}
+                    disabled={
+                      !adaptation.hasBookSession ||
+                      !hasCharacterSheets ||
+                      extracting ||
+                      Boolean(extractingSlug) ||
+                      workflow?.running ||
+                      extracted
+                    }
+                    title={extractBlockedReason}
                     onClick={() => void extractScene(line.slug)}
                   >
                     {extracting ? 'Extracting...' : 'Extract'}
