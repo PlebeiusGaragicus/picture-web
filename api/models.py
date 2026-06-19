@@ -295,6 +295,16 @@ class SceneListLineCreate(BaseModel):
     description: str = ""
 
 
+class MomentRefInput(BaseModel):
+    ref: str
+    kind: Literal["character", "location", "unknown"]
+    entityKey: str = ""
+    tagId: str = ""
+    ready: bool
+    assetIds: list[str] = Field(default_factory=list)
+    detail: str = ""
+
+
 class MomentLayoutSection(BaseModel):
     key: str = Field(pattern=SLUG_RE)
     refs: str = ""
@@ -302,6 +312,11 @@ class MomentLayoutSection(BaseModel):
     dialogue: str = ""
     caption: str = ""
     prompt: str = ""
+    refInputs: list[MomentRefInput] = Field(default_factory=list)
+    canGenerate: bool = False
+    referenceImageCount: int = 0
+    referenceImageLimit: int = 14
+    referenceLimitExceeded: bool = False
 
 
 class SceneMomentsDocument(BaseModel):
@@ -333,6 +348,11 @@ class MomentSequenceEntry(BaseModel):
     activeAssetId: str | None = None
     finalized: bool = False
     status: Literal["missing", "ready", "generated"] = "ready"
+    refInputs: list[MomentRefInput] = Field(default_factory=list)
+    canGenerate: bool = False
+    referenceImageCount: int = 0
+    referenceImageLimit: int = 14
+    referenceLimitExceeded: bool = False
 
 
 class MomentSequenceCounts(BaseModel):

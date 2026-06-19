@@ -494,6 +494,8 @@ def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, mon
     create_project(client)
     root = library.project_dir("farm-comic") / "adaptation"
     (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
+    (root / "scenes").mkdir(parents=True, exist_ok=True)
+    (root / "scenes" / "list.txt").write_text("001-panel: Panel.\n")
 
     for asset_id, title, tags in [
         ("01HSTYLE", "Style", []),
@@ -579,7 +581,8 @@ def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, mon
         json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01", "visualStyleId": style_id},
     )
     assert response.status_code == 200
-    assert captured_refs == ["01HSTYLE", "01HCHAR", "01HCHAR2", "01HLOC"]
+    assert captured_refs == ["01HCHAR", "01HCHAR2", "01HLOC"]
+    assert "01HSTYLE" not in captured_refs
     assert "bold comic ink" in captured_prompt["text"].lower()
     panel_link = client.get("/api/projects/farm-comic/adaptation").json()["panels"]["001-panel-01"]
     assert panel_link["assetIds"] == [response.json()["asset"]["id"]]
@@ -593,6 +596,213 @@ def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, mon
     assert nodes[child_id]["type"] == "imageGroup"
     assert nodes[child_id]["activeAssetId"] == response.json()["asset"]["id"]
     assert nodes[child_id]["role"] == {"type": "generated-result", "sourceNodeId": source_id}
+
+    sequence = client.get("/api/projects/farm-comic/adaptation/moments/sequence").json()
+    moment = next(item for item in sequence["moments"] if item["momentKey"] == "001-panel-01")
+    assert moment["canGenerate"] is True
+    assert moment["referenceImageCount"] == 3
+    assert {item["ref"] for item in moment["refInputs"]} == {"character:hero-base", "location:farm"}
+    assert all(item["ready"] for item in moment["refInputs"] if item["kind"] in {"character", "location"})
+
+
+def test_adaptation_panel_generation_blocks_empty_refs(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
+    make_png(library.asset_png_path("farm-comic", "01HCHAR"), color="green")
+    library.write_json(
+        library.asset_json_path("farm-comic", "01HCHAR"),
+        {
+            "id": "01HCHAR",
+            "kind": "imported",
+            "title": "Character",
+            "tags": ["hero-base"],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    library.write_json(
+        root / "adaptation.json",
+        {
+            "version": 2,
+            "settings": {"storyKind": "comic-book"},
+            "styleRefs": {},
+            "characters": {"hero-base": {"artifactKind": "character-sheet", "promptPath": "x.md", "assetIds": ["01HCHAR"], "status": "generated"}},
+            "locations": {},
+            "scenes": {},
+            "pages": {},
+            "panels": {},
+        },
+    )
+    (root / "panels" / "prompts" / "001-panel.md").write_text(
+        "## 001-panel-01\n"
+        "mode: story-layout\n"
+        "refs:\n"
+        "narration: None.\n"
+        "dialogue: None.\n"
+        "caption: None.\n\n"
+        "Empty refs panel.\n"
+    )
+    style_id = client.post(
+        "/api/projects/farm-comic/adaptation/visual-styles",
+        json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
+    ).json()["visualStyles"][0]["id"]
+    response = client.post(
+        "/api/projects/farm-comic/adaptation/generate-artifact",
+        json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01", "visualStyleId": style_id},
+    )
+    assert response.status_code == 400
+    assert "character:" in response.json()["detail"].lower() or "location:" in response.json()["detail"].lower()
+
+
+def test_adaptation_panel_generation_blocks_untagged_assets(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
+    make_png(library.asset_png_path("farm-comic", "01HCHAR"), color="green")
+    library.write_json(
+        library.asset_json_path("farm-comic", "01HCHAR"),
+        {
+            "id": "01HCHAR",
+            "kind": "imported",
+            "title": "Character",
+            "tags": [],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    library.write_json(
+        root / "adaptation.json",
+        {
+            "version": 2,
+            "settings": {"storyKind": "comic-book"},
+            "styleRefs": {},
+            "characters": {"hero-base": {"artifactKind": "character-sheet", "promptPath": "x.md", "assetIds": ["01HCHAR"], "status": "generated"}},
+            "locations": {},
+            "scenes": {},
+            "pages": {},
+            "panels": {},
+        },
+    )
+    (root / "panels" / "prompts" / "001-panel.md").write_text(
+        "## 001-panel-01\n"
+        "mode: story-layout\n"
+        "refs: character:hero-base\n"
+        "narration: None.\n"
+        "dialogue: None.\n"
+        "caption: None.\n\n"
+        "Untagged panel.\n"
+    )
+    style_id = client.post(
+        "/api/projects/farm-comic/adaptation/visual-styles",
+        json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
+    ).json()["visualStyles"][0]["id"]
+    response = client.post(
+        "/api/projects/farm-comic/adaptation/generate-artifact",
+        json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01", "visualStyleId": style_id},
+    )
+    assert response.status_code == 400
+    assert "hero-base" in response.json()["detail"]
+
+
+def test_adaptation_panel_generation_blocks_over_reference_limit(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
+    asset_ids = []
+    for index in range(4):
+        asset_id = f"01HREF{index}"
+        asset_ids.append(asset_id)
+        make_png(library.asset_png_path("farm-comic", asset_id), color="green")
+        library.write_json(
+            library.asset_json_path("farm-comic", asset_id),
+            {
+                "id": asset_id,
+                "kind": "imported",
+                "title": f"Ref {index}",
+                "tags": ["hero-base"],
+                "createdAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:00Z",
+            },
+        )
+    library.write_json(
+        root / "adaptation.json",
+        {
+            "version": 2,
+            "settings": {"storyKind": "comic-book"},
+            "styleRefs": {},
+            "characters": {"hero-base": {"artifactKind": "character-sheet", "promptPath": "x.md", "assetIds": asset_ids, "status": "generated"}},
+            "locations": {},
+            "scenes": {},
+            "pages": {},
+            "panels": {},
+        },
+    )
+    (root / "panels" / "prompts" / "001-panel.md").write_text(
+        "## 001-panel-01\n"
+        "mode: story-layout\n"
+        "refs: character:hero-base\n"
+        "narration: None.\n"
+        "dialogue: None.\n"
+        "caption: None.\n\n"
+        "Over limit panel.\n"
+    )
+    style_id = client.post(
+        "/api/projects/farm-comic/adaptation/visual-styles",
+        json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
+    ).json()["visualStyles"][0]["id"]
+    response = client.post(
+        "/api/projects/farm-comic/adaptation/generate-artifact",
+        json={
+            "artifactKind": "panel-prompt",
+            "artifactKey": "001-panel-01",
+            "visualStyleId": style_id,
+            "model": "gemini-2.5-flash-image",
+        },
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "Too many reference images" in detail
+    assert "3" in detail
+
+
+def test_moment_ref_asset_order_is_stable(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    from moment_refs import ordered_moment_ref_asset_ids
+
+    for asset_id in ["01HZ", "01HA", "01HM"]:
+        make_png(library.asset_png_path("farm-comic", asset_id), color="green")
+        library.write_json(
+            library.asset_json_path("farm-comic", asset_id),
+            {
+                "id": asset_id,
+                "kind": "imported",
+                "title": asset_id,
+                "tags": ["hero-base"],
+                "createdAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:00Z",
+            },
+        )
+    make_png(library.asset_png_path("farm-comic", "01HLOC"), color="green")
+    library.write_json(
+        library.asset_json_path("farm-comic", "01HLOC"),
+        {
+            "id": "01HLOC",
+            "kind": "imported",
+            "title": "Loc",
+            "tags": ["farm"],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    style_ref = "character:hero-base, location:farm"
+    first = ordered_moment_ref_asset_ids("farm-comic", style_ref)
+    second = ordered_moment_ref_asset_ids("farm-comic", style_ref)
+    assert first == second == ["01HA", "01HM", "01HZ", "01HLOC"]
 
 
 def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path, monkeypatch):
@@ -1159,6 +1369,14 @@ def test_moment_sequence_and_patch_api(tmp_path, monkeypatch):
         "002-later-panel-01",
     ]
     assert payload["counts"]["total"] == 2
+
+    opening = payload["moments"][0]
+    later = payload["moments"][1]
+    assert opening["canGenerate"] is False
+    assert opening["refInputs"]
+    assert any(not item["ready"] for item in opening["refInputs"])
+    assert later["canGenerate"] is False
+    assert any(item["detail"] for item in later["refInputs"] if not item["ready"])
 
     patched = client.patch(
         "/api/projects/farm-comic/adaptation/moments/001-opening-panel-01",

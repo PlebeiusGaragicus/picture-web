@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import type { AdaptationStatus, MomentLayoutSection, StoryKind } from '../types';
+import { momentRefInputs } from './momentRefInputs';
+import { MomentRefInputsView } from './momentRefInputsView';
+import type { AdaptationStatus, Asset, MomentLayoutSection, StoryKind } from '../types';
 
 function textFieldsForStoryKind(storyKind: StoryKind): Array<'narration' | 'dialogue' | 'caption'> {
   if (storyKind === 'comic-book') return ['dialogue', 'caption'];
@@ -53,9 +55,11 @@ function validateSections(sections: MomentLayoutSection[]): string | null {
 }
 
 export function MomentPanelEditor({
+  projectSlug,
   sceneSlug,
   storyKind,
   adaptation,
+  assets,
   initialSections,
   initialBody,
   isSaving,
@@ -63,9 +67,11 @@ export function MomentPanelEditor({
   onSaveBody,
   onCancel,
 }: {
+  projectSlug: string;
   sceneSlug: string;
   storyKind: StoryKind;
   adaptation: AdaptationStatus;
+  assets: Asset[];
   initialSections: MomentLayoutSection[];
   initialBody: string;
   isSaving: boolean;
@@ -135,7 +141,16 @@ export function MomentPanelEditor({
       setError(validationError);
       return;
     }
-    await onSaveSections(sections);
+    await onSaveSections(
+      sections.map(({ key, refs, narration, dialogue, caption, prompt }) => ({
+        key,
+        refs,
+        narration,
+        dialogue,
+        caption,
+        prompt,
+      })),
+    );
   };
 
   return (
@@ -168,6 +183,7 @@ export function MomentPanelEditor({
           <div className="moment-panel-editor-list">
             {sections.map((section, index) => {
               const expanded = expandedKey === section.key;
+              const refStatus = momentRefInputs(section.refs, adaptation, assets);
               return (
                 <div
                   key={`${section.key}-${index}`}
@@ -191,6 +207,13 @@ export function MomentPanelEditor({
                     </button>
                     {expanded && (
                       <div className="moment-panel-editor-fields">
+                        <MomentRefInputsView
+                          projectSlug={projectSlug}
+                          refInputs={refStatus.refInputs}
+                          referenceImageCount={refStatus.referenceImageCount}
+                          referenceImageLimit={refStatus.referenceImageLimit}
+                          referenceLimitExceeded={refStatus.referenceLimitExceeded}
+                        />
                         <label className="field-label">
                           Slug
                           <input

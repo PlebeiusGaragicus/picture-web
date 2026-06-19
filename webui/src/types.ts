@@ -225,6 +225,16 @@ export interface AdaptationStatus {
 
 export type AdaptationStage = 'ingest' | 'characters' | 'scene-list' | 'scenes' | 'locations' | 'moments' | 'all';
 
+export interface MomentRefInput {
+  ref: string;
+  kind: 'character' | 'location' | 'unknown';
+  entityKey: string;
+  tagId: string;
+  ready: boolean;
+  assetIds: string[];
+  detail: string;
+}
+
 export interface MomentLayoutSection {
   key: string;
   refs: string;
@@ -232,6 +242,11 @@ export interface MomentLayoutSection {
   dialogue: string;
   caption: string;
   prompt: string;
+  refInputs?: MomentRefInput[];
+  canGenerate?: boolean;
+  referenceImageCount?: number;
+  referenceImageLimit?: number;
+  referenceLimitExceeded?: boolean;
 }
 
 export interface SceneMomentsDocument {
@@ -258,6 +273,11 @@ export interface MomentSequenceEntry {
   activeAssetId?: string | null;
   finalized: boolean;
   status: 'missing' | 'ready' | 'generated';
+  refInputs?: MomentRefInput[];
+  canGenerate?: boolean;
+  referenceImageCount?: number;
+  referenceImageLimit?: number;
+  referenceLimitExceeded?: boolean;
 }
 
 export interface MomentSequenceDocument {

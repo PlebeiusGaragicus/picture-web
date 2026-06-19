@@ -2384,6 +2384,7 @@ function StoryPhaseScreen({
           <PhaseMoments
             projectSlug={projectSlug}
             adaptation={adaptation}
+            assets={assets}
             workflow={workflow}
             validation={validation}
             onStartValidation={onStartValidation}

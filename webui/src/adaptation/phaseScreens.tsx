@@ -135,6 +135,7 @@ export function PhaseScenes({
 export function PhaseMoments({
   projectSlug,
   adaptation,
+  assets,
   workflow,
   validation,
   onStartValidation,
@@ -142,6 +143,7 @@ export function PhaseMoments({
 }: {
   projectSlug: string;
   adaptation: AdaptationStatus;
+  assets: Asset[];
   workflow: AdaptationWorkflowStatus | null;
   validation: AdaptationWorkflowStatus | null;
   onStartValidation: () => Promise<void>;
@@ -171,6 +173,7 @@ export function PhaseMoments({
       <MomentSceneList
         projectSlug={projectSlug}
         adaptation={adaptation}
+        assets={assets}
         workflow={workflow}
         onReloadAdaptation={onReloadAdaptation}
       />

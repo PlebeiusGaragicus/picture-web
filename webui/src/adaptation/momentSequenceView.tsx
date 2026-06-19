@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { MomentRefInputsView } from './momentRefInputsView';
 import type { AdaptationStatus, MomentSequenceEntry, StoryKind, VisualStyleDefinition } from '../types';
 
 function textFieldsForStoryKind(storyKind: StoryKind): Array<'narration' | 'dialogue' | 'caption'> {
@@ -147,6 +148,7 @@ export function MomentSequenceView({
               const previewId = moment.activeAssetId ?? moment.assetIds[moment.assetIds.length - 1] ?? null;
               const isGenerating = generatingKey === moment.momentKey;
               const isSaving = savingKey === moment.momentKey;
+              const generateBlocked = !moment.canGenerate || moment.referenceLimitExceeded;
               return (
                 <article key={moment.momentKey} className={`moment-sequence-card ${moment.finalized ? 'is-finalized' : ''}`}>
                   <div className="moment-sequence-card-media">
@@ -172,6 +174,13 @@ export function MomentSequenceView({
                         Finalized
                       </label>
                     </div>
+                    <MomentRefInputsView
+                      projectSlug={projectSlug}
+                      refInputs={moment.refInputs ?? []}
+                      referenceImageCount={moment.referenceImageCount}
+                      referenceImageLimit={moment.referenceImageLimit}
+                      referenceLimitExceeded={moment.referenceLimitExceeded}
+                    />
                     {textFields.map((field) => (
                       <label key={field} className="field-label">
                         {textFieldLabel(field)}
@@ -208,7 +217,14 @@ export function MomentSequenceView({
                       <button
                         type="button"
                         className="generate-button"
-                        disabled={!visualStyleId || isGenerating}
+                        disabled={!visualStyleId || isGenerating || generateBlocked}
+                        title={
+                          generateBlocked
+                            ? moment.referenceLimitExceeded
+                              ? `Too many reference images (${moment.referenceImageCount}); limit is ${moment.referenceImageLimit}`
+                              : 'Tag all panel references on the canvas before generating'
+                            : undefined
+                        }
                         onClick={() => void generateMoment(moment)}
                       >
                         {isGenerating ? 'Generating...' : 'Generate'}

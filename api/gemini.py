@@ -50,6 +50,16 @@ def default_image_size() -> str:
     return os.environ.get("NANO_BANANA_IMAGE_SIZE", DEFAULT_IMAGE_SIZE)
 
 
+def reference_image_limit(model: str) -> int:
+    """Max reference/input images per Gemini image-generation prompt for the given model."""
+    normalized = model.strip().lower()
+    if "2.5-flash-image" in normalized or "2-5-flash-image" in normalized:
+        return 3
+    if "image" in normalized:
+        return 14
+    return 14
+
+
 def load_parent_images(parent_paths: list[Path]) -> list[Image.Image]:
     images: list[Image.Image] = []
     for path in parent_paths:

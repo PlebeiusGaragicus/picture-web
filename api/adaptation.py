@@ -37,6 +37,8 @@ from models import (
     SceneMomentsDocument,
     SceneMomentsUpdate,
     MomentLayoutSection,
+    MomentRefInput,
+    MomentLayoutSection,
     MomentSequenceEntry,
     MomentSequenceDocument,
     MomentSequenceCounts,
@@ -944,14 +946,28 @@ def _require_scene_artifact(slug: str, scene_slug: str) -> Path:
     return artifact
 
 
-def _layout_section_model(key: str, section: dict[str, str]) -> MomentLayoutSection:
+def _layout_section_model(
+    slug: str,
+    key: str,
+    section: dict[str, str],
+    metadata: AdaptationMetadata,
+) -> MomentLayoutSection:
+    from moment_refs import moment_ref_inputs
+
+    refs = section.get("style_ref", "")
+    ref_inputs, count, limit, limit_exceeded, can_generate = moment_ref_inputs(slug, metadata, refs)
     return MomentLayoutSection(
         key=key,
-        refs=section.get("style_ref", ""),
+        refs=refs,
         narration=section.get("narration", ""),
         dialogue=section.get("dialogue", ""),
         caption=section.get("caption", ""),
         prompt=section.get("prompt", ""),
+        refInputs=ref_inputs,
+        canGenerate=can_generate,
+        referenceImageCount=count,
+        referenceImageLimit=limit,
+        referenceLimitExceeded=limit_exceeded,
     )
 
 
@@ -964,8 +980,9 @@ def scene_moments_document(slug: str, scene_slug: str) -> SceneMomentsDocument:
     story_kind = read_story_kind(root)
     moment_path = moment_output_path(root, story_kind, target)
     body = read_text(moment_path)
+    metadata = read_metadata(slug)
     sections = [
-        _layout_section_model(key, section)
+        _layout_section_model(slug, key, section, metadata)
         for key, section in ordered_layout_sections(moment_path)
     ]
     return SceneMomentsDocument(
@@ -1065,9 +1082,23 @@ def _find_moment_link(metadata: AdaptationMetadata, moment_key: str) -> tuple[Ar
     return None
 
 
-def _moment_link_to_entry(scene_slug: str, moment_key: str, artifact_kind: ArtifactKind, link: AdaptationAssetLink) -> MomentSequenceEntry:
+def _moment_link_to_entry(
+    slug: str,
+    scene_slug: str,
+    moment_key: str,
+    artifact_kind: ArtifactKind,
+    link: AdaptationAssetLink,
+    metadata: AdaptationMetadata,
+    *,
+    model: str | None = None,
+) -> MomentSequenceEntry:
+    from moment_refs import moment_ref_inputs
+
     illustrated = bool(link.activeAssetId or link.assetIds)
     status_value: Literal["missing", "ready", "generated"] = "generated" if illustrated else "ready"
+    ref_inputs, count, limit, limit_exceeded, can_generate = moment_ref_inputs(
+        slug, metadata, link.styleRef, model=model
+    )
     return MomentSequenceEntry(
         momentKey=moment_key,
         sceneSlug=scene_slug,
@@ -1082,6 +1113,11 @@ def _moment_link_to_entry(scene_slug: str, moment_key: str, artifact_kind: Artif
         activeAssetId=link.activeAssetId,
         finalized=link.finalized,
         status=status_value,
+        refInputs=ref_inputs,
+        canGenerate=can_generate,
+        referenceImageCount=count,
+        referenceImageLimit=limit,
+        referenceLimitExceeded=limit_exceeded,
     )
 
 
@@ -1110,7 +1146,9 @@ def moment_sequence_document(slug: str) -> MomentSequenceDocument:
         if found is None:
             continue
         artifact_kind, link = found
-        moments.append(_moment_link_to_entry(item.scene_slug, item.moment_key, artifact_kind, link))
+        moments.append(
+            _moment_link_to_entry(slug, item.scene_slug, item.moment_key, artifact_kind, link, metadata)
+        )
     return MomentSequenceDocument(moments=moments, counts=_moment_progress_counts(metadata))
 
 
@@ -1161,7 +1199,7 @@ def patch_moment(slug: str, moment_key: str, payload: MomentPatch) -> MomentSequ
     artifact_kind, link = found
     if not scene_slug:
         scene_slug = next((item.scene_slug for item in ordered_moment_sequence(root) if item.moment_key == target), "")
-    return _moment_link_to_entry(scene_slug, target, artifact_kind, link)
+    return _moment_link_to_entry(slug, scene_slug, target, artifact_kind, link, metadata)
 
 
 def parse_layout_sections(path: Path) -> dict[str, dict[str, str]]:
@@ -1532,17 +1570,22 @@ def resolve_entity_assets(slug: str, metadata: AdaptationMetadata, ref: str) -> 
     return [asset_id for asset_id in link.assetIds if asset_exists(slug, asset_id)]
 
 
-def artifact_ref_asset_ids(slug: str, metadata: AdaptationMetadata, artifact_kind: ArtifactKind, link: AdaptationAssetLink) -> list[str]:
+def artifact_ref_asset_ids(
+    slug: str,
+    metadata: AdaptationMetadata,
+    artifact_kind: ArtifactKind,
+    link: AdaptationAssetLink,
+    *,
+    model: str | None = None,
+) -> list[str]:
     if artifact_kind == "scene-artifact":
         return []
     if artifact_kind in {"page-plan", "panel-prompt"}:
-        refs: list[str] = []
-        style_ref_id = style_ref_asset_id(metadata, artifact_kind)
-        if style_ref_id:
-            refs.append(style_ref_id)
-        for raw_ref in [item.strip() for item in link.styleRef.split(",") if item.strip()]:
-            refs.extend(resolve_entity_assets(slug, metadata, raw_ref))
-        return list(dict.fromkeys(refs))
+        import gemini
+        from moment_refs import assert_moment_refs_ready
+
+        resolved_model = model or gemini.default_model()
+        return assert_moment_refs_ready(slug, metadata, link.styleRef, model=resolved_model)
     if link.mode == "new-image":
         ref_asset_id = style_ref_asset_id(metadata, artifact_kind)
         if ref_asset_id is None:
@@ -1595,8 +1638,6 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
         raise HTTPException(status_code=404, detail=f"Story artifact not found: {request.artifactKey}")
     if request.artifactKind == "scene-artifact":
         raise HTTPException(status_code=400, detail="Scene artifacts are planning artifacts and cannot be generated directly")
-    ref_asset_ids = artifact_ref_asset_ids(slug, metadata, request.artifactKind, link)
-    prompt = f"{link.prompt.strip()}\n"
     canvas = library.read_stored_canvas(slug)
     canvas_node_id = request.canvasNodeId
     if canvas_node_id is None:
@@ -1612,6 +1653,11 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
         )
     artifact_node = canvas.nodes.get(canvas_node_id) if canvas_node_id else None
     artifact_params = artifact_node.params if isinstance(artifact_node, StoryArtifactCanvasNode) else None
+    resolved_model = request.model or (artifact_params.model if artifact_params else None) or gemini.default_model()
+    ref_asset_ids = artifact_ref_asset_ids(
+        slug, metadata, request.artifactKind, link, model=resolved_model
+    )
+    prompt = f"{link.prompt.strip()}\n"
     visual_style_id = request.visualStyleId or (
         artifact_node.visualStyleId if isinstance(artifact_node, StoryArtifactCanvasNode) else None
     )

@@ -5,6 +5,7 @@ import { MomentPanelEditor } from './momentPanelEditor';
 import type {
   AdaptationStatus,
   AdaptationWorkflowStatus,
+  Asset,
   MomentLayoutSection,
   SceneListLine,
   SceneMomentsDocument,
@@ -20,11 +21,13 @@ function momentLabel(storyKind: StoryKind, sectionCount: number) {
 export function MomentSceneList({
   projectSlug,
   adaptation,
+  assets,
   workflow,
   onReloadAdaptation,
 }: {
   projectSlug: string;
   adaptation: AdaptationStatus;
+  assets: Asset[];
   workflow: AdaptationWorkflowStatus | null;
   onReloadAdaptation: () => Promise<void>;
 }) {
@@ -201,9 +204,11 @@ export function MomentSceneList({
       {editSlug !== null && editDocument !== null && (
         <Modal title={`Edit panels: ${editSlug}`} onClose={closeEditor}>
           <MomentPanelEditor
+            projectSlug={projectSlug}
             sceneSlug={editSlug}
             storyKind={editDocument.storyKind}
             adaptation={adaptation}
+            assets={assets}
             initialSections={editDocument.sections}
             initialBody={editDocument.body}
             isSaving={isSaving}

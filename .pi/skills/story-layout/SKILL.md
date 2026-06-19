@@ -88,7 +88,7 @@ caption: Later that morning.
 Close-up reaction panel. Caption box at top. No watermarks.
 ```
 
-The `refs:` line may be empty if no canonical reference exists yet, but include semantic refs whenever the scene artifact names characters or locations that should be used as visual inputs.
+The `refs:` line must include at least one `character:` or `location:` reference per section. Use **exact entity keys** from the scene artifact **Visual Continuity** section (for example `character:rainbow-dash-base`, not shortened story names). Those keys are the tag ids users apply on the canvas (`rainbow-dash-base` without the `character:` prefix).
 
 Put readable story text in `narration:`, `dialogue:`, and `caption:` lines. Do not rely on the image prompt as the only copy of the story text.
 
@@ -119,7 +119,7 @@ Seed `narration:`, `dialogue:`, and `caption:` from the scene artifact **Text Ca
 
 - Use source-supported facts from the scene artifact.
 - Do not invent major events, dialogue, props, or visual designs.
-- Use canonical character and location semantic refs where possible.
+- Use canonical character and location semantic refs from **Visual Continuity** using exact adaptation keys (for example `character:hero-base`, `location:barn`).
 - End each image prompt with: `No watermarks.`
 - If speech bubbles or captions are needed, describe their placement in the image prompt; put the readable text in `dialogue:` or `caption:`.
 
