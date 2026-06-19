@@ -346,10 +346,14 @@ class StepRunner:
         )
 
         if output_path.is_file():
-            self.logger.write_skip("moments", f"plan scene {scene_slug}", rel_output)
-            self.logger.record_task(name=f"plan scene {scene_slug}", skipped=True, duration_ms=0)
-            self._notify_progress()
-            return
+            try:
+                validate_moment_file(output_path)
+                self.logger.write_skip("moments", f"plan scene {scene_slug}", rel_output)
+                self.logger.record_task(name=f"plan scene {scene_slug}", skipped=True, duration_ms=0)
+                self._notify_progress()
+                return
+            except ValidationError:
+                self.logger.write_line(f"replacing invalid moment file: {rel_output}")
 
         self.run_pi_step("moments", f"plan scene {scene_slug}", rel_output, prompt)
         if output_path.is_file() and output_path.stat().st_size > 0:

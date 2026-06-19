@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { Modal } from '../ui';
-import type { AdaptationStatus, AdaptationWorkflowStatus, SceneListLine, SceneMomentsDocument, StoryKind } from '../types';
+import { MomentPanelEditor } from './momentPanelEditor';
+import type {
+  AdaptationStatus,
+  AdaptationWorkflowStatus,
+  MomentLayoutSection,
+  SceneListLine,
+  SceneMomentsDocument,
+  StoryKind,
+} from '../types';
 
 function momentLabel(storyKind: StoryKind, sectionCount: number) {
   if (sectionCount === 0) return 'Skipped';
@@ -24,8 +32,8 @@ export function MomentSceneList({
   const [isLoading, setIsLoading] = useState(true);
   const [momentsBySlug, setMomentsBySlug] = useState<Record<string, SceneMomentsDocument>>({});
   const [planningSlug, setPlanningSlug] = useState<string | null>(null);
-  const [viewSlug, setViewSlug] = useState<string | null>(null);
-  const [viewBody, setViewBody] = useState('');
+  const [editSlug, setEditSlug] = useState<string | null>(null);
+  const [editDocument, setEditDocument] = useState<SceneMomentsDocument | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   const storyKind = adaptation.settings.storyKind;
@@ -88,21 +96,39 @@ export function MomentSceneList({
     return () => window.clearInterval(timer);
   }, [loadLines, onReloadAdaptation, planningSlug, projectSlug]);
 
-  const openView = async (slug: string) => {
+  const openEditor = async (slug: string) => {
     const document = await api.getSceneMoments(projectSlug, slug);
-    setViewSlug(slug);
-    setViewBody(document.body);
+    setEditSlug(slug);
+    setEditDocument(document);
     setMomentsBySlug((current) => ({ ...current, [slug]: document }));
   };
 
-  const saveView = async () => {
-    if (!viewSlug) return;
+  const closeEditor = () => {
+    setEditSlug(null);
+    setEditDocument(null);
+  };
+
+  const saveSections = async (sections: MomentLayoutSection[]) => {
+    if (!editSlug) return;
     setIsSaving(true);
     try {
-      const document = await api.putSceneMoments(projectSlug, viewSlug, viewBody);
-      setMomentsBySlug((current) => ({ ...current, [viewSlug]: document }));
+      const document = await api.putSceneMoments(projectSlug, editSlug, { sections });
+      setMomentsBySlug((current) => ({ ...current, [editSlug]: document }));
       await onReloadAdaptation();
-      setViewSlug(null);
+      closeEditor();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const saveBody = async (body: string) => {
+    if (!editSlug) return;
+    setIsSaving(true);
+    try {
+      const document = await api.putSceneMoments(projectSlug, editSlug, { body });
+      setMomentsBySlug((current) => ({ ...current, [editSlug]: document }));
+      await onReloadAdaptation();
+      closeEditor();
     } finally {
       setIsSaving(false);
     }
@@ -161,9 +187,9 @@ export function MomentSceneList({
                     type="button"
                     className="secondary"
                     disabled={!planned}
-                    onClick={() => void openView(line.slug)}
+                    onClick={() => void openEditor(line.slug)}
                   >
-                    View
+                    Edit panels
                   </button>
                 </div>
               </div>
@@ -172,24 +198,19 @@ export function MomentSceneList({
         </div>
       )}
 
-      {viewSlug !== null && (
-        <Modal title={`Edit moments: ${viewSlug}`} onClose={() => setViewSlug(null)}>
-          <div className="adaptation-file-form">
-            <textarea
-              className="modal-textarea"
-              value={viewBody}
-              onChange={(event) => setViewBody(event.target.value)}
-              rows={18}
-            />
-            <div className="scene-list-header-actions">
-              <button type="button" className="secondary" onClick={() => setViewSlug(null)} disabled={isSaving}>
-                Cancel
-              </button>
-              <button type="button" className="generate-button" onClick={() => void saveView()} disabled={isSaving}>
-                {isSaving ? 'Saving...' : 'Save'}
-              </button>
-            </div>
-          </div>
+      {editSlug !== null && editDocument !== null && (
+        <Modal title={`Edit panels: ${editSlug}`} onClose={closeEditor}>
+          <MomentPanelEditor
+            sceneSlug={editSlug}
+            storyKind={editDocument.storyKind}
+            adaptation={adaptation}
+            initialSections={editDocument.sections}
+            initialBody={editDocument.body}
+            isSaving={isSaving}
+            onSaveSections={saveSections}
+            onSaveBody={saveBody}
+            onCancel={closeEditor}
+          />
         </Modal>
       )}
     </section>

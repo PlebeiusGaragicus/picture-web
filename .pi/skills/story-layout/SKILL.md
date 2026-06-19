@@ -38,7 +38,7 @@ Plain markdown only. No YAML frontmatter, JSON, tables, code fences, or commenta
 Each image-generatable section must use this parseable format:
 
 ```markdown
-## artifact-slug
+## unique-section-slug
 mode: story-layout
 refs: character:character-slug-base, location:location-slug
 narration: Candidate narration for this beat, or None.
@@ -46,6 +46,46 @@ dialogue: Important dialogue for this beat, or None.
 caption: Caption idea for this beat, or None.
 
 [direct image prompt focused on visuals, framing, and bubble placement only]
+```
+
+### Section slug rules
+
+- Every `##` heading is a **unique moment key** stored in adaptation metadata and shown as its own panel/page in the UI.
+- **Never repeat a heading** in the same file. Duplicate headings cause panels to be lost.
+- **Single section:** the heading may equal the scene slug (for example `## 001-opening`).
+- **Multiple sections (comic-book):** use `{scene-slug}-panel-01`, `{scene-slug}-panel-02`, and so on with two-digit zero padding.
+- **Multiple sections (picture-book / illustrated-story):** use `{scene-slug}-page-01` when more than one section is needed.
+- For comics, create **one section per separable beat** in **Dramatic Beats** when the scene has multiple actions or dialogue turns.
+
+Multi-panel comic example (one file, three unique headings):
+
+```markdown
+## 001-opening-panel-01
+mode: story-layout
+refs: character:hero-base, location:barn
+narration: None.
+dialogue: None.
+caption: None.
+
+Wide establishing panel of the barn at sunrise. No watermarks.
+
+## 001-opening-panel-02
+mode: story-layout
+refs: character:hero-base, location:barn
+narration: None.
+dialogue: "Hello!"
+caption: None.
+
+Medium shot of the hero waving from the barn door. Speech bubble on the right. No watermarks.
+
+## 001-opening-panel-03
+mode: story-layout
+refs: character:hero-base, location:barn
+narration: None.
+dialogue: None.
+caption: Later that morning.
+
+Close-up reaction panel. Caption box at top. No watermarks.
 ```
 
 The `refs:` line may be empty if no canonical reference exists yet, but include semantic refs whenever the scene artifact names characters or locations that should be used as visual inputs.

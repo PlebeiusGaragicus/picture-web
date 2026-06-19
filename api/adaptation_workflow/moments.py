@@ -127,6 +127,34 @@ def moment_section_count(path: Path) -> int:
     return len(parse_layout_sections(path))
 
 
+def layout_section_dict(
+    *,
+    refs: str,
+    narration: str,
+    dialogue: str,
+    caption: str,
+    prompt: str,
+) -> dict[str, str]:
+    return {
+        "mode": "story-layout",
+        "style_ref": refs,
+        "narration": narration,
+        "dialogue": dialogue,
+        "caption": caption,
+        "prompt": prompt,
+    }
+
+
+def ordered_layout_sections(path: Path) -> list[tuple[str, dict[str, str]]]:
+    return list(parse_layout_sections(path).items())
+
+
+def write_ordered_layout_sections(path: Path, items: list[tuple[str, dict[str, str]]]) -> None:
+    sections = dict(items)
+    order = [key for key, _ in items]
+    write_layout_sections(path, sections, order=order)
+
+
 @dataclass(frozen=True)
 class MomentSequenceItem:
     scene_slug: str

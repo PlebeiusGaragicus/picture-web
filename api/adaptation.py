@@ -36,6 +36,7 @@ from models import (
     SceneListReplace,
     SceneMomentsDocument,
     SceneMomentsUpdate,
+    MomentLayoutSection,
     MomentSequenceEntry,
     MomentSequenceDocument,
     MomentSequenceCounts,
@@ -943,8 +944,19 @@ def _require_scene_artifact(slug: str, scene_slug: str) -> Path:
     return artifact
 
 
+def _layout_section_model(key: str, section: dict[str, str]) -> MomentLayoutSection:
+    return MomentLayoutSection(
+        key=key,
+        refs=section.get("style_ref", ""),
+        narration=section.get("narration", ""),
+        dialogue=section.get("dialogue", ""),
+        caption=section.get("caption", ""),
+        prompt=section.get("prompt", ""),
+    )
+
+
 def scene_moments_document(slug: str, scene_slug: str) -> SceneMomentsDocument:
-    from adaptation_workflow.moments import moment_output_path, moment_section_count, read_story_kind
+    from adaptation_workflow.moments import moment_output_path, moment_section_count, ordered_layout_sections, read_story_kind
 
     target = scene_slug.strip().lower()
     _require_scene_list_line(slug, target)
@@ -952,10 +964,15 @@ def scene_moments_document(slug: str, scene_slug: str) -> SceneMomentsDocument:
     story_kind = read_story_kind(root)
     moment_path = moment_output_path(root, story_kind, target)
     body = read_text(moment_path)
+    sections = [
+        _layout_section_model(key, section)
+        for key, section in ordered_layout_sections(moment_path)
+    ]
     return SceneMomentsDocument(
         sceneSlug=target,
         path=relpath(root, moment_path),
         body=body,
+        sections=sections,
         sectionCount=moment_section_count(moment_path),
         storyKind=story_kind,  # type: ignore[arg-type]
         exists=moment_path.is_file(),
@@ -963,7 +980,13 @@ def scene_moments_document(slug: str, scene_slug: str) -> SceneMomentsDocument:
 
 
 def put_scene_moments(slug: str, scene_slug: str, payload: SceneMomentsUpdate) -> SceneMomentsDocument:
-    from adaptation_workflow.moments import moment_output_path, read_story_kind
+    from adaptation_workflow.moments import layout_section_dict, moment_output_path, read_story_kind, write_ordered_layout_sections
+    from adaptation_workflow.validate import ValidationError, validate_moment_file
+
+    has_body = payload.body is not None
+    has_sections = payload.sections is not None
+    if has_body == has_sections:
+        raise HTTPException(status_code=400, detail="Provide exactly one of body or sections")
 
     target = scene_slug.strip().lower()
     _require_scene_list_line(slug, target)
@@ -972,7 +995,36 @@ def put_scene_moments(slug: str, scene_slug: str, payload: SceneMomentsUpdate) -
     story_kind = read_story_kind(root)
     moment_path = moment_output_path(root, story_kind, target)
     moment_path.parent.mkdir(parents=True, exist_ok=True)
-    moment_path.write_text(payload.body.rstrip() + ("\n" if payload.body.strip() else ""))
+
+    if has_sections:
+        assert payload.sections is not None
+        keys = [section.key for section in payload.sections]
+        if len(keys) != len(set(keys)):
+            raise HTTPException(status_code=400, detail="Duplicate section keys in payload")
+        items = [
+            (
+                section.key,
+                layout_section_dict(
+                    refs=section.refs,
+                    narration=section.narration,
+                    dialogue=section.dialogue,
+                    caption=section.caption,
+                    prompt=section.prompt,
+                ),
+            )
+            for section in payload.sections
+        ]
+        write_ordered_layout_sections(moment_path, items)
+    else:
+        body = payload.body or ""
+        moment_path.write_text(body.rstrip() + ("\n" if body.strip() else ""))
+
+    if moment_path.is_file() and moment_path.stat().st_size > 0:
+        try:
+            validate_moment_file(moment_path)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     sync_prompt_links(slug, read_metadata(slug))
     return scene_moments_document(slug, target)
 
@@ -1182,26 +1234,32 @@ def sync_prompt_links(slug: str, metadata: AdaptationMetadata) -> AdaptationMeta
             section=section,
             existing=existing,
         )
+    old_pages = metadata.pages
+    new_pages: dict[str, AdaptationAssetLink] = {}
     for plan_file in sorted((root / "pages" / "plans").glob("*.md")):
         prompt_path = relpath(root, plan_file)
         for key, section in parse_layout_sections(plan_file).items():
-            existing = metadata.pages.get(key)
-            metadata.pages[key] = prompt_link(
+            existing = old_pages.get(key)
+            new_pages[key] = prompt_link(
                 artifact_kind="page-plan",
                 prompt_path=prompt_path,
                 section=section,
                 existing=existing,
             )
+    metadata.pages = new_pages
+    old_panels = metadata.panels
+    new_panels: dict[str, AdaptationAssetLink] = {}
     for prompt_file in sorted((root / "panels" / "prompts").glob("*.md")):
         prompt_path = relpath(root, prompt_file)
         for key, section in parse_layout_sections(prompt_file).items():
-            existing = metadata.panels.get(key)
-            metadata.panels[key] = prompt_link(
+            existing = old_panels.get(key)
+            new_panels[key] = prompt_link(
                 artifact_kind="panel-prompt",
                 prompt_path=prompt_path,
                 section=section,
                 existing=existing,
             )
+    metadata.panels = new_panels
     return write_metadata(slug, metadata)
 
 

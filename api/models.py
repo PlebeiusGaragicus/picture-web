@@ -295,17 +295,28 @@ class SceneListLineCreate(BaseModel):
     description: str = ""
 
 
+class MomentLayoutSection(BaseModel):
+    key: str = Field(pattern=SLUG_RE)
+    refs: str = ""
+    narration: str = ""
+    dialogue: str = ""
+    caption: str = ""
+    prompt: str = ""
+
+
 class SceneMomentsDocument(BaseModel):
     sceneSlug: str
     path: str
     body: str
+    sections: list[MomentLayoutSection] = Field(default_factory=list)
     sectionCount: int
     storyKind: StoryKind
     exists: bool = False
 
 
 class SceneMomentsUpdate(BaseModel):
-    body: str
+    body: str | None = None
+    sections: list[MomentLayoutSection] | None = None
 
 
 class MomentSequenceEntry(BaseModel):

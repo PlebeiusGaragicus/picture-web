@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, MomentLayoutSection, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = true;
 
@@ -147,10 +147,14 @@ export const api = {
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/plan`),
   getSceneMoments: (slug: string, sceneKey: string) =>
     request<SceneMomentsDocument>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/moments`),
-  putSceneMoments: (slug: string, sceneKey: string, body: string) =>
+  putSceneMoments: (
+    slug: string,
+    sceneKey: string,
+    payload: { body: string } | { sections: MomentLayoutSection[] },
+  ) =>
     request<SceneMomentsDocument>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/moments`, {
       method: 'PUT',
-      body: JSON.stringify({ body }),
+      body: JSON.stringify(payload),
     }),
   getMomentSequence: (slug: string) =>
     request<MomentSequenceDocument>(`/api/projects/${slug}/adaptation/moments/sequence`),

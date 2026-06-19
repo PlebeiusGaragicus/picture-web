@@ -225,10 +225,20 @@ export interface AdaptationStatus {
 
 export type AdaptationStage = 'ingest' | 'characters' | 'scene-list' | 'scenes' | 'locations' | 'moments' | 'all';
 
+export interface MomentLayoutSection {
+  key: string;
+  refs: string;
+  narration: string;
+  dialogue: string;
+  caption: string;
+  prompt: string;
+}
+
 export interface SceneMomentsDocument {
   sceneSlug: string;
   path: string;
   body: string;
+  sections: MomentLayoutSection[];
   sectionCount: number;
   storyKind: StoryKind;
   exists: boolean;

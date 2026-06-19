@@ -2317,6 +2317,63 @@ pre {
   gap: 12px;
 }
 
+.moment-panel-editor-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.moment-panel-editor-tabs button.is-active {
+  background: #1e293b;
+  border-color: #93c5fd;
+}
+
+.moment-panel-editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.moment-panel-editor-list {
+  display: grid;
+  gap: 10px;
+}
+
+.moment-panel-editor-row {
+  align-items: flex-start;
+}
+
+.moment-panel-editor-row-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.moment-panel-editor-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.moment-panel-editor-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.moment-panel-editor-error {
+  margin: 0;
+  color: #fca5a5;
+}
+
 .adaptation-file-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

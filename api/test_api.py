@@ -807,12 +807,16 @@ def test_scene_moments_file_api(tmp_path, monkeypatch):
     missing = client.get("/api/projects/farm-comic/adaptation/scenes/001-opening/moments")
     assert missing.status_code == 200
     assert missing.json()["sectionCount"] == 0
+    assert missing.json()["sections"] == []
     assert missing.json()["path"] == "panels/prompts/001-opening.md"
 
     body = (
         "## 001-opening-panel-01\n"
         "mode: story-layout\n"
-        "refs: character:hero-base, location:barn\n\n"
+        "refs: character:hero-base, location:barn\n"
+        "narration: None.\n"
+        "dialogue: None.\n"
+        "caption: None.\n\n"
         "Opening panel. No watermarks.\n"
     )
     saved = client.put(
@@ -822,10 +826,206 @@ def test_scene_moments_file_api(tmp_path, monkeypatch):
     assert saved.status_code == 200
     assert saved.json()["sectionCount"] == 1
     assert saved.json()["body"].strip() == body.strip()
+    assert saved.json()["sections"][0]["key"] == "001-opening-panel-01"
 
     status = client.get("/api/projects/farm-comic/adaptation")
     assert status.json()["counts"]["momentSections"] == 1
     assert "001-opening-panel-01" in status.json()["panels"]
+
+
+def test_scene_moments_sections_api(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Once upon a time.\n")
+    (root / "scenes" / "artifacts").mkdir(parents=True, exist_ok=True)
+    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
+    (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
+    (root / "scenes" / "artifacts" / "001-opening.md").write_text(
+        "# Opening\n\nScene Id: 001-opening\nSource Lines: L001-L002\nPrimary Location: barn\n\n"
+        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: hero-base\n- Locations: barn\n"
+        "- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n"
+        "## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n"
+    )
+    library.write_json(
+        root / "adaptation.json",
+        {
+            "version": 2,
+            "settings": {"storyKind": "comic-book"},
+            "styleRefs": {},
+            "characters": {},
+            "locations": {},
+            "scenes": {},
+            "pages": {},
+            "panels": {},
+        },
+    )
+
+    sections = [
+        {
+            "key": "001-opening-panel-01",
+            "refs": "character:hero-base, location:barn",
+            "narration": "None.",
+            "dialogue": "First.",
+            "caption": "None.",
+            "prompt": "First panel. No watermarks.",
+        },
+        {
+            "key": "001-opening-panel-02",
+            "refs": "character:hero-base, location:barn",
+            "narration": "None.",
+            "dialogue": "Second.",
+            "caption": "None.",
+            "prompt": "Second panel. No watermarks.",
+        },
+        {
+            "key": "001-opening-panel-03",
+            "refs": "character:hero-base, location:barn",
+            "narration": "None.",
+            "dialogue": "Third.",
+            "caption": "None.",
+            "prompt": "Third panel. No watermarks.",
+        },
+    ]
+    saved = client.put(
+        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
+        json={"sections": sections},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["sectionCount"] == 3
+    assert [item["key"] for item in saved.json()["sections"]] == [
+        "001-opening-panel-01",
+        "001-opening-panel-02",
+        "001-opening-panel-03",
+    ]
+
+    reordered = client.put(
+        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
+        json={"sections": [sections[2], sections[0], sections[1]]},
+    )
+    assert reordered.status_code == 200
+    assert [item["key"] for item in reordered.json()["sections"]] == [
+        "001-opening-panel-03",
+        "001-opening-panel-01",
+        "001-opening-panel-02",
+    ]
+
+    sequence = client.get("/api/projects/farm-comic/adaptation/moments/sequence")
+    assert sequence.status_code == 200
+    assert [item["momentKey"] for item in sequence.json()["moments"]] == [
+        "001-opening-panel-03",
+        "001-opening-panel-01",
+        "001-opening-panel-02",
+    ]
+
+    duplicate_keys = client.put(
+        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
+        json={"sections": [sections[0], {**sections[1], "key": "001-opening-panel-01"}]},
+    )
+    assert duplicate_keys.status_code == 400
+
+    invalid_prompt = client.put(
+        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
+        json={"sections": [{**sections[0], "prompt": "Missing watermark line."}]},
+    )
+    assert invalid_prompt.status_code == 400
+
+    both_payloads = client.put(
+        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
+        json={"body": "ignored", "sections": sections},
+    )
+    assert both_payloads.status_code == 400
+
+
+def test_scene_moments_prune_metadata(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Once upon a time.\n")
+    (root / "scenes" / "artifacts").mkdir(parents=True, exist_ok=True)
+    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
+    (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
+    (root / "scenes" / "artifacts" / "001-opening.md").write_text(
+        "# Opening\n\nScene Id: 001-opening\nSource Lines: L001-L002\nPrimary Location: barn\n\n"
+        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: hero-base\n- Locations: barn\n"
+        "- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n"
+        "## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n"
+    )
+    library.write_json(
+        root / "adaptation.json",
+        {
+            "version": 2,
+            "settings": {"storyKind": "comic-book"},
+            "styleRefs": {},
+            "characters": {},
+            "locations": {},
+            "scenes": {},
+            "pages": {},
+            "panels": {
+                "001-opening-panel-old": {
+                    "artifactKind": "panel-prompt",
+                    "promptPath": "panels/prompts/001-opening.md",
+                    "mode": "story-layout",
+                    "styleRef": "",
+                    "prompt": "Old panel. No watermarks.",
+                    "narration": "",
+                    "dialogue": "",
+                    "caption": "",
+                    "assetIds": ["01HOLDPANEL"],
+                    "activeAssetId": "01HOLDPANEL",
+                    "finalized": False,
+                    "status": "generated",
+                }
+            },
+        },
+    )
+
+    saved = client.put(
+        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
+        json={
+            "sections": [
+                {
+                    "key": "001-opening-panel-new",
+                    "refs": "character:hero-base, location:barn",
+                    "narration": "None.",
+                    "dialogue": "None.",
+                    "caption": "None.",
+                    "prompt": "Renamed panel. No watermarks.",
+                }
+            ]
+        },
+    )
+    assert saved.status_code == 200
+
+    status = client.get("/api/projects/farm-comic/adaptation")
+    panels = status.json()["panels"]
+    assert "001-opening-panel-old" not in panels
+    assert "001-opening-panel-new" in panels
+
+
+def test_validate_moment_duplicate_slug(tmp_path):
+    from adaptation_workflow.validate import ValidationError, validate_moment_file
+
+    root = tmp_path / "adaptation" / "panels" / "prompts"
+    root.mkdir(parents=True)
+    path = root / "001-sunny-day.md"
+    path.write_text(
+        "## 001-sunny-day\n"
+        "mode: story-layout\n"
+        "refs: character:hero-base, location:barn\n\n"
+        "Panel 1. No watermarks.\n\n"
+        "## 001-sunny-day\n"
+        "mode: story-layout\n"
+        "refs: character:hero-base, location:barn\n\n"
+        "Panel 2. No watermarks.\n"
+    )
+    try:
+        validate_moment_file(path)
+        raise AssertionError("expected duplicate slug validation failure")
+    except ValidationError as exc:
+        assert "Duplicate section slug '001-sunny-day'" in str(exc)
 
 
 def test_plan_scene_api_guards(tmp_path, monkeypatch):
@@ -872,7 +1072,13 @@ def test_validate_moments(tmp_path):
 
 
 def test_layout_sections_round_trip(tmp_path):
-    from adaptation_workflow.moments import format_layout_section, parse_layout_sections, write_layout_sections
+    from adaptation_workflow.moments import (
+        format_layout_section,
+        ordered_layout_sections,
+        parse_layout_sections,
+        write_layout_sections,
+        write_ordered_layout_sections,
+    )
 
     path = tmp_path / "panels" / "prompts" / "001-opening.md"
     section = {
@@ -890,6 +1096,19 @@ def test_layout_sections_round_trip(tmp_path):
     assert parsed["caption"] == "None."
     assert parsed["prompt"] == "Opening panel. No watermarks."
     assert format_layout_section("001-opening-panel-01", parsed) == path.read_text()
+
+    section_two = {**section, "prompt": "Second panel. No watermarks.", "dialogue": "Second."}
+    write_ordered_layout_sections(
+        path,
+        [
+            ("001-opening-panel-02", section_two),
+            ("001-opening-panel-01", section),
+        ],
+    )
+    assert [key for key, _ in ordered_layout_sections(path)] == [
+        "001-opening-panel-02",
+        "001-opening-panel-01",
+    ]
 
 
 def test_moment_sequence_and_patch_api(tmp_path, monkeypatch):

@@ -112,6 +112,13 @@ def validate_moment_file(path: Path) -> None:
         return
     blocks = re.split(r"(?=^## )", text, flags=re.MULTILINE)
     blocks = [block for block in blocks if block.startswith("## ")]
+    seen: set[str] = set()
+    for block in blocks:
+        heading = block.splitlines()[0]
+        slug = heading.removeprefix("## ").strip().split()[0]
+        if slug in seen:
+            raise ValidationError(f"Duplicate section slug '{slug}' in {path}")
+        seen.add(slug)
     if len(blocks) != len(sections):
         raise ValidationError(f"Could not parse all moment sections in {path}")
     for block in blocks:
