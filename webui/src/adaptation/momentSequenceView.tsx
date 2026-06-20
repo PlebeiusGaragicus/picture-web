@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatRequestError } from '../formatError';
 import { api } from '../api';
 import { MomentRefInputsView } from './momentRefInputsView';
 import { defaultVisualStyleId } from './visualStyleUtils';
@@ -129,6 +130,7 @@ export function MomentSequenceView({
   const [isLoading, setIsLoading] = useState(true);
   const [visualStyleId, setVisualStyleId] = useState('');
   const [generatingKey, setGeneratingKey] = useState<string | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [expandedPromptKey, setExpandedPromptKey] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -212,6 +214,7 @@ export function MomentSequenceView({
   const generateMoment = async (moment: MomentSequenceEntry) => {
     if (!visualStyleId) return;
     setGeneratingKey(moment.momentKey);
+    setGenerationError(null);
     try {
       await api.generateAdaptationArtifact(projectSlug, {
         artifactKind: moment.artifactKind,
@@ -220,6 +223,8 @@ export function MomentSequenceView({
       });
       await onReloadAdaptation();
       await loadSequence();
+    } catch (err) {
+      setGenerationError(formatRequestError(err));
     } finally {
       setGeneratingKey(null);
     }
@@ -240,6 +245,12 @@ export function MomentSequenceView({
 
   return (
     <div className="moment-sequence">
+      {generationError && (
+        <div className="generation-error-notice moment-sequence-error" role="alert">
+          <strong>Generation failed</strong>
+          <p>{generationError}</p>
+        </div>
+      )}
       {lightboxIndex !== null && gallerySlides.length > 0 && (
         <MomentSequenceLightbox
           projectSlug={projectSlug}

@@ -60,6 +60,91 @@ def reference_image_limit(model: str) -> int:
     return 14
 
 
+class ImageGenerationError(RuntimeError):
+    """Raised when Gemini does not return a usable generated image."""
+
+    def __init__(self, message: str, *, category: str = "provider") -> None:
+        super().__init__(message)
+        self.category = category
+
+
+def http_status_for_generation_error(exc: ImageGenerationError) -> int:
+    if exc.category in {"safety", "blocked", "empty"}:
+        return 422
+    return 502
+
+
+def _response_attr(response: Any, snake: str, camel: str | None = None) -> Any:
+    if isinstance(response, dict):
+        if snake in response:
+            return response[snake]
+        if camel is not None and camel in response:
+            return response[camel]
+        return None
+    if hasattr(response, snake):
+        return getattr(response, snake)
+    if camel is not None and hasattr(response, camel):
+        return getattr(response, camel)
+    return None
+
+
+def _first_candidate(response: Any) -> Any | None:
+    candidates = _response_attr(response, "candidates", "candidates")
+    if not candidates:
+        return None
+    if isinstance(candidates, list):
+        return candidates[0] if candidates else None
+    return None
+
+
+def _enum_label(value: Any) -> str:
+    if value is None:
+        return ""
+    name = getattr(value, "name", None)
+    if isinstance(name, str) and name:
+        return name.replace("_", " ").strip().lower()
+    text = str(value).strip()
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    return text.replace("_", " ").strip().lower()
+
+
+def describe_generation_failure(response: Any) -> tuple[str, str]:
+    """Return (category, user-facing message) when no image was produced."""
+    prompt_feedback = _response_attr(response, "prompt_feedback", "promptFeedback")
+    block_reason = _response_attr(prompt_feedback, "block_reason", "blockReason") if prompt_feedback else None
+    block_message = _response_attr(prompt_feedback, "block_reason_message", "blockReasonMessage") if prompt_feedback else None
+    if block_reason:
+        reason_label = _enum_label(block_reason)
+        detail = f" Reason: {reason_label}." if reason_label else ""
+        if block_message and isinstance(block_message, str) and block_message.strip():
+            detail = f" {block_message.strip()}"
+        return (
+            "safety",
+            "Image generation was blocked by Gemini content safety filters."
+            " Soften explicit violence, gore, sexual content, or other restricted details in the prompt, then try again."
+            f"{detail}",
+        )
+
+    candidate = _first_candidate(response)
+    finish_reason = _response_attr(candidate, "finish_reason", "finishReason") if candidate else None
+    finish_label = _enum_label(finish_reason)
+    if finish_label and any(token in finish_label for token in ("safety", "block", "prohibit", "recitation")):
+        detail = f" Finish reason: {finish_label}." if finish_label else ""
+        return (
+            "safety",
+            "Image generation was blocked by Gemini safety filters. Try a less explicit or restrictive prompt."
+            f"{detail}",
+        )
+
+    return (
+        "empty",
+        "Gemini returned no image for this prompt. The model may have refused the request, "
+        "encountered a content limit, or failed to produce image output. Try rephrasing the prompt "
+        "or reducing reference-image complexity.",
+    )
+
+
 def load_parent_images(parent_paths: list[Path]) -> list[Image.Image]:
     images: list[Image.Image] = []
     for path in parent_paths:
@@ -383,16 +468,16 @@ def generate_image(
             ),
         ),
     )
-    for part in response.parts:
-        if part.inline_data is not None:
+    for part in _response_parts(response):
+        data, mime_type = _image_bytes_from_part(part)
+        if data is not None and mime_type.startswith("image/"):
             output_png.parent.mkdir(parents=True, exist_ok=True)
-            part.as_image().save(output_png)
+            Image.open(BytesIO(data)).save(output_png, format="PNG")
             logger.debug("Gemini image saved output=%s", output_png)
             return GeneratedImage(
                 output_png=output_png,
                 provider_response=serialize_response_metadata(response, output_png),
             )
-    raise RuntimeError(
-        "No image in API response. The prompt may have been blocked, "
-        "or the model may not support image output."
-    )
+    category, message = describe_generation_failure(response)
+    logger.warning("Gemini returned no image category=%s model=%s output=%s", category, resolved_model, output_png)
+    raise ImageGenerationError(message, category=category)

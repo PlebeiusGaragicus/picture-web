@@ -347,6 +347,13 @@ def append_turn(
         )
     except Exception as exc:
         logger.exception("chat turn provider call failed slug=%s session_id=%s", slug, session_id)
+        from gemini import ImageGenerationError, http_status_for_generation_error
+
+        if isinstance(exc, ImageGenerationError):
+            raise HTTPException(
+                status_code=http_status_for_generation_error(exc),
+                detail=str(exc),
+            ) from exc
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     user_turn_id = new_ulid()

@@ -443,6 +443,108 @@ class AdaptationGenerateResponse(BaseModel):
     message: str
 
 
+class StoryPanelRect(BaseModel):
+    x: int = Field(ge=0, le=11)
+    y: int = Field(ge=0)
+    w: int = Field(ge=1, le=12)
+    h: int = Field(ge=1, le=12)
+
+    @model_validator(mode="after")
+    def fits_page_grid(self) -> "StoryPanelRect":
+        if self.x + self.w > 12:
+            raise ValueError("Panel layout must fit within the 12-column page grid")
+        return self
+
+
+class StoryPanelPage(BaseModel):
+    id: str = Field(pattern=TAG_RE)
+    order: int = Field(ge=0)
+    title: str = Field(default="", max_length=120)
+
+
+class StoryPanelPageSettings(BaseModel):
+    width: int = Field(default=2, ge=1, le=100)
+    height: int = Field(default=3, ge=1, le=100)
+
+
+class StoryPanel(BaseModel):
+    id: str = Field(pattern=TAG_RE)
+    order: int = Field(ge=0)
+    startOffset: int = Field(ge=0)
+    endOffset: int = Field(ge=0)
+    selectedText: str = ""
+    pageId: str = Field(pattern=TAG_RE)
+    panelKind: Literal["image", "inlay", "text"] = "image"
+    rect: StoryPanelRect = Field(default_factory=lambda: StoryPanelRect(x=0, y=0, w=12, h=3))
+    layer: int = Field(default=0, ge=0)
+    assetIds: list[str] = Field(default_factory=list)
+    activeAssetId: str | None = None
+    finalized: bool = False
+
+    @model_validator(mode="after")
+    def validate_offsets_and_active_asset(self) -> "StoryPanel":
+        if self.endOffset <= self.startOffset:
+            raise ValueError("Panel endOffset must be greater than startOffset")
+        if self.activeAssetId is not None and self.activeAssetId not in self.assetIds:
+            raise ValueError("activeAssetId must be attached to the panel")
+        return self
+
+
+class StoryPanelDocument(BaseModel):
+    version: int = 1
+    bookSource: str = "adaptation/book.txt"
+    pageSettings: StoryPanelPageSettings = Field(default_factory=StoryPanelPageSettings)
+    pages: list[StoryPanelPage] = Field(default_factory=list)
+    panels: list[StoryPanel] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_document(self) -> "StoryPanelDocument":
+        page_ids = [page.id for page in self.pages]
+        if len(page_ids) != len(set(page_ids)):
+            raise ValueError("Duplicate page ids")
+        panel_ids = [panel.id for panel in self.panels]
+        if len(panel_ids) != len(set(panel_ids)):
+            raise ValueError("Duplicate panel ids")
+        page_id_set = set(page_ids)
+        for panel in self.panels:
+            if panel.pageId not in page_id_set:
+                raise ValueError(f"Panel references unknown page: {panel.pageId}")
+        ranges = sorted((panel.startOffset, panel.endOffset, panel.id) for panel in self.panels)
+        for previous, current in zip(ranges, ranges[1:]):
+            if previous[1] > current[0]:
+                raise ValueError(f"Panel text ranges overlap: {previous[2]} and {current[2]}")
+        return self
+
+
+class StoryPanelCreate(BaseModel):
+    startOffset: int = Field(ge=0)
+    endOffset: int = Field(ge=0)
+    selectedText: str = ""
+    pageId: str | None = Field(default=None, pattern=TAG_RE)
+    rect: StoryPanelRect | None = None
+    layer: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_offsets(self) -> "StoryPanelCreate":
+        if self.endOffset <= self.startOffset:
+            raise ValueError("Panel endOffset must be greater than startOffset")
+        return self
+
+
+class StoryPanelPatch(BaseModel):
+    order: int | None = Field(default=None, ge=0)
+    startOffset: int | None = Field(default=None, ge=0)
+    endOffset: int | None = Field(default=None, ge=0)
+    selectedText: str | None = None
+    pageId: str | None = Field(default=None, pattern=TAG_RE)
+    panelKind: Literal["image", "inlay", "text"] | None = None
+    rect: StoryPanelRect | None = None
+    layer: int | None = Field(default=None, ge=0)
+    assetIds: list[str] | None = None
+    activeAssetId: str | None = None
+    finalized: bool | None = None
+
+
 class ProjectDetail(BaseModel):
     project: ProjectMetadata
     assets: list[AssetSummary]

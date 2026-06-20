@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, MomentLayoutSection, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, MomentLayoutSection, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = true;
 
@@ -191,6 +191,29 @@ export const api = {
     }),
   getAdaptationBook: (slug: string) =>
     request<{ text: string }>(`/api/projects/${slug}/adaptation/book`),
+  getStoryPanelBook: (slug: string) =>
+    request<{ text: string }>(`/api/projects/${slug}/story-panels/book`),
+  getStoryPanels: (slug: string) =>
+    request<StoryPanelDocument>(`/api/projects/${slug}/story-panels`),
+  saveStoryPanels: (slug: string, document: StoryPanelDocument) =>
+    request<StoryPanelDocument>(`/api/projects/${slug}/story-panels`, {
+      method: 'PUT',
+      body: JSON.stringify(document),
+    }),
+  createStoryPanel: (slug: string, payload: StoryPanelCreatePayload) =>
+    request<StoryPanelDocument>(`/api/projects/${slug}/story-panels/panels`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  patchStoryPanel: (slug: string, panelId: string, patch: StoryPanelPatchPayload) =>
+    request<StoryPanelDocument>(`/api/projects/${slug}/story-panels/panels/${panelId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteStoryPanel: (slug: string, panelId: string) =>
+    request<StoryPanelDocument>(`/api/projects/${slug}/story-panels/panels/${panelId}`, {
+      method: 'DELETE',
+    }),
   importAdaptationBook: (slug: string, file: File) => {
     const data = new FormData();
     data.append('file', file);

@@ -299,6 +299,60 @@ export interface MomentPatch {
   finalized?: boolean;
 }
 
+export interface StoryPanelRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface StoryPanelPage {
+  id: string;
+  order: number;
+  title: string;
+}
+
+export interface StoryPanelPageSettings {
+  width: number;
+  height: number;
+}
+
+export interface StoryPanel {
+  id: string;
+  order: number;
+  startOffset: number;
+  endOffset: number;
+  selectedText: string;
+  pageId: string;
+  panelKind: 'image' | 'inlay' | 'text';
+  rect: StoryPanelRect;
+  layer: number;
+  assetIds: string[];
+  activeAssetId?: string | null;
+  finalized: boolean;
+}
+
+export interface StoryPanelDocument {
+  version: 1;
+  bookSource: string;
+  pageSettings: StoryPanelPageSettings;
+  pages: StoryPanelPage[];
+  panels: StoryPanel[];
+}
+
+export interface StoryPanelCreatePayload {
+  startOffset: number;
+  endOffset: number;
+  selectedText?: string;
+  pageId?: string | null;
+  rect?: StoryPanelRect | null;
+  layer?: number;
+}
+
+export type StoryPanelPatchPayload = Partial<
+  Pick<StoryPanel, 'order' | 'startOffset' | 'endOffset' | 'selectedText' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'assetIds' | 'activeAssetId' | 'finalized'>
+>;
+
 export interface SceneListLine {
   slug: string;
   description: string;

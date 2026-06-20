@@ -16,12 +16,14 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import './style.css';
+import { formatRequestError } from './formatError';
 import { api } from './api';
 import { exportProjectAssetsToFolder, saveAssetImageToDisk } from './exportAssets';
 import { VisualStyleList } from './adaptation/cards';
 import { WorkflowLogPanel } from './adaptation/workflowLog';
 import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
 import { MomentSequenceView } from './adaptation/momentSequenceView';
+import { StoryPanelsView } from './storyPanels/StoryPanelsView';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
 import { SYSTEM_TAGS, artifactKindLabel, assetLabel, adaptationFileKindToArtifactKind, capabilitiesForModel, characterEntityTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, storyArtifactKeysOnCanvas, storyArtifactNodeId, userProjectTags, visibleDisplayName } from './canvas/shared';
@@ -37,6 +39,7 @@ import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, Ad
 
 type ProjectPhase =
   | 'story-canvas'
+  | 'story-panels'
   | 'phase-0-ingestion'
   | 'phase-1-characters'
   | 'phase-2-scenes'
@@ -58,7 +61,7 @@ function phaseHasCanvas(phase: ProjectPhase) {
 }
 
 function phaseHasList(phase: ProjectPhase) {
-  return phase !== 'story-canvas';
+  return phase !== 'story-canvas' && phase !== 'story-panels';
 }
 
 function phaseHasViewToggle(phase: ProjectPhase) {
@@ -257,6 +260,7 @@ function App() {
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [nodes, setNodes] = useState<Node<PhotoNodeData>[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [generationError, setGenerationError] = useState<{ nodeId: string; message: string } | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [popoverNodeId, setPopoverNodeId] = useState<string | null>(null);
@@ -757,7 +761,7 @@ function App() {
       await loadProject(openProjectSlug);
       setActiveChatSessionId(response.session.id);
     } catch (err) {
-      const message = String(err);
+      const message = formatRequestError(err);
       setError(message);
       throw err;
     } finally {
@@ -1050,11 +1054,22 @@ function App() {
     });
   };
 
+  const reportGenerationFailure = (nodeId: string, err: unknown) => {
+    const message = formatRequestError(err);
+    setError(message);
+    setGenerationError({ nodeId, message });
+  };
+
+  const clearGenerationFailure = () => {
+    setGenerationError(null);
+  };
+
   const generateDraft = async (id: string, draft: DraftNodeData) => {
+    const styleRefKind = styleRefKindForTags(draft.tags);
+    const generatingId = styleRefKind ? styleRefImageNodeId(styleRefKind, adaptation) : id;
     try {
+      clearGenerationFailure();
       setError(null);
-      const styleRefKind = styleRefKindForTags(draft.tags);
-      const generatingId = styleRefKind ? styleRefImageNodeId(styleRefKind, adaptation) : id;
       setGeneratingNodeIds((current) => new Set(current).add(generatingId));
       setNodes((current) => current.map((node) => (node.id === generatingId || node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
       if (styleRefKind) {
@@ -1093,7 +1108,7 @@ function App() {
       setPopoverNodeId(styleRefKind ? generatedResultNodeId(id) : null);
       await reload();
     } catch (err) {
-      setError(String(err));
+      reportGenerationFailure(generatingId, err);
     } finally {
       const styleRefKind = styleRefKindForTags(draft.tags);
       const generatingId = styleRefKind ? styleRefImageNodeId(styleRefKind, adaptation) : id;
@@ -1117,6 +1132,7 @@ function App() {
     const refs = sourceAsset?.generation?.refs ?? [];
     if (!prompt || !sourceAsset?.generation) return;
     try {
+      clearGenerationFailure();
       setError(null);
       setGeneratingNodeIds((current) => new Set(current).add(id));
       setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
@@ -1137,7 +1153,7 @@ function App() {
       await reload();
       setPopoverNodeId(id);
     } catch (err) {
-      setError(String(err));
+      reportGenerationFailure(id, err);
     } finally {
       setGeneratingNodeIds((current) => {
         const next = new Set(current);
@@ -1326,6 +1342,7 @@ function App() {
     setGeneratingNodeIds((current) => new Set(current).add(id));
     setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
     try {
+      clearGenerationFailure();
       setError(null);
       const result = await api.generateAdaptationArtifact(openProjectSlug, {
         artifactKind: artifact.artifactKind,
@@ -1342,7 +1359,7 @@ function App() {
       await reload();
       setPopoverNodeId(generatedResultNodeId(id));
     } catch (err) {
-      setError(String(err));
+      reportGenerationFailure(id, err);
     } finally {
       setGeneratingNodeIds((current) => {
         const next = new Set(current);
@@ -1370,7 +1387,8 @@ function App() {
   const showViewToggle = (phaseHasCanvas(projectPhase) && phaseHasList(projectPhase)) || phaseHasViewToggle(projectPhase);
   const isCanvasActive = phaseHasCanvas(projectPhase) && phaseViewMode === 'canvas';
   const isMomentViewActive = phaseHasViewToggle(projectPhase) && phaseViewMode === 'view';
-  const isAdaptationListActive = !isCanvasActive && !isMomentViewActive;
+  const isStoryPanelsActive = projectPhase === 'story-panels';
+  const isAdaptationListActive = !isCanvasActive && !isMomentViewActive && !isStoryPanelsActive;
 
   return (
     <div className="app">
@@ -1482,6 +1500,9 @@ function App() {
             onDraftArtifactToCanvas={draftArtifactToCanvas}
             onReloadAdaptation={loadAdaptation}
           />
+        )}
+        {isStoryPanelsActive && (
+          <StoryPanelsView projectSlug={openProjectSlug} />
         )}
         {isMomentViewActive && adaptation && (
           <div className="story-adaptation-screen">
@@ -1631,6 +1652,7 @@ function App() {
           onGenerate={generateDraft}
           onGenerateArtifact={generateStoryArtifact}
           onGenerateVariants={generateImageVariants}
+          generationError={generationError?.nodeId === selectedNode.id ? generationError.message : null}
           onCreateChildText={createChildTextArtifact}
           onSetStyleRefAsset={setAdaptationStyleRefAsset}
           onSetProjectCover={setProjectCover}
@@ -1763,7 +1785,7 @@ function ProjectLanding({
     <div className="landing">
       <div className="landing-card">
         <h1>Story Canvas</h1>
-        {error && <p className="error">{error}</p>}
+        {error && <p className="error error-banner">{error}</p>}
         <section>
           <h2>Projects</h2>
           <div className="project-list">
@@ -2009,7 +2031,7 @@ function ProjectPhaseSidebar({
           {project?.name ?? projectSlug}
         </strong>
       </div>
-      {error && <p className="error">{error}</p>}
+      {error && <p className="error error-banner">{error}</p>}
       <nav className="phase-nav" aria-label="Story canvas">
         <button
           type="button"
@@ -2038,6 +2060,18 @@ function ProjectPhaseSidebar({
             </button>
           );
         })}
+      </nav>
+      <h3 className="phase-nav-heading">Story / Comic Panels</h3>
+      <nav className="phase-nav" aria-label="Story panel prototype">
+        <button
+          type="button"
+          className={`phase-nav-item ${activePhase === 'story-panels' ? 'is-selected' : ''}`}
+          aria-current={activePhase === 'story-panels' ? 'page' : undefined}
+          onClick={() => onPhaseChange('story-panels')}
+        >
+          <span className="phase-number" aria-hidden="true">▤</span>
+          <strong>Story Panels</strong>
+        </button>
       </nav>
       <div className="phase-sidebar-footer">
         <button className="secondary" disabled={deleting || exportingAssets} onClick={() => setOrganizingTags(true)}>

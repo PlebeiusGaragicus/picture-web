@@ -12,6 +12,7 @@ from starlette import status
 import adaptation
 import library
 import chat_sessions
+import story_panels
 from models import (
     ArchivePatch,
     AdaptationCanvasImportResponse,
@@ -47,6 +48,9 @@ from models import (
     MomentSequenceDocument,
     MomentSequenceEntry,
     MomentPatch,
+    StoryPanelCreate,
+    StoryPanelDocument,
+    StoryPanelPatch,
     DisplayPatch,
     GenerateRequest,
     GenerateResponse,
@@ -308,6 +312,36 @@ async def import_adaptation_book(slug: str, file: UploadFile = File(...)) -> Ada
 @app.get("/api/projects/{slug}/adaptation/book")
 def get_adaptation_book(slug: str) -> dict[str, str]:
     return {"text": adaptation.read_book(slug)}
+
+
+@app.get("/api/projects/{slug}/story-panels/book")
+def get_story_panel_book(slug: str) -> dict[str, str]:
+    return {"text": story_panels.read_book(slug)}
+
+
+@app.get("/api/projects/{slug}/story-panels", response_model=StoryPanelDocument)
+def get_story_panels(slug: str) -> StoryPanelDocument:
+    return story_panels.read_document(slug)
+
+
+@app.put("/api/projects/{slug}/story-panels", response_model=StoryPanelDocument)
+def put_story_panels(slug: str, payload: StoryPanelDocument) -> StoryPanelDocument:
+    return story_panels.save_document(slug, payload)
+
+
+@app.post("/api/projects/{slug}/story-panels/panels", response_model=StoryPanelDocument)
+def create_story_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
+    return story_panels.create_panel(slug, payload)
+
+
+@app.patch("/api/projects/{slug}/story-panels/panels/{panel_id}", response_model=StoryPanelDocument)
+def patch_story_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> StoryPanelDocument:
+    return story_panels.patch_panel(slug, panel_id, payload)
+
+
+@app.delete("/api/projects/{slug}/story-panels/panels/{panel_id}", response_model=StoryPanelDocument)
+def delete_story_panel(slug: str, panel_id: str) -> StoryPanelDocument:
+    return story_panels.delete_panel(slug, panel_id)
 
 
 @app.post("/api/projects/{slug}/adaptation/import-style-ref", response_model=AdaptationStatus)

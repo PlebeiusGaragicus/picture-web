@@ -1043,6 +1043,74 @@ def test_scene_moments_file_api(tmp_path, monkeypatch):
     assert "001-opening-panel-01" in status.json()["panels"]
 
 
+def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the door. Beta crosses the room. Gamma watches.\n")
+
+    empty = client.get("/api/projects/farm-comic/story-panels")
+    assert empty.status_code == 200
+    assert empty.json()["pages"][0]["id"] == "page-001"
+    assert empty.json()["panels"] == []
+
+    book = client.get("/api/projects/farm-comic/story-panels/book")
+    assert book.status_code == 200
+    assert book.json()["text"].startswith("Alpha opens")
+
+    created = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
+    )
+    assert created.status_code == 200
+    panel = created.json()["panels"][0]
+    assert panel["id"] == "panel-001"
+    assert panel["selectedText"] == "Alpha opens the door."
+    assert panel["rect"] == {"x": 0, "y": 0, "w": 12, "h": 3}
+
+    overlap = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 6, "endOffset": 25, "selectedText": "opens the door. Be"},
+    )
+    assert overlap.status_code == 400
+
+    patched = client.patch(
+        "/api/projects/farm-comic/story-panels/panels/panel-001",
+        json={"rect": {"x": 0, "y": 2, "w": 6, "h": 6}, "layer": 1, "finalized": True},
+    )
+    assert patched.status_code == 200
+    panel = patched.json()["panels"][0]
+    assert panel["rect"] == {"x": 0, "y": 2, "w": 6, "h": 6}
+    assert panel["layer"] == 1
+    assert panel["finalized"] is True
+
+    document = patched.json()
+    document["pages"].append({"id": "page-002", "order": 1, "title": "Page 2"})
+    document["panels"][0]["pageId"] = "page-002"
+    saved = client.put("/api/projects/farm-comic/story-panels", json=document)
+    assert saved.status_code == 200
+    assert saved.json()["panels"][0]["pageId"] == "page-002"
+
+    deleted = client.delete("/api/projects/farm-comic/story-panels/panels/panel-001")
+    assert deleted.status_code == 200
+    assert deleted.json()["panels"] == []
+
+
+def test_story_panels_missing_book(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    response = client.get("/api/projects/farm-comic/story-panels/book")
+    assert response.status_code == 404
+
+    create = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 5, "selectedText": "Alpha"},
+    )
+    assert create.status_code == 404
+
+
 def test_scene_moments_sections_api(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
@@ -2359,3 +2427,61 @@ def test_read_canvas_preserves_generated_result_child_nodes_when_normalizing_var
     assert nodes["generated_source_prompt"]["assetIds"] == [first_id]
     assert nodes["generated_source_prompt"]["role"] == {"type": "generated-result", "sourceNodeId": "source_prompt"}
     assert nodes["node_b"]["assetIds"] == [second_id]
+
+
+def test_describe_generation_failure_safety_block():
+    from gemini import ImageGenerationError, describe_generation_failure, http_status_for_generation_error
+
+    category, message = describe_generation_failure(
+        {
+            "promptFeedback": {
+                "blockReason": "SAFETY",
+                "blockReasonMessage": "Prompt blocked for violent content.",
+            }
+        }
+    )
+    assert category == "safety"
+    assert "content safety filters" in message
+    assert "violent content" in message
+
+    exc = ImageGenerationError(message, category=category)
+    assert http_status_for_generation_error(exc) == 422
+
+
+def test_describe_generation_failure_empty_response():
+    from gemini import describe_generation_failure
+
+    category, message = describe_generation_failure({"candidates": []})
+    assert category == "empty"
+    assert "returned no image" in message
+
+
+def test_create_generated_assets_surfaces_image_generation_error(tmp_path, monkeypatch):
+    from gemini import ImageGenerationError
+
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic")
+    make_png(root / "assets" / "01HPARENT.png")
+
+    def blocked_generate(**kwargs):
+        raise ImageGenerationError(
+            "Image generation was blocked by Gemini content safety filters.",
+            category="safety",
+        )
+
+    monkeypatch.setattr("gemini.generate_image", blocked_generate)
+
+    response = client.post(
+        "/api/projects/farm-comic/generate",
+        json={
+            "prompt": "Blocked prompt",
+            "refs": [],
+            "model": "gemini-3.1-flash-image",
+            "aspectRatio": "16:9",
+            "imageSize": "1K",
+            "batchCount": 1,
+        },
+    )
+    assert response.status_code == 422
+    assert "content safety filters" in response.json()["detail"]

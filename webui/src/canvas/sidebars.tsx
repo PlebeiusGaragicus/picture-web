@@ -8,6 +8,16 @@ import { canDeleteNode } from './roles';
 import { artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, uniqueOptions, visibleDisplayName } from './shared';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './types';
 
+function GenerationErrorNotice({ message }: { message: string | null | undefined }) {
+  if (!message) return null;
+  return (
+    <div className="generation-error-notice" role="alert">
+      <strong>Generation failed</strong>
+      <p>{message}</p>
+    </div>
+  );
+}
+
 export function NodeSidebar({
   node,
   assets,
@@ -20,6 +30,7 @@ export function NodeSidebar({
   onGenerate,
   onGenerateArtifact,
   onGenerateVariants,
+  generationError,
   onCreateChildText,
   onSetStyleRefAsset,
   onSetProjectCover,
@@ -45,6 +56,7 @@ export function NodeSidebar({
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onGenerateArtifact: (id: string, artifact: StoryArtifactNodeData) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams, visualStyleId?: string | null) => void;
+  generationError?: string | null;
   onCreateChildText: (node: Node<DraftNodeData> | Node<StoryArtifactNodeData>) => void;
   onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
   onSetProjectCover: (assetId: string) => void;
@@ -71,6 +83,7 @@ export function NodeSidebar({
         onGenerate={onGenerate}
         onCreateChildText={onCreateChildText}
         onDelete={onDelete}
+        generationError={generationError}
       />
     );
   }
@@ -86,6 +99,7 @@ export function NodeSidebar({
         onGenerate={onGenerateArtifact}
         onCreateChildText={onCreateChildText}
         onDelete={onDelete}
+        generationError={generationError}
       />
     );
   }
@@ -116,6 +130,7 @@ export function NodeSidebar({
       onVariant={onVariant}
       onCreateSibling={onCreateSibling}
       onGenerateVariants={onGenerateVariants}
+      generationError={generationError}
       onSetStyleRefAsset={onSetStyleRefAsset}
       onSetProjectCover={onSetProjectCover}
       onFindOnCanvas={onFindOnCanvas}
@@ -133,6 +148,7 @@ function DraftSidebar({
   onGenerate,
   onCreateChildText,
   onDelete,
+  generationError,
 }: {
   node: Node<DraftNodeData>;
   assets: Asset[];
@@ -142,6 +158,7 @@ function DraftSidebar({
   onGenerate: (id: string, draft: DraftNodeData) => void;
   onCreateChildText: (node: Node<DraftNodeData>) => void;
   onDelete: (id: string, assetId?: string) => void;
+  generationError?: string | null;
 }) {
   const draft = node.data;
   const canDelete = canDeleteNode(node);
@@ -283,6 +300,7 @@ function DraftSidebar({
       </section>
       {(!isFileBackedPrompt || showArchetypeControls) && <section className="sidebar-section generation-section">
         <h3>Parameters</h3>
+        <GenerationErrorNotice message={generationError} />
       <div className="row">
         <select
           value={draftModel ?? ''}
@@ -352,6 +370,7 @@ function StoryArtifactSidebar({
   onGenerate,
   onCreateChildText,
   onDelete,
+  generationError,
 }: {
   node: Node<StoryArtifactNodeData>;
   visualStyles: VisualStyleDefinition[];
@@ -360,6 +379,7 @@ function StoryArtifactSidebar({
   onGenerate: (id: string, artifact: StoryArtifactNodeData) => void;
   onCreateChildText: (node: Node<StoryArtifactNodeData>) => void;
   onDelete: (id: string, assetId?: string) => void;
+  generationError?: string | null;
 }) {
   const artifact = node.data;
   const canDelete = canDeleteNode(node);
@@ -401,6 +421,7 @@ function StoryArtifactSidebar({
       </section>
       <section className="sidebar-section generation-section">
         <h3>Parameters</h3>
+        <GenerationErrorNotice message={generationError} />
         {canGenerate ? (
           <>
             <div className="row">
@@ -472,6 +493,7 @@ function ImageSidebar({
   onVariant,
   onCreateSibling,
   onGenerateVariants,
+  generationError,
   onSetStyleRefAsset,
   onSetProjectCover,
   onFindOnCanvas,
@@ -492,6 +514,7 @@ function ImageSidebar({
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams, visualStyleId?: string | null) => void;
+  generationError?: string | null;
   onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
   onSetProjectCover: (assetId: string) => void;
   onFindOnCanvas: (nodeId: string) => void;
@@ -680,6 +703,7 @@ function ImageSidebar({
       {asset.generation && (
         <section className="sidebar-section generation-section">
           <h3>Parameters</h3>
+          <GenerationErrorNotice message={generationError} />
           <label className="field-label">
             Model
             <select

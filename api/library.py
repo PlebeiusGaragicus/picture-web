@@ -970,6 +970,13 @@ def create_generated_assets(
         except Exception as exc:
             logger.exception("generation failed slug=%s run_id=%s index=%s asset_id=%s", slug, run_id, index, asset_id)
             out_png.unlink(missing_ok=True)
+            from gemini import ImageGenerationError, http_status_for_generation_error
+
+            if isinstance(exc, ImageGenerationError):
+                raise HTTPException(
+                    status_code=http_status_for_generation_error(exc),
+                    detail=str(exc),
+                ) from exc
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         now = utc_now()
