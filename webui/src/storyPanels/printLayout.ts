@@ -1,10 +1,10 @@
 /** Landscape letter sheet proportions mirrored from api/story_panels_print.py (in points). */
 export const PRINT_SHEET_WIDTH = 792;
 export const PRINT_SHEET_HEIGHT = 612;
-export const PRINT_OUTER_MARGIN = 9;
+export const PRINT_OUTER_MARGIN = 18;
 export const PRINT_TOP_MARGIN = 18;
 export const PRINT_BOTTOM_MARGIN = 18;
-export const PRINT_INNER_GUTTER = 27;
+export const PRINT_INNER_GUTTER = 18;
 export const PRINT_HALF_WIDTH = PRINT_SHEET_WIDTH / 2;
 export const PRINT_PAGE_WIDTH = PRINT_HALF_WIDTH - PRINT_OUTER_MARGIN - PRINT_INNER_GUTTER;
 export const PRINT_PAGE_HEIGHT = PRINT_SHEET_HEIGHT - PRINT_TOP_MARGIN - PRINT_BOTTOM_MARGIN;

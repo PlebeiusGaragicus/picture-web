@@ -38,6 +38,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportPageBorder, setExportPageBorder] = useState<BookletPageBorder>('black');
   const [historyControls, setHistoryControls] = useState<React.ReactNode>(null);
+  const [pageControls, setPageControls] = useState<React.ReactNode>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -251,23 +252,34 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
       <h1 className="story-panels-title">Story Panels</h1>
       <header className="story-panels-header story-card">
         <div className="story-panels-header-actions">
-          <label className="story-panels-view-control">
-            View
-            <select value={layoutMode} onChange={(event) => setLayoutMode(event.target.value as StoryPanelLayoutMode)}>
-              <option value="all-pages">All pages (a)</option>
-              <option value="spread">Two-page spread (2)</option>
-              <option value="single">Single page + info (i)</option>
-              <option value="single-chunks">Single page + panel chunks (p)</option>
-              <option value="book-chunks">Book text + panel chunks (c)</option>
-              <option value="book">Book text (b)</option>
-            </select>
-          </label>
-          <div className="story-panels-history-actions">
-            {historyControls}
+          <div className="story-panels-header-primary">
+            <label className="story-panels-view-control">
+              <select value={layoutMode} aria-label="Layout view" onChange={(event) => setLayoutMode(event.target.value as StoryPanelLayoutMode)}>
+                <option value="all-pages">All pages (a)</option>
+                <option value="spread">Two-page spread (2)</option>
+                <option value="single">Single page + info (i)</option>
+                <option value="single-chunks">Single page + panel chunks (p)</option>
+                <option value="book-chunks">Book text + panel chunks (c)</option>
+                <option value="book">Book text (b)</option>
+              </select>
+            </label>
+            <div className="story-panels-history-actions">
+              {historyControls}
+            </div>
+            <button
+              type="button"
+              className="secondary small-button"
+              disabled={isExporting || isSaving}
+              onClick={() => setShowExportModal(true)}
+              aria-label={isExporting ? 'Exporting…' : 'Export PDF'}
+              title={isExporting ? 'Exporting…' : 'Export PDF'}
+            >
+              <span aria-hidden="true">🖨️</span>
+            </button>
           </div>
-          <button type="button" className="secondary" disabled={isExporting || isSaving} onClick={() => setShowExportModal(true)}>
-            {isExporting ? 'Exporting...' : 'Export PDF'}
-          </button>
+          <div className="story-panels-header-page-controls">
+            {pageControls}
+          </div>
         </div>
       </header>
       {error && <p className="error error-banner">{error}</p>}
@@ -312,6 +324,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
           sidePanel={panelChunks}
           onLayoutModeChange={setLayoutMode}
           onHistoryControlsChange={setHistoryControls}
+          onPageControlsChange={setPageControls}
         />
         {showBookText && (
           <div className={`story-panels-text-row is-book-mode ${layoutMode === 'book' ? 'is-book-only' : ''}`}>

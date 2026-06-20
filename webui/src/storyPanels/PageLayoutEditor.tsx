@@ -1,7 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import type { StoryPanel, StoryPanelDocument, StoryPanelRect } from '../types';
 import { sortedStoryPages, storyPageNumberById as mapStoryPageNumbers } from './pageNumbers';
+import {
+  PRINT_HALF_WIDTH,
+  PRINT_INNER_GUTTER,
+  PRINT_OUTER_MARGIN,
+  PRINT_PAGE_HEIGHT,
+  PRINT_PAGE_WIDTH,
+  PRINT_SHEET_ASPECT_RATIO,
+  PRINT_SHEET_GRID_COLUMNS,
+  PRINT_SHEET_GRID_ROWS,
+  PRINT_SHEET_HEIGHT,
+} from './printLayout';
 
 export type StoryPanelLayoutMode = 'spread' | 'single' | 'single-chunks' | 'all-pages' | 'book' | 'book-chunks';
 
@@ -12,6 +23,9 @@ const minTextPanelHeight = 0.5;
 const minTextPanelWidth = 0.75;
 const panelSnapScale = 4;
 const comicPageAspectRatio = '5.5 / 8.5';
+
+type SinglePagePreviewMode = 'readable' | 'print';
+type StoryPanelCssProperties = CSSProperties & Record<`--${string}`, string | number>;
 
 type DragMode = 'move' | 'resize';
 type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
@@ -151,6 +165,7 @@ export function PageLayoutEditor({
   sidePanel,
   onLayoutModeChange,
   onHistoryControlsChange,
+  onPageControlsChange,
 }: {
   document: StoryPanelDocument;
   selectedPanelId: string | null;
@@ -161,6 +176,7 @@ export function PageLayoutEditor({
   sidePanel?: React.ReactNode;
   onLayoutModeChange?: (layoutMode: StoryPanelLayoutMode) => void;
   onHistoryControlsChange?: (controls: React.ReactNode) => void;
+  onPageControlsChange?: (controls: React.ReactNode) => void;
 }) {
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const sideHeightSourceRef = useRef<HTMLElement | null>(null);
@@ -175,6 +191,7 @@ export function PageLayoutEditor({
   const [undoStack, setUndoStack] = useState<StoryPanelDocument[]>([]);
   const [redoStack, setRedoStack] = useState<StoryPanelDocument[]>([]);
   const [customTextDraft, setCustomTextDraft] = useState<string | null>(null);
+  const [singlePagePreviewMode, setSinglePagePreviewMode] = useState<SinglePagePreviewMode>('readable');
   const [sidePanelHeight, setSidePanelHeight] = useState<number | null>(null);
   const [flashingPanelId, setFlashingPanelId] = useState<string | null>(null);
   const displayDocument = draftDocument ?? document;
@@ -193,6 +210,19 @@ export function PageLayoutEditor({
     : 0;
   const isPageLayoutMode = layoutMode !== 'book' && layoutMode !== 'book-chunks';
   const isSinglePageMode = isPageLayoutMode && layoutMode !== 'spread';
+  const hasSinglePageSidePanel = layoutMode === 'single' || layoutMode === 'single-chunks';
+  const singlePagePreviewAspect = singlePagePreviewMode === 'print'
+    ? `${PRINT_HALF_WIDTH} / ${PRINT_SHEET_HEIGHT}`
+    : `${PRINT_PAGE_WIDTH} / ${PRINT_PAGE_HEIGHT}`;
+  const singlePagePreviewWidthRatio = singlePagePreviewMode === 'print'
+    ? PRINT_HALF_WIDTH / PRINT_SHEET_HEIGHT
+    : PRINT_PAGE_WIDTH / PRINT_PAGE_HEIGHT;
+  const pageLayoutStyle: StoryPanelCssProperties | undefined = hasSinglePageSidePanel
+    ? {
+      '--story-single-page-preview-aspect': singlePagePreviewAspect,
+      '--story-single-page-width-ratio': singlePagePreviewWidthRatio,
+    }
+    : undefined;
   const visiblePages = pages.length === 0 ? [] : layoutMode === 'all-pages'
     ? pages
     : isSinglePageMode
@@ -277,18 +307,18 @@ export function PageLayoutEditor({
   useEffect(() => {
     onHistoryControlsChange?.(
       <>
-        <button type="button" className="secondary" disabled={isSaving || undoStack.length === 0} onClick={undo}>
-          Undo
+        <button type="button" className="secondary small-button" disabled={isSaving || undoStack.length === 0} onClick={undo} aria-label="Undo" title="Undo">
+          <span aria-hidden="true">↩</span>
         </button>
-        <button type="button" className="secondary" disabled={isSaving || redoStack.length === 0} onClick={redo}>
-          Redo
+        <button type="button" className="secondary small-button" disabled={isSaving || redoStack.length === 0} onClick={redo} aria-label="Redo" title="Redo">
+          <span aria-hidden="true">↪</span>
         </button>
       </>,
     );
     return () => onHistoryControlsChange?.(null);
   }, [isSaving, onHistoryControlsChange, redoStack.length, undoStack.length]);
   useLayoutEffect(() => {
-    if (layoutMode !== 'single-chunks' || !sideHeightSourceRef.current) {
+    if (!hasSinglePageSidePanel || !sideHeightSourceRef.current) {
       setSidePanelHeight(null);
       return;
     }
@@ -298,7 +328,7 @@ export function PageLayoutEditor({
     const observer = new ResizeObserver(updateHeight);
     observer.observe(source);
     return () => observer.disconnect();
-  }, [layoutMode, clampedPageIndex, visiblePages.length]);
+  }, [hasSinglePageSidePanel, clampedPageIndex, visiblePages.length]);
   const createPageDocument = (afterPageId?: string) => {
     const id = nextPageId(displayDocument);
     const insertionIndex = afterPageId ? pages.findIndex((page) => page.id === afterPageId) + 1 : displayDocument.pages.length;
@@ -626,53 +656,125 @@ export function PageLayoutEditor({
     onSelectPanel(panel.id);
     onLayoutModeChange?.('single');
   };
+  const singlePrintSlotForPage = (page: StoryPanelDocument['pages'][number] | null, fallbackIndex: number) => {
+    const pageIndex = page ? pages.findIndex((candidate) => candidate.id === page.id) : fallbackIndex;
+    return pageIndex >= 0 && pageIndex % 2 === 0 ? 'left' : 'right';
+  };
+  const singlePrintFrameStyle = (printSlot: 'left' | 'right'): CSSProperties => ({
+    gridTemplateColumns: printSlot === 'left'
+      ? `${PRINT_OUTER_MARGIN}fr ${PRINT_PAGE_WIDTH}fr ${PRINT_INNER_GUTTER}fr`
+      : `${PRINT_INNER_GUTTER}fr ${PRINT_PAGE_WIDTH}fr ${PRINT_OUTER_MARGIN}fr`,
+    gridTemplateRows: PRINT_SHEET_GRID_ROWS,
+  });
+  const renderSinglePagePreviewFrame = (
+    page: StoryPanelDocument['pages'][number] | null,
+    fallbackIndex: number,
+    grid: ReactNode,
+  ) => {
+    if (!hasSinglePageSidePanel) return grid;
+    const printSlot = singlePrintSlotForPage(page, fallbackIndex);
+    return (
+      <div
+        className={`story-panels-single-page-preview is-${singlePagePreviewMode} is-print-slot-${printSlot}`}
+        style={singlePagePreviewMode === 'print' ? singlePrintFrameStyle(printSlot) : undefined}
+      >
+        {grid}
+      </div>
+    );
+  };
+  useEffect(() => {
+    if (!isPageLayoutMode) {
+      onPageControlsChange?.(null);
+      return;
+    }
+    onPageControlsChange?.(
+      <div className="story-panels-page-nav" aria-label="Page navigation">
+        {layoutMode === 'all-pages' ? (
+          <>
+            <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder || selectedStoryPageIndex <= 0} onClick={() => moveSelectedPage(-1)}>Move left</button>
+            <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder || selectedStoryPageIndex < 0 || selectedStoryPageIndex >= storyPages.length - 1} onClick={() => moveSelectedPage(1)}>Move right</button>
+            <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder} onClick={addPageAfterSelected}>Add story page after</button>
+            <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder || storyPages.length <= 1} onClick={requestDeleteSelectedPage}>Delete page</button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="secondary small-button" disabled={isSaving || clampedPageIndex <= 0} onClick={goPrevious} aria-label="Previous page" title="Previous page">
+              <span aria-hidden="true">←</span>
+            </button>
+            <label className="story-panels-page-jump">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={currentPageLabel}
+                disabled={isSaving || storyPages.length === 0}
+                aria-label="Current page"
+                onChange={(event) => jumpToPage(Number(event.target.value))}
+              />
+              <span aria-hidden="true">/</span>
+              <input type="text" value={Math.max(1, storyPages.length)} readOnly aria-label="Total story pages" />
+            </label>
+            <button
+              type="button"
+              className={isLastStoryPageInView ? 'secondary' : 'secondary small-button'}
+              disabled={isSaving}
+              onClick={goNext}
+              aria-label={isLastStoryPageInView ? 'Add page' : 'Next page'}
+              title={isLastStoryPageInView ? 'Add page' : 'Next page'}
+            >
+              {isLastStoryPageInView ? 'Add page' : <span aria-hidden="true">→</span>}
+            </button>
+            {hasSinglePageSidePanel && (
+              <div className="story-panels-preview-toggle" role="group" aria-label="Single page preview mode">
+                <button
+                  type="button"
+                  className={singlePagePreviewMode === 'readable' ? 'active' : ''}
+                  onClick={() => setSinglePagePreviewMode('readable')}
+                >
+                  Readable area
+                </button>
+                <button
+                  type="button"
+                  className={singlePagePreviewMode === 'print' ? 'active' : ''}
+                  onClick={() => setSinglePagePreviewMode('print')}
+                >
+                  Print preview
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>,
+    );
+    return () => onPageControlsChange?.(null);
+  }, [
+    clampedPageIndex,
+    currentPageLabel,
+    hasSinglePageSidePanel,
+    isLastStoryPageInView,
+    isPageLayoutMode,
+    isSaving,
+    layoutMode,
+    onPageControlsChange,
+    redoStack.length,
+    selectedPageCanChangeOrder,
+    selectedStoryPageIndex,
+    singlePagePreviewMode,
+    storyPages.length,
+    undoStack.length,
+  ]);
 
   return (
     <>
       {isPageLayoutMode && (
-        <div className="story-panels-overlap-controls">
-          <div className="story-panels-action-row">
-            <div className="story-panels-page-nav" aria-label="Page navigation">
-              {layoutMode === 'all-pages' ? (
-                <>
-                  <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder || selectedStoryPageIndex <= 0} onClick={() => moveSelectedPage(-1)}>Move left</button>
-                  <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder || selectedStoryPageIndex < 0 || selectedStoryPageIndex >= storyPages.length - 1} onClick={() => moveSelectedPage(1)}>Move right</button>
-                  <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder} onClick={addPageAfterSelected}>Add story page after</button>
-                  <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder || storyPages.length <= 1} onClick={requestDeleteSelectedPage}>Delete page</button>
-                </>
-              ) : (
-                <>
-                  <button type="button" className="secondary" disabled={isSaving || clampedPageIndex <= 0} onClick={goPrevious}>
-                    Prev
-                  </button>
-                  <label className="story-panels-page-jump">
-                    <span>Page</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={currentPageLabel}
-                      disabled={isSaving || storyPages.length === 0}
-                      onChange={(event) => jumpToPage(Number(event.target.value))}
-                    />
-                    <span aria-hidden="true">/</span>
-                    <input type="text" value={Math.max(1, storyPages.length)} readOnly aria-label="Total story pages" />
-                  </label>
-                  <button type="button" className="secondary" disabled={isSaving} onClick={goNext}>
-                    {isLastStoryPageInView ? 'New page' : 'Next'}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-      {isPageLayoutMode && (
-        <div className={`story-panels-layout-workspace is-${layoutMode}`}>
+        <div
+          className={`story-panels-layout-workspace is-${layoutMode} ${hasSinglePageSidePanel ? `is-single-preview-${singlePagePreviewMode}` : ''}`}
+          style={pageLayoutStyle}
+        >
         <div className="story-panels-pages">
         {visiblePages.length ? (
           layoutMode === 'spread' ? (
             <div className="story-panels-spread-wrap">
-              <div className="story-panels-spread-labels">
+              <div className="story-panels-spread-labels" style={{ gridTemplateColumns: PRINT_SHEET_GRID_COLUMNS }}>
                 {visiblePages.map((page, pageIndex) => (
                   <h3
                     key={page ? `${page.id}-label` : `spread-blank-label-${pageIndex}`}
@@ -688,7 +790,14 @@ export function PageLayoutEditor({
                   </h3>
                 ))}
               </div>
-              <div className="story-panels-print-sheet">
+              <div
+                className="story-panels-print-sheet"
+                style={{
+                  aspectRatio: PRINT_SHEET_ASPECT_RATIO,
+                  gridTemplateColumns: PRINT_SHEET_GRID_COLUMNS,
+                  gridTemplateRows: PRINT_SHEET_GRID_ROWS,
+                }}
+              >
               {visiblePages.map((page, pageIndex) => {
                 const spreadSlot = pageIndex === 0 ? 'left' : 'right';
                 if (!page) {
@@ -753,6 +862,18 @@ export function PageLayoutEditor({
                   </article>
                 );
               })}
+              {visiblePages.map((page, pageIndex) => {
+                const pageNumber = page ? storyPageNumberById.get(page.id) : undefined;
+                if (!page || !pageNumber) return null;
+                return (
+                  <span
+                    key={`${page.id}-spread-page-number`}
+                    className={`story-panels-print-page-number is-spread-slot-${pageIndex === 0 ? 'left' : 'right'}`}
+                  >
+                    {pageNumber}
+                  </span>
+                );
+              })}
               {visiblePages.length > 1 && <div className="story-panels-print-gutter" aria-hidden="true" />}
               </div>
             </div>
@@ -763,14 +884,21 @@ export function PageLayoutEditor({
             <article
               key="intentional-blank-start"
               ref={(element) => {
-                if (layoutMode === 'single-chunks' && pageIndex === 0) sideHeightSourceRef.current = element;
+                if (hasSinglePageSidePanel && pageIndex === 0) sideHeightSourceRef.current = element;
               }}
               className={`story-panels-page is-blank ${layoutMode === 'all-pages' && selectedPageId === null ? 'is-page-selected' : ''}`}
             >
                 <h3>Intentionally Blank</h3>
-                <div className="story-panels-page-grid story-panels-blank-page" style={{ aspectRatio: comicPageAspectRatio }}>
-                  <p>This page intentionally left blank.</p>
-                </div>
+                {renderSinglePagePreviewFrame(
+                  null,
+                  clampedPageIndex,
+                  <div
+                    className="story-panels-page-grid story-panels-blank-page"
+                    style={layoutMode === 'all-pages' ? { aspectRatio: comicPageAspectRatio } : undefined}
+                  >
+                    <p>This page intentionally left blank.</p>
+                  </div>,
+                )}
               </article>
             );
           }
@@ -780,57 +908,64 @@ export function PageLayoutEditor({
             <article
               key={`${page.id}-${pageIndex}`}
               ref={(element) => {
-                if (layoutMode === 'single-chunks' && pageIndex === 0) sideHeightSourceRef.current = element;
+                if (hasSinglePageSidePanel && pageIndex === 0) sideHeightSourceRef.current = element;
               }}
               className={`story-panels-page ${layoutMode === 'all-pages' && selectedPageId === page.id ? 'is-page-selected' : ''}`}
               onClick={() => setSelectedPageId(page.id)}
               onDoubleClick={layoutMode === 'all-pages' ? () => openPageDetail(page.id) : undefined}
             >
               <h3>{page.title || page.id} <span>{pageKindLabel(page.pageKind)}</span></h3>
-              <div
-                ref={(element) => {
-                  pageRefs.current[page.id] = element;
-                }}
-                className="story-panels-page-grid"
-                style={{ aspectRatio: comicPageAspectRatio, gridTemplateRows: `repeat(${pageRows}, minmax(22px, 1fr))` }}
-                onContextMenu={(event) => openPageMenu(event, page.id)}
-                onPointerMove={continueDrag}
-                onPointerUp={endDrag}
-                onPointerCancel={endDrag}
-              >
-                {pagePanels.map((panel) => (
-                  <button
-                    key={panel.id}
-                    type="button"
-                    className={`story-panels-page-panel is-${panel.panelKind} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
-                    style={panelStyle(panel, pageRows)}
-                    onClick={layoutMode === 'all-pages' ? undefined : () => onSelectPanel(panel.id)}
-                    onDoubleClick={(event) => openPanelDetail(event, panel)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                    }}
-                    onPointerDown={layoutMode === 'all-pages' ? undefined : (event) => beginDrag(event, panel, 'move')}
-                  >
-                    {layoutMode !== 'all-pages' && (
-                      <>
-                        {panel.sourceKind === 'story' && panel.panelKind !== 'text' && (
-                          <strong>Panel {storyPanelNumberById.get(panel.id) ?? ''}</strong>
-                        )}
-                        <span>{(panel.panelKind === 'text' && panel.id === selectedPanelId && customTextDraft ? customTextDraft : panel.panelKind === 'text' && panel.customText ? panel.customText : panel.selectedText || (panel.sourceKind === 'free-image' ? 'Cover image block' : '')).replace(/\s+/g, ' ').trim().slice(0, 120)}</span>
-                        {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
-                          <span
-                            key={corner}
-                            className={`story-panels-resize-handle is-${corner}`}
-                            aria-hidden="true"
-                            onPointerDown={(event) => beginDrag(event, panel, 'resize', corner)}
-                          />
-                        ))}
-                      </>
-                    )}
-                  </button>
-                ))}
-              </div>
+              {renderSinglePagePreviewFrame(
+                page,
+                pageIndex,
+                <div
+                  ref={(element) => {
+                    pageRefs.current[page.id] = element;
+                  }}
+                  className="story-panels-page-grid"
+                  style={{
+                    ...(layoutMode === 'all-pages' ? { aspectRatio: comicPageAspectRatio } : {}),
+                    gridTemplateRows: `repeat(${pageRows}, minmax(22px, 1fr))`,
+                  }}
+                  onContextMenu={(event) => openPageMenu(event, page.id)}
+                  onPointerMove={continueDrag}
+                  onPointerUp={endDrag}
+                  onPointerCancel={endDrag}
+                >
+                  {pagePanels.map((panel) => (
+                    <button
+                      key={panel.id}
+                      type="button"
+                      className={`story-panels-page-panel is-${panel.panelKind} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
+                      style={panelStyle(panel, pageRows)}
+                      onClick={layoutMode === 'all-pages' ? undefined : () => onSelectPanel(panel.id)}
+                      onDoubleClick={(event) => openPanelDetail(event, panel)}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onPointerDown={layoutMode === 'all-pages' ? undefined : (event) => beginDrag(event, panel, 'move')}
+                    >
+                      {layoutMode !== 'all-pages' && (
+                        <>
+                          {panel.sourceKind === 'story' && panel.panelKind !== 'text' && (
+                            <strong>Panel {storyPanelNumberById.get(panel.id) ?? ''}</strong>
+                          )}
+                          <span>{(panel.panelKind === 'text' && panel.id === selectedPanelId && customTextDraft ? customTextDraft : panel.panelKind === 'text' && panel.customText ? panel.customText : panel.selectedText || (panel.sourceKind === 'free-image' ? 'Cover image block' : '')).replace(/\s+/g, ' ').trim().slice(0, 120)}</span>
+                          {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+                            <span
+                              key={corner}
+                              className={`story-panels-resize-handle is-${corner}`}
+                              aria-hidden="true"
+                              onPointerDown={(event) => beginDrag(event, panel, 'resize', corner)}
+                            />
+                          ))}
+                        </>
+                      )}
+                    </button>
+                  ))}
+                </div>,
+              )}
             </article>
           );
         })
@@ -838,7 +973,7 @@ export function PageLayoutEditor({
         ) : <p className="muted">No pages yet.</p>}
         </div>
         {layoutMode === 'single' && (
-          <aside className="story-panels-info-panel">
+          <aside className="story-panels-info-panel" style={sidePanelHeight ? { height: sidePanelHeight } : undefined}>
             {visibleSelectedPanel ? (
               <>
                 <div className="story-panels-info-head">
