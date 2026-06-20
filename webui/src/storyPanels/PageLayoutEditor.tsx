@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { StoryPanel, StoryPanelDocument, StoryPanelRect } from '../types';
 
 const gridColumns = 12;
@@ -15,6 +15,13 @@ type DragState = {
   startClientX: number;
   startClientY: number;
   startRect: StoryPanelRect;
+};
+
+type PageContextMenu = {
+  x: number;
+  y: number;
+  pageId: string;
+  rect: StoryPanelRect;
 };
 
 function sortedPages(document: StoryPanelDocument) {
@@ -122,6 +129,7 @@ export function PageLayoutEditor({
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [draftDocument, setDraftDocument] = useState<StoryPanelDocument | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [pageMenu, setPageMenu] = useState<PageContextMenu | null>(null);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [undoStack, setUndoStack] = useState<StoryPanelDocument[]>([]);
   const [redoStack, setRedoStack] = useState<StoryPanelDocument[]>([]);
@@ -131,7 +139,18 @@ export function PageLayoutEditor({
   const spreadPages = pages.slice(clampedPageIndex, clampedPageIndex + 2);
   const currentPage = spreadPages[0] ?? pages[0] ?? null;
   const selectedPanel = displayDocument.panels.find((panel) => panel.id === selectedPanelId) ?? null;
+  const storyPanelNumberById = new Map(
+    [...displayDocument.panels]
+      .sort((a, b) => a.startOffset - b.startOffset || a.order - b.order)
+      .map((panel, index) => [panel.id, index + 1]),
+  );
   const pageAspectRatio = `${displayDocument.pageSettings.width} / ${displayDocument.pageSettings.height}`;
+  useEffect(() => {
+    if (!pageMenu) return;
+    const close = () => setPageMenu(null);
+    window.document.addEventListener('pointerdown', close);
+    return () => window.document.removeEventListener('pointerdown', close);
+  }, [pageMenu]);
   const createPageDocument = () => {
     const id = nextPageId(displayDocument);
     return {
@@ -178,6 +197,16 @@ export function PageLayoutEditor({
       ...displayDocument,
       panels: displayDocument.panels.map((panel) => panel.id === selectedPanel.id ? { ...panel, pageId } : panel),
     });
+  };
+  const placeSelectedPanelAt = (pageId: string, rect: StoryPanelRect) => {
+    if (!selectedPanel) return;
+    commitDocument({
+      ...displayDocument,
+      panels: displayDocument.panels.map((panel) => (
+        panel.id === selectedPanel.id ? { ...panel, pageId, rect: clampRect({ ...panel.rect, x: rect.x, y: rect.y }) } : panel
+      )),
+    });
+    setPageMenu(null);
   };
   const updateSelectedPanelKind = (panelKind: StoryPanel['panelKind']) => {
     if (!selectedPanel) return;
@@ -273,6 +302,16 @@ export function PageLayoutEditor({
   };
   const fixOverlaps = () => {
     commitDocument(packDocument(displayDocument));
+  };
+  const openPageMenu = (event: React.MouseEvent<HTMLDivElement>, pageId: string) => {
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const columnWidth = bounds.width / gridColumns;
+    const rows = Math.max(10, ...displayDocument.panels.filter((panel) => panel.pageId === pageId).map((panel) => panel.rect.y + panel.rect.h));
+    const rowHeight = Math.max(22, bounds.height / rows);
+    const x = Math.min(gridColumns - minPanelWidth, Math.max(0, Math.floor((event.clientX - bounds.left) / columnWidth)));
+    const y = Math.max(0, Math.floor((event.clientY - bounds.top) / rowHeight));
+    setPageMenu({ x: event.clientX, y: event.clientY, pageId, rect: { x, y, w: selectedPanel?.rect.w ?? 6, h: selectedPanel?.rect.h ?? 3 } });
   };
 
   return (
@@ -379,6 +418,7 @@ export function PageLayoutEditor({
                 }}
                 className="story-panels-page-grid"
                 style={{ aspectRatio: pageAspectRatio, gridTemplateRows: `repeat(${pageRows}, minmax(22px, 1fr))` }}
+                onContextMenu={(event) => openPageMenu(event, page.id)}
                 onPointerMove={continueDrag}
                 onPointerUp={endDrag}
                 onPointerCancel={endDrag}
@@ -396,7 +436,7 @@ export function PageLayoutEditor({
                     onClick={() => onSelectPanel(panel.id)}
                     onPointerDown={(event) => beginDrag(event, panel, 'move')}
                   >
-                    <strong>{panel.panelKind === 'text' ? 'Text' : panel.id}</strong>
+                    <strong>{panel.panelKind === 'text' ? `Text ${storyPanelNumberById.get(panel.id) ?? ''}` : `Panel ${storyPanelNumberById.get(panel.id) ?? ''}`}</strong>
                     <span>{panel.selectedText.replace(/\s+/g, ' ').trim().slice(0, 120)}</span>
                     {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
                       <span
@@ -413,6 +453,17 @@ export function PageLayoutEditor({
           );
         }) : <p className="muted">No pages yet.</p>}
       </div>
+      {pageMenu && (
+        <div className="story-panels-page-context-menu" style={{ left: pageMenu.x, top: pageMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+          {selectedPanel ? (
+            <button type="button" onClick={() => placeSelectedPanelAt(pageMenu.pageId, pageMenu.rect)}>
+              Place Panel {storyPanelNumberById.get(selectedPanel.id) ?? ''} here
+            </button>
+          ) : (
+            <p className="muted">Select a panel chunk first.</p>
+          )}
+        </div>
+      )}
     </section>
   );
 }

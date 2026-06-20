@@ -1,4 +1,5 @@
-import type { StoryPanel } from '../types';
+import { useEffect, useRef, useState } from 'react';
+import type { StoryPanel, StoryPanelPage } from '../types';
 
 function compactText(value: string, maxLength = 180) {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -9,7 +10,9 @@ function compactText(value: string, maxLength = 180) {
 export function PanelChunkList({
   bookLength,
   panels,
+  pages,
   selectedPanelId,
+  focusedPanelId,
   onSelectPanel,
   onDeletePanel,
   onToggleFinalized,
@@ -17,21 +20,48 @@ export function PanelChunkList({
 }: {
   bookLength: number;
   panels: StoryPanel[];
+  pages: StoryPanelPage[];
   selectedPanelId: string | null;
+  focusedPanelId: string | null;
   onSelectPanel: (panelId: string) => void;
   onDeletePanel: (panelId: string) => void;
   onToggleFinalized: (panel: StoryPanel) => void;
   isSaving: boolean;
 }) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const chunkRefs = useRef<Record<string, HTMLElement | null>>({});
+  const [flashingPanelId, setFlashingPanelId] = useState<string | null>(null);
   const sortedPanels = [...panels].sort((a, b) => a.startOffset - b.startOffset || a.order - b.order);
+  const sortedPages = [...pages].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  const pageNumberById = new Map(sortedPages.map((page, index) => [page.id, index + 1]));
   const coveredChars = sortedPanels.reduce((total, panel) => total + (panel.endOffset - panel.startOffset), 0);
   const coverage = bookLength > 0 ? Math.round((coveredChars / bookLength) * 100) : 0;
-  const gaps = sortedPanels.reduce<Array<{ start: number; end: number }>>((items, panel, index) => {
-    const previousEnd = index === 0 ? 0 : sortedPanels[index - 1].endOffset;
-    if (panel.startOffset > previousEnd) items.push({ start: previousEnd, end: panel.startOffset });
-    if (index === sortedPanels.length - 1 && panel.endOffset < bookLength) items.push({ start: panel.endOffset, end: bookLength });
-    return items;
-  }, sortedPanels.length ? [] : [{ start: 0, end: bookLength }]);
+
+  useEffect(() => {
+    if (!focusedPanelId) return;
+    const chunk = chunkRefs.current[focusedPanelId];
+    if (!chunk) return;
+    const list = listRef.current;
+    if (list) {
+      const listRect = list.getBoundingClientRect();
+      const chunkRect = chunk.getBoundingClientRect();
+      const relativeTop = chunkRect.top - listRect.top + list.scrollTop;
+      const relativeBottom = relativeTop + chunkRect.height;
+      const padding = 12;
+      let targetTop = list.scrollTop;
+      if (relativeTop < list.scrollTop + padding) {
+        targetTop = relativeTop - padding;
+      } else if (relativeBottom > list.scrollTop + list.clientHeight - padding) {
+        targetTop = relativeBottom - list.clientHeight + padding;
+      }
+      list.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+    } else {
+      chunk.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    setFlashingPanelId(focusedPanelId);
+    const timeout = window.setTimeout(() => setFlashingPanelId((current) => (current === focusedPanelId ? null : current)), 1400);
+    return () => window.clearTimeout(timeout);
+  }, [focusedPanelId]);
 
   return (
     <section className="story-card story-panels-list-card">
@@ -41,22 +71,23 @@ export function PanelChunkList({
           <p className="muted">{sortedPanels.length} panels cover {coverage}% of the book text.</p>
         </div>
       </div>
-      {gaps.length > 0 && (
-        <p className="story-panels-gap-note">
-          {gaps.length} uncovered passage{gaps.length === 1 ? '' : 's'} remain.
-        </p>
-      )}
-      <div className="story-panels-chunk-list">
+      <div ref={listRef} className="story-panels-chunk-list">
         {sortedPanels.length === 0 ? (
           <p className="muted">No panels yet. Select a passage in the book text to begin.</p>
         ) : sortedPanels.map((panel, index) => (
           <article
             key={panel.id}
-            className={`story-panels-chunk ${selectedPanelId === panel.id ? 'is-selected' : ''} ${panel.finalized ? 'is-finalized' : ''}`}
+            ref={(element) => {
+              chunkRefs.current[panel.id] = element;
+            }}
+            className={`story-panels-chunk ${selectedPanelId === panel.id ? 'is-selected' : ''} ${panel.finalized ? 'is-finalized' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''}`}
           >
             <button type="button" className="story-panels-chunk-main" onClick={() => onSelectPanel(panel.id)}>
               <strong>Panel {index + 1}</strong>
               <span>{panel.startOffset}-{panel.endOffset}</span>
+              <span className={`story-panels-placement-badge ${pageNumberById.has(panel.pageId) ? 'is-placed' : 'is-unplaced'}`}>
+                {pageNumberById.has(panel.pageId) ? `Page ${pageNumberById.get(panel.pageId)}` : 'Not placed'}
+              </span>
               <p>{compactText(panel.selectedText)}</p>
             </button>
             <div className="story-panels-chunk-actions">

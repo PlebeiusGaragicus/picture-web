@@ -10,12 +10,17 @@ function sortedPanels(panels: StoryPanel[]) {
   return [...panels].sort((a, b) => a.startOffset - b.startOffset || a.order - b.order);
 }
 
+function withSelectedText(bookText: string, panel: StoryPanel): StoryPanel {
+  return { ...panel, selectedText: bookText.slice(panel.startOffset, panel.endOffset) };
+}
+
 export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
   const [bookText, setBookText] = useState('');
   const [document, setDocument] = useState<StoryPanelDocument | null>(null);
   const [selection, setSelection] = useState<TextSelectionRange | null>(null);
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [focusedBookPanelId, setFocusedBookPanelId] = useState<string | null>(null);
+  const [focusedChunkPanelId, setFocusedChunkPanelId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -49,6 +54,12 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
     setSelectedPanelId(panelId);
     setFocusedBookPanelId(null);
     window.setTimeout(() => setFocusedBookPanelId(panelId), 0);
+  };
+
+  const focusPanelChunk = (panelId: string) => {
+    setSelectedPanelId(panelId);
+    setFocusedChunkPanelId(null);
+    window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
   };
 
   const createPanel = async () => {
@@ -93,6 +104,32 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const adjustPanelRange = async (panelId: string, startOffset: number, endOffset: number) => {
+    if (!document) return;
+    const ordered = sortedPanels(document.panels);
+    const targetIndex = ordered.findIndex((panel) => panel.id === panelId);
+    if (targetIndex < 0) return;
+    const target = ordered[targetIndex];
+    const nextStart = Math.max(0, Math.min(startOffset, endOffset - 1));
+    const nextEnd = Math.min(bookText.length, Math.max(endOffset, nextStart + 1));
+    const updates = new Map<string, StoryPanel>();
+    updates.set(target.id, withSelectedText(bookText, { ...target, startOffset: nextStart, endOffset: nextEnd }));
+    const previous = ordered[targetIndex - 1];
+    if (previous && previous.endOffset > nextStart) {
+      const adjustedPrevious = { ...previous, endOffset: Math.max(previous.startOffset + 1, nextStart) };
+      updates.set(previous.id, withSelectedText(bookText, adjustedPrevious));
+    }
+    const next = ordered[targetIndex + 1];
+    if (next && next.startOffset < nextEnd) {
+      const adjustedNext = { ...next, startOffset: Math.min(next.endOffset - 1, nextEnd) };
+      updates.set(next.id, withSelectedText(bookText, adjustedNext));
+    }
+    await saveDocument({
+      ...document,
+      panels: document.panels.map((panel) => updates.get(panel.id) ?? panel),
+    });
   };
 
   const toggleFinalized = async (panel: StoryPanel) => {
@@ -167,12 +204,17 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
             focusedPanelId={focusedBookPanelId}
             onSelectionChange={setSelection}
             onCreatePanel={createPanel}
+            onDeletePanel={deletePanel}
+            onAdjustPanelRange={adjustPanelRange}
+            onFocusPanelChunk={focusPanelChunk}
             isCreating={isCreating}
           />
           <PanelChunkList
             bookLength={bookText.length}
             panels={panels}
+            pages={document.pages}
             selectedPanelId={selectedPanelId}
+            focusedPanelId={focusedChunkPanelId}
             onSelectPanel={selectPanelChunk}
             onDeletePanel={deletePanel}
             onToggleFinalized={toggleFinalized}

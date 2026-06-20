@@ -814,7 +814,9 @@ button {
   display: grid;
   grid-template-columns: minmax(420px, 1fr) minmax(220px, 300px);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
+  height: min(840px, calc(100vh - 240px));
+  min-height: 420px;
 }
 
 .story-panels-section-head {
@@ -830,15 +832,23 @@ button {
 }
 
 .story-panels-book-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 .story-panels-list-card {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 .story-panels-book-text {
-  max-height: calc(100vh - 240px);
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 16px;
   color: #dbeafe;
@@ -852,6 +862,7 @@ button {
 }
 
 .story-panels-text-panel {
+  position: relative;
   background: rgb(59 130 246 / 0.22);
   box-shadow: 0 0 0 1px rgb(96 165 250 / 0.18);
   border-radius: 3px;
@@ -868,6 +879,42 @@ button {
 
 .story-panels-text-panel.is-flashing {
   animation: story-panel-source-flash 1.4s ease-out;
+}
+
+.story-panels-boundary-handle {
+  display: inline-block;
+  width: 7px;
+  height: 1.35em;
+  margin: 0 1px;
+  vertical-align: -0.22em;
+  background: rgb(250 204 21 / 0.85);
+  border-radius: 999px;
+  cursor: ew-resize;
+}
+
+.story-panels-boundary-handle.is-start {
+  margin-left: -2px;
+}
+
+.story-panels-boundary-handle.is-end {
+  margin-right: -2px;
+}
+
+.story-panels-text-menu {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  transform: translate(-50%, calc(-100% - 8px));
+  background: #020617;
+  border: 1px solid rgb(148 163 184 / 0.35);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.35);
+}
+
+.story-panels-text-menu button {
+  white-space: nowrap;
 }
 
 @keyframes story-panel-source-flash {
@@ -891,6 +938,10 @@ button {
 .story-panels-chunk-list {
   display: grid;
   gap: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .story-panels-chunk {
@@ -909,6 +960,23 @@ button {
 
 .story-panels-chunk.is-finalized {
   border-color: rgb(34 197 94 / 0.5);
+}
+
+.story-panels-chunk.is-flashing {
+  animation: story-panel-chunk-flash 1.4s ease-out;
+}
+
+@keyframes story-panel-chunk-flash {
+  0% {
+    border-color: rgb(250 204 21 / 0.9);
+    background: rgb(250 204 21 / 0.18);
+    box-shadow: 0 0 0 3px rgb(250 204 21 / 0.22);
+  }
+  100% {
+    border-color: rgb(96 165 250 / 0.65);
+    background: rgb(2 6 23 / 0.52);
+    box-shadow: inset 3px 0 0 #60a5fa;
+  }
 }
 
 .story-panels-chunk-main {
@@ -938,6 +1006,27 @@ button {
   color: #cbd5e1;
   font-size: 13px;
   line-height: 1.45;
+}
+
+.story-panels-placement-badge {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.story-panels-placement-badge.is-placed {
+  color: #bfdbfe;
+  background: rgb(59 130 246 / 0.18);
+  border: 1px solid rgb(147 197 253 / 0.28);
+}
+
+.story-panels-placement-badge.is-unplaced {
+  color: #fde68a;
+  background: rgb(245 158 11 / 0.14);
+  border: 1px solid rgb(253 230 138 / 0.26);
 }
 
 .story-panels-chunk-actions {
@@ -1081,6 +1170,23 @@ button {
   border-radius: 10px;
 }
 
+.story-panels-page-context-menu {
+  position: fixed;
+  z-index: 35;
+  display: grid;
+  gap: 8px;
+  min-width: 180px;
+  padding: 8px;
+  background: #020617;
+  border: 1px solid rgb(148 163 184 / 0.35);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.35);
+}
+
+.story-panels-page-context-menu p {
+  margin: 0;
+}
+
 .story-panels-page-panel {
   position: relative;
   display: grid;
@@ -1185,6 +1291,7 @@ button {
 @media (max-width: 1100px) {
   .story-panels-text-row {
     grid-template-columns: 1fr;
+    height: auto;
   }
 
   .story-panels-pages {
