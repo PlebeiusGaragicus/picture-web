@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { StoryPanel, StoryPanelDocument, StoryPanelRect } from '../types';
 
 const gridColumns = 12;
@@ -6,10 +6,12 @@ const minPanelHeight = 2;
 const minPanelWidth = 2;
 
 type DragMode = 'move' | 'resize';
+type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
 type DragState = {
   panelId: string;
   pageId: string;
   mode: DragMode;
+  corner?: ResizeCorner;
   startClientX: number;
   startClientY: number;
   startRect: StoryPanelRect;
@@ -38,6 +40,28 @@ function clampRect(rect: StoryPanelRect): StoryPanelRect {
   const h = Math.max(minPanelHeight, Math.round(rect.h));
   const x = Math.min(gridColumns - w, Math.max(0, Math.round(rect.x)));
   return { x, y: Math.max(0, Math.round(rect.y)), w, h };
+}
+
+function resizeRectFromCorner(rect: StoryPanelRect, corner: ResizeCorner, deltaColumns: number, deltaRows: number): StoryPanelRect {
+  const right = rect.x + rect.w;
+  const bottom = rect.y + rect.h;
+  let x = rect.x;
+  let y = rect.y;
+  let w = rect.w;
+  let h = rect.h;
+  if (corner.includes('w')) {
+    x = Math.min(right - minPanelWidth, Math.max(0, rect.x + deltaColumns));
+    w = right - x;
+  } else {
+    w = rect.w + deltaColumns;
+  }
+  if (corner.includes('n')) {
+    y = Math.min(bottom - minPanelHeight, Math.max(0, rect.y + deltaRows));
+    h = bottom - y;
+  } else {
+    h = rect.h + deltaRows;
+  }
+  return clampRect({ x, y, w, h });
 }
 
 function packPagePanels(panels: StoryPanel[]) {
@@ -99,28 +123,61 @@ export function PageLayoutEditor({
   const [draftDocument, setDraftDocument] = useState<StoryPanelDocument | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
-  const packedDocument = useMemo(() => packDocument(document), [document]);
-  const displayDocument = draftDocument ?? packedDocument;
+  const [undoStack, setUndoStack] = useState<StoryPanelDocument[]>([]);
+  const [redoStack, setRedoStack] = useState<StoryPanelDocument[]>([]);
+  const displayDocument = draftDocument ?? document;
   const pages = sortedPages(displayDocument);
   const clampedPageIndex = Math.min(Math.max(currentPageIndex, 0), Math.max(0, pages.length - 1));
-  const currentPage = pages[clampedPageIndex] ?? pages[0] ?? null;
+  const spreadPages = pages.slice(clampedPageIndex, clampedPageIndex + 2);
+  const currentPage = spreadPages[0] ?? pages[0] ?? null;
   const selectedPanel = displayDocument.panels.find((panel) => panel.id === selectedPanelId) ?? null;
   const pageAspectRatio = `${displayDocument.pageSettings.width} / ${displayDocument.pageSettings.height}`;
-  const addPage = () => {
+  const createPageDocument = () => {
     const id = nextPageId(displayDocument);
-    const nextPageIndex = displayDocument.pages.length;
-    onSaveDocument({
+    return {
       ...displayDocument,
       pages: [...displayDocument.pages, { id, order: displayDocument.pages.length, title: `Page ${displayDocument.pages.length + 1}` }],
-    });
+    };
+  };
+  const commitDocument = (nextDocument: StoryPanelDocument) => {
+    setUndoStack((current) => [...current, document]);
+    setRedoStack([]);
+    onSaveDocument(nextDocument);
+  };
+  const undo = () => {
+    const previous = undoStack[undoStack.length - 1];
+    if (!previous) return;
+    setUndoStack((current) => current.slice(0, -1));
+    setRedoStack((current) => [...current, document]);
+    onSaveDocument(previous);
+  };
+  const redo = () => {
+    const next = redoStack[redoStack.length - 1];
+    if (!next) return;
+    setRedoStack((current) => current.slice(0, -1));
+    setUndoStack((current) => [...current, document]);
+    onSaveDocument(next);
+  };
+  const addPage = () => {
+    const nextPageIndex = displayDocument.pages.length;
+    commitDocument(createPageDocument());
+    setCurrentPageIndex(nextPageIndex);
+  };
+  const goNext = () => {
+    if (clampedPageIndex < pages.length - 1) {
+      setCurrentPageIndex((index) => Math.min(pages.length - 1, index + 1));
+      return;
+    }
+    const nextPageIndex = pages.length;
+    commitDocument(createPageDocument());
     setCurrentPageIndex(nextPageIndex);
   };
   const moveToPage = (pageId: string) => {
     if (!selectedPanel) return;
-    onSaveDocument(packDocument({
+    commitDocument({
       ...displayDocument,
       panels: displayDocument.panels.map((panel) => panel.id === selectedPanel.id ? { ...panel, pageId } : panel),
-    }));
+    });
   };
   const updateSelectedPanelKind = (panelKind: StoryPanel['panelKind']) => {
     if (!selectedPanel) return;
@@ -131,10 +188,10 @@ export function PageLayoutEditor({
       }
       return { ...panel, panelKind, layer: 0 };
     });
-    onSaveDocument(packDocument({ ...displayDocument, panels: nextPanels }));
+    commitDocument({ ...displayDocument, panels: nextPanels });
   };
   const updatePageSettings = (patch: Partial<StoryPanelDocument['pageSettings']>) => {
-    onSaveDocument({
+    commitDocument({
       ...displayDocument,
       pageSettings: {
         ...displayDocument.pageSettings,
@@ -146,28 +203,36 @@ export function PageLayoutEditor({
     if (!Number.isFinite(value)) return;
     setCurrentPageIndex(Math.min(Math.max(value - 1, 0), Math.max(0, pages.length - 1)));
   };
+  const pageIdFromPointer = (clientX: number, clientY: number) => {
+    for (const [pageId, element] of Object.entries(pageRefs.current)) {
+      if (!element) continue;
+      const bounds = element.getBoundingClientRect();
+      if (clientX >= bounds.left && clientX <= bounds.right && clientY >= bounds.top && clientY <= bounds.bottom) {
+        return pageId;
+      }
+    }
+    return null;
+  };
   const updatePanelDuringDrag = (event: React.PointerEvent, state: DragState) => {
-    const pageElement = pageRefs.current[state.pageId];
+    const targetPageId = pageIdFromPointer(event.clientX, event.clientY) ?? state.pageId;
+    const pageElement = pageRefs.current[targetPageId] ?? pageRefs.current[state.pageId];
     if (!pageElement) return;
     const bounds = pageElement.getBoundingClientRect();
     const columnWidth = bounds.width / gridColumns;
     const rowHeight = Math.max(22, bounds.height / Math.max(10, ...displayDocument.panels.map((panel) => panel.rect.y + panel.rect.h)));
-    const deltaColumns = Math.round((event.clientX - state.startClientX) / columnWidth);
-    const deltaRows = Math.round((event.clientY - state.startClientY) / rowHeight);
+    const deltaColumns = targetPageId === state.pageId ? Math.round((event.clientX - state.startClientX) / columnWidth) : Math.round((event.clientX - bounds.left) / columnWidth) - state.startRect.x;
+    const deltaRows = targetPageId === state.pageId ? Math.round((event.clientY - state.startClientY) / rowHeight) : Math.round((event.clientY - bounds.top) / rowHeight) - state.startRect.y;
     const nextPanels = displayDocument.panels.map((panel) => {
       if (panel.id !== state.panelId) return panel;
       if (state.mode === 'resize') {
         return {
           ...panel,
-          rect: clampRect({
-            ...state.startRect,
-            w: state.startRect.w + deltaColumns,
-            h: state.startRect.h + deltaRows,
-          }),
+          rect: resizeRectFromCorner(state.startRect, state.corner ?? 'se', deltaColumns, deltaRows),
         };
       }
       return {
         ...panel,
+        pageId: targetPageId,
         rect: clampRect({
           ...state.startRect,
           x: state.startRect.x + deltaColumns,
@@ -175,9 +240,9 @@ export function PageLayoutEditor({
         }),
       };
     });
-    setDraftDocument(packDocument({ ...displayDocument, panels: nextPanels }));
+    setDraftDocument({ ...displayDocument, panels: nextPanels });
   };
-  const beginDrag = (event: React.PointerEvent, panel: StoryPanel, mode: DragMode) => {
+  const beginDrag = (event: React.PointerEvent, panel: StoryPanel, mode: DragMode, corner?: ResizeCorner) => {
     if (isSaving) return;
     event.preventDefault();
     event.stopPropagation();
@@ -186,6 +251,7 @@ export function PageLayoutEditor({
       panelId: panel.id,
       pageId: panel.pageId,
       mode,
+      corner,
       startClientX: event.clientX,
       startClientY: event.clientY,
       startRect: panel.rect,
@@ -203,7 +269,10 @@ export function PageLayoutEditor({
     const nextDocument = draftDocument;
     setDragState(null);
     setDraftDocument(null);
-    onSaveDocument(nextDocument);
+    commitDocument(nextDocument);
+  };
+  const fixOverlaps = () => {
+    commitDocument(packDocument(displayDocument));
   };
 
   return (
@@ -213,9 +282,6 @@ export function PageLayoutEditor({
           <h2>Page Layout</h2>
           <p className="muted">Arrange selected text chunks as comic page panels.</p>
         </div>
-        <button type="button" className="secondary" disabled={isSaving} onClick={addPage}>
-          Add page
-        </button>
       </div>
       <div className="story-panels-page-settings">
         <fieldset>
@@ -260,8 +326,11 @@ export function PageLayoutEditor({
             />
           </label>
           <span className="story-panels-page-count">of {Math.max(1, pages.length)}</span>
-          <button type="button" className="secondary" disabled={isSaving || clampedPageIndex >= pages.length - 1} onClick={() => setCurrentPageIndex((index) => Math.min(pages.length - 1, index + 1))}>
-            Next
+          <button type="button" className="secondary" disabled={isSaving} onClick={goNext}>
+            {clampedPageIndex >= pages.length - 1 ? 'New page' : 'Next'}
+          </button>
+          <button type="button" className="secondary" disabled={isSaving} onClick={addPage}>
+            Add page
           </button>
         </div>
       </div>
@@ -280,11 +349,25 @@ export function PageLayoutEditor({
               <option value="text">Text / caption</option>
             </select>
           </label>
-          <p className="story-panels-layout-hint">Drag panels to move them horizontally; rows compact automatically. Pull the lower-right handle to resize.</p>
+          <p className="story-panels-layout-hint">Drag panels to move them across the spread. Pull any corner handle to resize.</p>
         </div>
       )}
+      <div className="story-panels-overlap-controls">
+        <p className="story-panels-layout-hint">Panels may overlap while you tune sizing. Use cleanup when you want the current layout compacted again.</p>
+        <div className="story-panels-history-actions">
+          <button type="button" className="secondary" disabled={isSaving || undoStack.length === 0} onClick={undo}>
+            Undo
+          </button>
+          <button type="button" className="secondary" disabled={isSaving || redoStack.length === 0} onClick={redo}>
+            Redo
+          </button>
+          <button type="button" className="secondary" disabled={isSaving} onClick={fixOverlaps}>
+            Fix overlaps
+          </button>
+        </div>
+      </div>
       <div className="story-panels-pages">
-        {currentPage ? [currentPage].map((page) => {
+        {spreadPages.length ? spreadPages.map((page) => {
           const pagePanels = sortedPanelsForPage(displayDocument, page.id);
           const pageRows = Math.max(10, ...pagePanels.map((panel) => panel.rect.y + panel.rect.h));
           return (
@@ -315,11 +398,14 @@ export function PageLayoutEditor({
                   >
                     <strong>{panel.panelKind === 'text' ? 'Text' : panel.id}</strong>
                     <span>{panel.selectedText.replace(/\s+/g, ' ').trim().slice(0, 120)}</span>
-                    <span
-                      className="story-panels-resize-handle"
-                      aria-hidden="true"
-                      onPointerDown={(event) => beginDrag(event, panel, 'resize')}
-                    />
+                    {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+                      <span
+                        key={corner}
+                        className={`story-panels-resize-handle is-${corner}`}
+                        aria-hidden="true"
+                        onPointerDown={(event) => beginDrag(event, panel, 'resize', corner)}
+                      />
+                    ))}
                   </button>
                 ))}
               </div>

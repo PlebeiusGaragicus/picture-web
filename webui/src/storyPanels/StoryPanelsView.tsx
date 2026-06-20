@@ -15,6 +15,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
   const [document, setDocument] = useState<StoryPanelDocument | null>(null);
   const [selection, setSelection] = useState<TextSelectionRange | null>(null);
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
+  const [focusedBookPanelId, setFocusedBookPanelId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -43,6 +44,12 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
   }, [load]);
 
   const panels = useMemo(() => sortedPanels(document?.panels ?? []), [document]);
+
+  const selectPanelChunk = (panelId: string) => {
+    setSelectedPanelId(panelId);
+    setFocusedBookPanelId(null);
+    window.setTimeout(() => setFocusedBookPanelId(panelId), 0);
+  };
 
   const createPanel = async () => {
     if (!selection) return;
@@ -145,29 +152,30 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
       </header>
       {error && <p className="error error-banner">{error}</p>}
       <div className="story-panels-grid">
-        <BookTextSelector
-          bookText={bookText}
-          panels={panels}
-          selection={selection}
-          onSelectionChange={setSelection}
-          onCreatePanel={createPanel}
-          isCreating={isCreating}
+        <PageLayoutEditor
+          document={document}
+          selectedPanelId={selectedPanelId}
+          onSelectPanel={setSelectedPanelId}
+          onSaveDocument={saveDocument}
+          isSaving={isSaving}
         />
-        <div className="story-panels-tools">
+        <div className="story-panels-text-row">
+          <BookTextSelector
+            bookText={bookText}
+            panels={panels}
+            selection={selection}
+            focusedPanelId={focusedBookPanelId}
+            onSelectionChange={setSelection}
+            onCreatePanel={createPanel}
+            isCreating={isCreating}
+          />
           <PanelChunkList
             bookLength={bookText.length}
             panels={panels}
             selectedPanelId={selectedPanelId}
-            onSelectPanel={setSelectedPanelId}
+            onSelectPanel={selectPanelChunk}
             onDeletePanel={deletePanel}
             onToggleFinalized={toggleFinalized}
-            isSaving={isSaving}
-          />
-          <PageLayoutEditor
-            document={document}
-            selectedPanelId={selectedPanelId}
-            onSelectPanel={setSelectedPanelId}
-            onSaveDocument={saveDocument}
             isSaving={isSaving}
           />
         </div>

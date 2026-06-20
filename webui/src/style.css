@@ -806,14 +806,15 @@ button {
 
 .story-panels-grid {
   display: grid;
-  grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.25fr);
   gap: 16px;
   align-items: start;
 }
 
-.story-panels-tools {
+.story-panels-text-row {
   display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(220px, 300px);
   gap: 16px;
+  align-items: start;
 }
 
 .story-panels-section-head {
@@ -829,8 +830,11 @@ button {
 }
 
 .story-panels-book-card {
-  position: sticky;
-  top: 24px;
+  min-width: 0;
+}
+
+.story-panels-list-card {
+  min-width: 0;
 }
 
 .story-panels-book-text {
@@ -850,11 +854,31 @@ button {
 .story-panels-text-panel {
   background: rgb(59 130 246 / 0.22);
   box-shadow: 0 0 0 1px rgb(96 165 250 / 0.18);
+  border-radius: 3px;
 }
 
 .story-panels-text-selection {
   background: rgb(250 204 21 / 0.26);
   box-shadow: 0 0 0 1px rgb(253 224 71 / 0.28);
+}
+
+.story-panels-text-panel.is-focused {
+  background: rgb(96 165 250 / 0.36);
+}
+
+.story-panels-text-panel.is-flashing {
+  animation: story-panel-source-flash 1.4s ease-out;
+}
+
+@keyframes story-panel-source-flash {
+  0% {
+    background: rgb(250 204 21 / 0.7);
+    box-shadow: 0 0 0 3px rgb(250 204 21 / 0.32);
+  }
+  100% {
+    background: rgb(96 165 250 / 0.36);
+    box-shadow: 0 0 0 1px rgb(96 165 250 / 0.18);
+  }
 }
 
 .story-panels-selection-note,
@@ -931,6 +955,13 @@ button {
   align-items: center;
 }
 
+.story-panels-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .story-panels-layout-controls label {
   display: grid;
   gap: 6px;
@@ -1005,9 +1036,23 @@ button {
   line-height: 1.4;
 }
 
+.story-panels-overlap-controls {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 10px;
+  background: rgb(15 23 42 / 0.48);
+  border: 1px dashed rgb(148 163 184 / 0.24);
+  border-radius: 12px;
+}
+
 .story-panels-pages {
   display: grid;
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
 }
 
 .story-panels-page {
@@ -1027,7 +1072,7 @@ button {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
   gap: 6px;
-  width: min(100%, 560px);
+  width: 100%;
   min-height: 260px;
   max-height: 78vh;
   margin: 0 auto;
@@ -1094,14 +1139,39 @@ button {
 
 .story-panels-resize-handle {
   position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: rgb(37 99 235 / 0.7);
+  border-style: solid;
+  border-radius: 2px;
+}
+
+.story-panels-resize-handle.is-nw {
+  top: 4px;
+  left: 4px;
+  cursor: nwse-resize;
+  border-width: 3px 0 0 3px;
+}
+
+.story-panels-resize-handle.is-ne {
+  top: 4px;
+  right: 4px;
+  cursor: nesw-resize;
+  border-width: 3px 3px 0 0;
+}
+
+.story-panels-resize-handle.is-sw {
+  bottom: 4px;
+  left: 4px;
+  cursor: nesw-resize;
+  border-width: 0 0 3px 3px;
+}
+
+.story-panels-resize-handle.is-se {
   right: 4px;
   bottom: 4px;
-  width: 18px;
-  height: 18px;
   cursor: nwse-resize;
-  border-right: 3px solid rgb(37 99 235 / 0.7);
-  border-bottom: 3px solid rgb(37 99 235 / 0.7);
-  border-radius: 2px;
+  border-width: 0 3px 3px 0;
 }
 
 .story-panels-page-panel.is-inlay .story-panels-resize-handle {
@@ -1113,12 +1183,12 @@ button {
 }
 
 @media (max-width: 1100px) {
-  .story-panels-grid {
+  .story-panels-text-row {
     grid-template-columns: 1fr;
   }
 
-  .story-panels-book-card {
-    position: static;
+  .story-panels-pages {
+    grid-template-columns: 1fr;
   }
 }
 

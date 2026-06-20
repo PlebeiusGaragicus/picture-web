@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StoryPanel } from '../types';
 
 export type TextSelectionRange = {
@@ -34,6 +34,7 @@ export function BookTextSelector({
   bookText,
   panels,
   selection,
+  focusedPanelId,
   onSelectionChange,
   onCreatePanel,
   isCreating,
@@ -41,13 +42,26 @@ export function BookTextSelector({
   bookText: string;
   panels: StoryPanel[];
   selection: TextSelectionRange | null;
+  focusedPanelId: string | null;
   onSelectionChange: (selection: TextSelectionRange | null) => void;
   onCreatePanel: () => void;
   isCreating: boolean;
 }) {
   const textRef = useRef<HTMLDivElement | null>(null);
+  const panelSpanRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+  const [flashingPanelId, setFlashingPanelId] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const pieces = useMemo(() => textWithHighlights(bookText, panels, selection), [bookText, panels, selection]);
+
+  useEffect(() => {
+    if (!focusedPanelId) return;
+    const panelElement = panelSpanRefs.current[focusedPanelId];
+    if (!panelElement) return;
+    panelElement.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setFlashingPanelId(focusedPanelId);
+    const timeout = window.setTimeout(() => setFlashingPanelId((current) => (current === focusedPanelId ? null : current)), 1400);
+    return () => window.clearTimeout(timeout);
+  }, [focusedPanelId]);
 
   const captureSelection = () => {
     const root = textRef.current;
@@ -90,7 +104,17 @@ export function BookTextSelector({
       )}
       <div ref={textRef} className="story-panels-book-text" onMouseUp={captureSelection} onKeyUp={captureSelection}>
         {pieces.map((piece, index) => (
-          <span key={`${piece.id ?? 'plain'}-${index}`} className={piece.kind ? `story-panels-text-${piece.kind}` : undefined}>
+          <span
+            key={`${piece.id ?? 'plain'}-${index}`}
+            ref={piece.kind === 'panel' && piece.id ? (element) => {
+              panelSpanRefs.current[piece.id!] = element;
+            } : undefined}
+            className={[
+              piece.kind ? `story-panels-text-${piece.kind}` : '',
+              piece.kind === 'panel' && piece.id === focusedPanelId ? 'is-focused' : '',
+              piece.kind === 'panel' && piece.id === flashingPanelId ? 'is-flashing' : '',
+            ].filter(Boolean).join(' ') || undefined}
+          >
             {piece.text}
           </span>
         ))}
