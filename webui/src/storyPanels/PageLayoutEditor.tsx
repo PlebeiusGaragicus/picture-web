@@ -72,10 +72,6 @@ function panelStyle(panel: StoryPanel, rows: number): CSSProperties {
   };
 }
 
-function rectsOverlap(a: StoryPanelRect, b: StoryPanelRect) {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
-
 function roundStep(value: number, scale: number) {
   return Math.round(value * scale) / scale;
 }
@@ -113,41 +109,6 @@ function resizeRectFromCorner(rect: StoryPanelRect, corner: ResizeCorner, deltaC
   return clampRect({ x, y, w, h }, panelKind);
 }
 
-function packPagePanels(panels: StoryPanel[]) {
-  const placed: StoryPanel[] = [];
-  const basePanels = panels.filter((panel) => panel.panelKind !== 'inlay').sort((a, b) => a.order - b.order || storyOffset(a) - storyOffset(b));
-  const inlayPanels = panels.filter((panel) => panel.panelKind === 'inlay');
-  for (const panel of basePanels) {
-    const rect = clampRect(panel.rect, panel.panelKind);
-    let y = 0;
-    while (placed.some((placedPanel) => rectsOverlap({ ...rect, y }, placedPanel.rect))) {
-      y += 1;
-    }
-    placed.push({ ...panel, rect: { ...rect, y } });
-  }
-  return [
-    ...placed,
-    ...inlayPanels.map((panel) => ({ ...panel, rect: clampRect(panel.rect, panel.panelKind) })),
-  ];
-}
-
-function packDocument(document: StoryPanelDocument): StoryPanelDocument {
-  const panelsByPage = new Map<string, StoryPanel[]>();
-  for (const panel of document.panels) {
-    panelsByPage.set(panel.pageId, [...(panelsByPage.get(panel.pageId) ?? []), panel]);
-  }
-  const packedPanelsById = new Map<string, StoryPanel>();
-  for (const panels of panelsByPage.values()) {
-    for (const panel of packPagePanels(panels)) {
-      packedPanelsById.set(panel.id, panel);
-    }
-  }
-  return {
-    ...document,
-    panels: document.panels.map((panel) => packedPanelsById.get(panel.id) ?? panel),
-  };
-}
-
 function nextPageId(document: StoryPanelDocument) {
   const ids = new Set(document.pages.map((page) => page.id));
   let index = document.pages.length + 1;
@@ -170,6 +131,7 @@ export function PageLayoutEditor({
   onSaveDocument,
   isSaving,
   sidePanel,
+  onHistoryControlsChange,
 }: {
   document: StoryPanelDocument;
   selectedPanelId: string | null;
@@ -178,6 +140,7 @@ export function PageLayoutEditor({
   onSaveDocument: (document: StoryPanelDocument) => void;
   isSaving: boolean;
   sidePanel?: React.ReactNode;
+  onHistoryControlsChange?: (controls: React.ReactNode) => void;
 }) {
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const sideHeightSourceRef = useRef<HTMLElement | null>(null);
@@ -216,6 +179,19 @@ export function PageLayoutEditor({
   useEffect(() => {
     setCustomTextDraft(selectedPanel?.customText ?? null);
   }, [selectedPanel?.id, selectedPanel?.customText]);
+  useEffect(() => {
+    onHistoryControlsChange?.(
+      <>
+        <button type="button" className="secondary" disabled={isSaving || undoStack.length === 0} onClick={undo}>
+          Undo
+        </button>
+        <button type="button" className="secondary" disabled={isSaving || redoStack.length === 0} onClick={redo}>
+          Redo
+        </button>
+      </>,
+    );
+    return () => onHistoryControlsChange?.(null);
+  }, [isSaving, onHistoryControlsChange, redoStack.length, undoStack.length]);
   useLayoutEffect(() => {
     if (layoutMode !== 'single-chunks' || !sideHeightSourceRef.current) {
       setSidePanelHeight(null);
@@ -259,11 +235,6 @@ export function PageLayoutEditor({
     setRedoStack((current) => current.slice(0, -1));
     setUndoStack((current) => [...current, document]);
     onSaveDocument(next);
-  };
-  const addPage = () => {
-    const nextPageIndex = displayDocument.pages.length;
-    commitDocument(createPageDocument());
-    setCurrentPageIndex(layoutMode === 'spread' && nextPageIndex > 0 && nextPageIndex % 2 === 0 ? nextPageIndex - 1 : nextPageIndex);
   };
   const goNext = () => {
     const nextPageIndex = layoutMode === 'spread'
@@ -414,9 +385,6 @@ export function PageLayoutEditor({
     setDraftDocument(null);
     commitDocument(nextDocument);
   };
-  const fixOverlaps = () => {
-    commitDocument(packDocument(displayDocument));
-  };
   const openPageMenu = (event: React.MouseEvent<HTMLDivElement>, pageId: string) => {
     event.preventDefault();
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -442,10 +410,10 @@ export function PageLayoutEditor({
           <div className="story-panels-action-row">
             <div className="story-panels-page-nav" aria-label="Page navigation">
               <button type="button" className="secondary" disabled={isSaving || clampedPageIndex <= 0} onClick={goPrevious}>
-                Previous
+                Prev
               </button>
-              <label>
-                Page
+              <label className="story-panels-page-jump">
+                <span>Page</span>
                 <input
                   type="number"
                   min={1}
@@ -454,24 +422,11 @@ export function PageLayoutEditor({
                   disabled={isSaving || pages.length === 0}
                   onChange={(event) => jumpToPage(Number(event.target.value))}
                 />
+                <span aria-hidden="true">/</span>
+                <input type="text" value={Math.max(1, pages.length)} readOnly aria-label="Total pages" />
               </label>
-              <span className="story-panels-page-count">of {Math.max(1, pages.length)}</span>
               <button type="button" className="secondary" disabled={isSaving} onClick={goNext}>
                 {clampedPageIndex >= (layoutMode === 'spread' ? lastSpreadStartIndex : pages.length - 1) ? 'New page' : 'Next'}
-              </button>
-              <button type="button" className="secondary" disabled={isSaving} onClick={addPage}>
-                Add page
-              </button>
-            </div>
-            <div className="story-panels-history-actions">
-              <button type="button" className="secondary" disabled={isSaving || undoStack.length === 0} onClick={undo}>
-                Undo
-              </button>
-              <button type="button" className="secondary" disabled={isSaving || redoStack.length === 0} onClick={redo}>
-                Redo
-              </button>
-              <button type="button" className="secondary" disabled={isSaving} onClick={fixOverlaps}>
-                Fix overlaps
               </button>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type React from 'react';
 import { formatRequestError } from '../formatError';
 import { api } from '../api';
 import type { StoryPanel, StoryPanelDocument } from '../types';
@@ -27,6 +28,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
   const [isSaving, setIsSaving] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [historyControls, setHistoryControls] = useState<React.ReactNode>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -221,6 +223,9 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
               <option value="book-chunks">Book text + panel chunks</option>
             </select>
           </label>
+          <div className="story-panels-history-actions">
+            {historyControls}
+          </div>
           <button type="button" className="secondary" disabled={isExporting || isSaving} onClick={exportBookletPdf}>
             {isExporting ? 'Exporting...' : 'Export PDF'}
           </button>
@@ -236,6 +241,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
           onSaveDocument={saveDocument}
           isSaving={isSaving}
           sidePanel={panelChunks}
+          onHistoryControlsChange={setHistoryControls}
         />
         {showBookText && (
           <div className={`story-panels-text-row ${layoutMode === 'book' ? 'is-book-only' : ''}`}>

@@ -1074,14 +1074,17 @@ button {
 }
 
 .story-panels-page-nav label {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
   color: #cbd5e1;
   font-size: 12px;
 }
 
 .story-panels-page-nav input {
-  width: 72px;
+  width: 44px;
+  min-width: 44px;
+  text-align: center;
 }
 
 .story-panels-page-count {
@@ -1190,6 +1193,8 @@ button {
 
 .story-panels-info-panel {
   display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 12px;
   padding: 12px;
   background: rgb(15 23 42 / 0.72);
