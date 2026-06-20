@@ -102,6 +102,12 @@ function phaseValidationStage(phase: ProjectPhase): AdaptationStage | null {
   }
 }
 
+function isEditableShortcutTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable;
+}
+
 function phaseStage(phase: ProjectPhase): AdaptationStage | null {
   return phaseWorkflowStage(phase);
 }
@@ -307,6 +313,18 @@ function App() {
   useEffect(() => {
     chatSessionsRef.current = chatSessions;
   }, [chatSessions]);
+
+  useEffect(() => {
+    if (!openProjectSlug) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) return;
+      if (event.key.toLowerCase() !== 's') return;
+      event.preventDefault();
+      setIsPhaseSidebarCollapsed((current) => !current);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [openProjectSlug]);
 
   assetsRef.current = assets;
 

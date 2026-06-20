@@ -1053,9 +1053,16 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
 
     empty = client.get("/api/projects/farm-comic/story-panels")
     assert empty.status_code == 200
-    assert [page["pageKind"] for page in empty.json()["pages"]] == ["cover", "inside-cover", "story", "back-cover"]
+    assert [page["pageKind"] for page in empty.json()["pages"]] == ["cover", "inside-cover", "story", "inside-back-cover", "back-cover"]
     assert empty.json()["pages"][2]["id"] == "page-001"
-    assert empty.json()["panels"] == []
+    assert [
+        (panel["pageId"], panel["sourceKind"], panel["panelKind"], panel["customText"])
+        for panel in empty.json()["panels"]
+    ] == [
+        ("cover", "free-text", "text", "Title goes here"),
+        ("inside-front-cover", "free-text", "text", "Copyright information goes here."),
+        ("inside-back-cover", "free-text", "text", "About this comic, acknowledgements, or bonus notes go here."),
+    ]
 
     book = client.get("/api/projects/farm-comic/story-panels/book")
     assert book.status_code == 200
@@ -1066,8 +1073,7 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
         json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
     )
     assert created.status_code == 200
-    panel = created.json()["panels"][0]
-    assert panel["id"] == "panel-001"
+    panel = next(panel for panel in created.json()["panels"] if panel["sourceKind"] == "story")
     assert panel["sourceKind"] == "story"
     assert panel["selectedText"] == "Alpha opens the door."
     assert panel["rect"] == {"x": 0, "y": 0, "w": 12, "h": 3}
@@ -1079,25 +1085,26 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
     assert overlap.status_code == 400
 
     patched = client.patch(
-        "/api/projects/farm-comic/story-panels/panels/panel-001",
+        f"/api/projects/farm-comic/story-panels/panels/{panel['id']}",
         json={"rect": {"x": 0, "y": 2, "w": 6, "h": 6}, "layer": 1, "finalized": True},
     )
     assert patched.status_code == 200
-    panel = patched.json()["panels"][0]
+    panel = next(candidate for candidate in patched.json()["panels"] if candidate["sourceKind"] == "story")
     assert panel["rect"] == {"x": 0, "y": 2, "w": 6, "h": 6}
     assert panel["layer"] == 1
     assert panel["finalized"] is True
 
     document = patched.json()
-    document["pages"].append({"id": "page-002", "order": 4, "title": "Page 2", "pageKind": "story"})
-    document["panels"][0]["pageId"] = "page-002"
+    document["pages"].append({"id": "page-002", "order": 5, "title": "Page 2", "pageKind": "story"})
+    story_panel = next(panel for panel in document["panels"] if panel["sourceKind"] == "story")
+    story_panel["pageId"] = "page-002"
     saved = client.put("/api/projects/farm-comic/story-panels", json=document)
     assert saved.status_code == 200
-    assert saved.json()["panels"][0]["pageId"] == "page-002"
+    assert next(panel for panel in saved.json()["panels"] if panel["sourceKind"] == "story")["pageId"] == "page-002"
 
-    deleted = client.delete("/api/projects/farm-comic/story-panels/panels/panel-001")
+    deleted = client.delete(f"/api/projects/farm-comic/story-panels/panels/{story_panel['id']}")
     assert deleted.status_code == 200
-    assert deleted.json()["panels"] == []
+    assert not any(panel["sourceKind"] == "story" for panel in deleted.json()["panels"])
 
 
 def test_story_panels_missing_book(tmp_path, monkeypatch):
@@ -1126,9 +1133,10 @@ def test_story_panels_create_uses_story_neighbor_page(tmp_path, monkeypatch):
         json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
     ).json()
     document = first
-    document["pages"].append({"id": "page-002", "order": 4, "title": "Page 2", "pageKind": "story"})
-    document["panels"][0]["pageId"] = "page-002"
-    document["panels"][0]["rect"] = {"x": 0, "y": 4, "w": 6, "h": 3}
+    document["pages"].append({"id": "page-002", "order": 5, "title": "Page 2", "pageKind": "story"})
+    story_panel = next(panel for panel in document["panels"] if panel["sourceKind"] == "story")
+    story_panel["pageId"] = "page-002"
+    story_panel["rect"] = {"x": 0, "y": 4, "w": 6, "h": 3}
     saved = client.put("/api/projects/farm-comic/story-panels", json=document)
     assert saved.status_code == 200
 
@@ -1191,8 +1199,9 @@ def test_story_panels_booklet_pdf_endpoint(tmp_path, monkeypatch):
     )
     assert created.status_code == 200
     document = created.json()
-    document["panels"][0]["panelKind"] = "text"
-    document["panels"][0]["customText"] = "Custom caption text."
+    story_panel = next(panel for panel in document["panels"] if panel["sourceKind"] == "story")
+    story_panel["panelKind"] = "text"
+    story_panel["customText"] = "Custom caption text."
     saved = client.put("/api/projects/farm-comic/story-panels", json=document)
     assert saved.status_code == 200
 

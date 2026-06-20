@@ -47,10 +47,24 @@ function sortedPanelsForPage(document: StoryPanelDocument, pageId: string) {
 }
 
 function pageKindLabel(pageKind: StoryPanelDocument['pages'][number]['pageKind']) {
-  if (pageKind === 'cover') return 'Cover page';
-  if (pageKind === 'inside-cover') return 'Inside cover / copyright';
+  if (pageKind === 'cover') return 'Front cover';
+  if (pageKind === 'inside-cover') return 'Inside front cover';
+  if (pageKind === 'inside-back-cover') return 'Inside back cover';
   if (pageKind === 'back-cover') return 'Back cover';
   return 'Story page';
+}
+
+function isStoryPage(page: StoryPanelDocument['pages'][number] | null | undefined) {
+  return page?.pageKind === 'story';
+}
+
+function fixedPageShortLabel(page: StoryPanelDocument['pages'][number] | null | undefined) {
+  if (!page) return '';
+  if (page.pageKind === 'cover') return 'F';
+  if (page.pageKind === 'inside-cover') return 'IFC';
+  if (page.pageKind === 'inside-back-cover') return 'IBC';
+  if (page.pageKind === 'back-cover') return 'B';
+  return '';
 }
 
 function panelStyle(panel: StoryPanel, rows: number): CSSProperties {
@@ -120,6 +134,12 @@ function normalizePageOrder(pages: StoryPanelDocument['pages']) {
     .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }
 
+function isEditableShortcutTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable;
+}
+
 export function PageLayoutEditor({
   document,
   selectedPanelId,
@@ -157,17 +177,44 @@ export function PageLayoutEditor({
   const displayDocument = draftDocument ?? document;
   const pages = sortedPages(displayDocument);
   const clampedPageIndex = Math.min(Math.max(currentPageIndex, 0), Math.max(0, pages.length - 1));
-  const lastSpreadStartIndex = pages.length <= 1 ? 0 : pages.length % 2 === 0 ? pages.length - 1 : pages.length - 2;
+  const coverPage = pages.find((page) => page.pageKind === 'cover') ?? null;
+  const backCoverPage = pages.find((page) => page.pageKind === 'back-cover') ?? null;
+  const interiorSpreadPages = pages.filter((page) => page.pageKind !== 'cover' && page.pageKind !== 'back-cover');
+  const lastInteriorSpreadStart = interiorSpreadPages.length <= 1
+    ? 0
+    : interiorSpreadPages.length % 2 === 0
+      ? interiorSpreadPages.length - 2
+      : interiorSpreadPages.length - 1;
+  const lastSpreadStartIndex = interiorSpreadPages.length > 0
+    ? pages.findIndex((page) => page.id === interiorSpreadPages[lastInteriorSpreadStart]?.id)
+    : 0;
   const isPageLayoutMode = layoutMode !== 'book' && layoutMode !== 'book-chunks';
   const isSinglePageMode = isPageLayoutMode && layoutMode !== 'spread';
   const visiblePages = pages.length === 0 ? [] : layoutMode === 'all-pages'
     ? pages
     : isSinglePageMode
     ? pages.slice(clampedPageIndex, clampedPageIndex + 1)
+    : clampedPageIndex === 0 && coverPage && backCoverPage
+      ? [coverPage, backCoverPage]
     : clampedPageIndex === 0
-      ? [null, pages[0]].filter((page, index) => index === 0 || Boolean(page))
-      : pages.slice(clampedPageIndex, clampedPageIndex + 2);
+      ? [null, coverPage ?? pages[0]].filter((page, index) => index === 0 || Boolean(page))
+      : interiorSpreadPages.slice(Math.max(0, clampedPageIndex - 1), Math.max(0, clampedPageIndex - 1) + 2);
   const selectedPanel = displayDocument.panels.find((panel) => panel.id === selectedPanelId) ?? null;
+  const selectedPage = selectedPageId ? pages.find((page) => page.id === selectedPageId) ?? null : null;
+  const selectedPageCanChangeOrder = isStoryPage(selectedPage);
+  const storyPages = pages.filter((page) => page.pageKind === 'story');
+  const storyPageNumberById = new Map(storyPages.map((page, index) => [page.id, index + 1]));
+  const currentStoryPageNumbers = visiblePages
+    .filter((page): page is StoryPanelDocument['pages'][number] => page !== null && page.pageKind === 'story')
+    .map((page) => storyPageNumberById.get(page.id))
+    .filter((pageNumber): pageNumber is number => typeof pageNumber === 'number');
+  const isLastStoryPageInView = currentStoryPageNumbers.includes(storyPages.length);
+  const currentPageLabel = layoutMode === 'spread' && clampedPageIndex === 0 && coverPage && backCoverPage
+    ? 'F/B'
+    : currentStoryPageNumbers.length > 1
+      ? `${currentStoryPageNumbers[0]}-${currentStoryPageNumbers[currentStoryPageNumbers.length - 1]}`
+      : currentStoryPageNumbers[0]?.toString() ?? fixedPageShortLabel(visiblePages.find(Boolean));
+  const selectedStoryPageIndex = selectedPageId ? storyPages.findIndex((page) => page.id === selectedPageId) : -1;
   const pendingPageDelete = pendingPageDeleteId ? pages.find((page) => page.id === pendingPageDeleteId) ?? null : null;
   const pendingPageDeletePanelCount = pendingPageDeleteId
     ? displayDocument.panels.filter((panel) => panel.pageId === pendingPageDeleteId).length
@@ -266,6 +313,15 @@ export function PageLayoutEditor({
     onSaveDocument(next);
   };
   const goNext = () => {
+    if (isLastStoryPageInView) {
+      const lastStoryPage = storyPages[storyPages.length - 1];
+      if (!lastStoryPage) return;
+      const nextDocument = createPageDocument(lastStoryPage.id);
+      const insertedPageIndex = sortedPages(nextDocument).findIndex((page) => !pages.some((existingPage) => existingPage.id === page.id));
+      commitDocument(nextDocument);
+      setCurrentPageIndex(insertedPageIndex >= 0 ? insertedPageIndex : pages.findIndex((page) => page.id === lastStoryPage.id));
+      return;
+    }
     const nextPageIndex = layoutMode === 'spread'
       ? clampedPageIndex === 0 ? 1 : clampedPageIndex + 2
       : clampedPageIndex + 1;
@@ -278,21 +334,44 @@ export function PageLayoutEditor({
     commitDocument(createPageDocument());
     setCurrentPageIndex(layoutMode === 'spread' && newPageIndex > 0 && newPageIndex % 2 === 0 ? newPageIndex - 1 : newPageIndex);
   };
+  const goNextExistingPage = () => {
+    const nextPageIndex = layoutMode === 'spread'
+      ? clampedPageIndex === 0 ? 1 : clampedPageIndex + 2
+      : clampedPageIndex + 1;
+    const lastPageIndex = layoutMode === 'spread' ? lastSpreadStartIndex : pages.length - 1;
+    if (nextPageIndex <= lastPageIndex) {
+      setCurrentPageIndex(nextPageIndex);
+    }
+  };
   const selectedPageIndex = selectedPageId ? pages.findIndex((page) => page.id === selectedPageId) : -1;
   const addPageAfterSelected = () => {
-    const anchorId = selectedPageId ?? pages[pages.length - 1]?.id;
+    const anchorId = selectedPageCanChangeOrder ? selectedPageId : null;
+    if (!anchorId) return;
     const nextDocument = createPageDocument(anchorId);
-    const insertedPage = sortedPages(nextDocument)[Math.max(0, (anchorId ? selectedPageIndex + 1 : pages.length))];
+    const anchorIndex = sortedPages(nextDocument).findIndex((page) => page.id === anchorId);
+    const insertedPage = sortedPages(nextDocument)[Math.max(0, anchorIndex + 1)];
     commitDocument(nextDocument);
     setSelectedPageId(insertedPage?.id ?? null);
   };
   const requestDeleteSelectedPage = () => {
-    if (!selectedPageId || pages.length <= 1) return;
+    if (!selectedPageId || !selectedPageCanChangeOrder || storyPages.length <= 1) return;
     setPendingPageDeleteId(selectedPageId);
   };
+  useEffect(() => {
+    if (layoutMode !== 'all-pages') return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) return;
+      if (event.key.toLowerCase() !== 'd') return;
+      event.preventDefault();
+      requestDeleteSelectedPage();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [layoutMode, selectedPageId, selectedPageCanChangeOrder, storyPages.length]);
   const confirmDeleteSelectedPage = () => {
     const pageId = pendingPageDeleteId;
-    if (!pageId || pages.length <= 1) return;
+    const page = pages.find((candidate) => candidate.id === pageId);
+    if (!pageId || !isStoryPage(page) || storyPages.length <= 1) return;
     const pageIndex = pages.findIndex((page) => page.id === pageId);
     const nextPages = normalizePageOrder(pages.filter((page) => page.id !== pageId));
     const nextIndex = Math.min(Math.max(0, pageIndex), nextPages.length - 1);
@@ -306,9 +385,11 @@ export function PageLayoutEditor({
     setCurrentPageIndex(nextIndex);
   };
   const moveSelectedPage = (direction: -1 | 1) => {
-    if (!selectedPageId || selectedPageIndex < 0) return;
-    const targetIndex = selectedPageIndex + direction;
-    if (targetIndex < 0 || targetIndex >= pages.length) return;
+    if (!selectedPageId || !selectedPageCanChangeOrder || selectedStoryPageIndex < 0) return;
+    const targetStoryPage = storyPages[selectedStoryPageIndex + direction];
+    if (!targetStoryPage) return;
+    const targetIndex = pages.findIndex((page) => page.id === targetStoryPage.id);
+    if (selectedPageIndex < 0 || targetIndex < 0) return;
     const nextPages = [...pages];
     const [page] = nextPages.splice(selectedPageIndex, 1);
     nextPages.splice(targetIndex, 0, page);
@@ -322,6 +403,22 @@ export function PageLayoutEditor({
     }
     setCurrentPageIndex((index) => index <= 1 ? 0 : Math.max(1, index - 2));
   };
+  useEffect(() => {
+    if (!isPageLayoutMode || layoutMode === 'all-pages') return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) return;
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        goPrevious();
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        goNextExistingPage();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPageLayoutMode, layoutMode, clampedPageIndex, pages.length, isSaving]);
   const placeSelectedPanelAt = (pageId: string, rect: StoryPanelRect) => {
     if (!selectedPanel) return;
     const page = displayDocument.pages.find((candidate) => candidate.id === pageId);
@@ -364,13 +461,32 @@ export function PageLayoutEditor({
       panels: displayDocument.panels.map((panel) => panel.id === selectedPanel.id ? { ...panel, ...patch } : panel),
     });
   };
+  const deleteSelectedPanel = () => {
+    if (!selectedPanel) return;
+    commitDocument({
+      ...displayDocument,
+      panels: displayDocument.panels.filter((panel) => panel.id !== selectedPanel.id),
+    });
+  };
   const commitCustomTextDraft = () => {
     if (!selectedPanel || customTextDraft === null || customTextDraft === (selectedPanel.customText ?? '')) return;
     updateSelectedPanel({ customText: customTextDraft });
   };
   const jumpToPage = (value: number) => {
     if (!Number.isFinite(value)) return;
-    setCurrentPageIndex(Math.min(Math.max(value - 1, 0), Math.max(0, pages.length - 1)));
+    const targetStoryPage = storyPages[Math.min(Math.max(Math.trunc(value) - 1, 0), Math.max(0, storyPages.length - 1))];
+    if (!targetStoryPage) return;
+    const pageIndex = pages.findIndex((page) => page.id === targetStoryPage.id);
+    if (pageIndex < 0) return;
+    if (layoutMode === 'spread') {
+      const interiorIndex = interiorSpreadPages.findIndex((page) => page.id === targetStoryPage.id);
+      const spreadInteriorIndex = interiorIndex <= 1 ? 0 : interiorIndex % 2 === 0 ? interiorIndex : interiorIndex - 1;
+      const spreadPage = interiorSpreadPages[spreadInteriorIndex];
+      const spreadPageIndex = pages.findIndex((page) => page.id === spreadPage?.id);
+      setCurrentPageIndex(spreadPageIndex >= 0 ? spreadPageIndex : pageIndex);
+      return;
+    }
+    setCurrentPageIndex(pageIndex);
   };
   const pageIdFromPointer = (clientX: number, clientY: number) => {
     for (const [pageId, element] of Object.entries(pageRefs.current)) {
@@ -478,10 +594,10 @@ export function PageLayoutEditor({
             <div className="story-panels-page-nav" aria-label="Page navigation">
               {layoutMode === 'all-pages' ? (
                 <>
-                  <button type="button" className="secondary" disabled={isSaving || selectedPageIndex <= 0} onClick={() => moveSelectedPage(-1)}>Move left</button>
-                  <button type="button" className="secondary" disabled={isSaving || selectedPageIndex < 0 || selectedPageIndex >= pages.length - 1} onClick={() => moveSelectedPage(1)}>Move right</button>
-                  <button type="button" className="secondary" disabled={isSaving || !selectedPageId} onClick={addPageAfterSelected}>Add page after</button>
-                  <button type="button" className="secondary" disabled={isSaving || !selectedPageId || pages.length <= 1} onClick={requestDeleteSelectedPage}>Delete page</button>
+                  <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder || selectedStoryPageIndex <= 0} onClick={() => moveSelectedPage(-1)}>Move left</button>
+                  <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder || selectedStoryPageIndex < 0 || selectedStoryPageIndex >= storyPages.length - 1} onClick={() => moveSelectedPage(1)}>Move right</button>
+                  <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder} onClick={addPageAfterSelected}>Add story page after</button>
+                  <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder || storyPages.length <= 1} onClick={requestDeleteSelectedPage}>Delete page</button>
                 </>
               ) : (
                 <>
@@ -491,18 +607,17 @@ export function PageLayoutEditor({
                   <label className="story-panels-page-jump">
                     <span>Page</span>
                     <input
-                      type="number"
-                      min={1}
-                      max={Math.max(1, pages.length)}
-                      value={pages.length ? clampedPageIndex + 1 : 0}
-                      disabled={isSaving || pages.length === 0}
+                      type="text"
+                      inputMode="numeric"
+                      value={currentPageLabel}
+                      disabled={isSaving || storyPages.length === 0}
                       onChange={(event) => jumpToPage(Number(event.target.value))}
                     />
                     <span aria-hidden="true">/</span>
-                    <input type="text" value={Math.max(1, pages.length)} readOnly aria-label="Total pages" />
+                    <input type="text" value={Math.max(1, storyPages.length)} readOnly aria-label="Total story pages" />
                   </label>
                   <button type="button" className="secondary" disabled={isSaving} onClick={goNext}>
-                    {clampedPageIndex >= (layoutMode === 'spread' ? lastSpreadStartIndex : pages.length - 1) ? 'New page' : 'Next'}
+                    {isLastStoryPageInView ? 'New page' : 'Next'}
                   </button>
                 </>
               )}
@@ -593,37 +708,52 @@ export function PageLayoutEditor({
         </div>
         {layoutMode === 'single' && (
           <aside className="story-panels-info-panel">
-            <h3>Selected Panel</h3>
             {selectedPanel ? (
               <>
-                <dl>
-                  <div>
-                    <dt>Panel</dt>
-                    <dd>{storyPanelNumberById.get(selectedPanel.id) ?? ''}</dd>
+                <div className="story-panels-info-head">
+                  <h3>Selected Panel</h3>
+                  <button type="button" className="danger" disabled={isSaving} onClick={deleteSelectedPanel}>
+                    Delete
+                  </button>
+                </div>
+                <div className="story-panels-info-control">
+                  <span>Panel kind</span>
+                  <div className="story-panels-kind-toggle" role="tablist" aria-label="Panel kind">
+                    <button
+                      type="button"
+                      className={selectedPanel.panelKind === 'image' ? 'active' : ''}
+                      role="tab"
+                      aria-selected={selectedPanel.panelKind === 'image'}
+                      disabled={isSaving}
+                      onClick={() => updateSelectedPanel({ panelKind: 'image' })}
+                    >
+                      Image panel
+                    </button>
+                    <button
+                      type="button"
+                      className={selectedPanel.panelKind === 'text' ? 'active' : ''}
+                      role="tab"
+                      aria-selected={selectedPanel.panelKind === 'text'}
+                      disabled={isSaving}
+                      onClick={() => updateSelectedPanel({ panelKind: 'text' })}
+                    >
+                      Text / caption
+                    </button>
                   </div>
-                  <div>
-                    <dt>Book range</dt>
-                    <dd>{selectedPanel.startOffset} to {selectedPanel.endOffset}</dd>
-                  </div>
-                  <div>
-                    <dt>Position</dt>
-                    <dd>x {selectedPanel.rect.x}, y {selectedPanel.rect.y}, w {selectedPanel.rect.w}, h {selectedPanel.rect.h}</dd>
-                  </div>
-                </dl>
+                </div>
                 <label>
-                  Panel kind
-                  <select
-                    value={selectedPanel.panelKind}
-                    disabled={isSaving}
-                    onChange={(event) => updateSelectedPanel({ panelKind: event.target.value as StoryPanel['panelKind'] })}
-                  >
-                    <option value="image">Image panel</option>
-                    <option value="text">Text / caption</option>
-                  </select>
+                  {selectedPanel.sourceKind === 'story' ? `Passage text (${selectedPanel.startOffset} to ${selectedPanel.endOffset})` : 'Passage text'}
+                  <textarea
+                    value={selectedPanel.sourceKind === 'story' ? selectedPanel.selectedText : ''}
+                    rows={5}
+                    readOnly
+                    disabled={selectedPanel.sourceKind !== 'story'}
+                    placeholder={selectedPanel.sourceKind !== 'story' ? 'No source passage for this free layout item' : undefined}
+                  />
                 </label>
                 {selectedPanel.panelKind === 'text' && (
                   <label>
-                    Custom comic text
+                    Caption text
                     <textarea
                       value={customTextDraft ?? ''}
                       rows={5}
@@ -635,10 +765,6 @@ export function PageLayoutEditor({
                     />
                   </label>
                 )}
-                <label>
-                  Passage text
-                  <textarea value={selectedPanel.selectedText} rows={5} readOnly />
-                </label>
               </>
             ) : (
               <p className="muted">Select a page panel to see its settings and source text.</p>

@@ -33,15 +33,85 @@ def default_page() -> StoryPanelPage:
 
 
 def empty_document() -> StoryPanelDocument:
-    return StoryPanelDocument(
-        pages=[
-            StoryPanelPage(id="cover", order=0, title="Cover", pageKind="cover"),
-            StoryPanelPage(id="copyright", order=1, title="Copyright / Indicia", pageKind="inside-cover"),
-            default_page(),
-            StoryPanelPage(id="back-cover", order=3, title="Back Cover", pageKind="back-cover"),
-        ],
-        panels=[],
+    return _normalize_document_pages(StoryPanelDocument(pages=[default_page()], panels=[]))
+
+
+def _fixed_page(id: str, order: int, title: str, page_kind: str) -> StoryPanelPage:
+    return StoryPanelPage(id=id, order=order, title=title, pageKind=page_kind)  # type: ignore[arg-type]
+
+
+def _normalize_document_pages(document: StoryPanelDocument) -> StoryPanelDocument:
+    existing_by_id = {page.id: page for page in document.pages}
+    story_pages = sorted(
+        [page for page in document.pages if page.pageKind == "story"],
+        key=lambda page: (page.order, page.id),
     )
+    if not story_pages:
+        story_pages = [default_page()]
+    fixed_front = [
+        _fixed_page("cover", 0, "Front Cover", "cover"),
+        _fixed_page("inside-front-cover", 1, "Inside Front Cover", "inside-cover"),
+    ]
+    fixed_back = [
+        _fixed_page("inside-back-cover", 0, "Inside Back Cover", "inside-back-cover"),
+        _fixed_page("back-cover", 0, "Back Cover", "back-cover"),
+    ]
+    ordered_pages: list[StoryPanelPage] = []
+    for fixed in [*fixed_front, *story_pages, *fixed_back]:
+        existing = existing_by_id.get(fixed.id)
+        if existing and fixed.pageKind != "story":
+            ordered_pages.append(
+                StoryPanelPage.model_validate(
+                    {**existing.model_dump(mode="json"), "title": fixed.title, "pageKind": fixed.pageKind}
+                )
+            )
+        else:
+            ordered_pages.append(existing if existing else fixed)
+    document.pages = [
+        StoryPanelPage.model_validate({**page.model_dump(mode="json"), "order": index})
+        for index, page in enumerate(ordered_pages)
+    ]
+    _ensure_default_fixed_page_panels(document)
+    return document
+
+
+def _ensure_default_fixed_page_panels(document: StoryPanelDocument) -> None:
+    defaults = {
+        "cover": {
+            "customText": "Title goes here",
+            "rect": StoryPanelRect(x=1.5, y=1.25, w=9, h=1.25),
+        },
+        "inside-front-cover": {
+            "customText": "Copyright information goes here.",
+            "rect": StoryPanelRect(x=1, y=1, w=10, h=2),
+        },
+        "inside-back-cover": {
+            "customText": "About this comic, acknowledgements, or bonus notes go here.",
+            "rect": StoryPanelRect(x=1, y=1, w=10, h=2),
+        },
+    }
+    existing_pages = {page.id for page in document.pages}
+    occupied_pages = {panel.pageId for panel in document.panels}
+    next_order = max((panel.order for panel in document.panels), default=-1) + 1
+    for page_id, default in defaults.items():
+        if page_id not in existing_pages or page_id in occupied_pages:
+            continue
+        document.panels.append(
+            StoryPanel(
+                id=_next_panel_id(document),
+                order=next_order,
+                sourceKind="free-text",
+                startOffset=None,
+                endOffset=None,
+                selectedText="",
+                customText=default["customText"],
+                pageId=page_id,
+                panelKind="text",
+                rect=default["rect"],
+                layer=0,
+            )
+        )
+        next_order += 1
 
 
 def read_book(slug: str) -> str:
@@ -75,11 +145,11 @@ def read_document(slug: str) -> StoryPanelDocument:
     path = document_path(slug)
     if not path.is_file():
         return empty_document()
-    return _validate_against_book(slug, StoryPanelDocument.model_validate(library.read_json(path)))
+    return _validate_against_book(slug, _normalize_document_pages(StoryPanelDocument.model_validate(library.read_json(path))))
 
 
 def save_document(slug: str, document: StoryPanelDocument) -> StoryPanelDocument:
-    return _write_document(slug, _validate_against_book(slug, document))
+    return _write_document(slug, _validate_against_book(slug, _normalize_document_pages(document)))
 
 
 def _slugify(value: str) -> str:

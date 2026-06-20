@@ -310,7 +310,7 @@ export interface StoryPanelPage {
   id: string;
   order: number;
   title: string;
-  pageKind: 'cover' | 'inside-cover' | 'story' | 'back-cover';
+  pageKind: 'cover' | 'inside-cover' | 'story' | 'inside-back-cover' | 'back-cover';
 }
 
 export interface StoryPanelPageSettings {

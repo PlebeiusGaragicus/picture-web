@@ -460,7 +460,7 @@ class StoryPanelPage(BaseModel):
     id: str = Field(pattern=TAG_RE)
     order: int = Field(ge=0)
     title: str = Field(default="", max_length=120)
-    pageKind: Literal["cover", "inside-cover", "story", "back-cover"] = "story"
+    pageKind: Literal["cover", "inside-cover", "story", "inside-back-cover", "back-cover"] = "story"
 
 
 class StoryPanelPageSettings(BaseModel):
