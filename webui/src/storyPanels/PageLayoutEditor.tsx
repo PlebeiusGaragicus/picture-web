@@ -152,6 +152,7 @@ export function PageLayoutEditor({
   const [redoStack, setRedoStack] = useState<StoryPanelDocument[]>([]);
   const [customTextDraft, setCustomTextDraft] = useState<string | null>(null);
   const [sidePanelHeight, setSidePanelHeight] = useState<number | null>(null);
+  const [flashingPanelId, setFlashingPanelId] = useState<string | null>(null);
   const displayDocument = draftDocument ?? document;
   const pages = sortedPages(displayDocument);
   const clampedPageIndex = Math.min(Math.max(currentPageIndex, 0), Math.max(0, pages.length - 1));
@@ -179,6 +180,20 @@ export function PageLayoutEditor({
   useEffect(() => {
     setCustomTextDraft(selectedPanel?.customText ?? null);
   }, [selectedPanel?.id, selectedPanel?.customText]);
+  useEffect(() => {
+    if (!selectedPanel || !isPageLayoutMode) return;
+    const pageIndex = pages.findIndex((page) => page.id === selectedPanel.pageId);
+    if (pageIndex >= 0) {
+      setCurrentPageIndex(layoutMode === 'spread' ? pageIndex === 0 ? 0 : pageIndex % 2 === 0 ? pageIndex - 1 : pageIndex : pageIndex);
+    }
+    setFlashingPanelId(null);
+    const start = window.setTimeout(() => setFlashingPanelId(selectedPanel.id), 0);
+    const stop = window.setTimeout(() => setFlashingPanelId((current) => (current === selectedPanel.id ? null : current)), 1400);
+    return () => {
+      window.clearTimeout(start);
+      window.clearTimeout(stop);
+    };
+  }, [isPageLayoutMode, layoutMode, selectedPanel?.id, selectedPanel?.pageId]);
   useEffect(() => {
     onHistoryControlsChange?.(
       <>
@@ -478,7 +493,7 @@ export function PageLayoutEditor({
                   <button
                     key={panel.id}
                     type="button"
-                    className={`story-panels-page-panel is-${panel.panelKind} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
+                    className={`story-panels-page-panel is-${panel.panelKind} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
                     style={panelStyle(panel, pageRows)}
                     onClick={() => onSelectPanel(panel.id)}
                     onContextMenu={(event) => openPanelMenu(event, panel.id)}

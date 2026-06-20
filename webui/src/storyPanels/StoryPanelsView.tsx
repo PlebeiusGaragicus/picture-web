@@ -244,7 +244,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
           onHistoryControlsChange={setHistoryControls}
         />
         {showBookText && (
-          <div className={`story-panels-text-row ${layoutMode === 'book' ? 'is-book-only' : ''}`}>
+          <div className={`story-panels-text-row is-book-mode ${layoutMode === 'book' ? 'is-book-only' : ''}`}>
             <BookTextSelector
               bookText={bookText}
               panels={storyPanels}
