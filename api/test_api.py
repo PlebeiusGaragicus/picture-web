@@ -1111,6 +1111,34 @@ def test_story_panels_missing_book(tmp_path, monkeypatch):
     assert create.status_code == 404
 
 
+def test_story_panels_create_uses_story_neighbor_page(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the door. Beta crosses the room. Gamma watches.\n")
+
+    first = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
+    ).json()
+    document = first
+    document["pages"].append({"id": "page-002", "order": 1, "title": "Page 2"})
+    document["panels"][0]["pageId"] = "page-002"
+    document["panels"][0]["rect"] = {"x": 0, "y": 4, "w": 6, "h": 3}
+    saved = client.put("/api/projects/farm-comic/story-panels", json=document)
+    assert saved.status_code == 200
+
+    second = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 22, "endOffset": 44, "selectedText": "Beta crosses the room."},
+    )
+    assert second.status_code == 200
+    created = next(panel for panel in second.json()["panels"] if panel["startOffset"] == 22)
+    assert created["pageId"] == "page-002"
+    assert created["rect"] == {"x": 0, "y": 7, "w": 6, "h": 3}
+
+
 def test_scene_moments_sections_api(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)

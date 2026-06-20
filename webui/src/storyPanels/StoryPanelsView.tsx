@@ -132,19 +132,6 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
     });
   };
 
-  const toggleFinalized = async (panel: StoryPanel) => {
-    setIsSaving(true);
-    setError(null);
-    try {
-      const next = await api.patchStoryPanel(projectSlug, panel.id, { finalized: !panel.finalized });
-      setDocument(next);
-    } catch (err) {
-      setError(formatRequestError(err));
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="story-adaptation-screen">
@@ -182,10 +169,6 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
           <h1>Story Panels</h1>
           <p className="muted">Chunk the source text into comic panels, then shape those panels on pages.</p>
         </div>
-        <div className="story-panels-stats">
-          <strong>{panels.length}</strong>
-          <span>panels</span>
-        </div>
       </header>
       {error && <p className="error error-banner">{error}</p>}
       <div className="story-panels-grid">
@@ -217,7 +200,6 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
             focusedPanelId={focusedChunkPanelId}
             onSelectPanel={selectPanelChunk}
             onDeletePanel={deletePanel}
-            onToggleFinalized={toggleFinalized}
             isSaving={isSaving}
           />
         </div>

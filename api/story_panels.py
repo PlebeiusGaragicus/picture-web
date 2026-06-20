@@ -102,11 +102,32 @@ def _default_rect(document: StoryPanelDocument, page_id: str) -> StoryPanelRect:
     return StoryPanelRect(x=0, y=y, w=12, h=3)
 
 
+def _story_order_placement(document: StoryPanelDocument, start_offset: int) -> tuple[str, StoryPanelRect]:
+    ordered = sorted(document.panels, key=lambda panel: (panel.startOffset, panel.endOffset, panel.order))
+    previous_panel = next((panel for panel in reversed(ordered) if panel.startOffset <= start_offset), None)
+    next_panel = next((panel for panel in ordered if panel.startOffset > start_offset), None)
+    anchor = previous_panel or next_panel
+    if anchor is None:
+        page_id = _next_page(document).id
+        return page_id, _default_rect(document, page_id)
+    page_id = anchor.pageId
+    anchor_bottom = anchor.rect.y + anchor.rect.h
+    panels_below_anchor = [
+        panel
+        for panel in document.panels
+        if panel.pageId == page_id and panel.layer == 0 and panel.rect.y >= anchor.rect.y
+    ]
+    y = max([anchor_bottom, *[panel.rect.y + panel.rect.h for panel in panels_below_anchor]], default=anchor_bottom)
+    return page_id, StoryPanelRect(x=anchor.rect.x, y=y, w=anchor.rect.w, h=anchor.rect.h)
+
+
 def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
     document = read_document(slug)
-    page_id = payload.pageId or _next_page(document).id
+    inferred_page_id, inferred_rect = _story_order_placement(document, payload.startOffset)
+    page_id = payload.pageId or inferred_page_id
     if not any(page.id == page_id for page in document.pages):
         raise HTTPException(status_code=400, detail=f"Unknown page: {page_id}")
+    rect = payload.rect or (inferred_rect if page_id == inferred_page_id else _default_rect(document, page_id))
     book = read_book(slug)
     if payload.endOffset > len(book):
         raise HTTPException(status_code=400, detail="Panel range exceeds book length")
@@ -121,7 +142,7 @@ def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
         endOffset=payload.endOffset,
         selectedText=selected,
         pageId=page_id,
-        rect=payload.rect or _default_rect(document, page_id),
+        rect=rect,
         layer=payload.layer,
     )
     document.panels.append(panel)

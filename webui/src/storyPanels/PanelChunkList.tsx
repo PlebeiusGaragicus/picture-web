@@ -15,7 +15,6 @@ export function PanelChunkList({
   focusedPanelId,
   onSelectPanel,
   onDeletePanel,
-  onToggleFinalized,
   isSaving,
 }: {
   bookLength: number;
@@ -25,7 +24,6 @@ export function PanelChunkList({
   focusedPanelId: string | null;
   onSelectPanel: (panelId: string) => void;
   onDeletePanel: (panelId: string) => void;
-  onToggleFinalized: (panel: StoryPanel) => void;
   isSaving: boolean;
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -80,7 +78,7 @@ export function PanelChunkList({
             ref={(element) => {
               chunkRefs.current[panel.id] = element;
             }}
-            className={`story-panels-chunk ${selectedPanelId === panel.id ? 'is-selected' : ''} ${panel.finalized ? 'is-finalized' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''}`}
+            className={`story-panels-chunk ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''}`}
           >
             <button type="button" className="story-panels-chunk-main" onClick={() => onSelectPanel(panel.id)}>
               <strong>Panel {index + 1}</strong>
@@ -91,15 +89,6 @@ export function PanelChunkList({
               <p>{compactText(panel.selectedText)}</p>
             </button>
             <div className="story-panels-chunk-actions">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={panel.finalized}
-                  disabled={isSaving}
-                  onChange={() => onToggleFinalized(panel)}
-                />
-                Final
-              </label>
               <button type="button" className="secondary" disabled={isSaving} onClick={() => onDeletePanel(panel.id)}>
                 Delete
               </button>

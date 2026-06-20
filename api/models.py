@@ -444,10 +444,10 @@ class AdaptationGenerateResponse(BaseModel):
 
 
 class StoryPanelRect(BaseModel):
-    x: int = Field(ge=0, le=11)
-    y: int = Field(ge=0)
-    w: int = Field(ge=1, le=12)
-    h: int = Field(ge=1, le=12)
+    x: float = Field(ge=0, le=12)
+    y: float = Field(ge=0)
+    w: float = Field(ge=0.25, le=12)
+    h: float = Field(ge=0.25, le=12)
 
     @model_validator(mode="after")
     def fits_page_grid(self) -> "StoryPanelRect":
@@ -473,6 +473,7 @@ class StoryPanel(BaseModel):
     startOffset: int = Field(ge=0)
     endOffset: int = Field(ge=0)
     selectedText: str = ""
+    customText: str = ""
     pageId: str = Field(pattern=TAG_RE)
     panelKind: Literal["image", "inlay", "text"] = "image"
     rect: StoryPanelRect = Field(default_factory=lambda: StoryPanelRect(x=0, y=0, w=12, h=3))
@@ -536,6 +537,7 @@ class StoryPanelPatch(BaseModel):
     startOffset: int | None = Field(default=None, ge=0)
     endOffset: int | None = Field(default=None, ge=0)
     selectedText: str | None = None
+    customText: str | None = None
     pageId: str | None = Field(default=None, pattern=TAG_RE)
     panelKind: Literal["image", "inlay", "text"] | None = None
     rect: StoryPanelRect | None = None

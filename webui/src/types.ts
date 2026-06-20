@@ -323,6 +323,7 @@ export interface StoryPanel {
   startOffset: number;
   endOffset: number;
   selectedText: string;
+  customText: string;
   pageId: string;
   panelKind: 'image' | 'inlay' | 'text';
   rect: StoryPanelRect;
@@ -350,7 +351,7 @@ export interface StoryPanelCreatePayload {
 }
 
 export type StoryPanelPatchPayload = Partial<
-  Pick<StoryPanel, 'order' | 'startOffset' | 'endOffset' | 'selectedText' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'assetIds' | 'activeAssetId' | 'finalized'>
+  Pick<StoryPanel, 'order' | 'startOffset' | 'endOffset' | 'selectedText' | 'customText' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'assetIds' | 'activeAssetId' | 'finalized'>
 >;
 
 export interface SceneListLine {
