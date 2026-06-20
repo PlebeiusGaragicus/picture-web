@@ -310,6 +310,7 @@ export interface StoryPanelPage {
   id: string;
   order: number;
   title: string;
+  pageKind: 'cover' | 'inside-cover' | 'story' | 'back-cover';
 }
 
 export interface StoryPanelPageSettings {
@@ -320,8 +321,9 @@ export interface StoryPanelPageSettings {
 export interface StoryPanel {
   id: string;
   order: number;
-  startOffset: number;
-  endOffset: number;
+  sourceKind: 'story' | 'free-text' | 'free-image';
+  startOffset: number | null;
+  endOffset: number | null;
   selectedText: string;
   customText: string;
   pageId: string;
@@ -351,7 +353,7 @@ export interface StoryPanelCreatePayload {
 }
 
 export type StoryPanelPatchPayload = Partial<
-  Pick<StoryPanel, 'order' | 'startOffset' | 'endOffset' | 'selectedText' | 'customText' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'assetIds' | 'activeAssetId' | 'finalized'>
+  Pick<StoryPanel, 'order' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'customText' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'assetIds' | 'activeAssetId' | 'finalized'>
 >;
 
 export interface SceneListLine {

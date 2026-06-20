@@ -3,14 +3,15 @@ import { formatRequestError } from '../formatError';
 import { api } from '../api';
 import type { StoryPanel, StoryPanelDocument } from '../types';
 import { BookTextSelector, type TextSelectionRange } from './BookTextSelector';
-import { PageLayoutEditor } from './PageLayoutEditor';
+import { PageLayoutEditor, type StoryPanelLayoutMode } from './PageLayoutEditor';
 import { PanelChunkList } from './PanelChunkList';
 
 function sortedPanels(panels: StoryPanel[]) {
-  return [...panels].sort((a, b) => a.startOffset - b.startOffset || a.order - b.order);
+  return [...panels].sort((a, b) => (a.startOffset ?? Number.MAX_SAFE_INTEGER) - (b.startOffset ?? Number.MAX_SAFE_INTEGER) || a.order - b.order);
 }
 
 function withSelectedText(bookText: string, panel: StoryPanel): StoryPanel {
+  if (panel.startOffset === null || panel.endOffset === null) return panel;
   return { ...panel, selectedText: bookText.slice(panel.startOffset, panel.endOffset) };
 }
 
@@ -21,9 +22,11 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [focusedBookPanelId, setFocusedBookPanelId] = useState<string | null>(null);
   const [focusedChunkPanelId, setFocusedChunkPanelId] = useState<string | null>(null);
+  const [layoutMode, setLayoutMode] = useState<StoryPanelLayoutMode>('spread');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -36,7 +39,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
       ]);
       setBookText(book.text);
       setDocument(panels);
-      setSelectedPanelId((current) => current ?? sortedPanels(panels.panels)[0]?.id ?? null);
+      setSelectedPanelId((current) => current ?? sortedPanels(panels.panels).find((panel) => panel.sourceKind === 'story')?.id ?? null);
     } catch (err) {
       setError(formatRequestError(err));
     } finally {
@@ -49,6 +52,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
   }, [load]);
 
   const panels = useMemo(() => sortedPanels(document?.panels ?? []), [document]);
+  const storyPanels = useMemo(() => panels.filter((panel) => panel.sourceKind === 'story'), [panels]);
 
   const selectPanelChunk = (panelId: string) => {
     setSelectedPanelId(panelId);
@@ -62,6 +66,13 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
     window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
   };
 
+  const selectLayoutPanel = (panelId: string) => {
+    setSelectedPanelId(panelId);
+    if (!document?.panels.some((panel) => panel.id === panelId && panel.sourceKind === 'story')) return;
+    setFocusedChunkPanelId(null);
+    window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
+  };
+
   const createPanel = async () => {
     if (!selection) return;
     setIsCreating(true);
@@ -70,7 +81,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
       const next = await api.createStoryPanel(projectSlug, selection);
       setDocument(next);
       setSelection(null);
-      setSelectedPanelId(sortedPanels(next.panels).find((panel) => panel.startOffset === selection.startOffset && panel.endOffset === selection.endOffset)?.id ?? null);
+      setSelectedPanelId(sortedPanels(next.panels).find((panel) => panel.sourceKind === 'story' && panel.startOffset === selection.startOffset && panel.endOffset === selection.endOffset)?.id ?? null);
       window.getSelection()?.removeAllRanges();
     } catch (err) {
       setError(formatRequestError(err));
@@ -98,7 +109,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
     try {
       const next = await api.deleteStoryPanel(projectSlug, panelId);
       setDocument(next);
-      setSelectedPanelId(sortedPanels(next.panels)[0]?.id ?? null);
+      setSelectedPanelId(sortedPanels(next.panels).find((panel) => panel.sourceKind === 'story')?.id ?? null);
     } catch (err) {
       setError(formatRequestError(err));
     } finally {
@@ -108,21 +119,22 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
 
   const adjustPanelRange = async (panelId: string, startOffset: number, endOffset: number) => {
     if (!document) return;
-    const ordered = sortedPanels(document.panels);
+    const ordered = sortedPanels(document.panels).filter((panel) => panel.sourceKind === 'story');
     const targetIndex = ordered.findIndex((panel) => panel.id === panelId);
     if (targetIndex < 0) return;
     const target = ordered[targetIndex];
+    if (target.startOffset === null || target.endOffset === null) return;
     const nextStart = Math.max(0, Math.min(startOffset, endOffset - 1));
     const nextEnd = Math.min(bookText.length, Math.max(endOffset, nextStart + 1));
     const updates = new Map<string, StoryPanel>();
     updates.set(target.id, withSelectedText(bookText, { ...target, startOffset: nextStart, endOffset: nextEnd }));
     const previous = ordered[targetIndex - 1];
-    if (previous && previous.endOffset > nextStart) {
+    if (previous && previous.startOffset !== null && previous.endOffset !== null && previous.endOffset > nextStart) {
       const adjustedPrevious = { ...previous, endOffset: Math.max(previous.startOffset + 1, nextStart) };
       updates.set(previous.id, withSelectedText(bookText, adjustedPrevious));
     }
     const next = ordered[targetIndex + 1];
-    if (next && next.startOffset < nextEnd) {
+    if (next && next.startOffset !== null && next.endOffset !== null && next.startOffset < nextEnd) {
       const adjustedNext = { ...next, startOffset: Math.min(next.endOffset - 1, nextEnd) };
       updates.set(next.id, withSelectedText(bookText, adjustedNext));
     }
@@ -130,6 +142,24 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
       ...document,
       panels: document.panels.map((panel) => updates.get(panel.id) ?? panel),
     });
+  };
+
+  const exportBookletPdf = async () => {
+    setIsExporting(true);
+    setError(null);
+    try {
+      const blob = await api.getStoryPanelsBookletPdf(projectSlug);
+      const url = URL.createObjectURL(blob);
+      const anchor = window.document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${projectSlug}-comic-booklet.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(formatRequestError(err));
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   if (isLoading) {
@@ -162,12 +192,38 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
     );
   }
 
+  const panelChunks = (
+    <PanelChunkList
+      bookLength={bookText.length}
+      panels={storyPanels}
+      pages={document.pages}
+      selectedPanelId={selectedPanelId}
+      focusedPanelId={focusedChunkPanelId}
+      onSelectPanel={selectPanelChunk}
+      onDeletePanel={deletePanel}
+      isSaving={isSaving}
+    />
+  );
+  const showBookText = layoutMode === 'book' || layoutMode === 'book-chunks';
+
   return (
     <div className="story-adaptation-screen story-panels-screen">
+      <h1 className="story-panels-title">Story Panels</h1>
       <header className="story-panels-header story-card">
-        <div>
-          <h1>Story Panels</h1>
-          <p className="muted">Chunk the source text into comic panels, then shape those panels on pages.</p>
+        <div className="story-panels-header-actions">
+          <label className="story-panels-view-control">
+            View
+            <select value={layoutMode} onChange={(event) => setLayoutMode(event.target.value as StoryPanelLayoutMode)}>
+              <option value="spread">Two-page spread</option>
+              <option value="single">Single page + info</option>
+              <option value="single-chunks">Single page + panel chunks</option>
+              <option value="book">Book text double wide</option>
+              <option value="book-chunks">Book text + panel chunks</option>
+            </select>
+          </label>
+          <button type="button" className="secondary" disabled={isExporting || isSaving} onClick={exportBookletPdf}>
+            {isExporting ? 'Exporting...' : 'Export PDF'}
+          </button>
         </div>
       </header>
       {error && <p className="error error-banner">{error}</p>}
@@ -175,34 +231,29 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
         <PageLayoutEditor
           document={document}
           selectedPanelId={selectedPanelId}
-          onSelectPanel={setSelectedPanelId}
+          layoutMode={layoutMode}
+          onSelectPanel={selectLayoutPanel}
           onSaveDocument={saveDocument}
           isSaving={isSaving}
+          sidePanel={panelChunks}
         />
-        <div className="story-panels-text-row">
-          <BookTextSelector
-            bookText={bookText}
-            panels={panels}
-            selection={selection}
-            focusedPanelId={focusedBookPanelId}
-            onSelectionChange={setSelection}
-            onCreatePanel={createPanel}
-            onDeletePanel={deletePanel}
-            onAdjustPanelRange={adjustPanelRange}
-            onFocusPanelChunk={focusPanelChunk}
-            isCreating={isCreating}
-          />
-          <PanelChunkList
-            bookLength={bookText.length}
-            panels={panels}
-            pages={document.pages}
-            selectedPanelId={selectedPanelId}
-            focusedPanelId={focusedChunkPanelId}
-            onSelectPanel={selectPanelChunk}
-            onDeletePanel={deletePanel}
-            isSaving={isSaving}
-          />
-        </div>
+        {showBookText && (
+          <div className={`story-panels-text-row ${layoutMode === 'book' ? 'is-book-only' : ''}`}>
+            <BookTextSelector
+              bookText={bookText}
+              panels={storyPanels}
+              selection={selection}
+              focusedPanelId={focusedBookPanelId}
+              onSelectionChange={setSelection}
+              onCreatePanel={createPanel}
+              onDeletePanel={deletePanel}
+              onAdjustPanelRange={adjustPanelRange}
+              onFocusPanelChunk={focusPanelChunk}
+              isCreating={isCreating}
+            />
+            {layoutMode === 'book-chunks' && panelChunks}
+          </div>
+        )}
       </div>
     </div>
   );

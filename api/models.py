@@ -460,6 +460,7 @@ class StoryPanelPage(BaseModel):
     id: str = Field(pattern=TAG_RE)
     order: int = Field(ge=0)
     title: str = Field(default="", max_length=120)
+    pageKind: Literal["cover", "inside-cover", "story", "back-cover"] = "story"
 
 
 class StoryPanelPageSettings(BaseModel):
@@ -470,8 +471,9 @@ class StoryPanelPageSettings(BaseModel):
 class StoryPanel(BaseModel):
     id: str = Field(pattern=TAG_RE)
     order: int = Field(ge=0)
-    startOffset: int = Field(ge=0)
-    endOffset: int = Field(ge=0)
+    sourceKind: Literal["story", "free-text", "free-image"] = "story"
+    startOffset: int | None = Field(default=None, ge=0)
+    endOffset: int | None = Field(default=None, ge=0)
     selectedText: str = ""
     customText: str = ""
     pageId: str = Field(pattern=TAG_RE)
@@ -484,8 +486,13 @@ class StoryPanel(BaseModel):
 
     @model_validator(mode="after")
     def validate_offsets_and_active_asset(self) -> "StoryPanel":
-        if self.endOffset <= self.startOffset:
-            raise ValueError("Panel endOffset must be greater than startOffset")
+        if self.sourceKind == "story":
+            if self.startOffset is None or self.endOffset is None:
+                raise ValueError("Story panels must have book offsets")
+            if self.endOffset <= self.startOffset:
+                raise ValueError("Panel endOffset must be greater than startOffset")
+        elif self.startOffset is not None or self.endOffset is not None:
+            raise ValueError("Free layout items must not have book offsets")
         if self.activeAssetId is not None and self.activeAssetId not in self.assetIds:
             raise ValueError("activeAssetId must be attached to the panel")
         return self
@@ -510,7 +517,7 @@ class StoryPanelDocument(BaseModel):
         for panel in self.panels:
             if panel.pageId not in page_id_set:
                 raise ValueError(f"Panel references unknown page: {panel.pageId}")
-        ranges = sorted((panel.startOffset, panel.endOffset, panel.id) for panel in self.panels)
+        ranges = sorted((panel.startOffset, panel.endOffset, panel.id) for panel in self.panels if panel.sourceKind == "story")
         for previous, current in zip(ranges, ranges[1:]):
             if previous[1] > current[0]:
                 raise ValueError(f"Panel text ranges overlap: {previous[2]} and {current[2]}")
@@ -534,6 +541,7 @@ class StoryPanelCreate(BaseModel):
 
 class StoryPanelPatch(BaseModel):
     order: int | None = Field(default=None, ge=0)
+    sourceKind: Literal["story", "free-text", "free-image"] | None = None
     startOffset: int | None = Field(default=None, ge=0)
     endOffset: int | None = Field(default=None, ge=0)
     selectedText: str | None = None

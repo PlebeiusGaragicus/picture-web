@@ -8,6 +8,7 @@ import library
 import gemini
 import chat_sessions
 import adaptation
+import story_panels_print
 from fastapi.testclient import TestClient
 from main import app
 from models import AdaptationAssetLink
@@ -1052,7 +1053,8 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
 
     empty = client.get("/api/projects/farm-comic/story-panels")
     assert empty.status_code == 200
-    assert empty.json()["pages"][0]["id"] == "page-001"
+    assert [page["pageKind"] for page in empty.json()["pages"]] == ["cover", "inside-cover", "story", "back-cover"]
+    assert empty.json()["pages"][2]["id"] == "page-001"
     assert empty.json()["panels"] == []
 
     book = client.get("/api/projects/farm-comic/story-panels/book")
@@ -1066,6 +1068,7 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
     assert created.status_code == 200
     panel = created.json()["panels"][0]
     assert panel["id"] == "panel-001"
+    assert panel["sourceKind"] == "story"
     assert panel["selectedText"] == "Alpha opens the door."
     assert panel["rect"] == {"x": 0, "y": 0, "w": 12, "h": 3}
 
@@ -1086,7 +1089,7 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
     assert panel["finalized"] is True
 
     document = patched.json()
-    document["pages"].append({"id": "page-002", "order": 1, "title": "Page 2"})
+    document["pages"].append({"id": "page-002", "order": 4, "title": "Page 2", "pageKind": "story"})
     document["panels"][0]["pageId"] = "page-002"
     saved = client.put("/api/projects/farm-comic/story-panels", json=document)
     assert saved.status_code == 200
@@ -1123,7 +1126,7 @@ def test_story_panels_create_uses_story_neighbor_page(tmp_path, monkeypatch):
         json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
     ).json()
     document = first
-    document["pages"].append({"id": "page-002", "order": 1, "title": "Page 2"})
+    document["pages"].append({"id": "page-002", "order": 4, "title": "Page 2", "pageKind": "story"})
     document["panels"][0]["pageId"] = "page-002"
     document["panels"][0]["rect"] = {"x": 0, "y": 4, "w": 6, "h": 3}
     saved = client.put("/api/projects/farm-comic/story-panels", json=document)
@@ -1137,6 +1140,67 @@ def test_story_panels_create_uses_story_neighbor_page(tmp_path, monkeypatch):
     created = next(panel for panel in second.json()["panels"] if panel["startOffset"] == 22)
     assert created["pageId"] == "page-002"
     assert created["rect"] == {"x": 0, "y": 7, "w": 6, "h": 3}
+
+
+def test_story_panels_reject_story_chunks_on_front_matter(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the door.\n")
+
+    response = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door.", "pageId": "cover"},
+    )
+    assert response.status_code == 400
+    assert "story pages" in response.json()["detail"]
+
+
+def test_story_panels_booklet_imposition_order():
+    pages = [story_panels_print.PrintPage(page=None, number=index) for index in range(1, 6)]
+    padded = story_panels_print.padded_booklet_pages(pages)
+    assert [page.number for page in padded] == [1, 2, 3, 4, 5, None, None, None]
+
+    sheets = story_panels_print.impose_booklet_pages(pages)
+    assert len(sheets) == 2
+    assert (
+        sheets[0].front_left.number,
+        sheets[0].front_right.number,
+        sheets[0].back_left.number,
+        sheets[0].back_right.number,
+    ) == (None, 1, 2, None)
+    assert (
+        sheets[1].front_left.number,
+        sheets[1].front_right.number,
+        sheets[1].back_left.number,
+        sheets[1].back_right.number,
+    ) == (None, 3, 4, 5)
+
+
+def test_story_panels_booklet_pdf_endpoint(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the door. Beta crosses the room. Gamma watches.\n")
+
+    created = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
+    )
+    assert created.status_code == 200
+    document = created.json()
+    document["panels"][0]["panelKind"] = "text"
+    document["panels"][0]["customText"] = "Custom caption text."
+    saved = client.put("/api/projects/farm-comic/story-panels", json=document)
+    assert saved.status_code == 200
+
+    response = client.get("/api/projects/farm-comic/story-panels/print/booklet.pdf")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert "farm-comic-comic-booklet.pdf" in response.headers["content-disposition"]
+    assert response.content.startswith(b"%PDF")
 
 
 def test_scene_moments_sections_api(tmp_path, monkeypatch):

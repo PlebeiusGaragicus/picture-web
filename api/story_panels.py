@@ -29,11 +29,19 @@ def document_path(slug: str) -> Path:
 
 
 def default_page() -> StoryPanelPage:
-    return StoryPanelPage(id="page-001", order=0, title="Page 1")
+    return StoryPanelPage(id="page-001", order=2, title="Page 1", pageKind="story")
 
 
 def empty_document() -> StoryPanelDocument:
-    return StoryPanelDocument(pages=[default_page()], panels=[])
+    return StoryPanelDocument(
+        pages=[
+            StoryPanelPage(id="cover", order=0, title="Cover", pageKind="cover"),
+            StoryPanelPage(id="copyright", order=1, title="Copyright / Indicia", pageKind="inside-cover"),
+            default_page(),
+            StoryPanelPage(id="back-cover", order=3, title="Back Cover", pageKind="back-cover"),
+        ],
+        panels=[],
+    )
 
 
 def read_book(slug: str) -> str:
@@ -51,6 +59,9 @@ def _validate_against_book(slug: str, document: StoryPanelDocument) -> StoryPane
     book = read_book(slug)
     book_len = len(book)
     for panel in document.panels:
+        if panel.sourceKind != "story":
+            continue
+        assert panel.startOffset is not None and panel.endOffset is not None
         if panel.endOffset > book_len:
             raise HTTPException(status_code=400, detail=f"Panel range exceeds book length: {panel.id}")
         selected = book[panel.startOffset:panel.endOffset]
@@ -87,8 +98,9 @@ def _next_panel_id(document: StoryPanelDocument) -> str:
 
 
 def _next_page(document: StoryPanelDocument) -> StoryPanelPage:
-    if document.pages:
-        return sorted(document.pages, key=lambda page: (page.order, page.id))[0]
+    story_pages = [page for page in document.pages if page.pageKind == "story"]
+    if story_pages:
+        return sorted(story_pages, key=lambda page: (page.order, page.id))[0]
     page = default_page()
     document.pages.append(page)
     return page
@@ -103,9 +115,12 @@ def _default_rect(document: StoryPanelDocument, page_id: str) -> StoryPanelRect:
 
 
 def _story_order_placement(document: StoryPanelDocument, start_offset: int) -> tuple[str, StoryPanelRect]:
-    ordered = sorted(document.panels, key=lambda panel: (panel.startOffset, panel.endOffset, panel.order))
-    previous_panel = next((panel for panel in reversed(ordered) if panel.startOffset <= start_offset), None)
-    next_panel = next((panel for panel in ordered if panel.startOffset > start_offset), None)
+    ordered = sorted(
+        [panel for panel in document.panels if panel.sourceKind == "story" and panel.startOffset is not None and panel.endOffset is not None],
+        key=lambda panel: (panel.startOffset, panel.endOffset, panel.order),
+    )
+    previous_panel = next((panel for panel in reversed(ordered) if panel.startOffset is not None and panel.startOffset <= start_offset), None)
+    next_panel = next((panel for panel in ordered if panel.startOffset is not None and panel.startOffset > start_offset), None)
     anchor = previous_panel or next_panel
     if anchor is None:
         page_id = _next_page(document).id
@@ -125,8 +140,11 @@ def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
     document = read_document(slug)
     inferred_page_id, inferred_rect = _story_order_placement(document, payload.startOffset)
     page_id = payload.pageId or inferred_page_id
-    if not any(page.id == page_id for page in document.pages):
+    target_page = next((page for page in document.pages if page.id == page_id), None)
+    if target_page is None:
         raise HTTPException(status_code=400, detail=f"Unknown page: {page_id}")
+    if target_page.pageKind != "story":
+        raise HTTPException(status_code=400, detail="Story panel chunks can only be created on story pages")
     rect = payload.rect or (inferred_rect if page_id == inferred_page_id else _default_rect(document, page_id))
     book = read_book(slug)
     if payload.endOffset > len(book):
@@ -138,6 +156,7 @@ def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
     panel = StoryPanel(
         id=_next_panel_id(document),
         order=next_order,
+        sourceKind="story",
         startOffset=payload.startOffset,
         endOffset=payload.endOffset,
         selectedText=selected,
@@ -158,6 +177,11 @@ def patch_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> StoryPane
     updates = payload.model_dump(exclude_unset=True)
     if "pageId" in updates and not any(page.id == updates["pageId"] for page in document.pages):
         raise HTTPException(status_code=400, detail=f"Unknown page: {updates['pageId']}")
+    target_page_id = updates.get("pageId", current.pageId)
+    target_page = next(page for page in document.pages if page.id == target_page_id)
+    next_source_kind = updates.get("sourceKind", current.sourceKind)
+    if next_source_kind == "story" and target_page.pageKind != "story":
+        raise HTTPException(status_code=400, detail="Story panel chunks can only be placed on story pages")
     if "activeAssetId" in updates and updates["activeAssetId"] is None:
         updates["activeAssetId"] = None
     next_panel = StoryPanel.model_validate({**current.model_dump(mode="json"), **updates})
@@ -189,6 +213,7 @@ def add_page(slug: str, title: str = "") -> StoryPanelDocument:
             id=page_id,
             order=max((page.order for page in document.pages), default=-1) + 1,
             title=title or f"Page {index}",
+            pageKind="story",
         )
     )
     return save_document(slug, document)

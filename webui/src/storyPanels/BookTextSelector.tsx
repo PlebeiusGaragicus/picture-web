@@ -17,12 +17,14 @@ type BoundaryDrag = {
 };
 
 function textWithHighlights(bookText: string, panels: StoryPanel[], selection: TextSelectionRange | null) {
-  const markers: Array<{ start: number; end: number; kind: 'panel' | 'selection'; id: string }> = panels.map((panel) => ({
-    start: panel.startOffset,
-    end: panel.endOffset,
-    kind: 'panel',
-    id: panel.id,
-  }));
+  const markers: Array<{ start: number; end: number; kind: 'panel' | 'selection'; id: string }> = panels
+    .filter((panel) => panel.startOffset !== null && panel.endOffset !== null)
+    .map((panel) => ({
+      start: panel.startOffset!,
+      end: panel.endOffset!,
+      kind: 'panel',
+      id: panel.id,
+    }));
   if (selection) {
     markers.push({ start: selection.startOffset, end: selection.endOffset, kind: 'selection', id: 'selection' });
   }
@@ -132,7 +134,7 @@ export function BookTextSelector({
     const selectedText = range.toString();
     const endOffset = startOffset + selectedText.length;
     if (!selectedText.trim()) return;
-    const overlaps = panels.some((panel) => startOffset < panel.endOffset && endOffset > panel.startOffset);
+    const overlaps = panels.some((panel) => panel.startOffset !== null && panel.endOffset !== null && startOffset < panel.endOffset && endOffset > panel.startOffset);
     if (overlaps) {
       setSelectionError('That passage overlaps an existing panel.');
       onSelectionChange(null);
@@ -155,7 +157,7 @@ export function BookTextSelector({
     if (!boundaryDrag) return;
     const offset = offsetFromPoint(event.clientX, event.clientY);
     const panel = panels.find((item) => item.id === boundaryDrag.panelId);
-    if (offset === null || !panel) return;
+    if (offset === null || !panel || panel.startOffset === null || panel.endOffset === null) return;
     if (boundaryDrag.side === 'start') {
       onAdjustPanelRange(panel.id, Math.max(0, Math.min(offset, panel.endOffset - 1)), panel.endOffset);
       return;

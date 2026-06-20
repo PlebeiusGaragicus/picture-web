@@ -29,10 +29,12 @@ export function PanelChunkList({
   const listRef = useRef<HTMLDivElement | null>(null);
   const chunkRefs = useRef<Record<string, HTMLElement | null>>({});
   const [flashingPanelId, setFlashingPanelId] = useState<string | null>(null);
-  const sortedPanels = [...panels].sort((a, b) => a.startOffset - b.startOffset || a.order - b.order);
+  const sortedPanels = panels
+    .filter((panel) => panel.startOffset !== null && panel.endOffset !== null)
+    .sort((a, b) => a.startOffset! - b.startOffset! || a.order - b.order);
   const sortedPages = [...pages].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   const pageNumberById = new Map(sortedPages.map((page, index) => [page.id, index + 1]));
-  const coveredChars = sortedPanels.reduce((total, panel) => total + (panel.endOffset - panel.startOffset), 0);
+  const coveredChars = sortedPanels.reduce((total, panel) => total + (panel.endOffset! - panel.startOffset!), 0);
   const coverage = bookLength > 0 ? Math.round((coveredChars / bookLength) * 100) : 0;
 
   useEffect(() => {

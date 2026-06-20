@@ -7,12 +7,14 @@ import logging
 from fastapi import FastAPI, File, Form, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from starlette import status
 
 import adaptation
 import library
 import chat_sessions
 import story_panels
+import story_panels_print
 from models import (
     ArchivePatch,
     AdaptationCanvasImportResponse,
@@ -322,6 +324,16 @@ def get_story_panel_book(slug: str) -> dict[str, str]:
 @app.get("/api/projects/{slug}/story-panels", response_model=StoryPanelDocument)
 def get_story_panels(slug: str) -> StoryPanelDocument:
     return story_panels.read_document(slug)
+
+
+@app.get("/api/projects/{slug}/story-panels/print/booklet.pdf")
+def get_story_panels_booklet_pdf(slug: str) -> Response:
+    pdf = story_panels_print.render_booklet_pdf(slug)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{slug}-comic-booklet.pdf"'},
+    )
 
 
 @app.put("/api/projects/{slug}/story-panels", response_model=StoryPanelDocument)

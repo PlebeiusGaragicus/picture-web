@@ -46,6 +46,17 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function requestBlob(url: string, init?: RequestInit): Promise<Blob> {
+  const method = init?.method ?? 'GET';
+  debugLog(`request ${method} ${url}`);
+  const response = await fetch(url, init);
+  debugLog(`response ${response.status} ${method} ${url}`);
+  if (!response.ok) {
+    throw new Error(await response.text() || response.statusText);
+  }
+  return response.blob();
+}
+
 export const api = {
   listProjects: () => request<Project[]>('/api/projects'),
   createProject: (slug: string, name: string, settings: Record<string, unknown> = {}) =>
@@ -195,6 +206,8 @@ export const api = {
     request<{ text: string }>(`/api/projects/${slug}/story-panels/book`),
   getStoryPanels: (slug: string) =>
     request<StoryPanelDocument>(`/api/projects/${slug}/story-panels`),
+  getStoryPanelsBookletPdf: (slug: string) =>
+    requestBlob(`/api/projects/${slug}/story-panels/print/booklet.pdf`),
   saveStoryPanels: (slug: string, document: StoryPanelDocument) =>
     request<StoryPanelDocument>(`/api/projects/${slug}/story-panels`, {
       method: 'PUT',
