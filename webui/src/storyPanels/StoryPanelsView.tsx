@@ -16,6 +16,12 @@ function withSelectedText(bookText: string, panel: StoryPanel): StoryPanel {
   return { ...panel, selectedText: bookText.slice(panel.startOffset, panel.endOffset) };
 }
 
+function isEditableShortcutTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable;
+}
+
 export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
   const [bookText, setBookText] = useState('');
   const [document, setDocument] = useState<StoryPanelDocument | null>(null);
@@ -171,6 +177,26 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
     }
   };
 
+  useEffect(() => {
+    const shortcuts: Record<string, StoryPanelLayoutMode> = {
+      a: 'all-pages',
+      '2': 'spread',
+      i: 'single',
+      p: 'single-chunks',
+      b: 'book',
+      c: 'book-chunks',
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) return;
+      const nextMode = shortcuts[event.key.toLowerCase()];
+      if (!nextMode) return;
+      event.preventDefault();
+      setLayoutMode(nextMode);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   if (isLoading) {
     return (
       <div className="story-adaptation-screen">
@@ -224,12 +250,12 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
           <label className="story-panels-view-control">
             View
             <select value={layoutMode} onChange={(event) => setLayoutMode(event.target.value as StoryPanelLayoutMode)}>
-              <option value="spread">Two-page spread</option>
-              <option value="single">Single page + info</option>
-              <option value="single-chunks">Single page + panel chunks</option>
-              <option value="all-pages">All pages</option>
-              <option value="book">Book text double wide</option>
-              <option value="book-chunks">Book text + panel chunks</option>
+              <option value="all-pages">All pages (a)</option>
+              <option value="spread">Two-page spread (2)</option>
+              <option value="single">Single page + info (i)</option>
+              <option value="single-chunks">Single page + panel chunks (p)</option>
+              <option value="book-chunks">Book text + panel chunks (c)</option>
+              <option value="book">Book text (b)</option>
             </select>
           </label>
           <div className="story-panels-history-actions">

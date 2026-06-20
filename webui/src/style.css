@@ -1098,6 +1098,18 @@ button {
   text-align: center;
 }
 
+.story-panels-page-jump input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.story-panels-page-jump input[type="number"]::-webkit-inner-spin-button,
+.story-panels-page-jump input[type="number"]::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
 .story-panels-page-count {
   color: #94a3b8;
   font-size: 13px;
