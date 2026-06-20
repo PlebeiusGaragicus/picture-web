@@ -206,8 +206,12 @@ export const api = {
     request<{ text: string }>(`/api/projects/${slug}/story-panels/book`),
   getStoryPanels: (slug: string) =>
     request<StoryPanelDocument>(`/api/projects/${slug}/story-panels`),
-  getStoryPanelsBookletPdf: (slug: string) =>
-    requestBlob(`/api/projects/${slug}/story-panels/print/booklet.pdf`),
+  getStoryPanelsBookletPdf: (slug: string, options?: { pageBorder?: 'black' | 'grey' | 'none' }) => {
+    const params = new URLSearchParams();
+    if (options?.pageBorder) params.set('pageBorder', options.pageBorder);
+    const query = params.toString();
+    return requestBlob(`/api/projects/${slug}/story-panels/print/booklet.pdf${query ? `?${query}` : ''}`);
+  },
   saveStoryPanels: (slug: string, document: StoryPanelDocument) =>
     request<StoryPanelDocument>(`/api/projects/${slug}/story-panels`, {
       method: 'PUT',

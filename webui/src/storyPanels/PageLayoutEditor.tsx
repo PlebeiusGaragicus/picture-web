@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { StoryPanel, StoryPanelDocument, StoryPanelRect } from '../types';
+import { sortedStoryPages, storyPageNumberById as mapStoryPageNumbers } from './pageNumbers';
 
 export type StoryPanelLayoutMode = 'spread' | 'single' | 'single-chunks' | 'all-pages' | 'book' | 'book-chunks';
 
@@ -154,7 +155,7 @@ export function PageLayoutEditor({
   document: StoryPanelDocument;
   selectedPanelId: string | null;
   layoutMode: StoryPanelLayoutMode;
-  onSelectPanel: (panelId: string) => void;
+  onSelectPanel: (panelId: string | null) => void;
   onSaveDocument: (document: StoryPanelDocument) => void;
   isSaving: boolean;
   sidePanel?: React.ReactNode;
@@ -163,12 +164,14 @@ export function PageLayoutEditor({
 }) {
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const sideHeightSourceRef = useRef<HTMLElement | null>(null);
+  const previousPageIndexRef = useRef(0);
   const [draftDocument, setDraftDocument] = useState<StoryPanelDocument | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [pageMenu, setPageMenu] = useState<PageContextMenu | null>(null);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [pendingPageDeleteId, setPendingPageDeleteId] = useState<string | null>(null);
+  const [pendingPanelDeleteId, setPendingPanelDeleteId] = useState<string | null>(null);
   const [undoStack, setUndoStack] = useState<StoryPanelDocument[]>([]);
   const [redoStack, setRedoStack] = useState<StoryPanelDocument[]>([]);
   const [customTextDraft, setCustomTextDraft] = useState<string | null>(null);
@@ -200,10 +203,14 @@ export function PageLayoutEditor({
       ? [null, coverPage ?? pages[0]].filter((page, index) => index === 0 || Boolean(page))
       : interiorSpreadPages.slice(Math.max(0, clampedPageIndex - 1), Math.max(0, clampedPageIndex - 1) + 2);
   const selectedPanel = displayDocument.panels.find((panel) => panel.id === selectedPanelId) ?? null;
+  const visiblePageIds = new Set(
+    visiblePages.flatMap((page) => (page ? [page.id] : [])),
+  );
+  const visibleSelectedPanel = selectedPanel && visiblePageIds.has(selectedPanel.pageId) ? selectedPanel : null;
   const selectedPage = selectedPageId ? pages.find((page) => page.id === selectedPageId) ?? null : null;
   const selectedPageCanChangeOrder = isStoryPage(selectedPage);
-  const storyPages = pages.filter((page) => page.pageKind === 'story');
-  const storyPageNumberById = new Map(storyPages.map((page, index) => [page.id, index + 1]));
+  const storyPages = sortedStoryPages(pages);
+  const storyPageNumberById = mapStoryPageNumbers(pages);
   const currentStoryPageNumbers = visiblePages
     .filter((page): page is StoryPanelDocument['pages'][number] => page !== null && page.pageKind === 'story')
     .map((page) => storyPageNumberById.get(page.id))
@@ -219,6 +226,9 @@ export function PageLayoutEditor({
   const pendingPageDeletePanelCount = pendingPageDeleteId
     ? displayDocument.panels.filter((panel) => panel.pageId === pendingPageDeleteId).length
     : 0;
+  const pendingPanelDelete = pendingPanelDeleteId
+    ? displayDocument.panels.find((panel) => panel.id === pendingPanelDeleteId) ?? null
+    : null;
   const storyPanelNumberById = new Map(
     displayDocument.panels
       .filter((panel) => panel.sourceKind === 'story')
@@ -238,6 +248,18 @@ export function PageLayoutEditor({
     if (selectedPageId && pages.some((page) => page.id === selectedPageId)) return;
     setSelectedPageId(pages[clampedPageIndex]?.id ?? pages[0]?.id ?? null);
   }, [clampedPageIndex, pages, selectedPageId]);
+  useEffect(() => {
+    if (layoutMode !== 'single' || !selectedPanel) {
+      previousPageIndexRef.current = clampedPageIndex;
+      return;
+    }
+    if (previousPageIndexRef.current === clampedPageIndex) return;
+    previousPageIndexRef.current = clampedPageIndex;
+    const currentPage = pages[clampedPageIndex];
+    if (!currentPage || currentPage.id !== selectedPanel.pageId) {
+      onSelectPanel(null);
+    }
+  }, [clampedPageIndex, layoutMode, onSelectPanel, pages, selectedPanel?.id, selectedPanel?.pageId]);
   useEffect(() => {
     if (!selectedPanel || !isPageLayoutMode || layoutMode === 'all-pages') return;
     const pageIndex = pages.findIndex((page) => page.id === selectedPanel.pageId);
@@ -368,6 +390,18 @@ export function PageLayoutEditor({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [layoutMode, selectedPageId, selectedPageCanChangeOrder, storyPages.length]);
+  useEffect(() => {
+    if (layoutMode !== 'single') return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) return;
+      if (event.key.toLowerCase() !== 'd') return;
+      if (!visibleSelectedPanel || isSaving || pendingPanelDeleteId) return;
+      event.preventDefault();
+      requestDeleteSelectedPanel();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSaving, layoutMode, pendingPanelDeleteId, visibleSelectedPanel?.id]);
   const confirmDeleteSelectedPage = () => {
     const pageId = pendingPageDeleteId;
     const page = pages.find((candidate) => candidate.id === pageId);
@@ -461,12 +495,19 @@ export function PageLayoutEditor({
       panels: displayDocument.panels.map((panel) => panel.id === selectedPanel.id ? { ...panel, ...patch } : panel),
     });
   };
-  const deleteSelectedPanel = () => {
-    if (!selectedPanel) return;
+  const requestDeleteSelectedPanel = () => {
+    if (!visibleSelectedPanel || isSaving) return;
+    setPendingPanelDeleteId(visibleSelectedPanel.id);
+  };
+  const confirmDeleteSelectedPanel = () => {
+    const panelId = pendingPanelDeleteId;
+    if (!panelId) return;
     commitDocument({
       ...displayDocument,
-      panels: displayDocument.panels.filter((panel) => panel.id !== selectedPanel.id),
+      panels: displayDocument.panels.filter((panel) => panel.id !== panelId),
     });
+    setPendingPanelDeleteId(null);
+    onSelectPanel(null);
   };
   const commitCustomTextDraft = () => {
     if (!selectedPanel || customTextDraft === null || customTextDraft === (selectedPanel.customText ?? '')) return;
@@ -628,7 +669,95 @@ export function PageLayoutEditor({
       {isPageLayoutMode && (
         <div className={`story-panels-layout-workspace is-${layoutMode}`}>
         <div className="story-panels-pages">
-        {visiblePages.length ? visiblePages.map((page, pageIndex) => {
+        {visiblePages.length ? (
+          layoutMode === 'spread' ? (
+            <div className="story-panels-spread-wrap">
+              <div className="story-panels-spread-labels">
+                {visiblePages.map((page, pageIndex) => (
+                  <h3
+                    key={page ? `${page.id}-label` : `spread-blank-label-${pageIndex}`}
+                    className={`is-spread-slot-${pageIndex === 0 ? 'left' : 'right'}`}
+                  >
+                    {page ? (
+                      <>
+                        {page.title || page.id} <span>{pageKindLabel(page.pageKind)}</span>
+                      </>
+                    ) : (
+                      'Intentionally Blank'
+                    )}
+                  </h3>
+                ))}
+              </div>
+              <div className="story-panels-print-sheet">
+              {visiblePages.map((page, pageIndex) => {
+                const spreadSlot = pageIndex === 0 ? 'left' : 'right';
+                if (!page) {
+                  return (
+                    <article
+                      key={`spread-blank-${spreadSlot}`}
+                      className={`story-panels-page is-blank is-spread-slot is-spread-slot-${spreadSlot}`}
+                    >
+                      <div className="story-panels-page-grid story-panels-blank-page">
+                        <p>This page intentionally left blank.</p>
+                      </div>
+                    </article>
+                  );
+                }
+                const pagePanels = sortedPanelsForPage(displayDocument, page.id);
+                const pageRows = Math.max(10, ...pagePanels.map((panel) => panel.rect.y + panel.rect.h));
+                return (
+                  <article
+                    key={`${page.id}-${pageIndex}`}
+                    className={`story-panels-page is-spread-slot is-spread-slot-${spreadSlot}`}
+                  >
+                    <div
+                      ref={(element) => {
+                        pageRefs.current[page.id] = element;
+                      }}
+                      className="story-panels-page-grid"
+                      style={{ gridTemplateRows: `repeat(${pageRows}, minmax(22px, 1fr))` }}
+                      onContextMenu={(event) => openPageMenu(event, page.id)}
+                      onPointerMove={continueDrag}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                    >
+                      {pagePanels.map((panel) => (
+                        <button
+                          key={panel.id}
+                          type="button"
+                          className={`story-panels-page-panel is-${panel.panelKind} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
+                          style={panelStyle(panel, pageRows)}
+                          onClick={() => onSelectPanel(panel.id)}
+                          onDoubleClick={(event) => openPanelDetail(event, panel)}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }}
+                          onPointerDown={(event) => beginDrag(event, panel, 'move')}
+                        >
+                          {panel.sourceKind === 'story' && panel.panelKind !== 'text' && (
+                            <strong>Panel {storyPanelNumberById.get(panel.id) ?? ''}</strong>
+                          )}
+                          <span>{(panel.panelKind === 'text' && panel.id === selectedPanelId && customTextDraft ? customTextDraft : panel.panelKind === 'text' && panel.customText ? panel.customText : panel.selectedText || (panel.sourceKind === 'free-image' ? 'Cover image block' : '')).replace(/\s+/g, ' ').trim().slice(0, 120)}</span>
+                          {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+                            <span
+                              key={corner}
+                              className={`story-panels-resize-handle is-${corner}`}
+                              aria-hidden="true"
+                              onPointerDown={(event) => beginDrag(event, panel, 'resize', corner)}
+                            />
+                          ))}
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                );
+              })}
+              {visiblePages.length > 1 && <div className="story-panels-print-gutter" aria-hidden="true" />}
+              </div>
+            </div>
+          ) : (
+            visiblePages.map((page, pageIndex) => {
           if (!page) {
             return (
             <article
@@ -704,15 +833,17 @@ export function PageLayoutEditor({
               </div>
             </article>
           );
-        }) : <p className="muted">No pages yet.</p>}
+        })
+          )
+        ) : <p className="muted">No pages yet.</p>}
         </div>
         {layoutMode === 'single' && (
           <aside className="story-panels-info-panel">
-            {selectedPanel ? (
+            {visibleSelectedPanel ? (
               <>
                 <div className="story-panels-info-head">
                   <h3>Selected Panel</h3>
-                  <button type="button" className="danger" disabled={isSaving} onClick={deleteSelectedPanel}>
+                  <button type="button" className="danger" disabled={isSaving} onClick={requestDeleteSelectedPanel}>
                     Delete
                   </button>
                 </div>
@@ -721,9 +852,9 @@ export function PageLayoutEditor({
                   <div className="story-panels-kind-toggle" role="tablist" aria-label="Panel kind">
                     <button
                       type="button"
-                      className={selectedPanel.panelKind === 'image' ? 'active' : ''}
+                      className={visibleSelectedPanel.panelKind === 'image' ? 'active' : ''}
                       role="tab"
-                      aria-selected={selectedPanel.panelKind === 'image'}
+                      aria-selected={visibleSelectedPanel.panelKind === 'image'}
                       disabled={isSaving}
                       onClick={() => updateSelectedPanel({ panelKind: 'image' })}
                     >
@@ -731,9 +862,9 @@ export function PageLayoutEditor({
                     </button>
                     <button
                       type="button"
-                      className={selectedPanel.panelKind === 'text' ? 'active' : ''}
+                      className={visibleSelectedPanel.panelKind === 'text' ? 'active' : ''}
                       role="tab"
-                      aria-selected={selectedPanel.panelKind === 'text'}
+                      aria-selected={visibleSelectedPanel.panelKind === 'text'}
                       disabled={isSaving}
                       onClick={() => updateSelectedPanel({ panelKind: 'text' })}
                     >
@@ -742,16 +873,16 @@ export function PageLayoutEditor({
                   </div>
                 </div>
                 <label>
-                  {selectedPanel.sourceKind === 'story' ? `Passage text (${selectedPanel.startOffset} to ${selectedPanel.endOffset})` : 'Passage text'}
+                  {visibleSelectedPanel.sourceKind === 'story' ? `Passage text (${visibleSelectedPanel.startOffset} to ${visibleSelectedPanel.endOffset})` : 'Passage text'}
                   <textarea
-                    value={selectedPanel.sourceKind === 'story' ? selectedPanel.selectedText : ''}
+                    value={visibleSelectedPanel.sourceKind === 'story' ? visibleSelectedPanel.selectedText : ''}
                     rows={5}
                     readOnly
-                    disabled={selectedPanel.sourceKind !== 'story'}
-                    placeholder={selectedPanel.sourceKind !== 'story' ? 'No source passage for this free layout item' : undefined}
+                    disabled={visibleSelectedPanel.sourceKind !== 'story'}
+                    placeholder={visibleSelectedPanel.sourceKind !== 'story' ? 'No source passage for this free layout item' : undefined}
                   />
                 </label>
-                {selectedPanel.panelKind === 'text' && (
+                {visibleSelectedPanel.panelKind === 'text' && (
                   <label>
                     Caption text
                     <textarea
@@ -794,6 +925,26 @@ export function PageLayoutEditor({
               <p className="muted">Select a panel chunk first.</p>
             )
           )}
+        </div>
+      )}
+      {pendingPanelDelete && (
+        <div className="confirm-backdrop" onClick={() => setPendingPanelDeleteId(null)}>
+          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-story-panel-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="delete-story-panel-title">
+              Delete {pendingPanelDelete.sourceKind === 'story'
+                ? `Panel ${storyPanelNumberById.get(pendingPanelDelete.id) ?? ''}`
+                : pendingPanelDelete.panelKind === 'text' ? 'text block' : 'image block'}?
+            </h2>
+            <p>
+              {pendingPanelDelete.sourceKind === 'story'
+                ? 'This will remove the panel chunk and its page layout placement. This can be undone from the header.'
+                : 'This will remove the layout item from the page. This can be undone from the header.'}
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={() => setPendingPanelDeleteId(null)}>Cancel</button>
+              <button type="button" className="danger" disabled={isSaving} onClick={confirmDeleteSelectedPanel}>Delete panel</button>
+            </div>
+          </div>
         </div>
       )}
       {pendingPageDelete && (

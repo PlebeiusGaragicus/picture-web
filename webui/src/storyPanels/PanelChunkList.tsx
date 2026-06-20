@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { StoryPanel, StoryPanelPage } from '../types';
+import { storyPageNumberById, storyPagePlacementLabel } from './pageNumbers';
 
 function compactText(value: string, maxLength = 180) {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -34,8 +35,7 @@ export function PanelChunkList({
   const sortedPanels = panels
     .filter((panel) => panel.startOffset !== null && panel.endOffset !== null)
     .sort((a, b) => a.startOffset! - b.startOffset! || a.order - b.order);
-  const sortedPages = [...pages].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-  const pageNumberById = new Map(sortedPages.map((page, index) => [page.id, index + 1]));
+  const pageNumbers = storyPageNumberById(pages);
   const coveredChars = sortedPanels.reduce((total, panel) => total + (panel.endOffset! - panel.startOffset!), 0);
   const coverage = bookLength > 0 ? Math.round((coveredChars / bookLength) * 100) : 0;
 
@@ -88,13 +88,13 @@ export function PanelChunkList({
               <strong>Panel {index + 1}</strong>
               <span>{panel.startOffset}-{panel.endOffset}</span>
               <span
-                className={`story-panels-placement-badge ${pageNumberById.has(panel.pageId) ? 'is-placed' : 'is-unplaced'}`}
+                className={`story-panels-placement-badge ${pageNumbers.has(panel.pageId) ? 'is-placed' : 'is-unplaced'}`}
                 onClick={(event) => {
                   event.stopPropagation();
                   onOpenPanelPlacement?.(panel.id);
                 }}
               >
-                {pageNumberById.has(panel.pageId) ? `Page ${pageNumberById.get(panel.pageId)}` : 'Not placed'}
+                {storyPagePlacementLabel(pages, panel.pageId)}
               </span>
               <p>{compactText(panel.selectedText)}</p>
             </button>

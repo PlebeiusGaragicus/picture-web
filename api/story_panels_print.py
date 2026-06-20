@@ -12,6 +12,8 @@ from reportlab.lib.pagesizes import landscape, letter
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
+from typing import Literal
+
 import library
 import story_panels
 from models import StoryPanel, StoryPanelDocument, StoryPanelPage
@@ -19,7 +21,7 @@ from models import StoryPanel, StoryPanelDocument, StoryPanelPage
 SHEET_WIDTH, SHEET_HEIGHT = landscape(letter)
 HALF_WIDTH = SHEET_WIDTH / 2
 PAGE_HEIGHT = SHEET_HEIGHT
-OUTER_MARGIN = 18
+OUTER_MARGIN = 9
 TOP_MARGIN = 18
 BOTTOM_MARGIN = 18
 INNER_GUTTER = 27
@@ -53,9 +55,18 @@ def story_pages(document: StoryPanelDocument) -> list[PrintPage]:
 
 
 def padded_booklet_pages(pages: list[PrintPage]) -> list[PrintPage]:
+    """Pad to a multiple of four for saddle-stitch imposition.
+
+    Blanks are inserted before the last page so the back cover stays at the
+    final reading-order position (outside back when the booklet is closed).
+    """
+    blank = PrintPage(page=None, number=None)
     padded = [*pages]
     while len(padded) == 0 or len(padded) % 4 != 0:
-        padded.append(PrintPage(page=None, number=None))
+        if len(padded) == 0:
+            padded.append(blank)
+        else:
+            padded.insert(-1, blank)
     return padded
 
 
@@ -78,15 +89,18 @@ def impose_booklet_pages(pages: list[PrintPage]) -> list[ImposedSheet]:
     return sheets
 
 
-def render_booklet_pdf(slug: str) -> bytes:
+PageBorder = Literal["black", "grey", "none"]
+
+
+def render_booklet_pdf(slug: str, *, page_border: PageBorder = "black") -> bytes:
     document = story_panels.read_document(slug)
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=(SHEET_WIDTH, SHEET_HEIGHT))
     panels_by_page = _panels_by_page(document)
     for sheet in impose_booklet_pages(story_pages(document)):
-        _draw_sheet_side(pdf, slug, document, panels_by_page, sheet.front_left, sheet.front_right)
+        _draw_sheet_side(pdf, slug, document, panels_by_page, sheet.front_left, sheet.front_right, page_border=page_border)
         pdf.showPage()
-        _draw_sheet_side(pdf, slug, document, panels_by_page, sheet.back_left, sheet.back_right)
+        _draw_sheet_side(pdf, slug, document, panels_by_page, sheet.back_left, sheet.back_right, page_border=page_border)
         pdf.showPage()
     pdf.save()
     return buffer.getvalue()
@@ -108,11 +122,13 @@ def _draw_sheet_side(
     panels_by_page: dict[str, list[StoryPanel]],
     left_page: PrintPage,
     right_page: PrintPage,
+    *,
+    page_border: PageBorder = "black",
 ) -> None:
     pdf.setFillColor(white)
     pdf.rect(0, 0, SHEET_WIDTH, SHEET_HEIGHT, stroke=0, fill=1)
-    _draw_comic_page(pdf, slug, document, panels_by_page, left_page, 0, is_left=True)
-    _draw_comic_page(pdf, slug, document, panels_by_page, right_page, HALF_WIDTH, is_left=False)
+    _draw_comic_page(pdf, slug, document, panels_by_page, left_page, 0, is_left=True, page_border=page_border)
+    _draw_comic_page(pdf, slug, document, panels_by_page, right_page, HALF_WIDTH, is_left=False, page_border=page_border)
     pdf.setStrokeColor(lightgrey)
     pdf.setDash(3, 4)
     pdf.line(HALF_WIDTH, 0, HALF_WIDTH, SHEET_HEIGHT)
@@ -128,6 +144,7 @@ def _draw_comic_page(
     origin_x: float,
     *,
     is_left: bool,
+    page_border: PageBorder = "black",
 ) -> None:
     inner_margin = INNER_GUTTER if is_left else OUTER_MARGIN
     outer_margin = OUTER_MARGIN if is_left else INNER_GUTTER
@@ -135,9 +152,14 @@ def _draw_comic_page(
     page_y = BOTTOM_MARGIN
     page_w = HALF_WIDTH - outer_margin - inner_margin
     page_h = PAGE_HEIGHT - TOP_MARGIN - BOTTOM_MARGIN
-    pdf.setStrokeColor(black)
-    pdf.setLineWidth(0.75)
-    pdf.rect(page_x, page_y, page_w, page_h, stroke=1, fill=0)
+    if page_border == "black":
+        pdf.setStrokeColor(black)
+        pdf.setLineWidth(0.75)
+        pdf.rect(page_x, page_y, page_w, page_h, stroke=1, fill=0)
+    elif page_border == "grey":
+        pdf.setStrokeColor(HexColor("#cbd5e1"))
+        pdf.setLineWidth(0.5)
+        pdf.rect(page_x, page_y, page_w, page_h, stroke=1, fill=0)
     if print_page.page is None:
         _draw_blank_page(pdf, page_x, page_y, page_w, page_h)
         return

@@ -181,7 +181,7 @@ def _default_rect(document: StoryPanelDocument, page_id: str) -> StoryPanelRect:
     y = 0
     if panels_on_page:
         y = max(panel.rect.y + panel.rect.h for panel in panels_on_page)
-    return StoryPanelRect(x=0, y=y, w=12, h=3)
+    return StoryPanelRect(x=0, y=y, w=4, h=3)
 
 
 def _story_order_placement(document: StoryPanelDocument, start_offset: int) -> tuple[str, StoryPanelRect]:

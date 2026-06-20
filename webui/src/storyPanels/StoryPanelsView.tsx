@@ -6,6 +6,7 @@ import type { StoryPanel, StoryPanelDocument } from '../types';
 import { BookTextSelector, type TextSelectionRange } from './BookTextSelector';
 import { PageLayoutEditor, type StoryPanelLayoutMode } from './PageLayoutEditor';
 import { PanelChunkList } from './PanelChunkList';
+import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './printLayout';
 
 function sortedPanels(panels: StoryPanel[]) {
   return [...panels].sort((a, b) => (a.startOffset ?? Number.MAX_SAFE_INTEGER) - (b.startOffset ?? Number.MAX_SAFE_INTEGER) || a.order - b.order);
@@ -34,6 +35,8 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
   const [isSaving, setIsSaving] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportPageBorder, setExportPageBorder] = useState<BookletPageBorder>('black');
   const [historyControls, setHistoryControls] = useState<React.ReactNode>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,9 +77,9 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
     window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
   };
 
-  const selectLayoutPanel = (panelId: string) => {
+  const selectLayoutPanel = (panelId: string | null) => {
     setSelectedPanelId(panelId);
-    if (!document?.panels.some((panel) => panel.id === panelId && panel.sourceKind === 'story')) return;
+    if (!panelId || !document?.panels.some((panel) => panel.id === panelId && panel.sourceKind === 'story')) return;
     setFocusedChunkPanelId(null);
     window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
   };
@@ -159,17 +162,18 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
     });
   };
 
-  const exportBookletPdf = async () => {
+  const exportBookletPdf = async (pageBorder: BookletPageBorder = exportPageBorder) => {
     setIsExporting(true);
     setError(null);
     try {
-      const blob = await api.getStoryPanelsBookletPdf(projectSlug);
+      const blob = await api.getStoryPanelsBookletPdf(projectSlug, { pageBorder });
       const url = URL.createObjectURL(blob);
       const anchor = window.document.createElement('a');
       anchor.href = url;
       anchor.download = `${projectSlug}-comic-booklet.pdf`;
       anchor.click();
       URL.revokeObjectURL(url);
+      setShowExportModal(false);
     } catch (err) {
       setError(formatRequestError(err));
     } finally {
@@ -261,12 +265,42 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
           <div className="story-panels-history-actions">
             {historyControls}
           </div>
-          <button type="button" className="secondary" disabled={isExporting || isSaving} onClick={exportBookletPdf}>
+          <button type="button" className="secondary" disabled={isExporting || isSaving} onClick={() => setShowExportModal(true)}>
             {isExporting ? 'Exporting...' : 'Export PDF'}
           </button>
         </div>
       </header>
       {error && <p className="error error-banner">{error}</p>}
+      {showExportModal && (
+        <div className="confirm-backdrop" onClick={() => !isExporting && setShowExportModal(false)}>
+          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="export-booklet-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="export-booklet-title">Export comic booklet PDF</h2>
+            <p className="muted">Landscape letter sheets with saddle-stitch imposition. Print duplex on the long edge, fold, and staple on the center crease.</p>
+            <fieldset className="story-panels-export-options">
+              <legend>Page outline border</legend>
+              {BOOKLET_PAGE_BORDER_OPTIONS.map((option) => (
+                <label key={option.value} className="story-panels-export-option">
+                  <input
+                    type="radio"
+                    name="booklet-page-border"
+                    value={option.value}
+                    checked={exportPageBorder === option.value}
+                    disabled={isExporting}
+                    onChange={() => setExportPageBorder(option.value)}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </fieldset>
+            <div className="modal-actions">
+              <button type="button" className="secondary" disabled={isExporting} onClick={() => setShowExportModal(false)}>Cancel</button>
+              <button type="button" disabled={isExporting} onClick={() => void exportBookletPdf(exportPageBorder)}>
+                {isExporting ? 'Exporting...' : 'Export PDF'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="story-panels-grid">
         <PageLayoutEditor
           document={document}

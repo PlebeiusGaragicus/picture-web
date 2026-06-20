@@ -8,6 +8,7 @@ import library
 import gemini
 import chat_sessions
 import adaptation
+import story_panels
 import story_panels_print
 from fastapi.testclient import TestClient
 from main import app
@@ -1076,7 +1077,7 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
     panel = next(panel for panel in created.json()["panels"] if panel["sourceKind"] == "story")
     assert panel["sourceKind"] == "story"
     assert panel["selectedText"] == "Alpha opens the door."
-    assert panel["rect"] == {"x": 0, "y": 0, "w": 12, "h": 3}
+    assert panel["rect"] == {"x": 0, "y": 0, "w": 4, "h": 3}
 
     overlap = client.post(
         "/api/projects/farm-comic/story-panels/panels",
@@ -1166,9 +1167,10 @@ def test_story_panels_reject_story_chunks_on_front_matter(tmp_path, monkeypatch)
 
 
 def test_story_panels_booklet_imposition_order():
+    # Reading order: 1=cover ... 5=back cover. Padding must keep 5 last for saddle stitch.
     pages = [story_panels_print.PrintPage(page=None, number=index) for index in range(1, 6)]
     padded = story_panels_print.padded_booklet_pages(pages)
-    assert [page.number for page in padded] == [1, 2, 3, 4, 5, None, None, None]
+    assert [page.number for page in padded] == [1, 2, 3, 4, None, None, None, 5]
 
     sheets = story_panels_print.impose_booklet_pages(pages)
     assert len(sheets) == 2
@@ -1177,13 +1179,42 @@ def test_story_panels_booklet_imposition_order():
         sheets[0].front_right.number,
         sheets[0].back_left.number,
         sheets[0].back_right.number,
-    ) == (None, 1, 2, None)
+    ) == (5, 1, 2, None)
     assert (
         sheets[1].front_left.number,
         sheets[1].front_right.number,
         sheets[1].back_left.number,
         sheets[1].back_right.number,
-    ) == (None, 3, 4, 5)
+    ) == (None, 3, 4, None)
+
+
+def test_story_panels_booklet_imposition_keeps_back_cover_outside():
+    document = story_panels.empty_document()
+    pages = story_panels_print.story_pages(document)
+    assert len(pages) == 5
+    padded = story_panels_print.padded_booklet_pages(pages)
+    assert len(padded) == 8
+    assert padded[-1].page is not None and padded[-1].page.pageKind == "back-cover"
+    assert padded[0].page is not None and padded[0].page.pageKind == "cover"
+    outer = story_panels_print.impose_booklet_pages(pages)[0]
+    assert outer.front_right.page is not None and outer.front_right.page.pageKind == "cover"
+    assert outer.front_left.page is not None and outer.front_left.page.pageKind == "back-cover"
+
+
+def test_story_panels_booklet_pdf_page_border_options(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the door.\n")
+
+    for border in ("black", "grey", "none"):
+        response = client.get(f"/api/projects/farm-comic/story-panels/print/booklet.pdf?pageBorder={border}")
+        assert response.status_code == 200
+        assert response.content.startswith(b"%PDF")
+
+    rejected = client.get("/api/projects/farm-comic/story-panels/print/booklet.pdf?pageBorder=purple")
+    assert rejected.status_code == 400
 
 
 def test_story_panels_booklet_pdf_endpoint(tmp_path, monkeypatch):

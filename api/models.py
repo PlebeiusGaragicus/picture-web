@@ -478,7 +478,7 @@ class StoryPanel(BaseModel):
     customText: str = ""
     pageId: str = Field(pattern=TAG_RE)
     panelKind: Literal["image", "text"] = "image"
-    rect: StoryPanelRect = Field(default_factory=lambda: StoryPanelRect(x=0, y=0, w=12, h=3))
+    rect: StoryPanelRect = Field(default_factory=lambda: StoryPanelRect(x=0, y=0, w=4, h=3))
     layer: int = Field(default=0, ge=0)
     assetIds: list[str] = Field(default_factory=list)
     activeAssetId: str | None = None

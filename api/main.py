@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, File, Form, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import Response
@@ -327,8 +327,10 @@ def get_story_panels(slug: str) -> StoryPanelDocument:
 
 
 @app.get("/api/projects/{slug}/story-panels/print/booklet.pdf")
-def get_story_panels_booklet_pdf(slug: str) -> Response:
-    pdf = story_panels_print.render_booklet_pdf(slug)
+def get_story_panels_booklet_pdf(slug: str, pageBorder: story_panels_print.PageBorder = "black") -> Response:
+    if pageBorder not in {"black", "grey", "none"}:
+        raise HTTPException(status_code=400, detail=f"Unknown pageBorder: {pageBorder}")
+    pdf = story_panels_print.render_booklet_pdf(slug, page_border=pageBorder)
     return Response(
         content=pdf,
         media_type="application/pdf",
