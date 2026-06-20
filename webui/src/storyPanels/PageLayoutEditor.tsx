@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { StoryPanel, StoryPanelDocument, StoryPanelRect } from '../types';
 
-export type StoryPanelLayoutMode = 'spread' | 'single' | 'single-chunks' | 'book' | 'book-chunks';
+export type StoryPanelLayoutMode = 'spread' | 'single' | 'single-chunks' | 'all-pages' | 'book' | 'book-chunks';
 
 const gridColumns = 12;
 const minPanelHeight = 2;
@@ -30,11 +30,6 @@ type PageContextMenu = {
   y: number;
   pageId: string;
   rect: StoryPanelRect;
-} | {
-  kind: 'panel';
-  x: number;
-  y: number;
-  panelId: string;
 };
 
 function storyOffset(panel: StoryPanel) {
@@ -48,7 +43,7 @@ function sortedPages(document: StoryPanelDocument) {
 function sortedPanelsForPage(document: StoryPanelDocument, pageId: string) {
   return document.panels
     .filter((panel) => panel.pageId === pageId)
-    .sort((a, b) => panelLayer(a) - panelLayer(b) || a.rect.y - b.rect.y || a.rect.x - b.rect.x);
+    .sort((a, b) => a.layer - b.layer || a.rect.y - b.rect.y || a.rect.x - b.rect.x);
 }
 
 function pageKindLabel(pageKind: StoryPanelDocument['pages'][number]['pageKind']) {
@@ -58,17 +53,13 @@ function pageKindLabel(pageKind: StoryPanelDocument['pages'][number]['pageKind']
   return 'Story page';
 }
 
-function panelLayer(panel: StoryPanel) {
-  return panel.panelKind === 'inlay' ? Math.max(1, panel.layer) : 0;
-}
-
 function panelStyle(panel: StoryPanel, rows: number): CSSProperties {
   return {
     left: `${(panel.rect.x / gridColumns) * 100}%`,
     top: `${(panel.rect.y / rows) * 100}%`,
     width: `${(panel.rect.w / gridColumns) * 100}%`,
     height: `${(panel.rect.h / rows) * 100}%`,
-    zIndex: panelLayer(panel) + 1,
+    zIndex: panel.layer + 1,
   };
 }
 
@@ -123,6 +114,12 @@ function nextPanelId(document: StoryPanelDocument) {
   return `panel-${String(index).padStart(3, '0')}`;
 }
 
+function normalizePageOrder(pages: StoryPanelDocument['pages']) {
+  return pages
+    .map((page, index) => ({ ...page, order: index }))
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+}
+
 export function PageLayoutEditor({
   document,
   selectedPanelId,
@@ -131,6 +128,7 @@ export function PageLayoutEditor({
   onSaveDocument,
   isSaving,
   sidePanel,
+  onLayoutModeChange,
   onHistoryControlsChange,
 }: {
   document: StoryPanelDocument;
@@ -140,6 +138,7 @@ export function PageLayoutEditor({
   onSaveDocument: (document: StoryPanelDocument) => void;
   isSaving: boolean;
   sidePanel?: React.ReactNode;
+  onLayoutModeChange?: (layoutMode: StoryPanelLayoutMode) => void;
   onHistoryControlsChange?: (controls: React.ReactNode) => void;
 }) {
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -148,6 +147,8 @@ export function PageLayoutEditor({
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [pageMenu, setPageMenu] = useState<PageContextMenu | null>(null);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
+  const [pendingPageDeleteId, setPendingPageDeleteId] = useState<string | null>(null);
   const [undoStack, setUndoStack] = useState<StoryPanelDocument[]>([]);
   const [redoStack, setRedoStack] = useState<StoryPanelDocument[]>([]);
   const [customTextDraft, setCustomTextDraft] = useState<string | null>(null);
@@ -159,12 +160,18 @@ export function PageLayoutEditor({
   const lastSpreadStartIndex = pages.length <= 1 ? 0 : pages.length % 2 === 0 ? pages.length - 1 : pages.length - 2;
   const isPageLayoutMode = layoutMode !== 'book' && layoutMode !== 'book-chunks';
   const isSinglePageMode = isPageLayoutMode && layoutMode !== 'spread';
-  const visiblePages = pages.length === 0 ? [] : isSinglePageMode
+  const visiblePages = pages.length === 0 ? [] : layoutMode === 'all-pages'
+    ? pages
+    : isSinglePageMode
     ? pages.slice(clampedPageIndex, clampedPageIndex + 1)
     : clampedPageIndex === 0
       ? [null, pages[0]].filter((page, index) => index === 0 || Boolean(page))
       : pages.slice(clampedPageIndex, clampedPageIndex + 2);
   const selectedPanel = displayDocument.panels.find((panel) => panel.id === selectedPanelId) ?? null;
+  const pendingPageDelete = pendingPageDeleteId ? pages.find((page) => page.id === pendingPageDeleteId) ?? null : null;
+  const pendingPageDeletePanelCount = pendingPageDeleteId
+    ? displayDocument.panels.filter((panel) => panel.pageId === pendingPageDeleteId).length
+    : 0;
   const storyPanelNumberById = new Map(
     displayDocument.panels
       .filter((panel) => panel.sourceKind === 'story')
@@ -181,7 +188,11 @@ export function PageLayoutEditor({
     setCustomTextDraft(selectedPanel?.customText ?? null);
   }, [selectedPanel?.id, selectedPanel?.customText]);
   useEffect(() => {
-    if (!selectedPanel || !isPageLayoutMode) return;
+    if (selectedPageId && pages.some((page) => page.id === selectedPageId)) return;
+    setSelectedPageId(pages[clampedPageIndex]?.id ?? pages[0]?.id ?? null);
+  }, [clampedPageIndex, pages, selectedPageId]);
+  useEffect(() => {
+    if (!selectedPanel || !isPageLayoutMode || layoutMode === 'all-pages') return;
     const pageIndex = pages.findIndex((page) => page.id === selectedPanel.pageId);
     if (pageIndex >= 0) {
       setCurrentPageIndex(layoutMode === 'spread' ? pageIndex === 0 ? 0 : pageIndex % 2 === 0 ? pageIndex - 1 : pageIndex : pageIndex);
@@ -219,17 +230,20 @@ export function PageLayoutEditor({
     observer.observe(source);
     return () => observer.disconnect();
   }, [layoutMode, clampedPageIndex, visiblePages.length]);
-  const createPageDocument = () => {
+  const createPageDocument = (afterPageId?: string) => {
     const id = nextPageId(displayDocument);
+    const insertionIndex = afterPageId ? pages.findIndex((page) => page.id === afterPageId) + 1 : displayDocument.pages.length;
     const page: StoryPanelDocument['pages'][number] = {
       id,
-      order: displayDocument.pages.length,
-      title: `Page ${displayDocument.pages.length + 1}`,
+      order: insertionIndex,
+      title: `Page ${pages.filter((candidate) => candidate.pageKind === 'story').length + 1}`,
       pageKind: 'story',
     };
+    const nextPages = [...pages];
+    nextPages.splice(insertionIndex < 0 ? pages.length : insertionIndex, 0, page);
     return {
       ...displayDocument,
-      pages: [...displayDocument.pages, page],
+      pages: nextPages.map((candidate, index) => ({ ...candidate, order: index })),
     };
   };
   const commitDocument = (nextDocument: StoryPanelDocument) => {
@@ -263,6 +277,43 @@ export function PageLayoutEditor({
     const newPageIndex = pages.length;
     commitDocument(createPageDocument());
     setCurrentPageIndex(layoutMode === 'spread' && newPageIndex > 0 && newPageIndex % 2 === 0 ? newPageIndex - 1 : newPageIndex);
+  };
+  const selectedPageIndex = selectedPageId ? pages.findIndex((page) => page.id === selectedPageId) : -1;
+  const addPageAfterSelected = () => {
+    const anchorId = selectedPageId ?? pages[pages.length - 1]?.id;
+    const nextDocument = createPageDocument(anchorId);
+    const insertedPage = sortedPages(nextDocument)[Math.max(0, (anchorId ? selectedPageIndex + 1 : pages.length))];
+    commitDocument(nextDocument);
+    setSelectedPageId(insertedPage?.id ?? null);
+  };
+  const requestDeleteSelectedPage = () => {
+    if (!selectedPageId || pages.length <= 1) return;
+    setPendingPageDeleteId(selectedPageId);
+  };
+  const confirmDeleteSelectedPage = () => {
+    const pageId = pendingPageDeleteId;
+    if (!pageId || pages.length <= 1) return;
+    const pageIndex = pages.findIndex((page) => page.id === pageId);
+    const nextPages = normalizePageOrder(pages.filter((page) => page.id !== pageId));
+    const nextIndex = Math.min(Math.max(0, pageIndex), nextPages.length - 1);
+    commitDocument({
+      ...displayDocument,
+      pages: nextPages,
+      panels: displayDocument.panels.filter((panel) => panel.pageId !== pageId),
+    });
+    setPendingPageDeleteId(null);
+    setSelectedPageId(nextPages[nextIndex]?.id ?? null);
+    setCurrentPageIndex(nextIndex);
+  };
+  const moveSelectedPage = (direction: -1 | 1) => {
+    if (!selectedPageId || selectedPageIndex < 0) return;
+    const targetIndex = selectedPageIndex + direction;
+    if (targetIndex < 0 || targetIndex >= pages.length) return;
+    const nextPages = [...pages];
+    const [page] = nextPages.splice(selectedPageIndex, 1);
+    nextPages.splice(targetIndex, 0, page);
+    commitDocument({ ...displayDocument, pages: nextPages.map((candidate, index) => ({ ...candidate, order: index })) });
+    setCurrentPageIndex(targetIndex);
   };
   const goPrevious = () => {
     if (isSinglePageMode) {
@@ -304,17 +355,6 @@ export function PageLayoutEditor({
     };
     commitDocument({ ...displayDocument, panels: [...displayDocument.panels, nextPanel] });
     onSelectPanel(nextPanel.id);
-    setPageMenu(null);
-  };
-  const updatePanelKind = (panelId: string, panelKind: StoryPanel['panelKind']) => {
-    const nextPanels = displayDocument.panels.map((panel) => {
-      if (panel.id !== panelId) return panel;
-      if (panelKind === 'inlay') {
-        return { ...panel, panelKind, layer: 1 };
-      }
-      return { ...panel, panelKind, layer: 0 };
-    });
-    commitDocument({ ...displayDocument, panels: nextPanels });
     setPageMenu(null);
   };
   const updateSelectedPanel = (patch: Partial<StoryPanel>) => {
@@ -411,11 +451,23 @@ export function PageLayoutEditor({
     const y = Math.max(0, roundStep((event.clientY - bounds.top) / rowHeight, panelSnapScale));
     setPageMenu({ kind: 'page', x: event.clientX, y: event.clientY, pageId, rect: { x, y, w: selectedPanel?.rect.w ?? 6, h: selectedPanel?.rect.h ?? 3 } });
   };
-  const openPanelMenu = (event: React.MouseEvent, panelId: string) => {
+  const openPageDetail = (pageId: string) => {
+    const pageIndex = pages.findIndex((page) => page.id === pageId);
+    if (pageIndex < 0) return;
+    setCurrentPageIndex(pageIndex);
+    setSelectedPageId(pageId);
+    onLayoutModeChange?.('single');
+  };
+  const openPanelDetail = (event: React.MouseEvent, panel: StoryPanel) => {
     event.preventDefault();
     event.stopPropagation();
-    onSelectPanel(panelId);
-    setPageMenu({ kind: 'panel', x: event.clientX, y: event.clientY, panelId });
+    const pageIndex = pages.findIndex((page) => page.id === panel.pageId);
+    if (pageIndex >= 0) {
+      setCurrentPageIndex(pageIndex);
+      setSelectedPageId(panel.pageId);
+    }
+    onSelectPanel(panel.id);
+    onLayoutModeChange?.('single');
   };
 
   return (
@@ -424,25 +476,36 @@ export function PageLayoutEditor({
         <div className="story-panels-overlap-controls">
           <div className="story-panels-action-row">
             <div className="story-panels-page-nav" aria-label="Page navigation">
-              <button type="button" className="secondary" disabled={isSaving || clampedPageIndex <= 0} onClick={goPrevious}>
-                Prev
-              </button>
-              <label className="story-panels-page-jump">
-                <span>Page</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={Math.max(1, pages.length)}
-                  value={pages.length ? clampedPageIndex + 1 : 0}
-                  disabled={isSaving || pages.length === 0}
-                  onChange={(event) => jumpToPage(Number(event.target.value))}
-                />
-                <span aria-hidden="true">/</span>
-                <input type="text" value={Math.max(1, pages.length)} readOnly aria-label="Total pages" />
-              </label>
-              <button type="button" className="secondary" disabled={isSaving} onClick={goNext}>
-                {clampedPageIndex >= (layoutMode === 'spread' ? lastSpreadStartIndex : pages.length - 1) ? 'New page' : 'Next'}
-              </button>
+              {layoutMode === 'all-pages' ? (
+                <>
+                  <button type="button" className="secondary" disabled={isSaving || selectedPageIndex <= 0} onClick={() => moveSelectedPage(-1)}>Move left</button>
+                  <button type="button" className="secondary" disabled={isSaving || selectedPageIndex < 0 || selectedPageIndex >= pages.length - 1} onClick={() => moveSelectedPage(1)}>Move right</button>
+                  <button type="button" className="secondary" disabled={isSaving || !selectedPageId} onClick={addPageAfterSelected}>Add page after</button>
+                  <button type="button" className="secondary" disabled={isSaving || !selectedPageId || pages.length <= 1} onClick={requestDeleteSelectedPage}>Delete page</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="secondary" disabled={isSaving || clampedPageIndex <= 0} onClick={goPrevious}>
+                    Prev
+                  </button>
+                  <label className="story-panels-page-jump">
+                    <span>Page</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={Math.max(1, pages.length)}
+                      value={pages.length ? clampedPageIndex + 1 : 0}
+                      disabled={isSaving || pages.length === 0}
+                      onChange={(event) => jumpToPage(Number(event.target.value))}
+                    />
+                    <span aria-hidden="true">/</span>
+                    <input type="text" value={Math.max(1, pages.length)} readOnly aria-label="Total pages" />
+                  </label>
+                  <button type="button" className="secondary" disabled={isSaving} onClick={goNext}>
+                    {clampedPageIndex >= (layoutMode === 'spread' ? lastSpreadStartIndex : pages.length - 1) ? 'New page' : 'Next'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -458,7 +521,7 @@ export function PageLayoutEditor({
               ref={(element) => {
                 if (layoutMode === 'single-chunks' && pageIndex === 0) sideHeightSourceRef.current = element;
               }}
-              className="story-panels-page is-blank"
+              className={`story-panels-page is-blank ${layoutMode === 'all-pages' && selectedPageId === null ? 'is-page-selected' : ''}`}
             >
                 <h3>Intentionally Blank</h3>
                 <div className="story-panels-page-grid story-panels-blank-page" style={{ aspectRatio: comicPageAspectRatio }}>
@@ -475,7 +538,9 @@ export function PageLayoutEditor({
               ref={(element) => {
                 if (layoutMode === 'single-chunks' && pageIndex === 0) sideHeightSourceRef.current = element;
               }}
-              className="story-panels-page"
+              className={`story-panels-page ${layoutMode === 'all-pages' && selectedPageId === page.id ? 'is-page-selected' : ''}`}
+              onClick={() => setSelectedPageId(page.id)}
+              onDoubleClick={layoutMode === 'all-pages' ? () => openPageDetail(page.id) : undefined}
             >
               <h3>{page.title || page.id} <span>{pageKindLabel(page.pageKind)}</span></h3>
               <div
@@ -495,22 +560,30 @@ export function PageLayoutEditor({
                     type="button"
                     className={`story-panels-page-panel is-${panel.panelKind} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
                     style={panelStyle(panel, pageRows)}
-                    onClick={() => onSelectPanel(panel.id)}
-                    onContextMenu={(event) => openPanelMenu(event, panel.id)}
-                    onPointerDown={(event) => beginDrag(event, panel, 'move')}
+                    onClick={layoutMode === 'all-pages' ? undefined : () => onSelectPanel(panel.id)}
+                    onDoubleClick={(event) => openPanelDetail(event, panel)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onPointerDown={layoutMode === 'all-pages' ? undefined : (event) => beginDrag(event, panel, 'move')}
                   >
-                    {panel.sourceKind === 'story' && panel.panelKind !== 'text' && (
-                      <strong>Panel {storyPanelNumberById.get(panel.id) ?? ''}</strong>
+                    {layoutMode !== 'all-pages' && (
+                      <>
+                        {panel.sourceKind === 'story' && panel.panelKind !== 'text' && (
+                          <strong>Panel {storyPanelNumberById.get(panel.id) ?? ''}</strong>
+                        )}
+                        <span>{(panel.panelKind === 'text' && panel.id === selectedPanelId && customTextDraft ? customTextDraft : panel.panelKind === 'text' && panel.customText ? panel.customText : panel.selectedText || (panel.sourceKind === 'free-image' ? 'Cover image block' : '')).replace(/\s+/g, ' ').trim().slice(0, 120)}</span>
+                        {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+                          <span
+                            key={corner}
+                            className={`story-panels-resize-handle is-${corner}`}
+                            aria-hidden="true"
+                            onPointerDown={(event) => beginDrag(event, panel, 'resize', corner)}
+                          />
+                        ))}
+                      </>
                     )}
-                    <span>{(panel.panelKind === 'text' && panel.id === selectedPanelId && customTextDraft ? customTextDraft : panel.panelKind === 'text' && panel.customText ? panel.customText : panel.selectedText || (panel.sourceKind === 'free-image' ? 'Cover image block' : '')).replace(/\s+/g, ' ').trim().slice(0, 120)}</span>
-                    {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
-                      <span
-                        key={corner}
-                        className={`story-panels-resize-handle is-${corner}`}
-                        aria-hidden="true"
-                        onPointerDown={(event) => beginDrag(event, panel, 'resize', corner)}
-                      />
-                    ))}
                   </button>
                 ))}
               </div>
@@ -529,10 +602,6 @@ export function PageLayoutEditor({
                     <dd>{storyPanelNumberById.get(selectedPanel.id) ?? ''}</dd>
                   </div>
                   <div>
-                    <dt>Kind</dt>
-                    <dd>{selectedPanel.panelKind === 'text' ? 'Text / caption' : selectedPanel.panelKind}</dd>
-                  </div>
-                  <div>
                     <dt>Book range</dt>
                     <dd>{selectedPanel.startOffset} to {selectedPanel.endOffset}</dd>
                   </div>
@@ -541,6 +610,17 @@ export function PageLayoutEditor({
                     <dd>x {selectedPanel.rect.x}, y {selectedPanel.rect.y}, w {selectedPanel.rect.w}, h {selectedPanel.rect.h}</dd>
                   </div>
                 </dl>
+                <label>
+                  Panel kind
+                  <select
+                    value={selectedPanel.panelKind}
+                    disabled={isSaving}
+                    onChange={(event) => updateSelectedPanel({ panelKind: event.target.value as StoryPanel['panelKind'] })}
+                  >
+                    <option value="image">Image panel</option>
+                    <option value="text">Text / caption</option>
+                  </select>
+                </label>
                 {selectedPanel.panelKind === 'text' && (
                   <label>
                     Custom comic text
@@ -588,14 +668,22 @@ export function PageLayoutEditor({
               <p className="muted">Select a panel chunk first.</p>
             )
           )}
-          {pageMenu.kind === 'panel' && (
-            <>
-              <strong>Panel {storyPanelNumberById.get(pageMenu.panelId) ?? ''}</strong>
-              <button type="button" onClick={() => updatePanelKind(pageMenu.panelId, 'image')}>Image panel</button>
-              <button type="button" onClick={() => updatePanelKind(pageMenu.panelId, 'inlay')}>Inlay panel</button>
-              <button type="button" onClick={() => updatePanelKind(pageMenu.panelId, 'text')}>Text / caption</button>
-            </>
-          )}
+        </div>
+      )}
+      {pendingPageDelete && (
+        <div className="confirm-backdrop" onClick={() => setPendingPageDeleteId(null)}>
+          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-story-page-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="delete-story-page-title">Delete {pendingPageDelete.title || pendingPageDelete.id}?</h2>
+            <p>
+              This will remove the page
+              {pendingPageDeletePanelCount > 0 ? ` and ${pendingPageDeletePanelCount} panel${pendingPageDeletePanelCount === 1 ? '' : 's'} on it` : ''}
+              . This can be undone from the header.
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={() => setPendingPageDeleteId(null)}>Cancel</button>
+              <button type="button" className="danger" disabled={isSaving} onClick={confirmDeleteSelectedPage}>Delete page</button>
+            </div>
+          </div>
         </div>
       )}
     </>

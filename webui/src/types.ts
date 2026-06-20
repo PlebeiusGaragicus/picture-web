@@ -327,7 +327,7 @@ export interface StoryPanel {
   selectedText: string;
   customText: string;
   pageId: string;
-  panelKind: 'image' | 'inlay' | 'text';
+  panelKind: 'image' | 'text';
   rect: StoryPanelRect;
   layer: number;
   assetIds: string[];

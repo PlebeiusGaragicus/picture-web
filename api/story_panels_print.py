@@ -202,10 +202,8 @@ def _draw_image_panel(
     if asset_path is not None:
         _draw_cropped_image(pdf, asset_path, x, y, w, h)
     else:
-        fill = "#fef3c7" if panel.panelKind == "inlay" else "#dbeafe"
-        stroke = "#f59e0b" if panel.panelKind == "inlay" else "#2563eb"
-        pdf.setFillColor(HexColor(fill))
-        pdf.setStrokeColor(HexColor(stroke))
+        pdf.setFillColor(HexColor("#dbeafe"))
+        pdf.setStrokeColor(HexColor("#2563eb"))
         pdf.rect(x, y, w, h, stroke=1, fill=1)
         label = "Image block" if panel.sourceKind == "free-image" else f"Page {page_number or '?'} Panel"
         body = panel.selectedText.strip() or panel.customText.strip()

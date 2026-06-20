@@ -75,6 +75,13 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
     window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
   };
 
+  const openPanelPlacement = (panelId: string) => {
+    setLayoutMode('single-chunks');
+    setSelectedPanelId(panelId);
+    setFocusedChunkPanelId(null);
+    window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
+  };
+
   const createPanel = async () => {
     if (!selection) return;
     setIsCreating(true);
@@ -202,6 +209,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
       selectedPanelId={selectedPanelId}
       focusedPanelId={focusedChunkPanelId}
       onSelectPanel={selectPanelChunk}
+      onOpenPanelPlacement={openPanelPlacement}
       onDeletePanel={deletePanel}
       isSaving={isSaving}
     />
@@ -219,6 +227,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
               <option value="spread">Two-page spread</option>
               <option value="single">Single page + info</option>
               <option value="single-chunks">Single page + panel chunks</option>
+              <option value="all-pages">All pages</option>
               <option value="book">Book text double wide</option>
               <option value="book-chunks">Book text + panel chunks</option>
             </select>
@@ -241,6 +250,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
           onSaveDocument={saveDocument}
           isSaving={isSaving}
           sidePanel={panelChunks}
+          onLayoutModeChange={setLayoutMode}
           onHistoryControlsChange={setHistoryControls}
         />
         {showBookText && (

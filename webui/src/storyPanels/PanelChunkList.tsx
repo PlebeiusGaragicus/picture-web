@@ -14,6 +14,7 @@ export function PanelChunkList({
   selectedPanelId,
   focusedPanelId,
   onSelectPanel,
+  onOpenPanelPlacement,
   onDeletePanel,
   isSaving,
 }: {
@@ -23,6 +24,7 @@ export function PanelChunkList({
   selectedPanelId: string | null;
   focusedPanelId: string | null;
   onSelectPanel: (panelId: string) => void;
+  onOpenPanelPlacement?: (panelId: string) => void;
   onDeletePanel: (panelId: string) => void;
   isSaving: boolean;
 }) {
@@ -85,7 +87,13 @@ export function PanelChunkList({
             <button type="button" className="story-panels-chunk-main" onClick={() => onSelectPanel(panel.id)}>
               <strong>Panel {index + 1}</strong>
               <span>{panel.startOffset}-{panel.endOffset}</span>
-              <span className={`story-panels-placement-badge ${pageNumberById.has(panel.pageId) ? 'is-placed' : 'is-unplaced'}`}>
+              <span
+                className={`story-panels-placement-badge ${pageNumberById.has(panel.pageId) ? 'is-placed' : 'is-unplaced'}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenPanelPlacement?.(panel.id);
+                }}
+              >
                 {pageNumberById.has(panel.pageId) ? `Page ${pageNumberById.get(panel.pageId)}` : 'Not placed'}
               </span>
               <p>{compactText(panel.selectedText)}</p>
