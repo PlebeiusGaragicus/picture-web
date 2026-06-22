@@ -447,6 +447,7 @@ export function PageLayoutEditor({
     : 0;
   const isSinglePageMode = layoutMode !== 'spread';
   const hasSinglePageSidePanel = layoutMode === 'single';
+  const usesLayoutPreview = layoutMode === 'single' || layoutMode === 'spread';
   const showsSelectedPanelInfo = (layoutMode === 'single' && singleSidePanel === 'info')
     || (layoutMode === 'spread' && spreadPanelInfoEnabled);
   const singlePagePreviewAspect = singlePagePreviewMode === 'print'
@@ -1630,14 +1631,17 @@ export function PageLayoutEditor({
     <>
       <div
         ref={spreadWorkspaceRef}
-        className={`story-panels-layout-workspace is-${layoutMode} ${hasSinglePageSidePanel ? `is-single-preview-${singlePagePreviewMode}` : ''}`}
+        className={`story-panels-layout-workspace is-${layoutMode} ${usesLayoutPreview ? `is-layout-preview-${singlePagePreviewMode}` : ''}`}
         style={pageLayoutStyle}
       >
         <div className="story-panels-pages">
         {visiblePages.length ? (
           layoutMode === 'spread' ? (
             <div className="story-panels-spread-wrap">
-              <div className="story-panels-spread-labels" style={{ gridTemplateColumns: PRINT_SHEET_GRID_COLUMNS }}>
+              <div
+                className="story-panels-spread-labels"
+                style={singlePagePreviewMode === 'print' ? { gridTemplateColumns: PRINT_SHEET_GRID_COLUMNS } : undefined}
+              >
                 {visiblePages.map((page, pageIndex) => (
                   <h3
                     key={page ? `${page.id}-label` : `spread-blank-label-${pageIndex}`}
@@ -1655,11 +1659,11 @@ export function PageLayoutEditor({
               </div>
               <div
                 className="story-panels-print-sheet"
-                style={{
+                style={singlePagePreviewMode === 'print' ? {
                   aspectRatio: PRINT_SHEET_ASPECT_RATIO,
                   gridTemplateColumns: PRINT_SHEET_GRID_COLUMNS,
                   gridTemplateRows: PRINT_SHEET_GRID_ROWS,
-                }}
+                } : undefined}
               >
               {visiblePages.map((page, pageIndex) => {
                 const spreadSlot = pageIndex === 0 ? 'left' : 'right';

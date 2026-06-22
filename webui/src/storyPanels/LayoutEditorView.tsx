@@ -4,7 +4,6 @@ import { PageLayoutEditor, type StoryPanelLayoutMode } from './PageLayoutEditor'
 import { LayoutViewModeSelect } from './LayoutViewModeSelect';
 import { PanelChunkList } from './PanelChunkList';
 import type { InsertDraftPayload } from './storyPanelSidebar';
-import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './printLayout';
 import type { LayoutEditorNavigation } from './layoutEditorNavigation';
 import { readSingleSidePanel, writeSingleSidePanel, type SingleSidePanel } from './singleSidePanel';
 import { readSinglePagePreviewMode, writeSinglePagePreviewMode, type SinglePagePreviewMode } from './singlePagePreview';
@@ -62,9 +61,6 @@ export function LayoutEditorView({
   const [focusedChunkPanelId, setFocusedChunkPanelId] = useState<string | null>(null);
   const [navigateToPanelId, setNavigateToPanelId] = useState<string | null>(null);
   const [layoutMode, setLayoutMode] = useState<StoryPanelLayoutMode>('spread');
-  const [isExporting, setIsExporting] = useState(false);
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [exportPageBorder, setExportPageBorder] = useState<BookletPageBorder>('black');
   const [historyControls, setHistoryControls] = useState<React.ReactNode>(null);
   const [pageControls, setPageControls] = useState<React.ReactNode>(null);
   const [spreadPanelInfoEnabled, setSpreadPanelInfoEnabled] = useState(readSpreadPanelInfoEnabled);
@@ -161,22 +157,6 @@ export function LayoutEditorView({
     setDocument(next);
   };
 
-  const exportBookletPdf = async (pageBorder: BookletPageBorder = exportPageBorder) => {
-    setIsExporting(true);
-    try {
-      const blob = await api.getStoryPanelsBookletPdf(projectSlug, { pageBorder });
-      const url = URL.createObjectURL(blob);
-      const anchor = window.document.createElement('a');
-      anchor.href = url;
-      anchor.download = `${projectSlug}-comic-booklet.pdf`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-      setShowExportModal(false);
-    } finally {
-      setIsExporting(false);
-    }
-  };
-
   useEffect(() => {
     if (!onTopBarEndContentChange) return;
     onTopBarEndContentChange(
@@ -254,11 +234,12 @@ export function LayoutEditorView({
           </div>
           <button
             type="button"
-            className="secondary small-button layout-view-export-button"
-            disabled={isExporting || isSaving}
-            onClick={() => setShowExportModal(true)}
-            aria-label={isExporting ? 'Exporting…' : 'Export PDF'}
-            title={isExporting ? 'Exporting…' : 'Export PDF'}
+            className={`secondary small-button layout-view-export-button ${singlePagePreviewMode === 'print' ? 'active' : ''}`}
+            disabled={isSaving}
+            aria-pressed={singlePagePreviewMode === 'print'}
+            aria-label={singlePagePreviewMode === 'print' ? 'Hide print preview' : 'Show print preview'}
+            title={singlePagePreviewMode === 'print' ? 'Hide print preview' : 'Show print preview'}
+            onClick={togglePrintPreview}
           >
             <span aria-hidden="true">🖨️</span>
           </button>
@@ -278,37 +259,26 @@ export function LayoutEditorView({
         </div>
         <div className="layout-view-toolbar-center">
           {layoutMode === 'single' && (
-            <>
+            <div className="story-panels-preview-toggle" role="group" aria-label="Side panel">
               <button
                 type="button"
-                className={`secondary layout-view-print-preview-toggle ${singlePagePreviewMode === 'print' ? 'active' : ''}`}
+                className={singleSidePanel === 'info' ? 'active' : ''}
                 disabled={isSaving}
-                aria-pressed={singlePagePreviewMode === 'print'}
-                onClick={togglePrintPreview}
+                aria-pressed={singleSidePanel === 'info'}
+                onClick={() => selectSingleSidePanel('info')}
               >
-                Print preview
+                Info
               </button>
-              <div className="story-panels-preview-toggle" role="group" aria-label="Side panel">
-                <button
-                  type="button"
-                  className={singleSidePanel === 'info' ? 'active' : ''}
-                  disabled={isSaving}
-                  aria-pressed={singleSidePanel === 'info'}
-                  onClick={() => selectSingleSidePanel('info')}
-                >
-                  Info
-                </button>
-                <button
-                  type="button"
-                  className={singleSidePanel === 'chunks' ? 'active' : ''}
-                  disabled={isSaving}
-                  aria-pressed={singleSidePanel === 'chunks'}
-                  onClick={() => selectSingleSidePanel('chunks')}
-                >
-                  Chunks
-                </button>
-              </div>
-            </>
+              <button
+                type="button"
+                className={singleSidePanel === 'chunks' ? 'active' : ''}
+                disabled={isSaving}
+                aria-pressed={singleSidePanel === 'chunks'}
+                onClick={() => selectSingleSidePanel('chunks')}
+              >
+                Chunks
+              </button>
+            </div>
           )}
         </div>
         <div className="layout-view-toolbar-page">
@@ -316,36 +286,6 @@ export function LayoutEditorView({
         </div>
       </header>
       {error && <p className="error error-banner layout-view-error">{error}</p>}
-      {showExportModal && (
-        <div className="confirm-backdrop" onClick={() => !isExporting && setShowExportModal(false)}>
-          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="export-booklet-title" onClick={(event) => event.stopPropagation()}>
-            <h2 id="export-booklet-title">Export comic booklet PDF</h2>
-            <p className="muted">Landscape letter sheets with saddle-stitch imposition. Print duplex on the long edge, fold, and staple on the center crease.</p>
-            <fieldset className="story-panels-export-options">
-              <legend>Page outline border</legend>
-              {BOOKLET_PAGE_BORDER_OPTIONS.map((option) => (
-                <label key={option.value} className="story-panels-export-option">
-                  <input
-                    type="radio"
-                    name="booklet-page-border"
-                    value={option.value}
-                    checked={exportPageBorder === option.value}
-                    disabled={isExporting}
-                    onChange={() => setExportPageBorder(option.value)}
-                  />
-                  {option.label}
-                </label>
-              ))}
-            </fieldset>
-            <div className="modal-actions">
-              <button type="button" className="secondary" disabled={isExporting} onClick={() => setShowExportModal(false)}>Cancel</button>
-              <button type="button" disabled={isExporting} onClick={() => void exportBookletPdf(exportPageBorder)}>
-                {isExporting ? 'Exporting...' : 'Export PDF'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       <div className="layout-view-workspace">
         <PageLayoutEditor
           document={document}

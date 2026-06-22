@@ -31,6 +31,7 @@ import { ProjectTopBar } from './ProjectTopBar';
 import { SidebarCollapseButton } from './PhaseSidebarToggle';
 import { adaptationNavPhases, phaseStatus, type ProjectPhase } from './projectNavigation';
 import type { LayoutEditorNavigation } from './storyPanels/layoutEditorNavigation';
+import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './storyPanels/printLayout';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
 import { SYSTEM_TAGS, artifactKindLabel, assetLabel, adaptationFileKindToArtifactKind, capabilitiesForModel, characterEntityTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, storyArtifactKeysOnCanvas, storyArtifactNodeId, userProjectTags, visibleDisplayName } from './canvas/shared';
@@ -278,6 +279,9 @@ function App() {
   const [storyHasBookText, setStoryHasBookText] = useState(false);
   const [storyAutoPlaceEnabled, setStoryAutoPlaceEnabled] = useState(readAutoPlaceEnabled);
   const [layoutEditorTopBarEnd, setLayoutEditorTopBarEnd] = useState<ReactNode>(null);
+  const [showExportPdfModal, setShowExportPdfModal] = useState(false);
+  const [exportPageBorder, setExportPageBorder] = useState<BookletPageBorder>('black');
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const [adaptation, setAdaptation] = useState<AdaptationStatus | null>(null);
   const [adaptationWorkflow, setAdaptationWorkflow] = useState<AdaptationWorkflowStatus | null>(null);
@@ -1420,6 +1424,26 @@ function App() {
     setActiveChatSessionId(null);
   };
 
+  const exportBookletPdf = async (pageBorder: BookletPageBorder = exportPageBorder) => {
+    if (!openProjectSlug) return;
+    setIsExportingPdf(true);
+    setError(null);
+    try {
+      const blob = await api.getStoryPanelsBookletPdf(openProjectSlug, { pageBorder });
+      const url = URL.createObjectURL(blob);
+      const anchor = window.document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${openProjectSlug}-comic-booklet.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setShowExportPdfModal(false);
+    } catch (err) {
+      setError(formatRequestError(err));
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   return (
     <div className="app">
       <ProjectPhaseSidebar
@@ -1449,6 +1473,8 @@ function App() {
             setError(err instanceof Error ? err.message : String(err));
           }
         }}
+        onExportPdf={() => setShowExportPdfModal(true)}
+        exportingPdf={isExportingPdf}
         onDeleteTag={deleteProjectTag}
         onUpdateTag={updateProjectTag}
         onPhaseChange={handleProjectPhaseChange}
@@ -1811,6 +1837,36 @@ function App() {
           </div>
         </div>
       )}
+      {openProjectSlug && showExportPdfModal && (
+        <div className="confirm-backdrop" onClick={() => !isExportingPdf && setShowExportPdfModal(false)}>
+          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="export-booklet-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="export-booklet-title">Export comic booklet PDF</h2>
+            <p className="muted">Landscape letter sheets with saddle-stitch imposition. Print duplex on the long edge, fold, and staple on the center crease.</p>
+            <fieldset className="story-panels-export-options">
+              <legend>Page outline border</legend>
+              {BOOKLET_PAGE_BORDER_OPTIONS.map((option) => (
+                <label key={option.value} className="story-panels-export-option">
+                  <input
+                    type="radio"
+                    name="booklet-page-border"
+                    value={option.value}
+                    checked={exportPageBorder === option.value}
+                    disabled={isExportingPdf}
+                    onChange={() => setExportPageBorder(option.value)}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </fieldset>
+            <div className="modal-actions">
+              <button type="button" className="secondary" disabled={isExportingPdf} onClick={() => setShowExportPdfModal(false)}>Cancel</button>
+              <button type="button" disabled={isExportingPdf} onClick={() => void exportBookletPdf(exportPageBorder)}>
+                {isExportingPdf ? 'Exporting...' : 'Export PDF'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2015,6 +2071,8 @@ function ProjectPhaseSidebar({
   onBack,
   onDeleteProject,
   onExportAssets,
+  onExportPdf,
+  exportingPdf = false,
   onDeleteTag,
   onUpdateTag,
   onPhaseChange,
@@ -2031,6 +2089,8 @@ function ProjectPhaseSidebar({
   onBack: () => void;
   onDeleteProject: () => Promise<void>;
   onExportAssets: () => Promise<void>;
+  onExportPdf: () => void;
+  exportingPdf?: boolean;
   onDeleteTag: (tagId: string) => Promise<void>;
   onUpdateTag: (tagId: string, patch: Partial<Pick<TagDefinition, 'name' | 'color'>>) => void;
   onPhaseChange: (phase: ProjectPhase) => void;
@@ -2110,7 +2170,14 @@ function ProjectPhaseSidebar({
         </button>
         <button
           className="secondary"
-          disabled={exportingAssets || deleting}
+          disabled={exportingPdf || exportingAssets || deleting}
+          onClick={onExportPdf}
+        >
+          {exportingPdf ? 'Exporting...' : 'Export PDF'}
+        </button>
+        <button
+          className="secondary"
+          disabled={exportingAssets || deleting || exportingPdf}
           onClick={async () => {
             setExportingAssets(true);
             try {
@@ -2122,7 +2189,7 @@ function ProjectPhaseSidebar({
         >
           {exportingAssets ? 'Exporting...' : 'Export assets'}
         </button>
-        <button className="danger" disabled={deleting || exportingAssets} onClick={() => setPendingDelete(true)}>
+        <button className="danger" disabled={deleting || exportingAssets || exportingPdf} onClick={() => setPendingDelete(true)}>
           Delete project
         </button>
       </div>

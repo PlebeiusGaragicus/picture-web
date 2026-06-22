@@ -807,7 +807,8 @@ button {
   margin-left: 0;
 }
 
-.layout-view-print-preview-toggle.active {
+.layout-view-export-button.active,
+.layout-view-spread-info-toggle.active {
   color: #0b1120;
   background: #93c5fd;
   border-color: #93c5fd;
@@ -833,12 +834,6 @@ button {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: -0.02em;
-}
-
-.layout-view-spread-info-toggle.active {
-  color: #0b1120;
-  background: #93c5fd;
-  border-color: #93c5fd;
 }
 
 .layout-view-toolbar-page:empty {
@@ -2143,6 +2138,56 @@ button {
   box-shadow: 0 16px 36px rgb(0 0 0 / 0.24);
   box-sizing: border-box;
   overflow: hidden;
+}
+
+.story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-spread-labels {
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-spread-labels h3.is-spread-slot-left {
+  grid-column: 1;
+}
+
+.story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-spread-labels h3.is-spread-slot-right {
+  grid-column: 2;
+}
+
+.story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-print-sheet {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 14px;
+  width: 100%;
+  aspect-ratio: 11 / 8.5;
+  max-height: 100%;
+  height: auto;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-print-gutter,
+.story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-print-page-number {
+  display: none;
+}
+
+.story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-page.is-spread-slot-left {
+  grid-column: 1;
+  grid-row: 1;
+  height: 100%;
+  min-height: 0;
+}
+
+.story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-page.is-spread-slot-right {
+  grid-column: 2;
+  grid-row: 1;
+  height: 100%;
+  min-height: 0;
+}
+
+.story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-page-grid {
+  background: #f8fafc;
 }
 
 .story-panels-print-gutter {
