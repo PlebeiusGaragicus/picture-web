@@ -1089,6 +1089,20 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
     assert panel["sourceKind"] == "story"
     assert panel["selectedText"] == "Alpha opens the door."
     assert panel["rect"] == {"x": 0, "y": 0, "w": 4, "h": 3}
+    alpha_panel_id = panel["id"]
+
+    unplaced = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={
+            "startOffset": 22,
+            "endOffset": 44,
+            "selectedText": "Beta crosses the room.",
+            "autoPlace": False,
+        },
+    )
+    assert unplaced.status_code == 200
+    beta_panel = next(panel for panel in unplaced.json()["panels"] if panel["selectedText"] == "Beta crosses the room.")
+    assert beta_panel["pageId"] is None
 
     overlap = client.post(
         "/api/projects/farm-comic/story-panels/panels",
@@ -1097,25 +1111,26 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
     assert overlap.status_code == 400
 
     patched = client.patch(
-        f"/api/projects/farm-comic/story-panels/panels/{panel['id']}",
+        f"/api/projects/farm-comic/story-panels/panels/{alpha_panel_id}",
         json={"rect": {"x": 0, "y": 2, "w": 6, "h": 6}, "layer": 1, "finalized": True},
     )
     assert patched.status_code == 200
-    panel = next(candidate for candidate in patched.json()["panels"] if candidate["sourceKind"] == "story")
+    panel = next(candidate for candidate in patched.json()["panels"] if candidate["id"] == alpha_panel_id)
     assert panel["rect"] == {"x": 0, "y": 2, "w": 6, "h": 6}
     assert panel["layer"] == 1
     assert panel["finalized"] is True
 
     document = patched.json()
-    story_panel = next(panel for panel in document["panels"] if panel["sourceKind"] == "story")
+    story_panel = next(panel for panel in document["panels"] if panel["id"] == alpha_panel_id)
     story_panel["pageId"] = "page-002"
     saved = client.put("/api/projects/farm-comic/story-panels", json=document)
     assert saved.status_code == 200
-    assert next(panel for panel in saved.json()["panels"] if panel["sourceKind"] == "story")["pageId"] == "page-002"
+    assert next(panel for panel in saved.json()["panels"] if panel["id"] == alpha_panel_id)["pageId"] == "page-002"
 
-    deleted = client.delete(f"/api/projects/farm-comic/story-panels/panels/{story_panel['id']}")
+    deleted = client.delete(f"/api/projects/farm-comic/story-panels/panels/{alpha_panel_id}")
     assert deleted.status_code == 200
-    assert not any(panel["sourceKind"] == "story" for panel in deleted.json()["panels"])
+    assert not any(panel["id"] == alpha_panel_id for panel in deleted.json()["panels"])
+    assert any(panel["selectedText"] == "Beta crosses the room." for panel in deleted.json()["panels"])
 
 
 def test_story_panels_panel_image_assignment(tmp_path, monkeypatch):

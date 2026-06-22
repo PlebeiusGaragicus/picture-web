@@ -371,6 +371,7 @@ export interface StoryPanelCreatePayload {
   selectedText?: string;
   customText?: string;
   insertAfterPanelId?: string | null;
+  autoPlace?: boolean;
   pageId?: string | null;
   rect?: StoryPanelRect | null;
   layer?: number;

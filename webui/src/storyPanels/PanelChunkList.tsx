@@ -24,6 +24,25 @@ function itemTitle(panel: StoryPanel) {
   return sidebarItemLabel(panel.sourceKind as 'story' | 'draft' | 'bookmark');
 }
 
+function deletePanelConfirmCopy(panel: StoryPanel): { title: string; body: string } {
+  if (panel.sourceKind === 'bookmark') {
+    return {
+      title: 'Delete bookmark?',
+      body: 'This removes the bookmark from the reading list.',
+    };
+  }
+  if (panel.sourceKind === 'draft') {
+    return {
+      title: 'Delete draft?',
+      body: 'This removes the draft from the reading list.',
+    };
+  }
+  return {
+    title: 'Delete panel chunk?',
+    body: 'This removes the panel from the reading list and layout.',
+  };
+}
+
 function ChunkActionsMenu({
   isOpen,
   onToggle,
@@ -209,7 +228,7 @@ export function PanelChunkList({
   focusedPanelId: string | null;
   onSelectPanel: (panelId: string) => void;
   onOpenPanelPlacement?: (panelId: string) => void;
-  onDeletePanel: (panelId: string) => void;
+  onDeletePanel: (panelId: string) => void | Promise<void>;
   onInsertDraft?: (payload: InsertDraftPayload) => Promise<void>;
   onEditPanelNote?: (panelId: string, noteText: string) => Promise<void>;
   isSaving: boolean;
@@ -227,6 +246,7 @@ export function PanelChunkList({
   const [draftText, setDraftText] = useState('');
   const [noteText, setNoteText] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [pendingDeletePanelId, setPendingDeletePanelId] = useState<string | null>(null);
   const hasBookText = bookLength > 0;
   const allItems = sortSidebarItems(panels);
   const sortedPanels = filterSidebarItems(panels, sidebarFilter);
@@ -241,6 +261,9 @@ export function PanelChunkList({
   };
   const coverage = bookLength > 0 ? Math.round((coveredChars / bookLength) * 100) : 0;
   const canInsertDraft = Boolean(onInsertDraft) && !hasBookText;
+  const pendingDeletePanel = pendingDeletePanelId
+    ? panels.find((panel) => panel.id === pendingDeletePanelId) ?? null
+    : null;
 
   useEffect(() => {
     if (!focusedPanelId) return;
@@ -308,6 +331,12 @@ export function PanelChunkList({
     } finally {
       setIsCreating(false);
     }
+  };
+
+  const confirmDeletePanel = async () => {
+    if (!pendingDeletePanelId) return;
+    await onDeletePanel(pendingDeletePanelId);
+    setPendingDeletePanelId(null);
   };
 
   const filterRow = (
@@ -399,7 +428,7 @@ export function PanelChunkList({
                   isOpen={openMenuId === panel.id}
                   onToggle={() => setOpenMenuId((current) => (current === panel.id ? null : panel.id))}
                   onClose={() => setOpenMenuId(null)}
-                  onDelete={() => onDeletePanel(panel.id)}
+                  onDelete={() => setPendingDeletePanelId(panel.id)}
                   onInsertAfter={canInsertDraft ? () => openInsertDialog(panel.id) : undefined}
                   onEditNote={onEditPanelNote && panel.sourceKind === 'story' ? () => openNoteDialog(panel.id) : undefined}
                   showInsert={canInsertDraft}
@@ -489,6 +518,20 @@ export function PanelChunkList({
               <button type="button" className="secondary" disabled={isCreating} onClick={() => setShowNoteDialog(false)}>Cancel</button>
               <button type="button" disabled={isCreating} onClick={() => void submitPanelNote()}>
                 {isCreating ? 'Saving…' : 'Save note'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {pendingDeletePanel && (
+        <div className="confirm-backdrop" onClick={() => !isSaving && setPendingDeletePanelId(null)}>
+          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-chunk-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="delete-chunk-title">{deletePanelConfirmCopy(pendingDeletePanel).title}</h2>
+            <p>{deletePanelConfirmCopy(pendingDeletePanel).body}</p>
+            <div className="modal-actions">
+              <button type="button" className="secondary" disabled={isSaving} onClick={() => setPendingDeletePanelId(null)}>Cancel</button>
+              <button type="button" className="danger" disabled={isSaving} onClick={() => void confirmDeletePanel()}>
+                {isSaving ? 'Deleting…' : 'Delete'}
               </button>
             </div>
           </div>

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { AutoPlaceToggle } from './storyPanels/AutoPlaceToggle';
 import { PanelChunksToggleButton } from './storyPanels/PanelChunksToggle';
 import { PhaseSidebarToggleIcon, SidebarCollapseButton } from './PhaseSidebarToggle';
 import { HelpTip } from './ui';
@@ -20,8 +21,13 @@ export function ProjectTopBar({
   sidebarCollapsed,
   onExpandSidebar,
   onCollapseSidebar,
-  showChunksToggle,
-  onOpenChunks,
+  showPanelChunksToggle,
+  panelChunksOpen,
+  onTogglePanelChunks,
+  showAutoPlaceToggle,
+  autoPlaceEnabled,
+  onAutoPlaceChange,
+  endContent,
 }: {
   activePhase: ProjectPhase;
   adaptation: AdaptationStatus | null;
@@ -29,8 +35,13 @@ export function ProjectTopBar({
   sidebarCollapsed: boolean;
   onExpandSidebar: () => void;
   onCollapseSidebar: () => void;
-  showChunksToggle: boolean;
-  onOpenChunks: () => void;
+  showPanelChunksToggle: boolean;
+  panelChunksOpen: boolean;
+  onTogglePanelChunks: () => void;
+  showAutoPlaceToggle: boolean;
+  autoPlaceEnabled: boolean;
+  onAutoPlaceChange: (enabled: boolean) => void;
+  endContent?: ReactNode;
 }) {
   const [navOpen, setNavOpen] = useState(false);
   const navRef = useRef<HTMLDivElement | null>(null);
@@ -130,9 +141,16 @@ export function ProjectTopBar({
         )}
       </div>
       <div className="project-top-bar-end">
-        {showChunksToggle && (
-          <PanelChunksToggleButton variant="expand" onClick={onOpenChunks} />
+        {showAutoPlaceToggle && (
+          <AutoPlaceToggle enabled={autoPlaceEnabled} onChange={onAutoPlaceChange} />
         )}
+        {showPanelChunksToggle && (
+          <PanelChunksToggleButton
+            variant={panelChunksOpen ? 'collapse' : 'expand'}
+            onClick={onTogglePanelChunks}
+          />
+        )}
+        {endContent}
       </div>
     </header>
   );

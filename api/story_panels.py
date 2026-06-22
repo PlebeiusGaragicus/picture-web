@@ -251,14 +251,26 @@ def _story_order_placement(document: StoryPanelDocument, start_offset: int) -> t
 
 def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
     document = read_document(slug)
-    inferred_page_id, inferred_rect = _story_order_placement(document, payload.startOffset)
-    page_id = payload.pageId or inferred_page_id
-    target_page = next((page for page in document.pages if page.id == page_id), None)
-    if target_page is None:
-        raise HTTPException(status_code=400, detail=f"Unknown page: {page_id}")
-    if target_page.pageKind != "story":
-        raise HTTPException(status_code=400, detail="Story panel chunks can only be created on story pages")
-    rect = payload.rect or (inferred_rect if page_id == inferred_page_id else _default_rect(document, page_id))
+    if payload.autoPlace:
+        inferred_page_id, inferred_rect = _story_order_placement(document, payload.startOffset)
+        page_id = payload.pageId or inferred_page_id
+        target_page = next((page for page in document.pages if page.id == page_id), None)
+        if target_page is None:
+            raise HTTPException(status_code=400, detail=f"Unknown page: {page_id}")
+        if target_page.pageKind != "story":
+            raise HTTPException(status_code=400, detail="Story panel chunks can only be created on story pages")
+        rect = payload.rect or (inferred_rect if page_id == inferred_page_id else _default_rect(document, page_id))
+    else:
+        page_id = payload.pageId
+        if page_id is not None:
+            target_page = next((page for page in document.pages if page.id == page_id), None)
+            if target_page is None:
+                raise HTTPException(status_code=400, detail=f"Unknown page: {page_id}")
+            if target_page.pageKind != "story":
+                raise HTTPException(status_code=400, detail="Story panel chunks can only be created on story pages")
+            rect = payload.rect or _default_rect(document, page_id)
+        else:
+            rect = payload.rect or StoryPanelRect(x=0, y=0, w=4, h=3)
     book = read_book(slug)
     if payload.endOffset > len(book):
         raise HTTPException(status_code=400, detail="Panel range exceeds book length")

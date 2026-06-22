@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import ReactDOM from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import ReactFlow, {
@@ -25,6 +25,7 @@ import { WorkflowLogPanel } from './adaptation/workflowLog';
 import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
 import { MomentSequenceView } from './adaptation/momentSequenceView';
 import { BookTextView } from './storyPanels/BookTextView';
+import { readAutoPlaceEnabled, writeAutoPlaceEnabled } from './storyPanels/autoPlace';
 import { LayoutEditorView } from './storyPanels/LayoutEditorView';
 import { ProjectTopBar } from './ProjectTopBar';
 import { SidebarCollapseButton } from './PhaseSidebarToggle';
@@ -274,6 +275,9 @@ function App() {
   const [phaseViewMode, setPhaseViewMode] = useState<PhaseViewMode>('list');
   const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
   const [storyPanelChunksOpen, setStoryPanelChunksOpen] = useState(true);
+  const [storyHasBookText, setStoryHasBookText] = useState(false);
+  const [storyAutoPlaceEnabled, setStoryAutoPlaceEnabled] = useState(readAutoPlaceEnabled);
+  const [layoutEditorTopBarEnd, setLayoutEditorTopBarEnd] = useState<ReactNode>(null);
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const [adaptation, setAdaptation] = useState<AdaptationStatus | null>(null);
   const [adaptationWorkflow, setAdaptationWorkflow] = useState<AdaptationWorkflowStatus | null>(null);
@@ -1494,8 +1498,38 @@ function App() {
             onPhaseChange={handleProjectPhaseChange}
             onExpandSidebar={() => setIsPhaseSidebarCollapsed(false)}
             onCollapseSidebar={() => setIsPhaseSidebarCollapsed(true)}
-            showChunksToggle={isStoryActive && !storyPanelChunksOpen}
-            onOpenChunks={() => setStoryPanelChunksOpen(true)}
+            showPanelChunksToggle={isStoryActive && storyHasBookText}
+            panelChunksOpen={storyPanelChunksOpen}
+            onTogglePanelChunks={() => setStoryPanelChunksOpen((open) => !open)}
+            showAutoPlaceToggle={isStoryActive && storyHasBookText}
+            autoPlaceEnabled={storyAutoPlaceEnabled}
+            onAutoPlaceChange={(enabled) => {
+              writeAutoPlaceEnabled(enabled);
+              setStoryAutoPlaceEnabled(enabled);
+            }}
+            endContent={(
+              <>
+                {layoutEditorTopBarEnd}
+                {isCanvasActive ? (
+                  <FloatingTagsMenu
+                userAvailableTags={availableUserTags}
+                characterAvailableTags={characterEntityTags(projectTags)}
+                locationAvailableTags={locationEntityTags(projectTags)}
+                userTagCounts={userTagCounts}
+                entityTagCounts={entityTagCounts}
+                activeUserTags={activeUserTagFilters}
+                activeEntityTags={activeEntityTagFilters}
+                showArchived={showArchived}
+                isOpen={isUserTagFilterMenuOpen}
+                onToggleOpen={() => setIsUserTagFilterMenuOpen((current) => !current)}
+                onClose={() => setIsUserTagFilterMenuOpen(false)}
+                onUserTagsChange={setActiveUserTagFilters}
+                onEntityTagsChange={setActiveEntityTagFilters}
+                onShowArchivedChange={setShowArchived}
+                  />
+                ) : null}
+              </>
+            )}
           />
         )}
         <input
@@ -1536,6 +1570,8 @@ function App() {
             projectSlug={openProjectSlug}
             panelChunksOpen={storyPanelChunksOpen}
             onPanelChunksOpenChange={setStoryPanelChunksOpen}
+            onHasBookTextChange={setStoryHasBookText}
+            autoPlaceEnabled={storyAutoPlaceEnabled}
             onNavigateToLayoutEditor={(navigation) => {
               setLayoutEditorNavigation(navigation);
               setProjectPhase('layout-editor');
@@ -1547,6 +1583,7 @@ function App() {
             projectSlug={openProjectSlug}
             initialNavigation={layoutEditorNavigation}
             onNavigationComplete={() => setLayoutEditorNavigation(null)}
+            onTopBarEndContentChange={setLayoutEditorTopBarEnd}
           />
         )}
         {isMomentViewActive && adaptation && (
@@ -1658,22 +1695,6 @@ function App() {
                 {zoomPercent}%
               </Panel>
             </ReactFlow>
-            <FloatingTagsMenu
-              userAvailableTags={availableUserTags}
-              characterAvailableTags={characterEntityTags(projectTags)}
-              locationAvailableTags={locationEntityTags(projectTags)}
-              userTagCounts={userTagCounts}
-              entityTagCounts={entityTagCounts}
-              activeUserTags={activeUserTagFilters}
-              activeEntityTags={activeEntityTagFilters}
-              showArchived={showArchived}
-              isOpen={isUserTagFilterMenuOpen}
-              onToggleOpen={() => setIsUserTagFilterMenuOpen((current) => !current)}
-              onClose={() => setIsUserTagFilterMenuOpen(false)}
-              onUserTagsChange={setActiveUserTagFilters}
-              onEntityTagsChange={setActiveEntityTagFilters}
-              onShowArchivedChange={setShowArchived}
-            />
             {isDraggingFile && <div className="drop-overlay">Drop photos to import</div>}
           </>
         )}
@@ -2242,14 +2263,36 @@ function FloatingTagsMenu({
   }, [isOpen, onClose]);
 
   return (
-    <div ref={menuRef} className="floating-tags-menu">
-      <button className={`secondary tag-filter-toggle ${activeCount ? 'active' : ''}`} onClick={onToggleOpen}>
-        Tags{activeCount ? ` (${activeCount})` : ''}
+    <div ref={menuRef} className="project-top-bar-tags-menu">
+      <button
+        type="button"
+        className={`project-top-bar-tags-trigger ${activeCount ? 'is-active' : ''}`}
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
+        onClick={onToggleOpen}
+      >
+        <span className="project-top-bar-tags-icon" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="14" height="14">
+            <path
+              d="M2.5 8.2 7.8 2.9a1.5 1.5 0 0 1 2.1 0l3.6 3.6a1.5 1.5 0 0 1 0 2.1L8.3 13.8a1.5 1.5 0 0 1-2.1 0L2.5 10.1a1.5 1.5 0 0 1 0-2.1Z"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              strokeLinejoin="round"
+            />
+            <circle cx="5.4" cy="5.4" r="0.9" fill="currentColor" />
+          </svg>
+        </span>
+        <span className="project-top-bar-tags-label">Tags</span>
+        {activeCount > 0 && (
+          <span className="project-top-bar-tags-count">{activeCount}</span>
+        )}
+        <span className="project-top-bar-nav-chevron" aria-hidden="true">▾</span>
       </button>
       {isOpen && (
         <SplitTagPopover
           mode="filter"
-          className="split-tag-popover-floating"
+          className="project-top-bar-tags-popover"
           userSelectedTags={activeUserTags}
           userAvailableTags={userAvailableTags}
           userTagCounts={userTagCounts}

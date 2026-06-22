@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type React from 'react';
 import { PageLayoutEditor, type StoryPanelLayoutMode } from './PageLayoutEditor';
+import { LayoutViewModeSelect } from './LayoutViewModeSelect';
 import { PanelChunkList } from './PanelChunkList';
 import type { InsertDraftPayload } from './storyPanelSidebar';
 import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './printLayout';
@@ -34,10 +35,12 @@ export function LayoutEditorView({
   projectSlug,
   initialNavigation,
   onNavigationComplete,
+  onTopBarEndContentChange,
 }: {
   projectSlug: string;
   initialNavigation: LayoutEditorNavigation | null;
   onNavigationComplete: () => void;
+  onTopBarEndContentChange?: (content: ReactNode | null) => void;
 }) {
   const {
     bookText,
@@ -156,6 +159,14 @@ export function LayoutEditorView({
   };
 
   useEffect(() => {
+    if (!onTopBarEndContentChange) return;
+    onTopBarEndContentChange(
+      <LayoutViewModeSelect value={layoutMode} onChange={setLayoutMode} disabled={isSaving} />,
+    );
+    return () => onTopBarEndContentChange(null);
+  }, [layoutMode, isSaving, onTopBarEndContentChange]);
+
+  useEffect(() => {
     const shortcuts: Record<string, StoryPanelLayoutMode> = {
       a: 'all-pages',
       '2': 'spread',
@@ -209,14 +220,6 @@ export function LayoutEditorView({
     <div className="story-adaptation-screen story-panels-screen layout-view-screen">
       <header className="layout-view-toolbar">
         <div className="layout-view-toolbar-primary">
-          <label className="story-panels-view-control">
-            <select value={layoutMode} aria-label="Layout view" onChange={(event) => setLayoutMode(event.target.value as StoryPanelLayoutMode)}>
-              <option value="all-pages">All pages (a)</option>
-              <option value="spread">Two-page spread (2)</option>
-              <option value="single">Single page + info (i)</option>
-              <option value="single-chunks">Single page + panel chunks (p)</option>
-            </select>
-          </label>
           <div className="story-panels-history-actions">
             {historyControls}
           </div>

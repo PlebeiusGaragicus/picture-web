@@ -8,18 +8,20 @@ import type { InsertDraftPayload } from './storyPanelSidebar';
 import { sortedPanels, withSelectedText } from './storyPanelUtils';
 import { useStoryPanelDocument } from './useStoryPanelDocument';
 
-import { PanelChunksToggleButton } from './PanelChunksToggle';
-
 export function BookTextView({
   projectSlug,
   onNavigateToLayoutEditor,
   panelChunksOpen,
   onPanelChunksOpenChange,
+  onHasBookTextChange,
+  autoPlaceEnabled,
 }: {
   projectSlug: string;
   onNavigateToLayoutEditor: (navigation: LayoutEditorNavigation) => void;
   panelChunksOpen: boolean;
   onPanelChunksOpenChange: (open: boolean) => void;
+  onHasBookTextChange: (hasBookText: boolean) => void;
+  autoPlaceEnabled: boolean;
 }) {
   const {
     bookText,
@@ -46,6 +48,10 @@ export function BookTextView({
       onPanelChunksOpenChange(true);
     }
   }, [hasBookText, onPanelChunksOpenChange]);
+
+  useEffect(() => {
+    onHasBookTextChange(hasBookText);
+  }, [hasBookText, onHasBookTextChange]);
 
   const selectPanelChunk = (panelId: string) => {
     setSelectedPanelId(panelId);
@@ -75,6 +81,7 @@ export function BookTextView({
       const next = await api.createStoryPanel(projectSlug, {
         ...selection,
         customText: panelNote ?? '',
+        autoPlace: autoPlaceEnabled,
       });
       setDocument(next);
       setSelection(null);
@@ -247,7 +254,6 @@ export function BookTextView({
           <aside className="story-view-chunks-pane">
             <div className="story-view-chunks-pane-head">
               <h2 className="story-view-chunks-title">Reading</h2>
-              <PanelChunksToggleButton variant="collapse" onClick={() => onPanelChunksOpenChange(false)} />
             </div>
             {panelChunks}
           </aside>
