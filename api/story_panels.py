@@ -11,6 +11,7 @@ from pydantic import ValidationError
 import adaptation
 import library
 from models import (
+    LAYOUT_GRID_COLUMNS,
     LAYOUT_PAGE_ROWS,
     StoryPanel,
     StoryPanelBookmarkCreate,
@@ -220,12 +221,30 @@ def _clamp_panel_rect(rect: StoryPanelRect) -> StoryPanelRect:
     return StoryPanelRect(x=rect.x, y=max(0.0, y), w=rect.w, h=h)
 
 
+DEFAULT_AUTO_PLACE_W = 4.0
+DEFAULT_AUTO_PLACE_H = 3.0
+
+
+def _panels_on_page(document: StoryPanelDocument, page_id: str) -> list[StoryPanel]:
+    return [panel for panel in document.panels if panel.pageId == page_id and panel.layer == 0]
+
+
+def _rect_after(document: StoryPanelDocument, page_id: str, anchor: StoryPanel, w: float, h: float) -> StoryPanelRect:
+    next_x = anchor.rect.x + anchor.rect.w
+    next_y = anchor.rect.y
+    if next_x + w <= LAYOUT_GRID_COLUMNS:
+        return _clamp_panel_rect(StoryPanelRect(x=next_x, y=next_y, w=w, h=h))
+    same_row = [panel for panel in _panels_on_page(document, page_id) if panel.rect.y == anchor.rect.y]
+    row_bottom = max(panel.rect.y + panel.rect.h for panel in (same_row or [anchor]))
+    return _clamp_panel_rect(StoryPanelRect(x=0, y=row_bottom, w=w, h=h))
+
+
 def _default_rect(document: StoryPanelDocument, page_id: str) -> StoryPanelRect:
-    panels_on_page = [panel for panel in document.panels if panel.pageId == page_id and panel.layer == 0]
-    y = 0.0
-    if panels_on_page:
-        y = max(panel.rect.y + panel.rect.h for panel in panels_on_page)
-    return _clamp_panel_rect(StoryPanelRect(x=0, y=y, w=4, h=3))
+    panels_on_page = _panels_on_page(document, page_id)
+    if not panels_on_page:
+        return _clamp_panel_rect(StoryPanelRect(x=0, y=0, w=DEFAULT_AUTO_PLACE_W, h=DEFAULT_AUTO_PLACE_H))
+    ordered = sorted(panels_on_page, key=lambda panel: (panel.rect.y, panel.rect.x))
+    return _rect_after(document, page_id, ordered[-1], DEFAULT_AUTO_PLACE_W, DEFAULT_AUTO_PLACE_H)
 
 
 def _story_order_placement(document: StoryPanelDocument, start_offset: int) -> tuple[str, StoryPanelRect]:
@@ -240,29 +259,21 @@ def _story_order_placement(document: StoryPanelDocument, start_offset: int) -> t
         page_id = _next_page(document).id
         return page_id, _default_rect(document, page_id)
     page_id = anchor.pageId
-    anchor_bottom = anchor.rect.y + anchor.rect.h
-    panels_below_anchor = [
-        panel
-        for panel in document.panels
-        if panel.pageId == page_id and panel.layer == 0 and panel.rect.y >= anchor.rect.y
-    ]
-    y = max([anchor_bottom, *[panel.rect.y + panel.rect.h for panel in panels_below_anchor]], default=anchor_bottom)
-    return page_id, _clamp_panel_rect(StoryPanelRect(x=anchor.rect.x, y=y, w=anchor.rect.w, h=anchor.rect.h))
+    assert page_id is not None
+    return page_id, _rect_after(document, page_id, anchor, anchor.rect.w, anchor.rect.h)
 
 
-def _place_below_panel(document: StoryPanelDocument, anchor: StoryPanel) -> tuple[str, StoryPanelRect]:
+def _place_after_panel(
+    document: StoryPanelDocument,
+    anchor: StoryPanel,
+    w: float = DEFAULT_AUTO_PLACE_W,
+    h: float = DEFAULT_AUTO_PLACE_H,
+) -> tuple[str, StoryPanelRect]:
     page_id = anchor.pageId
     if page_id is None:
         page_id = _next_page(document).id
-        return page_id, _default_rect(document, page_id)
-    anchor_bottom = anchor.rect.y + anchor.rect.h
-    panels_below_anchor = [
-        panel
-        for panel in document.panels
-        if panel.pageId == page_id and panel.layer == 0 and panel.rect.y >= anchor.rect.y
-    ]
-    y = max([anchor_bottom, *[panel.rect.y + panel.rect.h for panel in panels_below_anchor]], default=anchor_bottom)
-    return page_id, _clamp_panel_rect(StoryPanelRect(x=anchor.rect.x, y=y, w=anchor.rect.w, h=anchor.rect.h))
+        return page_id, _clamp_panel_rect(StoryPanelRect(x=0, y=0, w=w, h=h))
+    return page_id, _rect_after(document, page_id, anchor, w, h)
 
 
 def _draft_order_placement(document: StoryPanelDocument, insert_after_panel_id: str | None) -> tuple[str, StoryPanelRect]:
@@ -270,13 +281,13 @@ def _draft_order_placement(document: StoryPanelDocument, insert_after_panel_id: 
         anchor = next((panel for panel in document.panels if panel.id == insert_after_panel_id), None)
         if anchor and anchor.sourceKind in {"story", "draft"}:
             if anchor.pageId is not None:
-                return _place_below_panel(document, anchor)
+                return _place_after_panel(document, anchor)
     placed = sorted(
         [panel for panel in document.panels if panel.sourceKind in {"story", "draft"} and panel.pageId is not None],
         key=lambda panel: panel.order,
     )
     if placed:
-        return _place_below_panel(document, placed[-1])
+        return _place_after_panel(document, placed[-1])
     page_id = _next_page(document).id
     return page_id, _default_rect(document, page_id)
 

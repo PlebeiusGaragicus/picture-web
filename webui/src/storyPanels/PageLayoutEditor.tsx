@@ -42,7 +42,7 @@ import {
   parentPanelFor,
   removePanelAndCaptionChildren,
 } from './panelCaptions';
-import { removeStoryPanelFromLayout } from './panelPlacement';
+import { isPanelChunkSourceKind, removeStoryPanelFromLayout } from './panelPlacement';
 import { inferDocumentChangeLabel, type StoryPanelHistoryEntry } from './storyPanelHistory';
 import { sortedStoryPages, storyPageNumberById as mapStoryPageNumbers } from './pageNumbers';
 import { HoverTooltip } from '../ui';
@@ -1299,7 +1299,7 @@ export function PageLayoutEditor({
     if (!panelId) return;
     const panel = displayDocument.panels.find((candidate) => candidate.id === panelId);
     if (!panel) return;
-    if (panel.sourceKind === 'story') {
+    if (isPanelChunkSourceKind(panel.sourceKind)) {
       commitDocument(removeStoryPanelFromLayout(displayDocument, panelId));
     } else {
       commitDocument({
@@ -1312,7 +1312,9 @@ export function PageLayoutEditor({
     setPendingPanelDeleteId(null);
     onSelectPanel(null);
   };
-  const selectedPanelRemoveLabel = visibleSelectedPanel?.sourceKind === 'story' ? 'Remove' : 'Delete';
+  const selectedPanelRemoveLabel = visibleSelectedPanel && isPanelChunkSourceKind(visibleSelectedPanel.sourceKind)
+    ? 'Remove'
+    : 'Delete';
   const commitCustomTextDraft = () => {
     if (!selectedPanel) return;
     persistPanelTextDraft(selectedPanel.id, richTextEditorRef.current?.innerHTML ?? customTextDraft);
@@ -2423,19 +2425,21 @@ export function PageLayoutEditor({
             <h2 id="delete-story-panel-title">
               {pendingPanelDelete.sourceKind === 'story'
                 ? `Remove Panel ${storyPanelNumberById.get(pendingPanelDelete.id) ?? ''} from layout?`
+                : isPanelChunkSourceKind(pendingPanelDelete.sourceKind)
+                ? 'Remove panel from layout?'
                 : pendingPanelDelete.sourceKind === 'caption'
                 ? `Delete ${panelLabelFor(pendingPanelDelete)}?`
                 : pendingPanelDelete.panelKind === 'text' ? 'Delete text block?' : 'Delete image block?'}
             </h2>
             <p>
-              {pendingPanelDelete.sourceKind === 'story'
-                ? 'This removes the panel from the page layout. The panel chunk stays in Panel Chunks and can be placed again.'
+              {isPanelChunkSourceKind(pendingPanelDelete.sourceKind)
+                ? 'This removes the panel from the page layout. The panel stays in Reading and can be placed again.'
                 : 'This will remove the layout item from the page.'}
             </p>
             <div className="modal-actions">
               <button type="button" className="secondary" onClick={() => setPendingPanelDeleteId(null)}>Cancel</button>
               <button type="button" className="danger" disabled={isSaving} onClick={confirmRemoveSelectedPanel}>
-                {pendingPanelDelete.sourceKind === 'story' ? 'Remove from layout' : 'Delete'}
+                {isPanelChunkSourceKind(pendingPanelDelete.sourceKind) ? 'Remove from layout' : 'Delete'}
               </button>
             </div>
           </div>

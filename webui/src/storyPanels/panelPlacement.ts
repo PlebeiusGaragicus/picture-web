@@ -24,3 +24,7 @@ export function removeStoryPanelFromLayout(document: StoryPanelDocument, panelId
       )),
   };
 }
+
+export function isPanelChunkSourceKind(sourceKind: StoryPanel['sourceKind']): boolean {
+  return sourceKind === 'story' || sourceKind === 'draft' || sourceKind === 'bookmark';
+}

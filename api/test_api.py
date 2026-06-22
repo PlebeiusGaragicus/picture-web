@@ -1465,7 +1465,23 @@ def test_story_panels_draft_auto_place(tmp_path, monkeypatch):
     assert stacked.status_code == 200
     third = next(panel for panel in stacked.json()["panels"] if panel["customText"] == "Third panel.")
     assert third["pageId"] == "page-001"
-    assert third["rect"]["y"] == 3
+    assert third["rect"] == {"x": 4, "y": 0, "w": 4, "h": 3}
+
+    fourth = client.post(
+        "/api/projects/farm-comic/story-panels/panels/draft",
+        json={"customText": "Fourth panel.", "autoPlace": True},
+    )
+    assert fourth.status_code == 200
+    fourth_panel = next(panel for panel in fourth.json()["panels"] if panel["customText"] == "Fourth panel.")
+    assert fourth_panel["rect"] == {"x": 8, "y": 0, "w": 4, "h": 3}
+
+    fifth = client.post(
+        "/api/projects/farm-comic/story-panels/panels/draft",
+        json={"customText": "Fifth panel.", "autoPlace": True},
+    )
+    assert fifth.status_code == 200
+    fifth_panel = next(panel for panel in fifth.json()["panels"] if panel["customText"] == "Fifth panel.")
+    assert fifth_panel["rect"] == {"x": 0, "y": 3, "w": 4, "h": 3}
 
 
 def test_story_panels_create_panel_note_and_bookmark(tmp_path, monkeypatch):
@@ -1591,7 +1607,6 @@ def test_story_panels_create_uses_story_neighbor_page(tmp_path, monkeypatch):
         json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
     ).json()
     document = first
-    document["pages"].append({"id": "page-002", "order": 5, "title": "Page 2", "pageKind": "story"})
     story_panel = next(panel for panel in document["panels"] if panel["sourceKind"] == "story")
     story_panel["pageId"] = "page-002"
     story_panel["rect"] = {"x": 0, "y": 4, "w": 6, "h": 3}
@@ -1605,7 +1620,7 @@ def test_story_panels_create_uses_story_neighbor_page(tmp_path, monkeypatch):
     assert second.status_code == 200
     created = next(panel for panel in second.json()["panels"] if panel["startOffset"] == 22)
     assert created["pageId"] == "page-002"
-    assert created["rect"] == {"x": 0, "y": 7, "w": 6, "h": 3}
+    assert created["rect"] == {"x": 6, "y": 4, "w": 6, "h": 3}
 
 
 def test_story_panels_reject_story_chunks_on_front_matter(tmp_path, monkeypatch):
