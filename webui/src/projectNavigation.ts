@@ -41,7 +41,7 @@ export function projectPhaseIcon(phase: ProjectPhase) {
 export function projectPhaseHelp(phase: ProjectPhase) {
   switch (phase) {
     case 'story':
-      return 'Select a passage for panels or bookmarks. Panels can include an optional note. Drag panel edges to refine chunks.';
+      return 'Write panels one at a time, or upload book.txt to highlight passages into panel chunks. Use Reading to manage order and open Layout to place panels.';
     default:
       return undefined;
   }

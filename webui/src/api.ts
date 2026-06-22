@@ -241,6 +241,15 @@ export const api = {
     request<StoryPanelDocument>(`/api/projects/${slug}/story-panels/panels/${panelId}`, {
       method: 'DELETE',
     }),
+  // Recovery after breaking panels.json schema changes; keeps canvas, assets, and adaptation.
+  resetStoryPanelLayout: (slug: string) =>
+    request<StoryPanelDocument>(`/api/projects/${slug}/story-panels/reset-layout`, {
+      method: 'POST',
+    }),
+  resetStoryPanelChunks: (slug: string) =>
+    request<StoryPanelDocument>(`/api/projects/${slug}/story-panels/reset-chunks`, {
+      method: 'POST',
+    }),
   importAdaptationBook: (slug: string, file: File) => {
     const data = new FormData();
     data.append('file', file);

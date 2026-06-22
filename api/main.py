@@ -371,6 +371,16 @@ def delete_story_panel(slug: str, panel_id: str) -> StoryPanelDocument:
     return story_panels.delete_panel(slug, panel_id)
 
 
+@app.post("/api/projects/{slug}/story-panels/reset-layout", response_model=StoryPanelDocument)
+def reset_story_panel_layout(slug: str) -> StoryPanelDocument:
+    return story_panels.reset_layout(slug)
+
+
+@app.post("/api/projects/{slug}/story-panels/reset-chunks", response_model=StoryPanelDocument)
+def reset_story_panel_chunks(slug: str) -> StoryPanelDocument:
+    return story_panels.reset_chunks(slug)
+
+
 @app.post("/api/projects/{slug}/adaptation/import-style-ref", response_model=AdaptationStatus)
 async def import_adaptation_style_ref(
     slug: str,

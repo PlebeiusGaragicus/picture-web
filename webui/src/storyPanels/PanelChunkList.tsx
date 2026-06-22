@@ -5,6 +5,7 @@ import { panelIsPlacedOnLayout } from './panelPlacement';
 import { storyPagePlacementLabel } from './pageNumbers';
 import {
   filterSidebarItems,
+  manualPanelNumber,
   SIDEBAR_FILTER_OPTIONS,
   sidebarItemLabel,
   sidebarItemPrimaryText,
@@ -20,11 +21,15 @@ function compactText(value: string, maxLength = 180) {
   return `${normalized.slice(0, maxLength - 1)}...`;
 }
 
-function itemTitle(panel: StoryPanel) {
+function itemTitle(panel: StoryPanel, panels: StoryPanel[], manualMode: boolean) {
+  if (manualMode && panel.sourceKind === 'draft') {
+    const number = manualPanelNumber(panels, panel.id);
+    return number > 0 ? `Panel ${number}` : 'Panel';
+  }
   return sidebarItemLabel(panel.sourceKind as 'story' | 'draft' | 'bookmark');
 }
 
-function deletePanelConfirmCopy(panel: StoryPanel): { title: string; body: string } {
+function deletePanelConfirmCopy(panel: StoryPanel, manualMode: boolean): { title: string; body: string } {
   if (panel.sourceKind === 'bookmark') {
     return {
       title: 'Delete bookmark?',
@@ -33,8 +38,10 @@ function deletePanelConfirmCopy(panel: StoryPanel): { title: string; body: strin
   }
   if (panel.sourceKind === 'draft') {
     return {
-      title: 'Delete draft?',
-      body: 'This removes the draft from the reading list.',
+      title: manualMode ? 'Delete panel?' : 'Delete draft?',
+      body: manualMode
+        ? 'This removes the panel from your story and layout.'
+        : 'This removes the draft from the reading list.',
     };
   }
   return {
@@ -50,8 +57,10 @@ function ChunkActionsMenu({
   onDelete,
   onInsertAfter,
   onEditNote,
+  onEditText,
   showInsert,
   showEditNote,
+  showEditText,
   isSaving,
 }: {
   isOpen: boolean;
@@ -60,8 +69,10 @@ function ChunkActionsMenu({
   onDelete?: () => void;
   onInsertAfter?: () => void;
   onEditNote?: () => void;
+  onEditText?: () => void;
   showInsert: boolean;
   showEditNote: boolean;
+  showEditText: boolean;
   isSaving: boolean;
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -95,7 +106,7 @@ function ChunkActionsMenu({
       return;
     }
     updatePopoverPosition();
-  }, [isOpen, showInsert, showEditNote, updatePopoverPosition]);
+  }, [isOpen, showInsert, showEditNote, showEditText, updatePopoverPosition]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -168,6 +179,20 @@ function ChunkActionsMenu({
           Edit note…
         </button>
       )}
+      {showEditText && onEditText && (
+        <button
+          type="button"
+          role="menuitem"
+          className="story-panels-chunk-menu-item"
+          disabled={isSaving}
+          onClick={() => {
+            onClose();
+            onEditText();
+          }}
+        >
+          Edit text…
+        </button>
+      )}
       {onDelete && (
         <button
           type="button"
@@ -218,6 +243,7 @@ export function PanelChunkList({
   onDeletePanel,
   onInsertDraft,
   onEditPanelNote,
+  onEditPanelText,
   isSaving,
   variant = 'card',
 }: {
@@ -231,6 +257,7 @@ export function PanelChunkList({
   onDeletePanel: (panelId: string) => void | Promise<void>;
   onInsertDraft?: (payload: InsertDraftPayload) => Promise<void>;
   onEditPanelNote?: (panelId: string, noteText: string) => Promise<void>;
+  onEditPanelText?: (panelId: string, text: string) => Promise<void>;
   isSaving: boolean;
   variant?: 'card' | 'plain';
 }) {
@@ -247,7 +274,11 @@ export function PanelChunkList({
   const [noteText, setNoteText] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [pendingDeletePanelId, setPendingDeletePanelId] = useState<string | null>(null);
+  const [showEditTextDialog, setShowEditTextDialog] = useState(false);
+  const [editTextPanelId, setEditTextPanelId] = useState<string | null>(null);
+  const [editTextValue, setEditTextValue] = useState('');
   const hasBookText = bookLength > 0;
+  const manualMode = !hasBookText;
   const allItems = sortSidebarItems(panels);
   const sortedPanels = filterSidebarItems(panels, sidebarFilter);
   const coveredChars = allItems
@@ -298,6 +329,27 @@ export function PanelChunkList({
     setShowInsertDialog(true);
   };
 
+  const openEditTextDialog = (panelId: string) => {
+    const panel = panels.find((item) => item.id === panelId);
+    setEditTextPanelId(panelId);
+    setEditTextValue(panel ? sidebarItemPrimaryText(panel) : '');
+    setOpenMenuId(null);
+    setShowEditTextDialog(true);
+  };
+
+  const submitEditText = async () => {
+    if (!editTextPanelId || !onEditPanelText) return;
+    setIsCreating(true);
+    try {
+      await onEditPanelText(editTextPanelId, editTextValue.trim());
+      setEditTextPanelId(null);
+      setEditTextValue('');
+      setShowEditTextDialog(false);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
   const openNoteDialog = (panelId: string) => {
     const panel = panels.find((item) => item.id === panelId);
     setNotePanelId(panelId);
@@ -339,7 +391,7 @@ export function PanelChunkList({
     setPendingDeletePanelId(null);
   };
 
-  const filterRow = (
+  const filterRow = !manualMode ? (
     <div className="story-panels-sidebar-filters" role="tablist" aria-label="Filter reading items">
       {SIDEBAR_FILTER_OPTIONS.map((option) => (
         <button
@@ -355,7 +407,7 @@ export function PanelChunkList({
         </button>
       ))}
     </div>
-  );
+  ) : null;
 
   return (
     <div className={variant === 'plain' ? 'story-panels-chunks-pane' : 'story-card story-panels-list-card'}>
@@ -374,9 +426,15 @@ export function PanelChunkList({
       {variant === 'plain' && (
         <div className="story-panels-chunks-meta-row">
           <p className="story-panels-chunks-meta muted">
-            {counts.all} item{counts.all === 1 ? '' : 's'}
-            {bookLength > 0 ? ` · ${counts.story} panels · ${coverage}% covered` : ''}
+            {manualMode
+              ? `${counts.all} panel${counts.all === 1 ? '' : 's'}`
+              : `${counts.all} item${counts.all === 1 ? '' : 's'}${bookLength > 0 ? ` · ${counts.story} panels · ${coverage}% covered` : ''}`}
           </p>
+          {canInsertDraft && (
+            <button type="button" className="secondary story-panels-add-panel-button" disabled={isSaving || isCreating} onClick={() => openInsertDialog(null)}>
+              + Add panel
+            </button>
+          )}
         </div>
       )}
       {filterRow}
@@ -385,10 +443,17 @@ export function PanelChunkList({
           <div className="story-panels-chunk-empty">
             <p className="muted">
               {canInsertDraft
-                ? 'No items yet. Open the menu to insert a draft, or select a passage in Story.'
+                ? manualMode
+                  ? 'No panels yet. Add one here or continue writing in the story pane.'
+                  : 'No items yet. Open the menu to insert a draft, or select a passage in Story.'
                 : 'No items yet. Select a passage in the book text to begin.'}
             </p>
             {canInsertDraft && (
+              <button type="button" className="secondary" disabled={isSaving || isCreating} onClick={() => openInsertDialog(null)}>
+                Add first panel
+              </button>
+            )}
+            {canInsertDraft && !manualMode && (
               <ChunkActionsMenu
                 isOpen={openMenuId === '__empty__'}
                 onToggle={() => setOpenMenuId((current) => (current === '__empty__' ? null : '__empty__'))}
@@ -396,6 +461,7 @@ export function PanelChunkList({
                 onInsertAfter={() => openInsertDialog(null)}
                 showInsert
                 showEditNote={false}
+                showEditText={false}
                 isSaving={isSaving || isCreating}
               />
             )}
@@ -423,7 +489,7 @@ export function PanelChunkList({
           >
             <div className="story-panels-chunk-main">
               <div className="story-panels-chunk-title-row">
-                <strong>{itemTitle(panel)}</strong>
+                <strong>{itemTitle(panel, panels, manualMode)}</strong>
                 <ChunkActionsMenu
                   isOpen={openMenuId === panel.id}
                   onToggle={() => setOpenMenuId((current) => (current === panel.id ? null : panel.id))}
@@ -431,15 +497,17 @@ export function PanelChunkList({
                   onDelete={() => setPendingDeletePanelId(panel.id)}
                   onInsertAfter={canInsertDraft ? () => openInsertDialog(panel.id) : undefined}
                   onEditNote={onEditPanelNote && panel.sourceKind === 'story' ? () => openNoteDialog(panel.id) : undefined}
+                  onEditText={onEditPanelText && panel.sourceKind === 'draft' && manualMode ? () => openEditTextDialog(panel.id) : undefined}
                   showInsert={canInsertDraft}
                   showEditNote={Boolean(onEditPanelNote && panel.sourceKind === 'story')}
+                  showEditText={Boolean(onEditPanelText && panel.sourceKind === 'draft' && manualMode)}
                   isSaving={isSaving || isCreating}
                 />
-                {panel.sourceKind === 'story' && panel.startOffset !== null && panel.endOffset !== null ? (
+                {!manualMode && panel.sourceKind === 'story' && panel.startOffset !== null && panel.endOffset !== null ? (
                   <span className="story-panels-chunk-range">{panel.startOffset}-{panel.endOffset}</span>
-                ) : panel.sourceKind === 'draft' ? (
+                ) : !manualMode && panel.sourceKind === 'draft' ? (
                   <span className="story-panels-chunk-kind">Draft</span>
-                ) : panel.startOffset !== null && panel.endOffset !== null ? (
+                ) : !manualMode && panel.startOffset !== null && panel.endOffset !== null ? (
                   <span className="story-panels-chunk-range">{panel.startOffset}-{panel.endOffset}</span>
                 ) : null}
               </div>
@@ -471,10 +539,14 @@ export function PanelChunkList({
       {showInsertDialog && onInsertDraft && (
         <div className="confirm-backdrop" onClick={() => !isCreating && setShowInsertDialog(false)}>
           <div className="confirm-dialog story-panels-insert-dialog" role="dialog" aria-modal="true" aria-labelledby="insert-draft-title" onClick={(event) => event.stopPropagation()}>
-            <h2 id="insert-draft-title">Insert after</h2>
-            <p className="muted">Write the passage, caption, or scene text for this draft chunk.</p>
+            <h2 id="insert-draft-title">{insertAfterPanelId ? 'Insert after' : manualMode ? 'Add panel' : 'Insert after'}</h2>
+            <p className="muted">
+              {manualMode
+                ? 'Write the scene, dialogue, or narration for this panel.'
+                : 'Write the passage, caption, or scene text for this draft chunk.'}
+            </p>
             <label>
-              Draft text
+              {manualMode ? 'Panel text' : 'Draft text'}
               <textarea
                 value={draftText}
                 rows={6}
@@ -491,7 +563,31 @@ export function PanelChunkList({
                 setInsertAfterPanelId(null);
               }}>Cancel</button>
               <button type="button" disabled={isCreating || !draftText.trim()} onClick={() => void submitInsertDraft()}>
-                {isCreating ? 'Inserting…' : 'Insert draft'}
+                {isCreating ? 'Adding…' : manualMode ? 'Add panel' : 'Insert draft'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showEditTextDialog && onEditPanelText && (
+        <div className="confirm-backdrop" onClick={() => !isCreating && setShowEditTextDialog(false)}>
+          <div className="confirm-dialog story-panels-insert-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-panel-text-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="edit-panel-text-title">Edit panel</h2>
+            <label>
+              Panel text
+              <textarea
+                value={editTextValue}
+                rows={6}
+                autoFocus
+                disabled={isCreating}
+                onChange={(event) => setEditTextValue(event.target.value)}
+                onKeyDown={(event) => event.stopPropagation()}
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="secondary" disabled={isCreating} onClick={() => setShowEditTextDialog(false)}>Cancel</button>
+              <button type="button" disabled={isCreating || !editTextValue.trim()} onClick={() => void submitEditText()}>
+                {isCreating ? 'Saving…' : 'Save'}
               </button>
             </div>
           </div>
@@ -526,8 +622,8 @@ export function PanelChunkList({
       {pendingDeletePanel && (
         <div className="confirm-backdrop" onClick={() => !isSaving && setPendingDeletePanelId(null)}>
           <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-chunk-title" onClick={(event) => event.stopPropagation()}>
-            <h2 id="delete-chunk-title">{deletePanelConfirmCopy(pendingDeletePanel).title}</h2>
-            <p>{deletePanelConfirmCopy(pendingDeletePanel).body}</p>
+            <h2 id="delete-chunk-title">{deletePanelConfirmCopy(pendingDeletePanel, manualMode).title}</h2>
+            <p>{deletePanelConfirmCopy(pendingDeletePanel, manualMode).body}</p>
             <div className="modal-actions">
               <button type="button" className="secondary" disabled={isSaving} onClick={() => setPendingDeletePanelId(null)}>Cancel</button>
               <button type="button" className="danger" disabled={isSaving} onClick={() => void confirmDeletePanel()}>

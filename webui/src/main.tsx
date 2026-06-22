@@ -282,6 +282,8 @@ function App() {
   const [showExportPdfModal, setShowExportPdfModal] = useState(false);
   const [exportPageBorder, setExportPageBorder] = useState<BookletPageBorder>('black');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  // Bumped after story-panel recovery so Story/Layout remount and reload panels.json.
+  const [storyPanelRecoveryKey, setStoryPanelRecoveryKey] = useState(0);
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const [adaptation, setAdaptation] = useState<AdaptationStatus | null>(null);
   const [adaptationWorkflow, setAdaptationWorkflow] = useState<AdaptationWorkflowStatus | null>(null);
@@ -1462,6 +1464,26 @@ function App() {
           await loadProjects();
           closeProject();
         }}
+        onResetStoryPanelLayout={async () => {
+          try {
+            await api.resetStoryPanelLayout(openProjectSlug);
+            setStoryPanelRecoveryKey((current) => current + 1);
+            setError(null);
+          } catch (err) {
+            setError(formatRequestError(err));
+            throw err;
+          }
+        }}
+        onResetStoryPanelChunks={async () => {
+          try {
+            await api.resetStoryPanelChunks(openProjectSlug);
+            setStoryPanelRecoveryKey((current) => current + 1);
+            setError(null);
+          } catch (err) {
+            setError(formatRequestError(err));
+            throw err;
+          }
+        }}
         onExportAssets={async () => {
           if (!currentProject) return;
           setError(null);
@@ -1524,7 +1546,7 @@ function App() {
             onPhaseChange={handleProjectPhaseChange}
             onExpandSidebar={() => setIsPhaseSidebarCollapsed(false)}
             onCollapseSidebar={() => setIsPhaseSidebarCollapsed(true)}
-            showPanelChunksToggle={isStoryActive && storyHasBookText}
+            showPanelChunksToggle={isStoryActive}
             panelChunksOpen={storyPanelChunksOpen}
             onTogglePanelChunks={() => setStoryPanelChunksOpen((open) => !open)}
             showAutoPlaceToggle={isStoryActive && storyHasBookText}
@@ -1593,6 +1615,7 @@ function App() {
         )}
         {isStoryActive && (
           <BookTextView
+            key={`story-${openProjectSlug}-${storyPanelRecoveryKey}`}
             projectSlug={openProjectSlug}
             panelChunksOpen={storyPanelChunksOpen}
             onPanelChunksOpenChange={setStoryPanelChunksOpen}
@@ -1602,10 +1625,12 @@ function App() {
               setLayoutEditorNavigation(navigation);
               setProjectPhase('layout-editor');
             }}
+            onImportBook={importAdaptationBook}
           />
         )}
         {isLayoutEditorActive && (
           <LayoutEditorView
+            key={`layout-${openProjectSlug}-${storyPanelRecoveryKey}`}
             projectSlug={openProjectSlug}
             initialNavigation={layoutEditorNavigation}
             onNavigationComplete={() => setLayoutEditorNavigation(null)}
@@ -2070,6 +2095,8 @@ function ProjectPhaseSidebar({
   onToggleCollapsed,
   onBack,
   onDeleteProject,
+  onResetStoryPanelLayout,
+  onResetStoryPanelChunks,
   onExportAssets,
   onExportPdf,
   exportingPdf = false,
@@ -2088,6 +2115,8 @@ function ProjectPhaseSidebar({
   onToggleCollapsed: () => void;
   onBack: () => void;
   onDeleteProject: () => Promise<void>;
+  onResetStoryPanelLayout: () => Promise<void>;
+  onResetStoryPanelChunks: () => Promise<void>;
   onExportAssets: () => Promise<void>;
   onExportPdf: () => void;
   exportingPdf?: boolean;
@@ -2096,7 +2125,8 @@ function ProjectPhaseSidebar({
   onPhaseChange: (phase: ProjectPhase) => void;
 }) {
   const [pendingDelete, setPendingDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [deleteAction, setDeleteAction] = useState<'layout' | 'chunks' | 'project' | null>(null);
+  const deleting = deleteAction !== null;
   const [exportingAssets, setExportingAssets] = useState(false);
   const [organizingTags, setOrganizingTags] = useState(false);
   const [pendingTagDelete, setPendingTagDelete] = useState<TagDefinition | null>(null);
@@ -2248,27 +2278,60 @@ function ProjectPhaseSidebar({
       )}
       {pendingDelete && (
         <div className="confirm-backdrop" onClick={() => !deleting && setPendingDelete(false)}>
-          <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
-            <h2>Delete project?</h2>
+          <div className="confirm-dialog project-delete-dialog" onClick={(event) => event.stopPropagation()}>
+            <h2>Delete or reset?</h2>
             <p>
-              Move <strong>{project?.name ?? projectSlug}</strong> to the system Trash? This removes its canvas,
-              assets, and adaptation files from Comic Canvas.
+              Choose what to remove from <strong>{project?.name ?? projectSlug}</strong>. Canvas assets, tags, and
+              adaptation are kept unless you delete the entire project.
             </p>
-            <div className="row">
+            <p className="muted">
+              Use layout or chunk reset to recover projects whose Story or Layout views fail after schema changes.
+            </p>
+            <div className="row project-delete-actions">
               <button
                 className="danger"
                 disabled={deleting}
                 onClick={async () => {
-                  setDeleting(true);
+                  setDeleteAction('layout');
+                  try {
+                    await onResetStoryPanelLayout();
+                    setPendingDelete(false);
+                  } finally {
+                    setDeleteAction(null);
+                  }
+                }}
+              >
+                {deleteAction === 'layout' ? 'Resetting layout...' : 'Delete layout'}
+              </button>
+              <button
+                className="danger"
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleteAction('chunks');
+                  try {
+                    await onResetStoryPanelChunks();
+                    setPendingDelete(false);
+                  } finally {
+                    setDeleteAction(null);
+                  }
+                }}
+              >
+                {deleteAction === 'chunks' ? 'Clearing chunks...' : 'Delete all chunks'}
+              </button>
+              <button
+                className="danger"
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleteAction('project');
                   try {
                     await onDeleteProject();
                     setPendingDelete(false);
                   } finally {
-                    setDeleting(false);
+                    setDeleteAction(null);
                   }
                 }}
               >
-                {deleting ? 'Deleting...' : 'Delete project'}
+                {deleteAction === 'project' ? 'Deleting...' : 'Delete entire project'}
               </button>
               <button className="secondary" disabled={deleting} onClick={() => setPendingDelete(false)}>Cancel</button>
             </div>

@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 import adaptation
 import library
@@ -407,6 +408,59 @@ def delete_panel(slug: str, panel_id: str) -> StoryPanelDocument:
     if len(next_panels) == len(document.panels):
         raise HTTPException(status_code=404, detail=f"Panel not found: {panel_id}")
     document.panels = next_panels
+    return save_document(slug, document)
+
+
+def _read_document_lenient(slug: str) -> StoryPanelDocument | None:
+    """Parse panels.json without book cross-checks; None when the file no longer validates."""
+    path = document_path(slug)
+    if not path.is_file():
+        return empty_document()
+    raw = library.read_json(path)
+    for panel in raw.get("panels", []):
+        if panel.get("sourceKind") == "note":
+            panel["sourceKind"] = "story"
+    try:
+        document = StoryPanelDocument.model_validate(raw)
+    except ValidationError:
+        return None
+    return _normalize_document_pages(document)
+
+
+def reset_chunks(slug: str) -> StoryPanelDocument:
+    """Wipe story-panel chunks and layout while keeping canvas, assets, tags, and adaptation.
+
+    Writes a fresh document without reading the old file so projects with incompatible
+    panels.json can recover after breaking schema changes during local development.
+    """
+    library.require_project(slug)
+    return _write_document(slug, empty_document())
+
+
+def reset_layout(slug: str) -> StoryPanelDocument:
+    """Drop page placement and layout-only panels; keep story, draft, and bookmark chunks.
+
+    When panels.json no longer validates, falls back to reset_chunks so the project can
+    reopen Story and Layout without deleting canvas assets or adaptation work.
+    """
+    document = _read_document_lenient(slug)
+    if document is None:
+        return reset_chunks(slug)
+    default_rect = StoryPanelRect(x=0, y=0, w=4, h=3)
+    chunk_kinds = {"story", "draft", "bookmark"}
+    document.panels = [
+        panel.model_copy(
+            update={
+                "pageId": None,
+                "rect": default_rect,
+                "layer": 0,
+                "finalized": False,
+            }
+        )
+        for panel in document.panels
+        if panel.sourceKind in chunk_kinds
+    ]
+    document = _normalize_document_pages(document)
     return save_document(slug, document)
 
 

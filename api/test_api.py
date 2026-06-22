@@ -1133,6 +1133,80 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
     assert any(panel["selectedText"] == "Beta crosses the room." for panel in deleted.json()["panels"])
 
 
+def test_story_panels_reset_layout_keeps_chunks(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the door. Beta crosses the room.\n")
+
+    created = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
+    )
+    assert created.status_code == 200
+    alpha_panel_id = next(panel for panel in created.json()["panels"] if panel["sourceKind"] == "story")["id"]
+
+    client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{alpha_panel_id}",
+        json={"rect": {"x": 0, "y": 2, "w": 6, "h": 6}, "layer": 1, "finalized": True},
+    )
+
+    reset = client.post("/api/projects/farm-comic/story-panels/reset-layout")
+    assert reset.status_code == 200
+    body = reset.json()
+    alpha = next(panel for panel in body["panels"] if panel["id"] == alpha_panel_id)
+    assert alpha["selectedText"] == "Alpha opens the door."
+    assert alpha["pageId"] is None
+    assert alpha["rect"] == {"x": 0, "y": 0, "w": 4, "h": 3}
+    assert alpha["layer"] == 0
+    assert alpha["finalized"] is False
+    assert any(panel["sourceKind"] == "free-text" and panel["pageId"] == "cover" for panel in body["panels"])
+
+
+def test_story_panels_reset_chunks_clears_story_panels(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the door.\n")
+
+    created = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
+    )
+    assert created.status_code == 200
+    assert any(panel["sourceKind"] == "story" for panel in created.json()["panels"])
+
+    reset = client.post("/api/projects/farm-comic/story-panels/reset-chunks")
+    assert reset.status_code == 200
+    body = reset.json()
+    assert not any(panel["sourceKind"] in {"story", "draft", "bookmark"} for panel in body["panels"])
+    assert any(panel["sourceKind"] == "free-text" for panel in body["panels"])
+    assert (library.project_dir("farm-comic") / "canvas.json").is_file()
+    assert (root / "book.txt").is_file()
+
+
+def test_story_panels_reset_recovers_invalid_document(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    panels_path = library.project_dir("farm-comic") / "story-panels" / "panels.json"
+    panels_path.parent.mkdir(parents=True, exist_ok=True)
+    panels_path.write_text('{"version": 1, "panels": [{"id": "bad", "sourceKind": "story"}]}')
+
+    reset_layout = client.post("/api/projects/farm-comic/story-panels/reset-layout")
+    assert reset_layout.status_code == 200
+    recovered = client.get("/api/projects/farm-comic/story-panels")
+    assert recovered.status_code == 200
+    assert not any(panel["id"] == "bad" for panel in recovered.json()["panels"])
+
+    panels_path.write_text('{"version": 1, "panels": [{"id": "bad", "sourceKind": "story"}]}')
+
+    reset_chunks = client.post("/api/projects/farm-comic/story-panels/reset-chunks")
+    assert reset_chunks.status_code == 200
+    assert client.get("/api/projects/farm-comic/story-panels").status_code == 200
+
+
 def test_story_panels_panel_image_assignment(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)

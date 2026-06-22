@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { formatRequestError } from '../formatError';
 import { api } from '../api';
 import { BookTextSelector, type TextSelectionRange } from './BookTextSelector';
+import { ManualStoryReader } from './ManualStoryReader';
 import { PanelChunkList } from './PanelChunkList';
+import { StorySetupView } from './StorySetupView';
 import type { LayoutEditorNavigation } from './layoutEditorNavigation';
 import type { InsertDraftPayload } from './storyPanelSidebar';
 import { sortedPanels, withSelectedText } from './storyPanelUtils';
@@ -15,6 +17,7 @@ export function BookTextView({
   onPanelChunksOpenChange,
   onHasBookTextChange,
   autoPlaceEnabled,
+  onImportBook,
 }: {
   projectSlug: string;
   onNavigateToLayoutEditor: (navigation: LayoutEditorNavigation) => void;
@@ -22,6 +25,7 @@ export function BookTextView({
   onPanelChunksOpenChange: (open: boolean) => void;
   onHasBookTextChange: (hasBookText: boolean) => void;
   autoPlaceEnabled: boolean;
+  onImportBook: (file: File) => Promise<void>;
 }) {
   const {
     bookText,
@@ -34,6 +38,7 @@ export function BookTextView({
     setDocument,
     saveDocument,
     deletePanel,
+    reload,
   } = useStoryPanelDocument(projectSlug);
   const [selection, setSelection] = useState<TextSelectionRange | null>(null);
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
@@ -42,6 +47,18 @@ export function BookTextView({
   const [isCreating, setIsCreating] = useState(false);
 
   const hasBookText = bookText.length > 0;
+  const showStorySetup = !hasBookText && sidebarPanels.length === 0;
+
+  const handleImportBook = async (file: File) => {
+    setError(null);
+    try {
+      await onImportBook(file);
+      await reload();
+    } catch (err) {
+      setError(formatRequestError(err));
+      throw err;
+    }
+  };
 
   useEffect(() => {
     if (!hasBookText) {
@@ -138,8 +155,8 @@ export function BookTextView({
     const created = next.panels.find((panel) => !beforeIds.has(panel.id));
     if (created) {
       setSelectedPanelId(created.id);
-      setFocusedChunkPanelId(null);
-      window.setTimeout(() => setFocusedChunkPanelId(created.id), 0);
+      setFocusedBookPanelId(null);
+      window.setTimeout(() => setFocusedBookPanelId(created.id), 0);
     }
   };
 
@@ -152,6 +169,8 @@ export function BookTextView({
       setError(formatRequestError(err));
     }
   };
+
+  const editPanelText = editPanelNote;
 
   const adjustPanelRange = async (panelId: string, startOffset: number, endOffset: number) => {
     if (!document) return;
@@ -210,9 +229,23 @@ export function BookTextView({
       onDeletePanel={handleDeletePanel}
       onInsertDraft={hasBookText ? undefined : insertDraft}
       onEditPanelNote={hasBookText ? editPanelNote : undefined}
+      onEditPanelText={hasBookText ? undefined : editPanelText}
       isSaving={isSaving}
     />
   );
+
+  if (showStorySetup) {
+    return (
+      <div className="story-adaptation-screen story-panels-screen story-view-screen">
+        {error && <p className="error error-banner story-view-error">{error}</p>}
+        <StorySetupView
+          onImportBook={handleImportBook}
+          onAddPanel={insertDraft}
+          isSaving={isSaving}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="story-adaptation-screen story-panels-screen story-view-screen">
@@ -220,12 +253,11 @@ export function BookTextView({
       <div
         className={[
           'story-view-workspace',
-          panelChunksOpen && hasBookText ? 'is-chunks-open' : '',
-          !hasBookText ? 'is-create-mode' : '',
+          panelChunksOpen ? 'is-chunks-open' : '',
         ].filter(Boolean).join(' ')}
       >
-        {hasBookText ? (
-          <div className="story-view-text-pane">
+        <div className="story-view-text-pane">
+          {hasBookText ? (
             <BookTextSelector
               bookText={bookText}
               panels={sidebarPanels.filter((panel) => panel.sourceKind === 'story' || panel.sourceKind === 'bookmark')}
@@ -239,18 +271,21 @@ export function BookTextView({
               onFocusPanelChunk={focusPanelChunk}
               isCreating={isCreating}
             />
-          </div>
-        ) : (
-          <div className="story-view-create-pane">
-            <div className="story-view-create-head">
-              <h2 className="story-view-chunks-title">Your story</h2>
-              <p className="muted">Add chunks with Insert after in the Reading list, then open Layout to place them on pages.</p>
-            </div>
-            {panelChunks}
-          </div>
-        )}
+          ) : (
+            <ManualStoryReader
+              panels={sidebarPanels}
+              selectedPanelId={selectedPanelId}
+              focusedPanelId={focusedBookPanelId}
+              onSelectPanel={selectPanelChunk}
+              onFocusPanelChunk={focusPanelChunk}
+              onInsertDraft={insertDraft}
+              onEditPanelText={editPanelText}
+              isSaving={isSaving || isCreating}
+            />
+          )}
+        </div>
 
-        {hasBookText && panelChunksOpen && (
+        {panelChunksOpen && (
           <aside className="story-view-chunks-pane">
             <div className="story-view-chunks-pane-head">
               <h2 className="story-view-chunks-title">Reading</h2>

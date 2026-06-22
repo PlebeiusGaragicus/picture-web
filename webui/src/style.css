@@ -760,6 +760,85 @@ button {
   background: #000;
 }
 
+.story-setup-view {
+  display: grid;
+  flex: 1 1 0;
+  align-content: center;
+  gap: 24px;
+  min-height: 0;
+  padding: 32px 24px;
+  overflow: auto;
+}
+
+.story-setup-header {
+  display: grid;
+  gap: 8px;
+  max-width: 52ch;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.story-setup-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.story-setup-header p {
+  margin: 0;
+}
+
+.story-setup-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  width: min(760px, 100%);
+  margin: 0 auto;
+}
+
+.story-setup-card {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  padding: 20px;
+  background: rgb(15 23 42 / 0.88);
+  border: 1px solid #334155;
+  border-radius: 16px;
+}
+
+.story-setup-card h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.story-setup-card p {
+  margin: 0;
+}
+
+.story-setup-field {
+  display: grid;
+  gap: 6px;
+  color: #94a3b8;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.story-setup-field textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 10px 12px;
+  color: #e2e8f0;
+  background: #0a0a0a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  font: inherit;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.story-setup-card button {
+  justify-self: start;
+}
+
 .layout-view-screen {
   gap: 0;
   padding: 0;
@@ -1095,6 +1174,136 @@ button {
 
 .story-view-workspace.is-create-mode {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.story-panels-manual-story-wrap {
+  overflow: hidden;
+}
+
+.story-panels-manual-story {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 4px 0 0;
+}
+
+.story-panels-manual-empty {
+  display: grid;
+  gap: 10px;
+  max-width: 42ch;
+  padding: 24px 0;
+}
+
+.story-panels-manual-empty p {
+  margin: 0;
+}
+
+.story-panels-manual-empty-hint {
+  font-size: 0.88rem;
+}
+
+.story-panels-manual-segment {
+  margin: 0 0 1.35em;
+  padding: 0 0 0 12px;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.story-panels-manual-segment.is-selected {
+  border-left-color: #60a5fa;
+  background: rgb(96 165 250 / 0.08);
+  border-radius: 0 8px 8px 0;
+}
+
+.story-panels-manual-segment.is-flashing {
+  animation: story-panel-source-flash 1.4s ease-out;
+}
+
+.story-panels-manual-segment.is-editing {
+  cursor: default;
+  border-left-color: #60a5fa;
+  background: rgb(96 165 250 / 0.08);
+  border-radius: 0 8px 8px 0;
+}
+
+.story-panels-manual-segment-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.story-panels-manual-segment-text {
+  margin: 0;
+  color: #d4d4d8;
+  font-size: 1.05rem;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.story-panels-manual-segment-editor textarea {
+  width: 100%;
+  min-height: 120px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  color: #e2e8f0;
+  background: #0a0a0a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  font: inherit;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.story-panels-manual-segment-editor-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.story-panels-manual-composer {
+  flex-shrink: 0;
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #1a1a1a;
+}
+
+.story-panels-manual-composer-label {
+  display: grid;
+  gap: 6px;
+  color: #94a3b8;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.story-panels-manual-composer textarea {
+  width: 100%;
+  min-height: 88px;
+  padding: 10px 12px;
+  color: #e2e8f0;
+  background: #0a0a0a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  font: inherit;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.story-panels-manual-add-button {
+  justify-self: start;
+}
+
+.story-panels-add-panel-button {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  font-size: 0.82rem;
 }
 
 .story-view-create-pane {
@@ -4894,6 +5103,19 @@ pre {
 .confirm-dialog h2,
 .confirm-dialog p {
   margin: 0;
+}
+
+.project-delete-dialog {
+  width: min(460px, calc(100vw - 32px));
+}
+
+.project-delete-actions {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.project-delete-actions button {
+  width: 100%;
 }
 
 .editor-dialog {

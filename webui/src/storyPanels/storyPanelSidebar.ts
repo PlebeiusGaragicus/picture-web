@@ -52,6 +52,11 @@ export function sidebarItemPrimaryText(panel: StoryPanel) {
   return panel.customText || panel.selectedText;
 }
 
+export function manualPanelNumber(panels: StoryPanel[], panelId: string) {
+  const index = sortSidebarItems(panels).findIndex((panel) => panel.id === panelId);
+  return index >= 0 ? index + 1 : 0;
+}
+
 export function sidebarItemSecondaryText(panel: StoryPanel) {
   if (panel.sourceKind === 'story' && panel.customText.trim()) {
     return panel.customText.trim();
