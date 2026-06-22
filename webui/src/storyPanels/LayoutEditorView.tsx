@@ -41,11 +41,6 @@ export function LayoutEditorView({
   const [pageControls, setPageControls] = useState<React.ReactNode>(null);
 
   useEffect(() => {
-    if (!document || selectedPanelId) return;
-    setSelectedPanelId(sortedPanels(document.panels).find((panel) => panel.sourceKind === 'story')?.id ?? null);
-  }, [document, selectedPanelId]);
-
-  useEffect(() => {
     if (!initialNavigation || !document) return;
     setLayoutMode(initialNavigation.layoutMode);
     setSelectedPanelId(initialNavigation.panelId);
@@ -66,7 +61,11 @@ export function LayoutEditorView({
 
   const selectLayoutPanel = (panelId: string | null) => {
     setSelectedPanelId(panelId);
-    if (!panelId || !document?.panels.some((panel) => panel.id === panelId && panel.sourceKind === 'story')) return;
+    if (!panelId) {
+      setFocusedChunkPanelId(null);
+      return;
+    }
+    if (!document?.panels.some((panel) => panel.id === panelId && panel.sourceKind === 'story')) return;
     setFocusedChunkPanelId(null);
     window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
   };
@@ -127,30 +126,24 @@ export function LayoutEditorView({
 
   if (isLoading) {
     return (
-      <div className="story-adaptation-screen">
-        <p className="muted">Loading layout editor...</p>
+      <div className="story-adaptation-screen layout-view-screen layout-view-screen--empty">
+        <p className="muted">Loading layout...</p>
       </div>
     );
   }
 
   if (!bookText) {
     return (
-      <div className="story-adaptation-screen">
-        <section className="story-card">
-          <h2>Layout Editor</h2>
-          <p className="muted">Upload book text in Story & Style before laying out pages.</p>
-        </section>
+      <div className="story-adaptation-screen layout-view-screen layout-view-screen--empty">
+        <p className="muted">Upload book text in Story & Style before laying out pages.</p>
       </div>
     );
   }
 
   if (!document) {
     return (
-      <div className="story-adaptation-screen">
-        <section className="story-card">
-          <h2>Layout Editor</h2>
-          <p className="error">{error ?? 'Unable to load layout.'}</p>
-        </section>
+      <div className="story-adaptation-screen layout-view-screen layout-view-screen--empty">
+        <p className="error">{error ?? 'Unable to load layout.'}</p>
       </div>
     );
   }
@@ -170,39 +163,36 @@ export function LayoutEditorView({
   );
 
   return (
-    <div className="story-adaptation-screen story-panels-screen">
-      <h1 className="story-panels-title">Layout Editor</h1>
-      <header className="story-panels-header story-card">
-        <div className="story-panels-header-actions">
-          <div className="story-panels-header-primary">
-            <label className="story-panels-view-control">
-              <select value={layoutMode} aria-label="Layout view" onChange={(event) => setLayoutMode(event.target.value as StoryPanelLayoutMode)}>
-                <option value="all-pages">All pages (a)</option>
-                <option value="spread">Two-page spread (2)</option>
-                <option value="single">Single page + info (i)</option>
-                <option value="single-chunks">Single page + panel chunks (p)</option>
-              </select>
-            </label>
-            <div className="story-panels-history-actions">
-              {historyControls}
-            </div>
-            <button
-              type="button"
-              className="secondary small-button"
-              disabled={isExporting || isSaving}
-              onClick={() => setShowExportModal(true)}
-              aria-label={isExporting ? 'Exporting…' : 'Export PDF'}
-              title={isExporting ? 'Exporting…' : 'Export PDF'}
-            >
-              <span aria-hidden="true">🖨️</span>
-            </button>
+    <div className="story-adaptation-screen story-panels-screen layout-view-screen">
+      <header className="layout-view-toolbar">
+        <div className="layout-view-toolbar-primary">
+          <label className="story-panels-view-control">
+            <select value={layoutMode} aria-label="Layout view" onChange={(event) => setLayoutMode(event.target.value as StoryPanelLayoutMode)}>
+              <option value="all-pages">All pages (a)</option>
+              <option value="spread">Two-page spread (2)</option>
+              <option value="single">Single page + info (i)</option>
+              <option value="single-chunks">Single page + panel chunks (p)</option>
+            </select>
+          </label>
+          <div className="story-panels-history-actions">
+            {historyControls}
           </div>
-          <div className="story-panels-header-page-controls">
-            {pageControls}
-          </div>
+          <button
+            type="button"
+            className="secondary small-button layout-view-export-button"
+            disabled={isExporting || isSaving}
+            onClick={() => setShowExportModal(true)}
+            aria-label={isExporting ? 'Exporting…' : 'Export PDF'}
+            title={isExporting ? 'Exporting…' : 'Export PDF'}
+          >
+            <span aria-hidden="true">🖨️</span>
+          </button>
+        </div>
+        <div className="layout-view-toolbar-page">
+          {pageControls}
         </div>
       </header>
-      {error && <p className="error error-banner">{error}</p>}
+      {error && <p className="error error-banner layout-view-error">{error}</p>}
       {showExportModal && (
         <div className="confirm-backdrop" onClick={() => !isExporting && setShowExportModal(false)}>
           <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="export-booklet-title" onClick={(event) => event.stopPropagation()}>
@@ -233,7 +223,7 @@ export function LayoutEditorView({
           </div>
         </div>
       )}
-      <div className="story-panels-grid">
+      <div className="layout-view-workspace">
         <PageLayoutEditor
           document={document}
           selectedPanelId={selectedPanelId}

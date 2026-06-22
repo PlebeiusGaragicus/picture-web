@@ -60,6 +60,14 @@ export function imageInfoHostFor(document: StoryPanelDocument, panel: StoryPanel
   return null;
 }
 
+export function panelKindHostFor(document: StoryPanelDocument, panel: StoryPanel | null) {
+  if (!panel) return null;
+  if (panel.sourceKind === 'caption') {
+    return imageInfoHostFor(document, panel);
+  }
+  return panel;
+}
+
 export function removePanelAndCaptionChildren(document: StoryPanelDocument, panelId: string) {
   const childIds = new Set(
     document.panels.filter((panel) => panel.parentPanelId === panelId).map((panel) => panel.id),

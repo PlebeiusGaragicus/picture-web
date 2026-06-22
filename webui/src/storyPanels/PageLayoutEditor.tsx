@@ -37,6 +37,7 @@ import {
   clampCaptionRect,
   defaultCaptionRect,
   imageInfoHostFor,
+  panelKindHostFor,
   parentPanelFor,
   removePanelAndCaptionChildren,
 } from './panelCaptions';
@@ -481,6 +482,7 @@ export function PageLayoutEditor({
     visiblePages.flatMap((page) => (page ? [page.id] : [])),
   );
   const visibleSelectedPanel = selectedPanel && selectedPanel.pageId && visiblePageIds.has(selectedPanel.pageId) ? selectedPanel : null;
+  const panelKindHost = panelKindHostFor(displayDocument, visibleSelectedPanel);
   const imageInfoHost = imageInfoHostFor(displayDocument, visibleSelectedPanel);
   const captionHostPanel = imageInfoHost;
   const childCaptions = captionHostPanel ? captionPanelsFor(displayDocument, captionHostPanel.id) : [];
@@ -1444,6 +1446,29 @@ export function PageLayoutEditor({
     const y = Math.max(0, roundStep((event.clientY - bounds.top) / rowHeight, panelSnapScale));
     setPageMenu({ kind: 'page', x: event.clientX, y: event.clientY, pageId, rect: { x, y, w: selectedPanel?.rect.w ?? 6, h: selectedPanel?.rect.h ?? 3 } });
   };
+  const clearPanelSelection = () => {
+    if (!selectedPanelId || isSaving || dragState) return;
+    const editingPanelId = richTextEditingPanelIdRef.current;
+    if (editingPanelId) {
+      persistPanelTextDraft(
+        editingPanelId,
+        customTextDraftRef.current ?? richTextEditorRef.current?.innerHTML,
+      );
+    }
+    onSelectPanel(null);
+  };
+  const handlePageBackgroundClick = (event: React.MouseEvent<HTMLElement>) => {
+    if (layoutMode === 'all-pages') return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.closest('.story-panels-page-panel')) return;
+    clearPanelSelection();
+  };
+  const handlePagePreviewBackgroundClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (layoutMode === 'all-pages') return;
+    if (event.target !== event.currentTarget) return;
+    clearPanelSelection();
+  };
   const openPageDetail = (pageId: string) => {
     const pageIndex = pages.findIndex((page) => page.id === pageId);
     if (pageIndex < 0) return;
@@ -1485,6 +1510,7 @@ export function PageLayoutEditor({
         ref={captureSideHeight}
         className={`story-panels-single-page-preview is-${singlePagePreviewMode} is-print-slot-${printSlot}`}
         style={singlePagePreviewMode === 'print' ? singlePrintFrameStyle(printSlot) : undefined}
+        onClick={handlePagePreviewBackgroundClick}
       >
         {grid}
       </div>
@@ -1652,6 +1678,7 @@ export function PageLayoutEditor({
                       }}
                       className="story-panels-page-grid"
                       style={{ gridTemplateRows: `repeat(${pageRows}, minmax(22px, 1fr))` }}
+                      onClick={handlePageBackgroundClick}
                       onContextMenu={(event) => openPageMenu(event, page.id)}
                       onPointerMove={continueDrag}
                       onPointerUp={endDrag}
@@ -1758,6 +1785,7 @@ export function PageLayoutEditor({
                     ...(layoutMode === 'all-pages' ? { aspectRatio: comicPageAspectRatio } : {}),
                     gridTemplateRows: `repeat(${pageRows}, minmax(22px, 1fr))`,
                   }}
+                  onClick={handlePageBackgroundClick}
                   onContextMenu={(event) => openPageMenu(event, page.id)}
                   onPointerMove={continueDrag}
                   onPointerUp={endDrag}
@@ -1826,27 +1854,27 @@ export function PageLayoutEditor({
                   </button>
                 </div>
                 <div className="story-panels-info-panel-body" ref={infoPanelBodyRef}>
-                {imageInfoHost && (
+                {panelKindHost && (
                 <div className="story-panels-info-control">
                   <span>Panel kind</span>
                   <div className="story-panels-kind-toggle" role="tablist" aria-label="Panel kind">
                     <button
                       type="button"
-                      className={imageInfoHost.panelKind === 'image' ? 'active' : ''}
+                      className={panelKindHost.panelKind === 'image' ? 'active' : ''}
                       role="tab"
-                      aria-selected={imageInfoHost.panelKind === 'image'}
+                      aria-selected={panelKindHost.panelKind === 'image'}
                       disabled={isSaving}
-                      onClick={() => updatePanelById(imageInfoHost.id, { panelKind: 'image' })}
+                      onClick={() => updatePanelById(panelKindHost.id, { panelKind: 'image' })}
                     >
                       Image panel
                     </button>
                     <button
                       type="button"
-                      className={imageInfoHost.panelKind === 'text' ? 'active' : ''}
+                      className={panelKindHost.panelKind === 'text' ? 'active' : ''}
                       role="tab"
-                      aria-selected={imageInfoHost.panelKind === 'text'}
+                      aria-selected={panelKindHost.panelKind === 'text'}
                       disabled={isSaving}
-                      onClick={() => updatePanelById(imageInfoHost.id, { panelKind: 'text' })}
+                      onClick={() => updatePanelById(panelKindHost.id, { panelKind: 'text' })}
                     >
                       Text / caption
                     </button>

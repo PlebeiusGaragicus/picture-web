@@ -2059,15 +2059,6 @@ function ProjectPhaseSidebar({
       <nav className="phase-nav" aria-label="Workspace">
         <button
           type="button"
-          className={`phase-nav-item ${activePhase === 'image-canvas' ? 'is-selected' : ''}`}
-          aria-current={activePhase === 'image-canvas' ? 'page' : undefined}
-          onClick={() => onPhaseChange('image-canvas')}
-        >
-          <span className="phase-number" aria-hidden="true">▦</span>
-          <strong>Image Canvas</strong>
-        </button>
-        <button
-          type="button"
           className={`phase-nav-item ${activePhase === 'story' ? 'is-selected' : ''}`}
           aria-current={activePhase === 'story' ? 'page' : undefined}
           onClick={() => onPhaseChange('story')}
@@ -2082,7 +2073,16 @@ function ProjectPhaseSidebar({
           onClick={() => onPhaseChange('layout-editor')}
         >
           <span className="phase-number" aria-hidden="true">▤</span>
-          <strong>Layout Editor</strong>
+          <strong>Layout</strong>
+        </button>
+        <button
+          type="button"
+          className={`phase-nav-item ${activePhase === 'image-canvas' ? 'is-selected' : ''}`}
+          aria-current={activePhase === 'image-canvas' ? 'page' : undefined}
+          onClick={() => onPhaseChange('image-canvas')}
+        >
+          <span className="phase-number" aria-hidden="true">▦</span>
+          <strong>Canvas</strong>
         </button>
       </nav>
       <h3 className="phase-nav-heading">Story Adaptation</h3>

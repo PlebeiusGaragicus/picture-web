@@ -13,9 +13,9 @@ export type ProjectPhase =
 export type PhaseNavStatus = 'pending' | 'active' | 'ready';
 
 export const workspaceNavItems: Array<{ id: ProjectPhase; icon: string; label: string }> = [
-  { id: 'image-canvas', icon: '▦', label: 'Image Canvas' },
   { id: 'story', icon: '▥', label: 'Story' },
-  { id: 'layout-editor', icon: '▤', label: 'Layout Editor' },
+  { id: 'layout-editor', icon: '▤', label: 'Layout' },
+  { id: 'image-canvas', icon: '▦', label: 'Canvas' },
 ];
 
 export const adaptationNavPhases: Array<{ id: ProjectPhase; number: string; title: string }> = [
