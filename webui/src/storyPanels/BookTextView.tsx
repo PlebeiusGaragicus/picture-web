@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { formatRequestError } from '../formatError';
 import { api } from '../api';
 import { HelpTip } from '../ui';
@@ -9,16 +9,19 @@ import { sortedPanels, withSelectedText } from './storyPanelUtils';
 import { useStoryPanelDocument } from './useStoryPanelDocument';
 
 import { PanelChunksToggleButton } from './PanelChunksToggle';
+import { SidebarCollapseButton } from '../PhaseSidebarToggle';
 
 export function BookTextView({
   projectSlug,
   onNavigateToLayoutEditor,
+  onCollapseSidebar,
   isPhaseSidebarCollapsed,
   panelChunksOpen,
   onPanelChunksOpenChange,
 }: {
   projectSlug: string;
   onNavigateToLayoutEditor: (navigation: LayoutEditorNavigation) => void;
+  onCollapseSidebar: () => void;
   isPhaseSidebarCollapsed: boolean;
   panelChunksOpen: boolean;
   onPanelChunksOpenChange: (open: boolean) => void;
@@ -26,7 +29,7 @@ export function BookTextView({
   const {
     bookText,
     document,
-    storyPanels,
+    sidebarPanels,
     isLoading,
     isSaving,
     error,
@@ -40,6 +43,14 @@ export function BookTextView({
   const [focusedBookPanelId, setFocusedBookPanelId] = useState<string | null>(null);
   const [focusedChunkPanelId, setFocusedChunkPanelId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+
+  const hasBookText = bookText.length > 0;
+
+  useEffect(() => {
+    if (!hasBookText) {
+      onPanelChunksOpenChange(true);
+    }
+  }, [hasBookText, onPanelChunksOpenChange]);
 
   const selectPanelChunk = (panelId: string) => {
     setSelectedPanelId(panelId);
@@ -85,7 +96,59 @@ export function BookTextView({
   const handleDeletePanel = async (panelId: string) => {
     const next = await deletePanel(panelId);
     if (next) {
-      setSelectedPanelId(sortedPanels(next.panels).find((panel) => panel.sourceKind === 'story')?.id ?? null);
+      setSelectedPanelId(sortedPanels(next.panels).find((panel) => (
+        panel.sourceKind === 'story' || panel.sourceKind === 'draft' || panel.sourceKind === 'note' || panel.sourceKind === 'bookmark'
+      ))?.id ?? null);
+    }
+  };
+
+  const createAnchor = async (sourceKind: 'note' | 'bookmark', customText = '') => {
+    if (!selection) return;
+    setIsCreating(true);
+    setError(null);
+    try {
+      const beforeIds = new Set(document?.panels.map((panel) => panel.id) ?? []);
+      const next = await api.createStoryAnchor(projectSlug, {
+        sourceKind,
+        startOffset: selection.startOffset,
+        endOffset: selection.endOffset,
+        selectedText: selection.selectedText,
+        customText,
+      });
+      setDocument(next);
+      setSelection(null);
+      const created = next.panels.find((panel) => !beforeIds.has(panel.id));
+      if (created) {
+        setSelectedPanelId(created.id);
+        setFocusedBookPanelId(null);
+        window.setTimeout(() => setFocusedBookPanelId(created.id), 0);
+      }
+      window.getSelection()?.removeAllRanges();
+    } catch (err) {
+      setError(formatRequestError(err));
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const createNote = async (noteText: string) => {
+    await createAnchor('note', noteText);
+  };
+
+  const createBookmark = async () => {
+    await createAnchor('bookmark');
+  };
+
+  const createDraftPanel = async (customText: string, insertAfterPanelId?: string | null) => {
+    if (!document) return;
+    const beforeIds = new Set(document.panels.map((panel) => panel.id));
+    const next = await api.createDraftStoryPanel(projectSlug, { customText, insertAfterPanelId: insertAfterPanelId ?? null });
+    setDocument(next);
+    const created = next.panels.find((panel) => !beforeIds.has(panel.id));
+    if (created) {
+      setSelectedPanelId(created.id);
+      setFocusedChunkPanelId(null);
+      window.setTimeout(() => setFocusedChunkPanelId(created.id), 0);
     }
   };
 
@@ -119,16 +182,7 @@ export function BookTextView({
   if (isLoading) {
     return (
       <div className="story-adaptation-screen">
-        <p className="muted">Loading book text...</p>
-      </div>
-    );
-  }
-
-  if (!bookText) {
-    return (
-      <div className="story-adaptation-screen story-view-screen story-view-screen--empty">
-        <h1 className="story-view-title">Story</h1>
-        <p className="muted">Upload book text in Story & Style before creating panel chunks.</p>
+        <p className="muted">Loading story...</p>
       </div>
     );
   }
@@ -146,50 +200,81 @@ export function BookTextView({
     <PanelChunkList
       variant="plain"
       bookLength={bookText.length}
-      panels={storyPanels}
+      panels={sidebarPanels}
       pages={document.pages}
       selectedPanelId={selectedPanelId}
       focusedPanelId={focusedChunkPanelId}
       onSelectPanel={selectPanelChunk}
       onOpenPanelPlacement={openPanelPlacement}
       onDeletePanel={handleDeletePanel}
+      onCreatePanel={createDraftPanel}
       isSaving={isSaving}
     />
   );
+
+  const helpText = hasBookText
+    ? 'Select a passage for panels, notes, or bookmarks. Drag panel edges to refine chunks.'
+    : 'Write panel chunks directly, then place them in Layout.';
+
+  const showChunksToggle = hasBookText && !panelChunksOpen;
 
   return (
     <div className="story-adaptation-screen story-panels-screen story-view-screen">
       {!isPhaseSidebarCollapsed && (
         <header className="story-view-head">
-          <div className="archetype-card-title">
-            <h1 className="story-view-title">Story</h1>
-            <HelpTip text="Select a passage to open actions, or drag panel edges to refine chunks." />
+          <div className="story-view-head-center">
+            <SidebarCollapseButton className="story-view-sidebar-collapse" onClick={onCollapseSidebar} />
+            <div className="archetype-card-title">
+              <h1 className="story-view-title">Story</h1>
+              <HelpTip text={helpText} placement="bottom" />
+            </div>
           </div>
-          {!panelChunksOpen && (
-            <PanelChunksToggleButton variant="expand" onClick={() => onPanelChunksOpenChange(true)} />
-          )}
+          <div className="story-view-head-end">
+            {showChunksToggle && (
+              <PanelChunksToggleButton variant="expand" onClick={() => onPanelChunksOpenChange(true)} />
+            )}
+          </div>
         </header>
       )}
       {error && <p className="error error-banner story-view-error">{error}</p>}
-      <div className={`story-view-workspace ${panelChunksOpen ? 'is-chunks-open' : ''}`}>
-        <div className="story-view-text-pane">
-          <BookTextSelector
-            bookText={bookText}
-            panels={storyPanels}
-            selection={selection}
-            focusedPanelId={focusedBookPanelId}
-            onSelectionChange={setSelection}
-            onCreatePanel={createPanel}
-            onDeletePanel={handleDeletePanel}
-            onAdjustPanelRange={adjustPanelRange}
-            onFocusPanelChunk={focusPanelChunk}
-            isCreating={isCreating}
-          />
-        </div>
-        {panelChunksOpen && (
+      <div
+        className={[
+          'story-view-workspace',
+          panelChunksOpen && hasBookText ? 'is-chunks-open' : '',
+          !hasBookText ? 'is-create-mode' : '',
+        ].filter(Boolean).join(' ')}
+      >
+        {hasBookText ? (
+          <div className="story-view-text-pane">
+            <BookTextSelector
+              bookText={bookText}
+              panels={sidebarPanels.filter((panel) => panel.sourceKind === 'story' || panel.sourceKind === 'note' || panel.sourceKind === 'bookmark')}
+              selection={selection}
+              focusedPanelId={focusedBookPanelId}
+              onSelectionChange={setSelection}
+              onCreatePanel={createPanel}
+              onCreateNote={createNote}
+              onCreateBookmark={createBookmark}
+              onDeletePanel={handleDeletePanel}
+              onAdjustPanelRange={adjustPanelRange}
+              onFocusPanelChunk={focusPanelChunk}
+              isCreating={isCreating}
+            />
+          </div>
+        ) : (
+          <div className="story-view-create-pane">
+            <div className="story-view-create-head">
+              <h2 className="story-view-chunks-title">Your story</h2>
+              <p className="muted">Add panel chunks with New panel, then open Layout to place them on pages.</p>
+            </div>
+            {panelChunks}
+          </div>
+        )}
+
+        {hasBookText && panelChunksOpen && (
           <aside className="story-view-chunks-pane">
             <div className="story-view-chunks-pane-head">
-              <h2 className="story-view-chunks-title">Chunks</h2>
+              <h2 className="story-view-chunks-title">Reading</h2>
               <PanelChunksToggleButton variant="collapse" onClick={() => onPanelChunksOpenChange(false)} />
             </div>
             {panelChunks}

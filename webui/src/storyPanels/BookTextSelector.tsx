@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StoryPanel } from '../types';
+import { bookAnchorPanels } from './storyPanelSidebar';
 
 export type TextSelectionRange = {
   startOffset: number;
@@ -9,35 +10,51 @@ export type TextSelectionRange = {
 
 type MenuState =
   | { kind: 'selection'; x: number; y: number }
-  | { kind: 'panel'; panelId: string; x: number; y: number };
+  | { kind: 'anchor'; panelId: string; x: number; y: number };
 
 type BoundaryDrag = {
   panelId: string;
   side: 'start' | 'end';
 };
 
-function textWithHighlights(bookText: string, panels: StoryPanel[], selection: TextSelectionRange | null) {
-  const markers: Array<{ start: number; end: number; kind: 'panel' | 'selection'; id: string }> = panels
-    .filter((panel) => panel.startOffset !== null && panel.endOffset !== null)
-    .map((panel) => ({
-      start: panel.startOffset!,
-      end: panel.endOffset!,
-      kind: 'panel',
-      id: panel.id,
-    }));
+type TextPiece = {
+  text: string;
+  storyId?: string;
+  noteId?: string;
+  bookmarkId?: string;
+  isSelection?: boolean;
+};
+
+function buildTextPieces(bookText: string, panels: StoryPanel[], selection: TextSelectionRange | null): TextPiece[] {
+  const anchors = bookAnchorPanels(panels);
+  const boundaries = new Set<number>([0, bookText.length]);
+  for (const panel of anchors) {
+    boundaries.add(panel.startOffset!);
+    boundaries.add(panel.endOffset!);
+  }
   if (selection) {
-    markers.push({ start: selection.startOffset, end: selection.endOffset, kind: 'selection', id: 'selection' });
+    boundaries.add(selection.startOffset);
+    boundaries.add(selection.endOffset);
   }
-  markers.sort((a, b) => a.start - b.start || a.end - b.end);
-  const pieces: Array<{ text: string; kind?: 'panel' | 'selection'; id?: string }> = [];
-  let cursor = 0;
-  for (const marker of markers) {
-    if (marker.start < cursor || marker.start >= marker.end) continue;
-    if (marker.start > cursor) pieces.push({ text: bookText.slice(cursor, marker.start) });
-    pieces.push({ text: bookText.slice(marker.start, marker.end), kind: marker.kind, id: marker.id });
-    cursor = marker.end;
+  const points = Array.from(boundaries).sort((a, b) => a - b);
+  const pieces: TextPiece[] = [];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    if (start >= end) continue;
+    const covering = anchors.filter((panel) => panel.startOffset! <= start && panel.endOffset! >= end);
+    const story = covering.find((panel) => panel.sourceKind === 'story');
+    const note = covering.find((panel) => panel.sourceKind === 'note');
+    const bookmark = covering.find((panel) => panel.sourceKind === 'bookmark');
+    const isSelection = Boolean(selection && selection.startOffset <= start && selection.endOffset >= end);
+    pieces.push({
+      text: bookText.slice(start, end),
+      storyId: story?.id,
+      noteId: note?.id,
+      bookmarkId: bookmark?.id,
+      isSelection,
+    });
   }
-  if (cursor < bookText.length) pieces.push({ text: bookText.slice(cursor) });
   return pieces;
 }
 
@@ -48,6 +65,8 @@ export function BookTextSelector({
   focusedPanelId,
   onSelectionChange,
   onCreatePanel,
+  onCreateNote,
+  onCreateBookmark,
   onDeletePanel,
   onAdjustPanelRange,
   onFocusPanelChunk,
@@ -59,6 +78,8 @@ export function BookTextSelector({
   focusedPanelId: string | null;
   onSelectionChange: (selection: TextSelectionRange | null) => void;
   onCreatePanel: () => void;
+  onCreateNote: (noteText: string) => Promise<void>;
+  onCreateBookmark: () => Promise<void>;
   onDeletePanel: (panelId: string) => void;
   onAdjustPanelRange: (panelId: string, startOffset: number, endOffset: number) => void;
   onFocusPanelChunk: (panelId: string) => void;
@@ -66,16 +87,23 @@ export function BookTextSelector({
 }) {
   const textRef = useRef<HTMLDivElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
-  const panelSpanRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+  const anchorSpanRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const [flashingPanelId, setFlashingPanelId] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [boundaryDrag, setBoundaryDrag] = useState<BoundaryDrag | null>(null);
-  const pieces = useMemo(() => textWithHighlights(bookText, panels, selection), [bookText, panels, selection]);
+  const [showNoteDialog, setShowNoteDialog] = useState(false);
+  const [noteText, setNoteText] = useState('');
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const storyPanels = useMemo(
+    () => panels.filter((panel) => panel.sourceKind === 'story' && panel.startOffset !== null && panel.endOffset !== null),
+    [panels],
+  );
+  const pieces = useMemo(() => buildTextPieces(bookText, panels, selection), [bookText, panels, selection]);
 
   useEffect(() => {
     if (!focusedPanelId) return;
-    const panelElement = panelSpanRefs.current[focusedPanelId];
+    const panelElement = anchorSpanRefs.current[focusedPanelId];
     if (!panelElement) return;
     const scrollRoot = textRef.current;
     if (scrollRoot) {
@@ -134,9 +162,11 @@ export function BookTextSelector({
     const selectedText = range.toString();
     const endOffset = startOffset + selectedText.length;
     if (!selectedText.trim()) return;
-    const overlaps = panels.some((panel) => panel.startOffset !== null && panel.endOffset !== null && startOffset < panel.endOffset && endOffset > panel.startOffset);
-    if (overlaps) {
-      setSelectionError('That passage overlaps an existing panel.');
+    const overlapsStory = storyPanels.some(
+      (panel) => panel.startOffset !== null && panel.endOffset !== null && startOffset < panel.endOffset && endOffset > panel.startOffset,
+    );
+    if (overlapsStory) {
+      setSelectionError('That passage overlaps an existing panel chunk.');
       onSelectionChange(null);
       return;
     }
@@ -156,7 +186,7 @@ export function BookTextSelector({
   const updateBoundaryDrag = (event: React.PointerEvent) => {
     if (!boundaryDrag) return;
     const offset = offsetFromPoint(event.clientX, event.clientY);
-    const panel = panels.find((item) => item.id === boundaryDrag.panelId);
+    const panel = storyPanels.find((item) => item.id === boundaryDrag.panelId);
     if (offset === null || !panel || panel.startOffset === null || panel.endOffset === null) return;
     if (boundaryDrag.side === 'start') {
       onAdjustPanelRange(panel.id, Math.max(0, Math.min(offset, panel.endOffset - 1)), panel.endOffset);
@@ -172,9 +202,11 @@ export function BookTextSelector({
   const clearMenuForTextOffClick = (event: React.PointerEvent) => {
     const target = event.target as HTMLElement | null;
     if (
-      target?.closest('.story-panels-text-panel') ||
-      target?.closest('.story-panels-boundary-handle') ||
-      target?.closest('.story-panels-text-menu')
+      target?.closest('.story-panels-text-panel')
+      || target?.closest('.story-panels-text-note')
+      || target?.closest('.story-panels-text-bookmark')
+      || target?.closest('.story-panels-boundary-handle')
+      || target?.closest('.story-panels-text-menu')
     ) {
       return;
     }
@@ -182,6 +214,42 @@ export function BookTextSelector({
     onSelectionChange(null);
     window.getSelection()?.removeAllRanges();
   };
+
+  const openAnchorMenu = (panelId: string, event: React.MouseEvent<HTMLElement>) => {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    onFocusPanelChunk(panelId);
+    setMenu({ kind: 'anchor', panelId, x: rect.left + rect.width / 2, y: rect.top });
+  };
+
+  const submitNote = async () => {
+    const text = noteText.trim();
+    if (!text) return;
+    setIsSavingNote(true);
+    try {
+      await onCreateNote(text);
+      setNoteText('');
+      setShowNoteDialog(false);
+      setMenu(null);
+      onSelectionChange(null);
+      window.getSelection()?.removeAllRanges();
+    } finally {
+      setIsSavingNote(false);
+    }
+  };
+
+  const pieceClasses = (piece: TextPiece) => {
+    const classes = [];
+    if (piece.storyId) classes.push('story-panels-text-panel');
+    if (piece.noteId) classes.push('story-panels-text-note');
+    if (piece.bookmarkId) classes.push('story-panels-text-bookmark');
+    if (piece.isSelection) classes.push('story-panels-text-selection');
+    const anchorId = piece.storyId ?? piece.noteId ?? piece.bookmarkId;
+    if (anchorId === focusedPanelId) classes.push('is-focused');
+    if (anchorId === flashingPanelId) classes.push('is-flashing');
+    return classes.join(' ') || undefined;
+  };
+
+  const pieceAnchorId = (piece: TextPiece) => piece.storyId ?? piece.noteId ?? piece.bookmarkId;
 
   return (
     <div ref={cardRef} className="story-panels-book-text-wrap">
@@ -196,54 +264,74 @@ export function BookTextSelector({
         onPointerUp={endBoundaryDrag}
         onPointerCancel={endBoundaryDrag}
       >
-        {pieces.map((piece, index) => (
-          <span
-            key={`${piece.id ?? 'plain'}-${index}`}
-            ref={piece.kind === 'panel' && piece.id ? (element) => {
-              panelSpanRefs.current[piece.id!] = element;
-            } : undefined}
-            className={[
-              piece.kind ? `story-panels-text-${piece.kind}` : '',
-              piece.kind === 'panel' && piece.id === focusedPanelId ? 'is-focused' : '',
-              piece.kind === 'panel' && piece.id === flashingPanelId ? 'is-flashing' : '',
-            ].filter(Boolean).join(' ') || undefined}
-            onClick={piece.kind === 'panel' && piece.id ? (event) => {
-              const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-              onFocusPanelChunk(piece.id!);
-              setMenu({ kind: 'panel', panelId: piece.id!, x: rect.left + rect.width / 2, y: rect.top });
-            } : undefined}
-          >
-            {piece.kind === 'panel' && piece.id && (
-              <span
-                className="story-panels-boundary-handle is-start"
-                aria-hidden="true"
-                onPointerDown={(event) => beginBoundaryDrag(event, piece.id!, 'start')}
-              />
-            )}
-            {piece.text}
-            {piece.kind === 'panel' && piece.id && (
-              <span
-                className="story-panels-boundary-handle is-end"
-                aria-hidden="true"
-                onPointerDown={(event) => beginBoundaryDrag(event, piece.id!, 'end')}
-              />
-            )}
-          </span>
-        ))}
+        {pieces.map((piece, index) => {
+          const anchorId = pieceAnchorId(piece);
+          return (
+            <span
+              key={`${anchorId ?? 'plain'}-${index}`}
+              ref={anchorId ? (element) => {
+                anchorSpanRefs.current[anchorId] = element;
+              } : undefined}
+              className={pieceClasses(piece)}
+              onClick={anchorId ? (event) => openAnchorMenu(anchorId, event) : undefined}
+            >
+              {piece.storyId && (
+                <span
+                  className="story-panels-boundary-handle is-start"
+                  aria-hidden="true"
+                  onPointerDown={(event) => beginBoundaryDrag(event, piece.storyId!, 'start')}
+                />
+              )}
+              {piece.text}
+              {piece.storyId && (
+                <span
+                  className="story-panels-boundary-handle is-end"
+                  aria-hidden="true"
+                  onPointerDown={(event) => beginBoundaryDrag(event, piece.storyId!, 'end')}
+                />
+              )}
+            </span>
+          );
+        })}
       </div>
       {menu && (
         <div className="story-panels-text-menu" style={{ left: menu.x, top: menu.y }} onPointerDown={(event) => event.stopPropagation()}>
           {menu.kind === 'selection' ? (
-            <button
-              type="button"
-              disabled={!selection || isCreating}
-              onClick={() => {
-                setMenu(null);
-                onCreatePanel();
-              }}
-            >
-              {isCreating ? 'Creating...' : 'Create panel'}
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={!selection || isCreating}
+                onClick={() => {
+                  setMenu(null);
+                  onCreatePanel();
+                }}
+              >
+                {isCreating ? 'Creating...' : 'Create panel'}
+              </button>
+              <button
+                type="button"
+                disabled={!selection || isCreating}
+                onClick={() => {
+                  setMenu(null);
+                  setShowNoteDialog(true);
+                }}
+              >
+                Add note
+              </button>
+              <button
+                type="button"
+                disabled={!selection || isCreating}
+                onClick={() => {
+                  void onCreateBookmark().then(() => {
+                    setMenu(null);
+                    onSelectionChange(null);
+                    window.getSelection()?.removeAllRanges();
+                  });
+                }}
+              >
+                Bookmark
+              </button>
+            </>
           ) : (
             <button
               type="button"
@@ -253,9 +341,36 @@ export function BookTextSelector({
                 onDeletePanel(menu.panelId);
               }}
             >
-              Delete panel
+              Delete
             </button>
           )}
+        </div>
+      )}
+      {showNoteDialog && (
+        <div className="confirm-backdrop" onClick={() => !isSavingNote && setShowNoteDialog(false)}>
+          <div className="confirm-dialog story-panels-new-panel-dialog" role="dialog" aria-modal="true" aria-labelledby="book-note-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="book-note-title">Add note</h2>
+            <p className="muted">Write your note about the selected passage.</p>
+            {selection && <p className="story-panels-note-quote muted">{selection.selectedText.trim()}</p>}
+            <label>
+              Note
+              <textarea
+                value={noteText}
+                rows={5}
+                autoFocus
+                disabled={isSavingNote}
+                placeholder="Remember to revisit this scene..."
+                onChange={(event) => setNoteText(event.target.value)}
+                onKeyDown={(event) => event.stopPropagation()}
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="secondary" disabled={isSavingNote} onClick={() => setShowNoteDialog(false)}>Cancel</button>
+              <button type="button" disabled={isSavingNote || !noteText.trim()} onClick={() => void submitNote()}>
+                {isSavingNote ? 'Saving…' : 'Save note'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

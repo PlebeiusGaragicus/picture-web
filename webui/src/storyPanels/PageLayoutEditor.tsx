@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { nonArchivedVariants } from '../canvas/shared';
 import type { Asset, CanvasDocument, StoryPanel, StoryPanelDocument, StoryPanelImageCrop, StoryPanelRect, StoryPanelTextStyle, TagDefinition } from '../types';
@@ -42,7 +42,9 @@ import {
   removePanelAndCaptionChildren,
 } from './panelCaptions';
 import { removeStoryPanelFromLayout } from './panelPlacement';
+import { inferDocumentChangeLabel, type StoryPanelHistoryEntry } from './storyPanelHistory';
 import { sortedStoryPages, storyPageNumberById as mapStoryPageNumbers } from './pageNumbers';
+import { HoverTooltip } from '../ui';
 import {
   PRINT_HALF_WIDTH,
   PRINT_INNER_GUTTER,
@@ -374,6 +376,7 @@ export function PageLayoutEditor({
   onLayoutModeChange,
   onHistoryControlsChange,
   onPageControlsChange,
+  spreadPanelInfoEnabled = true,
   assets,
   projectTags,
   canvas,
@@ -391,6 +394,7 @@ export function PageLayoutEditor({
   onLayoutModeChange?: (layoutMode: StoryPanelLayoutMode) => void;
   onHistoryControlsChange?: (controls: ReactNode) => void;
   onPageControlsChange?: (controls: ReactNode) => void;
+  spreadPanelInfoEnabled?: boolean;
   assets: Asset[];
   projectTags: TagDefinition[];
   canvas: CanvasDocument;
@@ -407,6 +411,7 @@ export function PageLayoutEditor({
   const draftDocumentRef = useRef<StoryPanelDocument | null>(null);
   const richTextEditingPanelIdRef = useRef<string | null>(null);
   const infoPanelBodyRef = useRef<HTMLDivElement | null>(null);
+  const spreadWorkspaceRef = useRef<HTMLDivElement | null>(null);
   const zoomDragPanelIdRef = useRef<string | null>(null);
   const persistPanelTextDraftRef = useRef<(panelId: string, draftHtml: string | null | undefined) => void>(() => {});
   const [draftDocument, setDraftDocument] = useState<StoryPanelDocument | null>(null);
@@ -419,8 +424,8 @@ export function PageLayoutEditor({
   const [pendingPageDeleteId, setPendingPageDeleteId] = useState<string | null>(null);
   const [pendingPanelDeleteId, setPendingPanelDeleteId] = useState<string | null>(null);
   const [pendingCaptionDeleteId, setPendingCaptionDeleteId] = useState<string | null>(null);
-  const [undoStack, setUndoStack] = useState<StoryPanelDocument[]>([]);
-  const [redoStack, setRedoStack] = useState<StoryPanelDocument[]>([]);
+  const [undoStack, setUndoStack] = useState<StoryPanelHistoryEntry[]>([]);
+  const [redoStack, setRedoStack] = useState<StoryPanelHistoryEntry[]>([]);
   const [customTextDraft, setCustomTextDraft] = useState<string | null>(null);
   const [fontSizeInput, setFontSizeInput] = useState<string | null>(null);
   const [singlePagePreviewMode, setSinglePagePreviewMode] = useState<SinglePagePreviewMode>(readSinglePagePreviewMode);
@@ -436,6 +441,7 @@ export function PageLayoutEditor({
   const [captionFontSizeDraft, setCaptionFontSizeDraft] = useState<{ captionId: string; value: string } | null>(null);
   const [isSnappingAspect, setIsSnappingAspect] = useState(false);
   const [captionTextDrafts, setCaptionTextDrafts] = useState<Record<string, string>>({});
+  const [infoPopoverAnchor, setInfoPopoverAnchor] = useState<'left' | 'right'>('right');
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const displayDocument = draftDocument ?? document;
   displayDocumentRef.current = displayDocument;
@@ -456,6 +462,7 @@ export function PageLayoutEditor({
     : 0;
   const isSinglePageMode = layoutMode !== 'spread';
   const hasSinglePageSidePanel = layoutMode === 'single' || layoutMode === 'single-chunks';
+  const showsSelectedPanelInfo = layoutMode === 'single' || (layoutMode === 'spread' && spreadPanelInfoEnabled);
   const singlePagePreviewAspect = singlePagePreviewMode === 'print'
     ? `${PRINT_HALF_WIDTH} / ${PRINT_SHEET_HEIGHT}`
     : `${PRINT_PAGE_WIDTH} / ${PRINT_PAGE_HEIGHT}`;
@@ -533,7 +540,7 @@ export function PageLayoutEditor({
       )),
     };
     setDraftDocument(nextDocument);
-    setUndoStack((current) => [...current, doc]);
+    setUndoStack((current) => [...current, { document: doc, label: 'Edit text' }]);
     setRedoStack([]);
     onSaveDocument(nextDocument);
   };
@@ -555,9 +562,39 @@ export function PageLayoutEditor({
     }
   }, [selectedPanelId, cropModePanelId]);
   useLayoutEffect(() => {
-    if (layoutMode !== 'single' || visibleSelectedPanel?.sourceKind !== 'caption') return;
+    if (layoutMode !== 'single' && layoutMode !== 'spread') return;
+    if (visibleSelectedPanel?.sourceKind !== 'caption') return;
     infoPanelBodyRef.current?.scrollTo({ top: 0 });
   }, [layoutMode, visibleSelectedPanel?.id, visibleSelectedPanel?.sourceKind]);
+  const updateInfoPopoverAnchor = useCallback(() => {
+    if (layoutMode !== 'spread' || !visibleSelectedPanel) return;
+    const workspace = spreadWorkspaceRef.current;
+    const panelEl = workspace?.querySelector('.story-panels-page-panel.is-selected');
+    if (!workspace || !(panelEl instanceof HTMLElement)) {
+      setInfoPopoverAnchor('right');
+      return;
+    }
+    const workspaceRect = workspace.getBoundingClientRect();
+    const panelRect = panelEl.getBoundingClientRect();
+    const panelCenterX = panelRect.left + panelRect.width / 2;
+    const workspaceCenterX = workspaceRect.left + workspaceRect.width / 2;
+    setInfoPopoverAnchor(panelCenterX < workspaceCenterX ? 'right' : 'left');
+  }, [layoutMode, visibleSelectedPanel?.id, visibleSelectedPanel?.rect]);
+  useLayoutEffect(() => {
+    if (layoutMode !== 'spread' || !visibleSelectedPanel) return;
+    updateInfoPopoverAnchor();
+    const workspace = spreadWorkspaceRef.current;
+    if (!workspace) return;
+    const observer = new ResizeObserver(updateInfoPopoverAnchor);
+    observer.observe(workspace);
+    const panelEl = workspace.querySelector('.story-panels-page-panel.is-selected');
+    if (panelEl instanceof HTMLElement) observer.observe(panelEl);
+    window.addEventListener('resize', updateInfoPopoverAnchor);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateInfoPopoverAnchor);
+    };
+  }, [layoutMode, visibleSelectedPanel?.id, visibleSelectedPanel?.rect, clampedPageIndex, dragState, updateInfoPopoverAnchor]);
   useEffect(() => {
     if (!ratioPopoverOpen) return;
     const close = (event: MouseEvent) => {
@@ -585,7 +622,7 @@ export function PageLayoutEditor({
   }, [captionStylePopoverId]);
   useLayoutEffect(() => {
     const previousPanelId = richTextEditingPanelIdRef.current;
-    const activePanelId = layoutMode === 'single' && visibleSelectedPanel?.panelKind === 'text' && visibleSelectedPanel.sourceKind !== 'caption'
+    const activePanelId = showsSelectedPanelInfo && visibleSelectedPanel?.panelKind === 'text' && visibleSelectedPanel.sourceKind !== 'caption'
       ? visibleSelectedPanel.id
       : null;
 
@@ -596,7 +633,7 @@ export function PageLayoutEditor({
       );
     }
 
-    if (layoutMode !== 'single' || !visibleSelectedPanel || visibleSelectedPanel.panelKind !== 'text' || visibleSelectedPanel.sourceKind === 'caption') {
+    if (!showsSelectedPanelInfo || !visibleSelectedPanel || visibleSelectedPanel.panelKind !== 'text' || visibleSelectedPanel.sourceKind === 'caption') {
       if (!visibleSelectedPanel || visibleSelectedPanel.panelKind !== 'text' || visibleSelectedPanel.sourceKind === 'caption') {
         setCustomTextDraft(null);
       }
@@ -620,7 +657,7 @@ export function PageLayoutEditor({
     visibleSelectedPanel?.customText,
   ]);
   useEffect(() => {
-    if (layoutMode !== 'single' || !visibleSelectedPanel || visibleSelectedPanel.panelKind !== 'text') return;
+    if (!showsSelectedPanelInfo || !visibleSelectedPanel || visibleSelectedPanel.panelKind !== 'text') return;
     if (customTextDraft === null) return;
     const panelId = visibleSelectedPanel.id;
     const timer = window.setTimeout(() => {
@@ -630,7 +667,7 @@ export function PageLayoutEditor({
       );
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [customTextDraft, layoutMode, visibleSelectedPanel?.id, visibleSelectedPanel?.panelKind]);
+  }, [customTextDraft, showsSelectedPanelInfo, visibleSelectedPanel?.id, visibleSelectedPanel?.panelKind]);
   useEffect(() => {
     return () => {
       const panelId = richTextEditingPanelIdRef.current;
@@ -699,18 +736,24 @@ export function PageLayoutEditor({
     };
   }, [displayDocument.panels, layoutMode, navigateToPanelId, onNavigateToPanelComplete, pages]);
   useEffect(() => {
+    const undoEntry = undoStack[undoStack.length - 1];
+    const redoEntry = redoStack[redoStack.length - 1];
     onHistoryControlsChange?.(
       <>
-        <button type="button" className="secondary small-button" disabled={isSaving || undoStack.length === 0} onClick={undo} aria-label="Undo" title="Undo">
-          <span aria-hidden="true">↩</span>
-        </button>
-        <button type="button" className="secondary small-button" disabled={isSaving || redoStack.length === 0} onClick={redo} aria-label="Redo" title="Redo">
-          <span aria-hidden="true">↪</span>
-        </button>
+        <HoverTooltip text={undoEntry ? `Undo: ${undoEntry.label}` : 'Undo'} placement="bottom">
+          <button type="button" className="secondary small-button" disabled={isSaving || undoStack.length === 0} onClick={undo} aria-label={undoEntry ? `Undo ${undoEntry.label}` : 'Undo'}>
+            <span aria-hidden="true">↩</span>
+          </button>
+        </HoverTooltip>
+        <HoverTooltip text={redoEntry ? `Redo: ${redoEntry.label}` : 'Redo'} placement="bottom">
+          <button type="button" className="secondary small-button" disabled={isSaving || redoStack.length === 0} onClick={redo} aria-label={redoEntry ? `Redo ${redoEntry.label}` : 'Redo'}>
+            <span aria-hidden="true">↪</span>
+          </button>
+        </HoverTooltip>
       </>,
     );
     return () => onHistoryControlsChange?.(null);
-  }, [isSaving, onHistoryControlsChange, redoStack.length, undoStack.length]);
+  }, [isSaving, onHistoryControlsChange, redoStack, undoStack]);
   useLayoutEffect(() => {
     if (!hasSinglePageSidePanel || !sideHeightSourceRef.current) {
       setSidePanelHeight(null);
@@ -747,24 +790,27 @@ export function PageLayoutEditor({
       pages: nextPages.map((candidate, index) => ({ ...candidate, order: index })),
     };
   };
-  const commitDocument = (nextDocument: StoryPanelDocument) => {
-    setUndoStack((current) => [...current, displayDocument]);
+  const pushHistory = (beforeDocument: StoryPanelDocument, label: string) => {
+    setUndoStack((current) => [...current, { document: beforeDocument, label }]);
     setRedoStack([]);
+  };
+  const commitDocument = (nextDocument: StoryPanelDocument, label?: string) => {
+    pushHistory(displayDocument, label ?? inferDocumentChangeLabel(displayDocument, nextDocument));
     onSaveDocument(nextDocument);
   };
   const undo = () => {
-    const previous = undoStack[undoStack.length - 1];
-    if (!previous) return;
+    const entry = undoStack[undoStack.length - 1];
+    if (!entry) return;
     setUndoStack((current) => current.slice(0, -1));
-    setRedoStack((current) => [...current, document]);
-    onSaveDocument(previous);
+    setRedoStack((current) => [...current, { document, label: entry.label }]);
+    onSaveDocument(entry.document);
   };
   const redo = () => {
-    const next = redoStack[redoStack.length - 1];
-    if (!next) return;
+    const entry = redoStack[redoStack.length - 1];
+    if (!entry) return;
     setRedoStack((current) => current.slice(0, -1));
-    setUndoStack((current) => [...current, document]);
-    onSaveDocument(next);
+    setUndoStack((current) => [...current, { document, label: entry.label }]);
+    onSaveDocument(entry.document);
   };
   const pagesToReachNextStorySignature = () => {
     const remainder = storyPages.length % 4;
@@ -792,7 +838,7 @@ export function PageLayoutEditor({
       ? createPageDocument(lastStoryPage.id, pagesToReachNextStorySignature())
       : createPageDocument(undefined, pagesToReachNextStorySignature());
     const insertedPageIndex = sortedPages(nextDocument).findIndex((page) => !pages.some((existingPage) => existingPage.id === page.id));
-    commitDocument(nextDocument);
+    commitDocument(nextDocument, pagesToReachNextStorySignature() > 1 ? 'Add pages' : 'Add page');
     setCurrentPageIndex(insertedPageIndex >= 0 ? insertedPageIndex : layoutMode === 'spread' && newPageIndex > 0 && newPageIndex % 2 === 0 ? newPageIndex - 1 : newPageIndex);
   };
   const selectedPageIndex = selectedPageId ? pages.findIndex((page) => page.id === selectedPageId) : -1;
@@ -802,7 +848,7 @@ export function PageLayoutEditor({
     const nextDocument = createPageDocument(anchorId);
     const anchorIndex = sortedPages(nextDocument).findIndex((page) => page.id === anchorId);
     const insertedPage = sortedPages(nextDocument)[Math.max(0, anchorIndex + 1)];
-    commitDocument(nextDocument);
+    commitDocument(nextDocument, 'Add page');
     setSelectedPageId(insertedPage?.id ?? null);
   };
   const requestDeleteSelectedPage = () => {
@@ -821,7 +867,7 @@ export function PageLayoutEditor({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [layoutMode, selectedPageId, selectedPageCanChangeOrder, storyPages.length]);
   useEffect(() => {
-    if (layoutMode !== 'single') return;
+    if (layoutMode !== 'single' && layoutMode !== 'spread') return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) return;
       if (event.key.toLowerCase() !== 'd') return;
@@ -843,7 +889,7 @@ export function PageLayoutEditor({
       ...displayDocument,
       pages: nextPages,
       panels: displayDocument.panels.filter((panel) => panel.pageId !== pageId),
-    });
+    }, 'Delete page');
     setPendingPageDeleteId(null);
     setSelectedPageId(nextPages[nextIndex]?.id ?? null);
     setCurrentPageIndex(nextIndex);
@@ -857,7 +903,7 @@ export function PageLayoutEditor({
     const nextPages = [...pages];
     const [page] = nextPages.splice(selectedPageIndex, 1);
     nextPages.splice(targetIndex, 0, page);
-    commitDocument({ ...displayDocument, pages: nextPages.map((candidate, index) => ({ ...candidate, order: index })) });
+    commitDocument({ ...displayDocument, pages: nextPages.map((candidate, index) => ({ ...candidate, order: index })) }, 'Reorder pages');
     setCurrentPageIndex(targetIndex);
   };
   const goPrevious = () => {
@@ -887,12 +933,13 @@ export function PageLayoutEditor({
     if (!selectedPanel) return;
     const page = displayDocument.pages.find((candidate) => candidate.id === pageId);
     if (selectedPanel.sourceKind === 'story' && page?.pageKind !== 'story') return;
+    if (selectedPanel.sourceKind === 'draft' && page?.pageKind !== 'story') return;
     commitDocument({
       ...displayDocument,
       panels: displayDocument.panels.map((panel) => (
         panel.id === selectedPanel.id ? { ...panel, pageId, rect: clampRect({ ...panel.rect, x: rect.x, y: rect.y }, panel.panelKind) } : panel
       )),
-    });
+    }, 'Place panel');
     setPageMenu(null);
   };
   const addFreePanelAt = (pageId: string, rect: StoryPanelRect, sourceKind: 'free-text' | 'free-image') => {
@@ -1127,7 +1174,7 @@ export function PageLayoutEditor({
     zoomDragPanelIdRef.current = null;
     draftDocumentRef.current = null;
     setDraftDocument(null);
-    commitDocument(nextDocument);
+    commitDocument(nextDocument, 'Zoom image');
   };
   const cancelZoomAdjust = () => {
     zoomDragPanelIdRef.current = null;
@@ -1379,10 +1426,11 @@ export function PageLayoutEditor({
   };
   const endDrag = () => {
     if (!dragState || !draftDocument) return;
+    const label = dragState.mode === 'resize' ? 'Resize panel' : 'Move panel';
     const nextDocument = draftDocument;
     setDragState(null);
     setDraftDocument(null);
-    commitDocument(nextDocument);
+    commitDocument(nextDocument, label);
   };
   const beginCropPan = (event: React.PointerEvent<HTMLDivElement>, panel: StoryPanel) => {
     if (isSaving || cropModePanelId !== panel.id || !panel.activeAssetId) return;
@@ -1426,7 +1474,7 @@ export function PageLayoutEditor({
     const nextDocument = draftDocument;
     setCropDragState(null);
     setDraftDocument(null);
-    commitDocument(nextDocument);
+    commitDocument(nextDocument, 'Adjust image crop');
   };
   const openPanelMenu = (event: React.MouseEvent, panel: StoryPanel) => {
     event.preventDefault();
@@ -1620,6 +1668,7 @@ export function PageLayoutEditor({
   return (
     <>
       <div
+        ref={spreadWorkspaceRef}
         className={`story-panels-layout-workspace is-${layoutMode} ${hasSinglePageSidePanel ? `is-single-preview-${singlePagePreviewMode}` : ''}`}
         style={pageLayoutStyle}
       >
@@ -1843,8 +1892,14 @@ export function PageLayoutEditor({
           )
         ) : <p className="muted">No pages yet.</p>}
         </div>
-        {layoutMode === 'single' && (
-          <aside className="story-panels-info-panel" style={sidePanelHeight ? { height: sidePanelHeight } : undefined}>
+        {(layoutMode === 'single' || (layoutMode === 'spread' && visibleSelectedPanel && spreadPanelInfoEnabled)) && (
+          <aside
+            className={`story-panels-info-panel${layoutMode === 'spread' ? ` story-panels-info-popover is-anchor-${infoPopoverAnchor}` : ''}`}
+            style={layoutMode === 'single' && sidePanelHeight ? { height: sidePanelHeight } : undefined}
+            role={layoutMode === 'spread' ? 'dialog' : undefined}
+            aria-label={layoutMode === 'spread' ? 'Selected panel settings' : undefined}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
             {visibleSelectedPanel ? (
               <>
                 <div className="story-panels-info-head">

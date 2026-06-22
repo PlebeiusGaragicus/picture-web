@@ -51,6 +51,8 @@ from models import (
     MomentSequenceEntry,
     MomentPatch,
     StoryPanelCreate,
+    StoryPanelAnchorCreate,
+    StoryPanelDraftCreate,
     StoryPanelDocument,
     StoryPanelPatch,
     DisplayPatch,
@@ -318,7 +320,8 @@ def get_adaptation_book(slug: str) -> dict[str, str]:
 
 @app.get("/api/projects/{slug}/story-panels/book")
 def get_story_panel_book(slug: str) -> dict[str, str]:
-    return {"text": story_panels.read_book(slug)}
+    text = story_panels.optional_book_text(slug)
+    return {"text": text or ""}
 
 
 @app.get("/api/projects/{slug}/story-panels", response_model=StoryPanelDocument)
@@ -346,6 +349,16 @@ def put_story_panels(slug: str, payload: StoryPanelDocument) -> StoryPanelDocume
 @app.post("/api/projects/{slug}/story-panels/panels", response_model=StoryPanelDocument)
 def create_story_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
     return story_panels.create_panel(slug, payload)
+
+
+@app.post("/api/projects/{slug}/story-panels/panels/draft", response_model=StoryPanelDocument)
+def create_draft_story_panel(slug: str, payload: StoryPanelDraftCreate) -> StoryPanelDocument:
+    return story_panels.create_draft_panel(slug, payload)
+
+
+@app.post("/api/projects/{slug}/story-panels/panels/anchor", response_model=StoryPanelDocument)
+def create_story_panel_anchor(slug: str, payload: StoryPanelAnchorCreate) -> StoryPanelDocument:
+    return story_panels.create_anchor(slug, payload)
 
 
 @app.patch("/api/projects/{slug}/story-panels/panels/{panel_id}", response_model=StoryPanelDocument)

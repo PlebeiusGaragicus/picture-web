@@ -238,7 +238,10 @@ def read_tag_registry(slug: str) -> TagRegistryDocument:
     path = tags_json_path(slug)
     if not path.is_file():
         return TagRegistryDocument()
-    payload = read_json(path)
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return TagRegistryDocument()
     raw_tags = payload.get("tags", []) if isinstance(payload, dict) else []
     tags = [coerce_tag_definition(item) for item in raw_tags if isinstance(item, dict)]
     return TagRegistryDocument(tags=tags)

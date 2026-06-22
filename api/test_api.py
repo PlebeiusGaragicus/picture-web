@@ -1295,13 +1295,115 @@ def test_story_panels_missing_book(tmp_path, monkeypatch):
     create_project(client)
 
     response = client.get("/api/projects/farm-comic/story-panels/book")
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json()["text"] == ""
+
+    document = client.get("/api/projects/farm-comic/story-panels").json()
+    assert document["pages"]
 
     create = client.post(
         "/api/projects/farm-comic/story-panels/panels",
         json={"startOffset": 0, "endOffset": 5, "selectedText": "Alpha"},
     )
     assert create.status_code == 404
+
+    draft = client.post(
+        "/api/projects/farm-comic/story-panels/panels/draft",
+        json={"customText": "A brave pony stepped into the sun."},
+    ).json()
+    assert draft["panels"][-1]["sourceKind"] == "draft"
+    assert draft["panels"][-1]["customText"] == "A brave pony stepped into the sun."
+
+    saved = client.put("/api/projects/farm-comic/story-panels", json=draft)
+    assert saved.status_code == 200
+
+
+def test_story_panels_draft_insert_after_panel(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    first = client.post(
+        "/api/projects/farm-comic/story-panels/panels/draft",
+        json={"customText": "First panel."},
+    ).json()
+    first_panel = next(panel for panel in first["panels"] if panel["sourceKind"] == "draft")
+
+    second = client.post(
+        "/api/projects/farm-comic/story-panels/panels/draft",
+        json={"customText": "Second panel."},
+    ).json()
+    second_panel = next(panel for panel in second["panels"] if panel["customText"] == "Second panel.")
+
+    inserted = client.post(
+        "/api/projects/farm-comic/story-panels/panels/draft",
+        json={"customText": "Between.", "insertAfterPanelId": first_panel["id"]},
+    ).json()
+    inserted_panel = next(panel for panel in inserted["panels"] if panel["customText"] == "Between.")
+
+    ordered = sorted(
+        [panel for panel in inserted["panels"] if panel["sourceKind"] == "draft"],
+        key=lambda panel: panel["order"],
+    )
+    assert [panel["customText"] for panel in ordered] == ["First panel.", "Between.", "Second panel."]
+    assert inserted_panel["order"] == first_panel["order"] + 1
+    assert second_panel["order"] + 1 == next(panel for panel in inserted["panels"] if panel["id"] == second_panel["id"])["order"]
+
+
+def test_story_panels_create_note_and_bookmark(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    book_text = "Chapter One\n\nThe air was warm.\n"
+    (root / "book.txt").write_text(book_text)
+
+    story = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 11, "selectedText": "Chapter One"},
+    )
+    assert story.status_code == 200
+
+    note = client.post(
+        "/api/projects/farm-comic/story-panels/panels/anchor",
+        json={
+            "sourceKind": "note",
+            "startOffset": 13,
+            "endOffset": 30,
+            "selectedText": "The air was warm.",
+            "customText": "Nice opening line.",
+        },
+    )
+    assert note.status_code == 200
+    note_panel = next(panel for panel in note.json()["panels"] if panel["sourceKind"] == "note")
+    assert note_panel["customText"] == "Nice opening line."
+    assert note_panel["selectedText"] == "The air was warm."
+    assert note_panel["pageId"] is None
+
+    bookmark = client.post(
+        "/api/projects/farm-comic/story-panels/panels/anchor",
+        json={
+            "sourceKind": "bookmark",
+            "startOffset": 0,
+            "endOffset": 11,
+            "selectedText": "Chapter One",
+        },
+    )
+    assert bookmark.status_code == 200
+    bookmark_panel = next(panel for panel in bookmark.json()["panels"] if panel["sourceKind"] == "bookmark")
+    assert bookmark_panel["customText"] == "Chapter One"
+    assert bookmark_panel["pageId"] is None
+
+    missing_note_text = client.post(
+        "/api/projects/farm-comic/story-panels/panels/anchor",
+        json={
+            "sourceKind": "note",
+            "startOffset": 13,
+            "endOffset": 30,
+            "selectedText": "The air was warm.",
+            "customText": "   ",
+        },
+    )
+    assert missing_note_text.status_code == 422
 
 
 def test_story_panels_create_uses_story_neighbor_page(tmp_path, monkeypatch):

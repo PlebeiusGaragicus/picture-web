@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { PanelChunksToggleButton } from './storyPanels/PanelChunksToggle';
+import { PhaseSidebarToggleIcon, SidebarCollapseButton } from './PhaseSidebarToggle';
 import { HelpTip } from './ui';
 import type { AdaptationStatus } from './types';
 import {
@@ -12,32 +13,22 @@ import {
   type ProjectPhase,
 } from './projectNavigation';
 
-function PhaseSidebarToggleIcon({ variant }: { variant: 'collapse' | 'expand' }) {
-  return (
-    <svg className="phase-sidebar-toggle-icon" viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="none" stroke="currentColor" strokeWidth="1.25" />
-      <line x1="5.5" y1="2.5" x2="5.5" y2="13.5" stroke="currentColor" strokeWidth="1.25" />
-      {variant === 'collapse' ? (
-        <path d="M7 8 L10 5.5 M7 8 L10 10.5" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
-      ) : (
-        <path d="M11 8 L8 5.5 M11 8 L8 10.5" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
-      )}
-    </svg>
-  );
-}
-
 export function ProjectTopBar({
   activePhase,
   adaptation,
   onPhaseChange,
+  sidebarCollapsed,
   onExpandSidebar,
+  onCollapseSidebar,
   showChunksToggle,
   onOpenChunks,
 }: {
   activePhase: ProjectPhase;
   adaptation: AdaptationStatus | null;
   onPhaseChange: (phase: ProjectPhase) => void;
+  sidebarCollapsed: boolean;
   onExpandSidebar: () => void;
+  onCollapseSidebar: () => void;
   showChunksToggle: boolean;
   onOpenChunks: () => void;
 }) {
@@ -64,18 +55,23 @@ export function ProjectTopBar({
   return (
     <header className="project-top-bar" role="toolbar" aria-label="Project toolbar">
       <div className="project-top-bar-start">
-        <button
-          type="button"
-          className="project-top-bar-toggle"
-          onClick={onExpandSidebar}
-          title="Expand sidebar"
-          aria-label="Expand sidebar"
-        >
-          <PhaseSidebarToggleIcon variant="expand" />
-          <span>Sidebar</span>
-        </button>
+        {sidebarCollapsed && (
+          <button
+            type="button"
+            className="project-top-bar-toggle"
+            onClick={onExpandSidebar}
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+          >
+            <PhaseSidebarToggleIcon variant="expand" />
+            <span>Sidebar</span>
+          </button>
+        )}
       </div>
       <div className="project-top-bar-center">
+        {!sidebarCollapsed && (
+          <SidebarCollapseButton className="project-top-bar-sidebar-collapse" onClick={onCollapseSidebar} />
+        )}
         <div className="project-top-bar-nav-wrap" ref={navRef}>
           <button
             type="button"

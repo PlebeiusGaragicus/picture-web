@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, MomentLayoutSection, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, MomentLayoutSection, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StoryPanelAnchorCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelDraftCreatePayload, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = true;
 
@@ -219,6 +219,16 @@ export const api = {
     }),
   createStoryPanel: (slug: string, payload: StoryPanelCreatePayload) =>
     request<StoryPanelDocument>(`/api/projects/${slug}/story-panels/panels`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  createDraftStoryPanel: (slug: string, payload: StoryPanelDraftCreatePayload) =>
+    request<StoryPanelDocument>(`/api/projects/${slug}/story-panels/panels/draft`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  createStoryAnchor: (slug: string, payload: StoryPanelAnchorCreatePayload) =>
+    request<StoryPanelDocument>(`/api/projects/${slug}/story-panels/panels/anchor`, {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

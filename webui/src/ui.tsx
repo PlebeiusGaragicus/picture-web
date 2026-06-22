@@ -29,3 +29,20 @@ export function HelpTip({ text, placement = 'top' }: { text: string; placement?:
     </span>
   );
 }
+
+export function HoverTooltip({
+  text,
+  placement = 'bottom',
+  children,
+}: {
+  text: string;
+  placement?: 'top' | 'bottom';
+  children: React.ReactElement;
+}) {
+  return (
+    <span className={`hover-tooltip-wrap ${placement === 'bottom' ? 'is-below' : ''}`.trim()}>
+      {children}
+      <span className="help-tip-bubble hover-tooltip-bubble" role="tooltip">{text}</span>
+    </span>
+  );
+}

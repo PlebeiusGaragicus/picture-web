@@ -11,8 +11,10 @@ import adaptation
 import library
 from models import (
     StoryPanel,
+    StoryPanelAnchorCreate,
     StoryPanelCreate,
     StoryPanelDocument,
+    StoryPanelDraftCreate,
     StoryPanelPage,
     StoryPanelPatch,
     StoryPanelRect,
@@ -125,18 +127,22 @@ def read_book(slug: str) -> str:
     return adaptation.read_book(slug)
 
 
-def _write_document(slug: str, document: StoryPanelDocument) -> StoryPanelDocument:
-    path = document_path(slug)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    library.write_json(path, document.model_dump(mode="json"))
-    return document
+def optional_book_text(slug: str) -> str | None:
+    try:
+        return read_book(slug)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return None
+        raise
 
 
 def _validate_against_book(slug: str, document: StoryPanelDocument) -> StoryPanelDocument:
-    book = read_book(slug)
+    book = optional_book_text(slug)
+    if book is None:
+        return document
     book_len = len(book)
     for panel in document.panels:
-        if panel.sourceKind != "story":
+        if panel.sourceKind not in {"story", "note", "bookmark"}:
             continue
         assert panel.startOffset is not None and panel.endOffset is not None
         if panel.endOffset > book_len:
@@ -153,6 +159,13 @@ def read_document(slug: str) -> StoryPanelDocument:
     if not path.is_file():
         return empty_document()
     return _validate_against_book(slug, _normalize_document_pages(StoryPanelDocument.model_validate(library.read_json(path))))
+
+
+def _write_document(slug: str, document: StoryPanelDocument) -> StoryPanelDocument:
+    path = document_path(slug)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    library.write_json(path, document.model_dump(mode="json"))
+    return document
 
 
 def save_document(slug: str, document: StoryPanelDocument) -> StoryPanelDocument:
@@ -245,6 +258,81 @@ def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
     return save_document(slug, document)
 
 
+def _order_for_insert_after(document: StoryPanelDocument, after_panel_id: str | None) -> int:
+    if after_panel_id is None:
+        return max((panel.order for panel in document.panels), default=-1) + 1
+    after_panel = next((panel for panel in document.panels if panel.id == after_panel_id), None)
+    if after_panel is None:
+        raise HTTPException(status_code=404, detail=f"Panel not found: {after_panel_id}")
+    insert_order = after_panel.order + 1
+    for panel in document.panels:
+        if panel.order >= insert_order:
+            panel.order += 1
+    return insert_order
+
+
+def create_draft_panel(slug: str, payload: StoryPanelDraftCreate) -> StoryPanelDocument:
+    document = read_document(slug)
+    text = payload.customText.strip()
+    page_id = payload.pageId
+    rect = payload.rect
+    if page_id is not None:
+        target_page = next((page for page in document.pages if page.id == page_id), None)
+        if target_page is None:
+            raise HTTPException(status_code=400, detail=f"Unknown page: {page_id}")
+        if target_page.pageKind != "story":
+            raise HTTPException(status_code=400, detail="Draft panel chunks can only be created on story pages")
+        rect = rect or _default_rect(document, page_id)
+    else:
+        rect = rect or StoryPanelRect(x=0, y=0, w=4, h=3)
+    next_order = _order_for_insert_after(document, payload.insertAfterPanelId)
+    panel = StoryPanel(
+        id=_next_panel_id(document),
+        order=next_order,
+        sourceKind="draft",
+        startOffset=None,
+        endOffset=None,
+        selectedText=text,
+        customText=text,
+        pageId=page_id,
+        rect=rect,
+        layer=payload.layer,
+    )
+    document.panels.append(panel)
+    return save_document(slug, document)
+
+
+def create_anchor(slug: str, payload: StoryPanelAnchorCreate) -> StoryPanelDocument:
+    document = read_document(slug)
+    book = optional_book_text(slug)
+    if book is None:
+        raise HTTPException(status_code=404, detail="Book not found")
+    if payload.endOffset > len(book):
+        raise HTTPException(status_code=400, detail="Anchor range exceeds book length")
+    selected = book[payload.startOffset:payload.endOffset]
+    if payload.selectedText and payload.selectedText != selected:
+        raise HTTPException(status_code=400, detail="Anchor selectedText does not match book range")
+    custom_text = payload.customText.strip()
+    if payload.sourceKind == "bookmark" and not custom_text:
+        custom_text = selected.replace("\n", " ").strip()[:120]
+    next_order = max((panel.order for panel in document.panels), default=-1) + 1
+    panel = StoryPanel(
+        id=_next_panel_id(document),
+        order=next_order,
+        sourceKind=payload.sourceKind,
+        startOffset=payload.startOffset,
+        endOffset=payload.endOffset,
+        selectedText=selected,
+        customText=custom_text,
+        pageId=None,
+        panelKind="text",
+        rect=StoryPanelRect(x=0, y=0, w=4, h=3),
+        layer=payload.sourceKind == "note",
+    )
+    document.panels.append(panel)
+    return save_document(slug, document)
+
+
 def patch_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> StoryPanelDocument:
     document = read_document(slug)
     index = next((idx for idx, panel in enumerate(document.panels) if panel.id == panel_id), None)
@@ -257,15 +345,15 @@ def patch_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> StoryPane
         page_id = updates["pageId"]
         if page_id is not None and not any(page.id == page_id for page in document.pages):
             raise HTTPException(status_code=400, detail=f"Unknown page: {page_id}")
-        if page_id is None and next_source_kind != "story":
-            raise HTTPException(status_code=400, detail="Only story panels may be unplaced")
+        if page_id is None and next_source_kind not in {"story", "draft", "note", "bookmark"}:
+            raise HTTPException(status_code=400, detail="Only story, draft, note, and bookmark panels may be unplaced")
         if page_id is not None:
             target_page = next(page for page in document.pages if page.id == page_id)
-            if next_source_kind == "story" and target_page.pageKind != "story":
+            if next_source_kind in {"story", "draft"} and target_page.pageKind != "story":
                 raise HTTPException(status_code=400, detail="Story panel chunks can only be placed on story pages")
     elif current.pageId is not None:
         target_page = next(page for page in document.pages if page.id == current.pageId)
-        if next_source_kind == "story" and target_page.pageKind != "story":
+        if next_source_kind in {"story", "draft"} and target_page.pageKind != "story":
             raise HTTPException(status_code=400, detail="Story panel chunks can only be placed on story pages")
     if "activeAssetId" in updates and updates["activeAssetId"] is None:
         updates["activeAssetId"] = None

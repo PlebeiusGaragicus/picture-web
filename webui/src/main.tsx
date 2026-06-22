@@ -27,6 +27,7 @@ import { MomentSequenceView } from './adaptation/momentSequenceView';
 import { BookTextView } from './storyPanels/BookTextView';
 import { LayoutEditorView } from './storyPanels/LayoutEditorView';
 import { ProjectTopBar } from './ProjectTopBar';
+import { SidebarCollapseButton } from './PhaseSidebarToggle';
 import { adaptationNavPhases, phaseStatus, type ProjectPhase } from './projectNavigation';
 import type { LayoutEditorNavigation } from './storyPanels/layoutEditorNavigation';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
@@ -1400,6 +1401,20 @@ function App() {
   const isStoryActive = projectPhase === 'story';
   const isStoryPanelPhaseActive = isLayoutEditorActive || isStoryActive;
   const isAdaptationListActive = !isCanvasActive && !isMomentViewActive && !isStoryPanelPhaseActive;
+  const showProjectTopBar = Boolean(openProjectSlug && (isPhaseSidebarCollapsed || isCanvasActive));
+
+  const handleProjectPhaseChange = (phase: ProjectPhase) => {
+    setProjectPhase(phase);
+    if (phase !== 'layout-editor') {
+      setLayoutEditorNavigation(null);
+    }
+    setPhaseViewMode(phase === 'image-canvas' ? 'canvas' : 'list');
+    setActiveUserTagFilters([]);
+    setActiveEntityTagFilters([]);
+    setIsUserTagFilterMenuOpen(false);
+    setPopoverNodeId(null);
+    setActiveChatSessionId(null);
+  };
 
   return (
     <div className="app">
@@ -1432,22 +1447,11 @@ function App() {
         }}
         onDeleteTag={deleteProjectTag}
         onUpdateTag={updateProjectTag}
-        onPhaseChange={(phase) => {
-          setProjectPhase(phase);
-          if (phase !== 'layout-editor') {
-            setLayoutEditorNavigation(null);
-          }
-          setPhaseViewMode(phase === 'image-canvas' ? 'canvas' : 'list');
-          setActiveUserTagFilters([]);
-          setActiveEntityTagFilters([]);
-          setIsUserTagFilterMenuOpen(false);
-          setPopoverNodeId(null);
-          setActiveChatSessionId(null);
-        }}
+        onPhaseChange={handleProjectPhaseChange}
       />
       <main
         ref={canvasRef}
-        className={`canvas ${!isCanvasActive ? 'story-adaptation-view' : ''} ${showViewToggle ? 'has-view-toggle' : ''} ${isPhaseSidebarCollapsed ? 'has-collapsed-sidebar' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
+        className={`canvas ${!isCanvasActive ? 'story-adaptation-view' : ''} ${showViewToggle ? 'has-view-toggle' : ''} ${isPhaseSidebarCollapsed ? 'has-collapsed-sidebar' : ''} ${isCanvasActive ? 'has-canvas-top-bar' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
         onDragOver={(event) => {
           if (!isCanvasActive) return;
           event.preventDefault();
@@ -1482,23 +1486,14 @@ function App() {
             </button>
           </div>
         )}
-        {isPhaseSidebarCollapsed && openProjectSlug && (
+        {showProjectTopBar && (
           <ProjectTopBar
             activePhase={projectPhase}
             adaptation={adaptation}
-            onPhaseChange={(phase) => {
-              setProjectPhase(phase);
-              if (phase !== 'layout-editor') {
-                setLayoutEditorNavigation(null);
-              }
-              setPhaseViewMode(phase === 'image-canvas' ? 'canvas' : 'list');
-              setActiveUserTagFilters([]);
-              setActiveEntityTagFilters([]);
-              setIsUserTagFilterMenuOpen(false);
-              setPopoverNodeId(null);
-              setActiveChatSessionId(null);
-            }}
+            sidebarCollapsed={isPhaseSidebarCollapsed}
+            onPhaseChange={handleProjectPhaseChange}
             onExpandSidebar={() => setIsPhaseSidebarCollapsed(false)}
+            onCollapseSidebar={() => setIsPhaseSidebarCollapsed(true)}
             showChunksToggle={isStoryActive && !storyPanelChunksOpen}
             onOpenChunks={() => setStoryPanelChunksOpen(true)}
           />
@@ -1546,6 +1541,7 @@ function App() {
               setLayoutEditorNavigation(navigation);
               setProjectPhase('layout-editor');
             }}
+            onCollapseSidebar={() => setIsPhaseSidebarCollapsed(true)}
           />
         )}
         {isLayoutEditorActive && (
@@ -1884,20 +1880,6 @@ function ProjectLanding({
   );
 }
 
-function PhaseSidebarToggleIcon({ variant }: { variant: 'collapse' | 'expand' }) {
-  return (
-    <svg className="phase-sidebar-toggle-icon" viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="none" stroke="currentColor" strokeWidth="1.25" />
-      <line x1="5.5" y1="2.5" x2="5.5" y2="13.5" stroke="currentColor" strokeWidth="1.25" />
-      {variant === 'collapse' ? (
-        <path d="M7 8 L10 5.5 M7 8 L10 10.5" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
-      ) : (
-        <path d="M11 8 L8 5.5 M11 8 L8 10.5" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
-      )}
-    </svg>
-  );
-}
-
 function TrashIcon() {
   return (
     <svg className="tag-organizer-trash-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -2208,14 +2190,9 @@ function ProjectPhaseSidebar({
         </div>
       )}
       </aside>
-      <button
-        className="phase-sidebar-collapse"
-        onClick={onToggleCollapsed}
-        title="Collapse sidebar"
-        aria-label="Collapse sidebar"
-      >
-        <PhaseSidebarToggleIcon variant="collapse" />
-      </button>
+      {activePhase !== 'story' && activePhase !== 'image-canvas' && (
+        <SidebarCollapseButton onClick={onToggleCollapsed} />
+      )}
     </div>
   );
 }

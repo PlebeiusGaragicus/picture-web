@@ -8,6 +8,27 @@ import { isEditableShortcutTarget, sortedPanels } from './storyPanelUtils';
 import { useStoryPanelDocument } from './useStoryPanelDocument';
 import { api } from '../api';
 
+const SPREAD_PANEL_INFO_KEY = 'story-panels-spread-panel-info';
+
+function readSpreadPanelInfoEnabled(): boolean {
+  try {
+    const stored = localStorage.getItem(SPREAD_PANEL_INFO_KEY);
+    if (stored === 'false') return false;
+    if (stored === 'true') return true;
+  } catch {
+    // Ignore storage read failures in private browsing or restricted contexts.
+  }
+  return true;
+}
+
+function writeSpreadPanelInfoEnabled(enabled: boolean) {
+  try {
+    localStorage.setItem(SPREAD_PANEL_INFO_KEY, enabled ? 'true' : 'false');
+  } catch {
+    // Ignore storage write failures.
+  }
+}
+
 export function LayoutEditorView({
   projectSlug,
   initialNavigation,
@@ -24,6 +45,7 @@ export function LayoutEditorView({
     isLoading,
     isSaving,
     error,
+    setDocument,
     saveDocument,
     deletePanel,
     assets,
@@ -39,6 +61,15 @@ export function LayoutEditorView({
   const [exportPageBorder, setExportPageBorder] = useState<BookletPageBorder>('black');
   const [historyControls, setHistoryControls] = useState<React.ReactNode>(null);
   const [pageControls, setPageControls] = useState<React.ReactNode>(null);
+  const [spreadPanelInfoEnabled, setSpreadPanelInfoEnabled] = useState(readSpreadPanelInfoEnabled);
+
+  const toggleSpreadPanelInfo = () => {
+    setSpreadPanelInfoEnabled((current) => {
+      const next = !current;
+      writeSpreadPanelInfoEnabled(next);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!initialNavigation || !document) return;
@@ -65,7 +96,7 @@ export function LayoutEditorView({
       setFocusedChunkPanelId(null);
       return;
     }
-    if (!document?.panels.some((panel) => panel.id === panelId && panel.sourceKind === 'story')) return;
+    if (!document?.panels.some((panel) => panel.id === panelId && (panel.sourceKind === 'story' || panel.sourceKind === 'draft'))) return;
     setFocusedChunkPanelId(null);
     window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
   };
@@ -86,7 +117,19 @@ export function LayoutEditorView({
   const handleDeletePanel = async (panelId: string) => {
     const next = await deletePanel(panelId);
     if (next) {
-      setSelectedPanelId(sortedPanels(next.panels).find((panel) => panel.sourceKind === 'story')?.id ?? null);
+      setSelectedPanelId(sortedPanels(next.panels).find((panel) => panel.sourceKind === 'story' || panel.sourceKind === 'draft')?.id ?? null);
+    }
+  };
+
+  const createDraftPanel = async (customText: string, insertAfterPanelId?: string | null) => {
+    const beforeIds = new Set(document?.panels.map((panel) => panel.id) ?? []);
+    const next = await api.createDraftStoryPanel(projectSlug, { customText, insertAfterPanelId: insertAfterPanelId ?? null });
+    setDocument(next);
+    const created = next.panels.find((panel) => !beforeIds.has(panel.id));
+    if (created) {
+      setSelectedPanelId(created.id);
+      setFocusedChunkPanelId(null);
+      window.setTimeout(() => setFocusedChunkPanelId(created.id), 0);
     }
   };
 
@@ -132,14 +175,6 @@ export function LayoutEditorView({
     );
   }
 
-  if (!bookText) {
-    return (
-      <div className="story-adaptation-screen layout-view-screen layout-view-screen--empty">
-        <p className="muted">Upload book text in Story & Style before laying out pages.</p>
-      </div>
-    );
-  }
-
   if (!document) {
     return (
       <div className="story-adaptation-screen layout-view-screen layout-view-screen--empty">
@@ -158,6 +193,7 @@ export function LayoutEditorView({
       onSelectPanel={selectPanelChunk}
       onOpenPanelPlacement={openPanelPlacement}
       onDeletePanel={handleDeletePanel}
+      onCreatePanel={createDraftPanel}
       isSaving={isSaving}
     />
   );
@@ -187,6 +223,19 @@ export function LayoutEditorView({
           >
             <span aria-hidden="true">🖨️</span>
           </button>
+          {layoutMode === 'spread' && (
+            <button
+              type="button"
+              className={`secondary small-button layout-view-spread-info-toggle ${spreadPanelInfoEnabled ? 'active' : ''}`}
+              disabled={isSaving}
+              aria-pressed={spreadPanelInfoEnabled}
+              aria-label={spreadPanelInfoEnabled ? 'Hide panel info in spread view' : 'Show panel info in spread view'}
+              title={spreadPanelInfoEnabled ? 'Hide panel info when a panel is selected' : 'Show panel info when a panel is selected'}
+              onClick={toggleSpreadPanelInfo}
+            >
+              i
+            </button>
+          )}
         </div>
         <div className="layout-view-toolbar-page">
           {pageControls}
@@ -235,6 +284,7 @@ export function LayoutEditorView({
           onLayoutModeChange={setLayoutMode}
           onHistoryControlsChange={setHistoryControls}
           onPageControlsChange={setPageControls}
+          spreadPanelInfoEnabled={spreadPanelInfoEnabled}
           assets={assets}
           projectTags={projectTags}
           canvas={canvas}

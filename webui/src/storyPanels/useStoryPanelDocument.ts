@@ -21,12 +21,14 @@ export function useStoryPanelDocument(projectSlug: string, options?: { withCanva
     setIsLoading(true);
     setError(null);
     try {
-      const [book, panels] = await Promise.all([
-        api.getStoryPanelBook(projectSlug),
-        api.getStoryPanels(projectSlug),
-      ]);
-      setBookText(book.text);
+      const panels = await api.getStoryPanels(projectSlug);
       setDocument(panels);
+      try {
+        const book = await api.getStoryPanelBook(projectSlug);
+        setBookText(book.text);
+      } catch {
+        setBookText('');
+      }
       if (withCanvasContext) {
         const [projectDetail, nextCanvas] = await Promise.all([
           api.getProject(projectSlug),
@@ -48,7 +50,19 @@ export function useStoryPanelDocument(projectSlug: string, options?: { withCanva
   }, [load]);
 
   const panels = useMemo(() => sortedPanels(document?.panels ?? []), [document]);
-  const storyPanels = useMemo(() => panels.filter((panel) => panel.sourceKind === 'story'), [panels]);
+  const storyPanels = useMemo(
+    () => panels.filter((panel) => panel.sourceKind === 'story' || panel.sourceKind === 'draft'),
+    [panels],
+  );
+  const sidebarPanels = useMemo(
+    () => panels.filter(
+      (panel) => panel.sourceKind === 'story'
+        || panel.sourceKind === 'draft'
+        || panel.sourceKind === 'note'
+        || panel.sourceKind === 'bookmark',
+    ),
+    [panels],
+  );
 
   const saveDocument = async (nextDocument: StoryPanelDocument) => {
     setIsSaving(true);
@@ -83,6 +97,7 @@ export function useStoryPanelDocument(projectSlug: string, options?: { withCanva
     document,
     panels,
     storyPanels,
+    sidebarPanels,
     isLoading,
     isSaving,
     error,

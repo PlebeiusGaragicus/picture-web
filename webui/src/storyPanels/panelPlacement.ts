@@ -3,7 +3,7 @@ import { storyPageNumberById } from './pageNumbers';
 
 export function panelIsPlacedOnLayout(pages: StoryPanelPage[], panel: Pick<StoryPanel, 'pageId' | 'sourceKind'>): boolean {
   if (!panel.pageId) return false;
-  if (panel.sourceKind === 'story') {
+  if (panel.sourceKind === 'story' || panel.sourceKind === 'draft') {
     return storyPageNumberById(pages).has(panel.pageId);
   }
   return pages.some((page) => page.id === panel.pageId);
