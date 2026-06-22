@@ -70,7 +70,7 @@ export function BookTextView({
     const panel = document.panels.find((candidate) => candidate.id === panelId);
     if (!panel) return;
     setSelectedPanelId(panelId);
-    onNavigateToLayoutEditor({ panelId, layoutMode: 'single-chunks' });
+    onNavigateToLayoutEditor({ panelId, singleSidePanel: 'chunks' });
   };
 
   const createPanel = async (panelNote?: string) => {

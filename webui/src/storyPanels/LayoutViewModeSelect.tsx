@@ -21,8 +21,7 @@ export function LayoutViewModeSelect({
       >
         <option value="all-pages">All pages (a)</option>
         <option value="spread">Two-page spread (2)</option>
-        <option value="single">Single page + info (i)</option>
-        <option value="single-chunks">Single page + panel chunks (p)</option>
+        <option value="single">Single page (s)</option>
       </select>
     </label>
   );

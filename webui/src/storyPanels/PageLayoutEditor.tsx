@@ -58,7 +58,10 @@ import {
   PRINT_SHEET_HEIGHT,
 } from './printLayout';
 
-export type StoryPanelLayoutMode = 'spread' | 'single' | 'single-chunks' | 'all-pages';
+import type { SingleSidePanel } from './singleSidePanel';
+import type { SinglePagePreviewMode } from './singlePagePreview';
+
+export type StoryPanelLayoutMode = 'spread' | 'single' | 'all-pages';
 
 const gridColumns = 12;
 const minPanelHeight = 2;
@@ -74,27 +77,6 @@ const textFontFamilies: Record<StoryPanelTextStyle['fontFamily'], string> = {
   mono: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
   comic: '"Comic Sans MS", "Comic Sans", cursive',
 };
-
-type SinglePagePreviewMode = 'readable' | 'print';
-const SINGLE_PAGE_PREVIEW_MODE_KEY = 'story-panels-single-page-preview-mode';
-
-function readSinglePagePreviewMode(): SinglePagePreviewMode {
-  try {
-    const stored = localStorage.getItem(SINGLE_PAGE_PREVIEW_MODE_KEY);
-    if (stored === 'readable' || stored === 'print') return stored;
-  } catch {
-    // Ignore storage read failures in private browsing or restricted contexts.
-  }
-  return 'print';
-}
-
-function writeSinglePagePreviewMode(mode: SinglePagePreviewMode) {
-  try {
-    localStorage.setItem(SINGLE_PAGE_PREVIEW_MODE_KEY, mode);
-  } catch {
-    // Ignore storage write failures.
-  }
-}
 
 function TrashIcon() {
   return (
@@ -373,6 +355,8 @@ export function PageLayoutEditor({
   document,
   selectedPanelId,
   layoutMode,
+  singleSidePanel = 'info',
+  singlePagePreviewMode,
   onSelectPanel,
   onSaveDocument,
   isSaving,
@@ -391,6 +375,8 @@ export function PageLayoutEditor({
   document: StoryPanelDocument;
   selectedPanelId: string | null;
   layoutMode: StoryPanelLayoutMode;
+  singleSidePanel?: SingleSidePanel;
+  singlePagePreviewMode: SinglePagePreviewMode;
   onSelectPanel: (panelId: string | null) => void;
   onSaveDocument: (document: StoryPanelDocument) => void;
   isSaving: boolean;
@@ -432,11 +418,6 @@ export function PageLayoutEditor({
   const [redoStack, setRedoStack] = useState<StoryPanelHistoryEntry[]>([]);
   const [customTextDraft, setCustomTextDraft] = useState<string | null>(null);
   const [fontSizeInput, setFontSizeInput] = useState<string | null>(null);
-  const [singlePagePreviewMode, setSinglePagePreviewMode] = useState<SinglePagePreviewMode>(readSinglePagePreviewMode);
-  const selectSinglePagePreviewMode = (mode: SinglePagePreviewMode) => {
-    setSinglePagePreviewMode(mode);
-    writeSinglePagePreviewMode(mode);
-  };
   const [sidePanelHeight, setSidePanelHeight] = useState<number | null>(null);
   const [flashingPanelId, setFlashingPanelId] = useState<string | null>(null);
   const [pickerPanelId, setPickerPanelId] = useState<string | null>(null);
@@ -465,8 +446,9 @@ export function PageLayoutEditor({
     ? pages.findIndex((page) => page.id === interiorSpreadPages[lastInteriorSpreadStart]?.id)
     : 0;
   const isSinglePageMode = layoutMode !== 'spread';
-  const hasSinglePageSidePanel = layoutMode === 'single' || layoutMode === 'single-chunks';
-  const showsSelectedPanelInfo = layoutMode === 'single' || (layoutMode === 'spread' && spreadPanelInfoEnabled);
+  const hasSinglePageSidePanel = layoutMode === 'single';
+  const showsSelectedPanelInfo = (layoutMode === 'single' && singleSidePanel === 'info')
+    || (layoutMode === 'spread' && spreadPanelInfoEnabled);
   const singlePagePreviewAspect = singlePagePreviewMode === 'print'
     ? `${PRINT_HALF_WIDTH} / ${PRINT_SHEET_HEIGHT}`
     : `${PRINT_PAGE_WIDTH} / ${PRINT_PAGE_HEIGHT}`;
@@ -694,7 +676,7 @@ export function PageLayoutEditor({
     setSelectedPageId(pages[clampedPageIndex]?.id ?? pages[0]?.id ?? null);
   }, [clampedPageIndex, pages, selectedPageId]);
   useEffect(() => {
-    if (layoutMode !== 'single' || !selectedPanel) {
+    if (layoutMode !== 'single' || singleSidePanel !== 'info' || !selectedPanel) {
       previousPageIndexRef.current = clampedPageIndex;
       return;
     }
@@ -704,9 +686,9 @@ export function PageLayoutEditor({
     if (!currentPage || currentPage.id !== selectedPanel.pageId) {
       onSelectPanel(null);
     }
-  }, [clampedPageIndex, layoutMode, onSelectPanel, pages, selectedPanel?.id, selectedPanel?.pageId]);
+  }, [clampedPageIndex, layoutMode, onSelectPanel, pages, selectedPanel?.id, selectedPanel?.pageId, singleSidePanel]);
   useEffect(() => {
-    if (!selectedPanel || layoutMode === 'all-pages' || layoutMode === 'single-chunks') return;
+    if (!selectedPanel || layoutMode === 'all-pages' || (layoutMode === 'single' && singleSidePanel === 'chunks')) return;
     const pageIndex = pages.findIndex((page) => page.id === selectedPanel.pageId);
     if (pageIndex >= 0) {
       setCurrentPageIndex(layoutMode === 'spread' ? pageIndex === 0 ? 0 : pageIndex % 2 === 0 ? pageIndex - 1 : pageIndex : pageIndex);
@@ -718,7 +700,7 @@ export function PageLayoutEditor({
       window.clearTimeout(start);
       window.clearTimeout(stop);
     };
-  }, [layoutMode, selectedPanel?.id, selectedPanel?.pageId]);
+  }, [layoutMode, selectedPanel?.id, selectedPanel?.pageId, singleSidePanel]);
   useEffect(() => {
     if (!navigateToPanelId) return;
     const panel = displayDocument.panels.find((candidate) => candidate.id === navigateToPanelId);
@@ -871,7 +853,7 @@ export function PageLayoutEditor({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [layoutMode, selectedPageId, selectedPageCanChangeOrder, storyPages.length]);
   useEffect(() => {
-    if (layoutMode !== 'single' && layoutMode !== 'spread') return;
+    if (layoutMode !== 'spread' && !(layoutMode === 'single' && singleSidePanel === 'info')) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) return;
       if (event.key.toLowerCase() !== 'd') return;
@@ -881,7 +863,7 @@ export function PageLayoutEditor({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSaving, layoutMode, pendingPanelDeleteId, visibleSelectedPanel?.id]);
+  }, [isSaving, layoutMode, pendingPanelDeleteId, singleSidePanel, visibleSelectedPanel?.id]);
   const confirmDeleteSelectedPage = () => {
     const pageId = pendingPageDeleteId;
     const page = pages.find((candidate) => candidate.id === pageId);
@@ -1626,24 +1608,6 @@ export function PageLayoutEditor({
             >
               + Pages
             </button>
-            {hasSinglePageSidePanel && (
-              <div className="story-panels-preview-toggle" role="group" aria-label="Single page preview mode">
-                <button
-                  type="button"
-                  className={singlePagePreviewMode === 'readable' ? 'active' : ''}
-                  onClick={() => selectSinglePagePreviewMode('readable')}
-                >
-                  Readable area
-                </button>
-                <button
-                  type="button"
-                  className={singlePagePreviewMode === 'print' ? 'active' : ''}
-                  onClick={() => selectSinglePagePreviewMode('print')}
-                >
-                  Print preview
-                </button>
-              </div>
-            )}
           </>
         )}
       </div>,
@@ -1652,14 +1616,12 @@ export function PageLayoutEditor({
   }, [
     clampedPageIndex,
     currentPageLabel,
-    hasSinglePageSidePanel,
     isSaving,
     layoutMode,
     onPageControlsChange,
     redoStack.length,
     selectedPageCanChangeOrder,
     selectedStoryPageIndex,
-    singlePagePreviewMode,
     storyPages.length,
     undoStack.length,
   ]);
@@ -1891,7 +1853,7 @@ export function PageLayoutEditor({
           )
         ) : <p className="muted">No pages yet.</p>}
         </div>
-        {(layoutMode === 'single' || (layoutMode === 'spread' && visibleSelectedPanel && spreadPanelInfoEnabled)) && (
+        {((layoutMode === 'single' && singleSidePanel === 'info') || (layoutMode === 'spread' && visibleSelectedPanel && spreadPanelInfoEnabled)) && (
           <aside
             className={`story-panels-info-panel${layoutMode === 'spread' ? ` story-panels-info-popover is-anchor-${infoPopoverAnchor}` : ''}`}
             style={layoutMode === 'single' && sidePanelHeight ? { height: sidePanelHeight } : undefined}
@@ -2363,7 +2325,7 @@ export function PageLayoutEditor({
             )}
           </aside>
         )}
-        {layoutMode === 'single-chunks' && (
+        {layoutMode === 'single' && singleSidePanel === 'chunks' && (
           <div className="story-panels-layout-side-panel" style={sidePanelHeight ? { height: sidePanelHeight } : undefined}>
             {sidePanel}
           </div>

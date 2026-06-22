@@ -6,6 +6,8 @@ import { PanelChunkList } from './PanelChunkList';
 import type { InsertDraftPayload } from './storyPanelSidebar';
 import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './printLayout';
 import type { LayoutEditorNavigation } from './layoutEditorNavigation';
+import { readSingleSidePanel, writeSingleSidePanel, type SingleSidePanel } from './singleSidePanel';
+import { readSinglePagePreviewMode, writeSinglePagePreviewMode, type SinglePagePreviewMode } from './singlePagePreview';
 import { isEditableShortcutTarget, sortedPanels } from './storyPanelUtils';
 import { useStoryPanelDocument } from './useStoryPanelDocument';
 import { api } from '../api';
@@ -66,6 +68,21 @@ export function LayoutEditorView({
   const [historyControls, setHistoryControls] = useState<React.ReactNode>(null);
   const [pageControls, setPageControls] = useState<React.ReactNode>(null);
   const [spreadPanelInfoEnabled, setSpreadPanelInfoEnabled] = useState(readSpreadPanelInfoEnabled);
+  const [singleSidePanel, setSingleSidePanel] = useState<SingleSidePanel>(readSingleSidePanel);
+  const [singlePagePreviewMode, setSinglePagePreviewMode] = useState<SinglePagePreviewMode>(readSinglePagePreviewMode);
+
+  const selectSingleSidePanel = (panel: SingleSidePanel) => {
+    writeSingleSidePanel(panel);
+    setSingleSidePanel(panel);
+  };
+
+  const togglePrintPreview = () => {
+    setSinglePagePreviewMode((current) => {
+      const next = current === 'print' ? 'readable' : 'print';
+      writeSinglePagePreviewMode(next);
+      return next;
+    });
+  };
 
   const toggleSpreadPanelInfo = () => {
     setSpreadPanelInfoEnabled((current) => {
@@ -77,7 +94,8 @@ export function LayoutEditorView({
 
   useEffect(() => {
     if (!initialNavigation || !document) return;
-    setLayoutMode(initialNavigation.layoutMode);
+    setLayoutMode('single');
+    selectSingleSidePanel(initialNavigation.singleSidePanel);
     setSelectedPanelId(initialNavigation.panelId);
     setFocusedChunkPanelId(null);
     window.setTimeout(() => setFocusedChunkPanelId(initialNavigation.panelId), 0);
@@ -109,7 +127,8 @@ export function LayoutEditorView({
     if (!document) return;
     const panel = document.panels.find((candidate) => candidate.id === panelId);
     if (!panel) return;
-    setLayoutMode('single-chunks');
+    setLayoutMode('single');
+    selectSingleSidePanel('chunks');
     setSelectedPanelId(panelId);
     setFocusedChunkPanelId(null);
     window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
@@ -167,18 +186,28 @@ export function LayoutEditorView({
   }, [layoutMode, isSaving, onTopBarEndContentChange]);
 
   useEffect(() => {
-    const shortcuts: Record<string, StoryPanelLayoutMode> = {
+    const layoutShortcuts: Record<string, StoryPanelLayoutMode> = {
       a: 'all-pages',
       '2': 'spread',
-      i: 'single',
-      p: 'single-chunks',
+      s: 'single',
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) return;
-      const nextMode = shortcuts[event.key.toLowerCase()];
-      if (!nextMode) return;
-      event.preventDefault();
-      setLayoutMode(nextMode);
+      const key = event.key.toLowerCase();
+      const nextMode = layoutShortcuts[key];
+      if (nextMode) {
+        event.preventDefault();
+        setLayoutMode(nextMode);
+        if (key === 's') {
+          selectSingleSidePanel('info');
+        }
+        return;
+      }
+      if (key === 'p') {
+        event.preventDefault();
+        setLayoutMode('single');
+        selectSingleSidePanel('chunks');
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -247,6 +276,41 @@ export function LayoutEditorView({
             </button>
           )}
         </div>
+        <div className="layout-view-toolbar-center">
+          {layoutMode === 'single' && (
+            <>
+              <button
+                type="button"
+                className={`secondary layout-view-print-preview-toggle ${singlePagePreviewMode === 'print' ? 'active' : ''}`}
+                disabled={isSaving}
+                aria-pressed={singlePagePreviewMode === 'print'}
+                onClick={togglePrintPreview}
+              >
+                Print preview
+              </button>
+              <div className="story-panels-preview-toggle" role="group" aria-label="Side panel">
+                <button
+                  type="button"
+                  className={singleSidePanel === 'info' ? 'active' : ''}
+                  disabled={isSaving}
+                  aria-pressed={singleSidePanel === 'info'}
+                  onClick={() => selectSingleSidePanel('info')}
+                >
+                  Info
+                </button>
+                <button
+                  type="button"
+                  className={singleSidePanel === 'chunks' ? 'active' : ''}
+                  disabled={isSaving}
+                  aria-pressed={singleSidePanel === 'chunks'}
+                  onClick={() => selectSingleSidePanel('chunks')}
+                >
+                  Chunks
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         <div className="layout-view-toolbar-page">
           {pageControls}
         </div>
@@ -287,6 +351,8 @@ export function LayoutEditorView({
           document={document}
           selectedPanelId={selectedPanelId}
           layoutMode={layoutMode}
+          singleSidePanel={singleSidePanel}
+          singlePagePreviewMode={singlePagePreviewMode}
           onSelectPanel={selectLayoutPanel}
           onSaveDocument={saveDocument}
           isSaving={isSaving}

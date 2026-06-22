@@ -313,7 +313,7 @@ function App() {
     if (!openProjectSlug) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) return;
-      if (event.key.toLowerCase() !== 's') return;
+      if (event.key.toLowerCase() !== 'e') return;
       event.preventDefault();
       setIsPhaseSidebarCollapsed((current) => !current);
     };
