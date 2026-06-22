@@ -10,6 +10,8 @@ import { readSingleSidePanel, writeSingleSidePanel, type SingleSidePanel } from 
 import { readSinglePagePreviewMode, writeSinglePagePreviewMode, type SinglePagePreviewMode } from './singlePagePreview';
 import { isEditableShortcutTarget, sortedPanels } from './storyPanelUtils';
 import { useStoryPanelDocument } from './useStoryPanelDocument';
+import { formatRequestError } from '../formatError';
+import { HoverTooltip } from '../ui';
 import { api } from '../api';
 
 const SPREAD_PANEL_INFO_KEY = 'story-panels-spread-panel-info';
@@ -51,6 +53,7 @@ export function LayoutEditorView({
     isLoading,
     isSaving,
     error,
+    setError,
     setDocument,
     saveDocument,
     deletePanel,
@@ -67,6 +70,7 @@ export function LayoutEditorView({
   const [spreadPanelInfoEnabled, setSpreadPanelInfoEnabled] = useState(readSpreadPanelInfoEnabled);
   const [singleSidePanel, setSingleSidePanel] = useState<SingleSidePanel>(readSingleSidePanel);
   const [singlePagePreviewMode, setSinglePagePreviewMode] = useState<SinglePagePreviewMode>(readSinglePagePreviewMode);
+  const [isPlacingPanel, setIsPlacingPanel] = useState(false);
 
   const selectSingleSidePanel = (panel: SingleSidePanel) => {
     writeSingleSidePanel(panel);
@@ -131,6 +135,21 @@ export function LayoutEditorView({
     window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
     if (panel.pageId && document.pages.some((page) => page.id === panel.pageId && page.pageKind === 'story')) {
       setNavigateToPanelId(panelId);
+    }
+  };
+
+  const placePanelOnLayout = async (panelId: string) => {
+    setIsPlacingPanel(true);
+    setError(null);
+    try {
+      const next = await api.autoPlaceStoryPanel(projectSlug, panelId);
+      setDocument(next);
+      setSelectedPanelId(panelId);
+      openPanelPlacement(panelId);
+    } catch (err) {
+      setError(formatRequestError(err));
+    } finally {
+      setIsPlacingPanel(false);
     }
   };
 
@@ -223,10 +242,11 @@ export function LayoutEditorView({
       focusedPanelId={focusedChunkPanelId}
       onSelectPanel={selectPanelChunk}
       onOpenPanelPlacement={openPanelPlacement}
+      onPlacePanelOnLayout={placePanelOnLayout}
       onDeletePanel={handleDeletePanel}
       onInsertDraft={bookText.length === 0 ? insertDraft : undefined}
       onEditPanelNote={bookText.length > 0 ? editPanelNote : undefined}
-      isSaving={isSaving}
+      isSaving={isSaving || isPlacingPanel}
     />
   );
 
@@ -237,17 +257,21 @@ export function LayoutEditorView({
           <div className="story-panels-history-actions">
             {historyControls}
           </div>
-          <button
-            type="button"
-            className={`secondary small-button layout-view-export-button ${singlePagePreviewMode === 'print' ? 'active' : ''}`}
-            disabled={isSaving}
-            aria-pressed={singlePagePreviewMode === 'print'}
-            aria-label={singlePagePreviewMode === 'print' ? 'Hide print preview' : 'Show print preview'}
-            title={singlePagePreviewMode === 'print' ? 'Hide print preview' : 'Show print preview'}
-            onClick={togglePrintPreview}
+          <HoverTooltip
+            text={singlePagePreviewMode === 'print' ? 'Hide print preview' : 'Show print preview'}
+            placement="bottom"
           >
-            <span aria-hidden="true">🖨️</span>
-          </button>
+            <button
+              type="button"
+              className={`secondary small-button layout-view-export-button ${singlePagePreviewMode === 'print' ? 'active' : ''}`}
+              disabled={isSaving}
+              aria-pressed={singlePagePreviewMode === 'print'}
+              aria-label={singlePagePreviewMode === 'print' ? 'Hide print preview' : 'Show print preview'}
+              onClick={togglePrintPreview}
+            >
+              <span aria-hidden="true">🖨️</span>
+            </button>
+          </HoverTooltip>
           {layoutMode === 'spread' && (
             <button
               type="button"

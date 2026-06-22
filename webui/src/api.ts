@@ -237,6 +237,10 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
+  autoPlaceStoryPanel: (slug: string, panelId: string) =>
+    request<StoryPanelDocument>(`/api/projects/${slug}/story-panels/panels/${panelId}/auto-place`, {
+      method: 'POST',
+    }),
   deleteStoryPanel: (slug: string, panelId: string) =>
     request<StoryPanelDocument>(`/api/projects/${slug}/story-panels/panels/${panelId}`, {
       method: 'DELETE',

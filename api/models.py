@@ -12,6 +12,8 @@ SLUG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 TAG_COLOR_RE = r"^#[0-9a-fA-F]{6}$"
 LAYOUT_GRID_COLUMNS = 12
 LAYOUT_PAGE_ROWS = 10
+DEFAULT_AUTO_PLACE_W = LAYOUT_GRID_COLUMNS / 3.0
+DEFAULT_AUTO_PLACE_H = LAYOUT_PAGE_ROWS / 3.0
 
 AssetKind = Literal["imported", "generated"]
 StoryKind = Literal["picture-book", "illustrated-story", "comic-book"]
@@ -500,7 +502,9 @@ class StoryPanel(BaseModel):
     textStyle: StoryPanelTextStyle = Field(default_factory=StoryPanelTextStyle)
     pageId: str | None = None
     panelKind: Literal["image", "text"] = "image"
-    rect: StoryPanelRect = Field(default_factory=lambda: StoryPanelRect(x=0, y=0, w=4, h=3))
+    rect: StoryPanelRect = Field(
+        default_factory=lambda: StoryPanelRect(x=0, y=0, w=DEFAULT_AUTO_PLACE_W, h=DEFAULT_AUTO_PLACE_H),
+    )
     layer: int = Field(default=0, ge=0)
     parentPanelId: str | None = Field(default=None, pattern=TAG_RE)
     assetIds: list[str] = Field(default_factory=list)

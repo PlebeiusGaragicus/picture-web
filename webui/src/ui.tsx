@@ -36,11 +36,12 @@ export function HoverTooltip({
   children,
 }: {
   text: string;
-  placement?: 'top' | 'bottom';
+  placement?: 'top' | 'bottom' | 'right';
   children: React.ReactElement;
 }) {
+  const placementClass = placement === 'bottom' ? 'is-below' : placement === 'right' ? 'is-right' : '';
   return (
-    <span className={`hover-tooltip-wrap ${placement === 'bottom' ? 'is-below' : ''}`.trim()}>
+    <span className={`hover-tooltip-wrap ${placementClass}`.trim()}>
       {children}
       <span className="help-tip-bubble hover-tooltip-bubble" role="tooltip">{text}</span>
     </span>

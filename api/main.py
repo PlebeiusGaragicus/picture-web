@@ -366,6 +366,11 @@ def patch_story_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> Sto
     return story_panels.patch_panel(slug, panel_id, payload)
 
 
+@app.post("/api/projects/{slug}/story-panels/panels/{panel_id}/auto-place", response_model=StoryPanelDocument)
+def auto_place_story_panel(slug: str, panel_id: str) -> StoryPanelDocument:
+    return story_panels.auto_place_panel(slug, panel_id)
+
+
 @app.delete("/api/projects/{slug}/story-panels/panels/{panel_id}", response_model=StoryPanelDocument)
 def delete_story_panel(slug: str, panel_id: str) -> StoryPanelDocument:
     return story_panels.delete_panel(slug, panel_id)

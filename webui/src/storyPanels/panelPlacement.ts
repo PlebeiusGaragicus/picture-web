@@ -1,4 +1,5 @@
 import type { StoryPanel, StoryPanelDocument, StoryPanelPage } from '../types';
+import { panelKindHostFor } from './panelCaptions';
 import { storyPageNumberById } from './pageNumbers';
 
 export function panelIsPlacedOnLayout(pages: StoryPanelPage[], panel: Pick<StoryPanel, 'pageId' | 'sourceKind'>): boolean {
@@ -27,4 +28,14 @@ export function removeStoryPanelFromLayout(document: StoryPanelDocument, panelId
 
 export function isPanelChunkSourceKind(sourceKind: StoryPanel['sourceKind']): boolean {
   return sourceKind === 'story' || sourceKind === 'draft' || sourceKind === 'bookmark';
+}
+
+/** Reading-list chunk whose layout placement should be cleared, not deleted. */
+export function readingChunkPanelForLayoutAction(
+  document: StoryPanelDocument,
+  selectedPanel: StoryPanel | null,
+): StoryPanel | null {
+  const host = panelKindHostFor(document, selectedPanel);
+  if (!host || !isPanelChunkSourceKind(host.sourceKind)) return null;
+  return host;
 }

@@ -3783,6 +3783,14 @@ button {
   bottom: auto;
 }
 
+.hover-tooltip-wrap.is-right .hover-tooltip-bubble {
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: calc(100% + 8px);
+  transform: translateY(-50%);
+}
+
 .status-pill {
   padding: 3px 10px;
   border-radius: 999px;

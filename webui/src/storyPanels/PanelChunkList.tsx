@@ -58,9 +58,11 @@ function ChunkActionsMenu({
   onInsertAfter,
   onEditNote,
   onEditText,
+  onPlaceOnLayout,
   showInsert,
   showEditNote,
   showEditText,
+  showPlaceOnLayout,
   isSaving,
 }: {
   isOpen: boolean;
@@ -70,9 +72,11 @@ function ChunkActionsMenu({
   onInsertAfter?: () => void;
   onEditNote?: () => void;
   onEditText?: () => void;
+  onPlaceOnLayout?: () => void;
   showInsert: boolean;
   showEditNote: boolean;
   showEditText: boolean;
+  showPlaceOnLayout: boolean;
   isSaving: boolean;
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -106,7 +110,7 @@ function ChunkActionsMenu({
       return;
     }
     updatePopoverPosition();
-  }, [isOpen, showInsert, showEditNote, showEditText, updatePopoverPosition]);
+  }, [isOpen, showInsert, showEditNote, showEditText, showPlaceOnLayout, updatePopoverPosition]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -193,6 +197,20 @@ function ChunkActionsMenu({
           Edit text…
         </button>
       )}
+      {showPlaceOnLayout && onPlaceOnLayout && (
+        <button
+          type="button"
+          role="menuitem"
+          className="story-panels-chunk-menu-item"
+          disabled={isSaving}
+          onClick={() => {
+            onClose();
+            onPlaceOnLayout();
+          }}
+        >
+          Place on layout
+        </button>
+      )}
       {onDelete && (
         <button
           type="button"
@@ -240,6 +258,7 @@ export function PanelChunkList({
   focusedPanelId,
   onSelectPanel,
   onOpenPanelPlacement,
+  onPlacePanelOnLayout,
   onDeletePanel,
   onInsertDraft,
   onEditPanelNote,
@@ -254,6 +273,7 @@ export function PanelChunkList({
   focusedPanelId: string | null;
   onSelectPanel: (panelId: string) => void;
   onOpenPanelPlacement?: (panelId: string) => void;
+  onPlacePanelOnLayout?: (panelId: string) => void | Promise<void>;
   onDeletePanel: (panelId: string) => void | Promise<void>;
   onInsertDraft?: (payload: InsertDraftPayload) => Promise<void>;
   onEditPanelNote?: (panelId: string, noteText: string) => Promise<void>;
@@ -462,6 +482,7 @@ export function PanelChunkList({
                 showInsert
                 showEditNote={false}
                 showEditText={false}
+                showPlaceOnLayout={false}
                 isSaving={isSaving || isCreating}
               />
             )}
@@ -470,6 +491,7 @@ export function PanelChunkList({
           const primaryText = sidebarItemPrimaryText(panel);
           const secondaryText = sidebarItemSecondaryText(panel);
           const showPlacement = panel.sourceKind === 'story' || panel.sourceKind === 'draft';
+          const isPlaced = showPlacement && panelIsPlacedOnLayout(pages, panel);
           return (
           <article
             key={panel.id}
@@ -498,9 +520,11 @@ export function PanelChunkList({
                   onInsertAfter={canInsertDraft ? () => openInsertDialog(panel.id) : undefined}
                   onEditNote={onEditPanelNote && panel.sourceKind === 'story' ? () => openNoteDialog(panel.id) : undefined}
                   onEditText={onEditPanelText && panel.sourceKind === 'draft' && manualMode ? () => openEditTextDialog(panel.id) : undefined}
+                  onPlaceOnLayout={!isPlaced && onPlacePanelOnLayout ? () => void onPlacePanelOnLayout(panel.id) : undefined}
                   showInsert={canInsertDraft}
                   showEditNote={Boolean(onEditPanelNote && panel.sourceKind === 'story')}
                   showEditText={Boolean(onEditPanelText && panel.sourceKind === 'draft' && manualMode)}
+                  showPlaceOnLayout={Boolean(!isPlaced && onPlacePanelOnLayout && showPlacement)}
                   isSaving={isSaving || isCreating}
                 />
                 {!manualMode && panel.sourceKind === 'story' && panel.startOffset !== null && panel.endOffset !== null ? (
@@ -512,7 +536,7 @@ export function PanelChunkList({
                 ) : null}
               </div>
               {showPlacement && (
-                panelIsPlacedOnLayout(pages, panel) ? (
+                isPlaced ? (
                   <button
                     type="button"
                     className="story-panels-placement-badge is-placed"

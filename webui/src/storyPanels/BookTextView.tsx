@@ -46,6 +46,7 @@ export function BookTextView({
   const [focusedBookPanelId, setFocusedBookPanelId] = useState<string | null>(null);
   const [focusedChunkPanelId, setFocusedChunkPanelId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isPlacingPanel, setIsPlacingPanel] = useState(false);
 
   const hasBookText = bookText.length > 0;
   const showStorySetup = !hasBookText && sidebarPanels.length === 0;
@@ -89,6 +90,21 @@ export function BookTextView({
     if (!panel) return;
     setSelectedPanelId(panelId);
     onNavigateToLayoutEditor({ panelId, singleSidePanel: 'chunks' });
+  };
+
+  const placePanelOnLayout = async (panelId: string) => {
+    setIsPlacingPanel(true);
+    setError(null);
+    try {
+      const next = await api.autoPlaceStoryPanel(projectSlug, panelId);
+      setDocument(next);
+      setSelectedPanelId(panelId);
+      openPanelPlacement(panelId);
+    } catch (err) {
+      setError(formatRequestError(err));
+    } finally {
+      setIsPlacingPanel(false);
+    }
   };
 
   const createPanel = async (panelNote?: string) => {
@@ -231,11 +247,12 @@ export function BookTextView({
       focusedPanelId={focusedChunkPanelId}
       onSelectPanel={selectPanelChunk}
       onOpenPanelPlacement={openPanelPlacement}
+      onPlacePanelOnLayout={placePanelOnLayout}
       onDeletePanel={handleDeletePanel}
       onInsertDraft={hasBookText ? undefined : insertDraft}
       onEditPanelNote={hasBookText ? editPanelNote : undefined}
       onEditPanelText={hasBookText ? undefined : editPanelText}
-      isSaving={isSaving}
+      isSaving={isSaving || isPlacingPanel}
     />
   );
 

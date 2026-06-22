@@ -42,7 +42,11 @@ import {
   parentPanelFor,
   removePanelAndCaptionChildren,
 } from './panelCaptions';
-import { isPanelChunkSourceKind, removeStoryPanelFromLayout } from './panelPlacement';
+import {
+  isPanelChunkSourceKind,
+  readingChunkPanelForLayoutAction,
+  removeStoryPanelFromLayout,
+} from './panelPlacement';
 import { inferDocumentChangeLabel, type StoryPanelHistoryEntry } from './storyPanelHistory';
 import { sortedStoryPages, storyPageNumberById as mapStoryPageNumbers } from './pageNumbers';
 import { HoverTooltip } from '../ui';
@@ -115,7 +119,11 @@ type DragState = {
   startClientX: number;
   startClientY: number;
   startRect: StoryPanelRect;
+  activated: boolean;
 };
+
+/** Pointer movement before a move/resize updates the panel layout. */
+const PANEL_DRAG_ACTIVATION_PX = 6;
 
 type PageContextMenu =
   | {
@@ -1290,9 +1298,11 @@ export function PageLayoutEditor({
       updateSelectedPanelTextStyle({ fontSize: nextSize });
     }
   };
+  const layoutReadingChunkPanel = readingChunkPanelForLayoutAction(displayDocument, visibleSelectedPanel);
   const requestDeleteSelectedPanel = () => {
     if (!visibleSelectedPanel || isSaving) return;
-    setPendingPanelDeleteId(visibleSelectedPanel.id);
+    const chunkPanel = readingChunkPanelForLayoutAction(displayDocument, visibleSelectedPanel);
+    setPendingPanelDeleteId((chunkPanel ?? visibleSelectedPanel).id);
   };
   const confirmRemoveSelectedPanel = () => {
     const panelId = pendingPanelDeleteId;
@@ -1312,9 +1322,7 @@ export function PageLayoutEditor({
     setPendingPanelDeleteId(null);
     onSelectPanel(null);
   };
-  const selectedPanelRemoveLabel = visibleSelectedPanel && isPanelChunkSourceKind(visibleSelectedPanel.sourceKind)
-    ? 'Remove'
-    : 'Delete';
+  const selectedPanelRemoveLabel = layoutReadingChunkPanel ? 'Remove' : 'Delete';
   const commitCustomTextDraft = () => {
     if (!selectedPanel) return;
     persistPanelTextDraft(selectedPanel.id, richTextEditorRef.current?.innerHTML ?? customTextDraft);
@@ -1390,8 +1398,13 @@ export function PageLayoutEditor({
     if (isSaving || !panel.pageId) return;
     event.preventDefault();
     event.stopPropagation();
+    if (mode === 'move' && selectedPanelId !== panel.id) {
+      onSelectPanel(panel.id);
+      return;
+    }
     onSelectPanel(panel.id);
-    const state = {
+    const activated = mode === 'resize';
+    const state: DragState = {
       panelId: panel.id,
       pageId: panel.pageId,
       mode,
@@ -1399,17 +1412,34 @@ export function PageLayoutEditor({
       startClientX: event.clientX,
       startClientY: event.clientY,
       startRect: panel.rect,
+      activated,
     };
     setDragState(state);
-    setDraftDocument(displayDocument);
+    if (activated) {
+      setDraftDocument(displayDocument);
+    }
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const continueDrag = (event: React.PointerEvent) => {
     if (!dragState) return;
-    updatePanelDuringDrag(event, dragState);
+    let activeState = dragState;
+    if (!activeState.activated) {
+      const deltaX = event.clientX - activeState.startClientX;
+      const deltaY = event.clientY - activeState.startClientY;
+      if (Math.hypot(deltaX, deltaY) < PANEL_DRAG_ACTIVATION_PX) return;
+      activeState = { ...activeState, activated: true };
+      setDragState(activeState);
+      setDraftDocument(displayDocument);
+    }
+    updatePanelDuringDrag(event, activeState);
   };
   const endDrag = () => {
-    if (!dragState || !draftDocument) return;
+    if (!dragState) return;
+    if (!dragState.activated) {
+      setDragState(null);
+      return;
+    }
+    if (!draftDocument) return;
     const label = dragState.mode === 'resize' ? 'Resize panel' : 'Move panel';
     const nextDocument = draftDocument;
     setDragState(null);
@@ -1704,7 +1734,7 @@ export function PageLayoutEditor({
                         <div
                           key={panel.id}
                           role="presentation"
-                          className={`story-panels-page-panel is-${panel.panelKind} ${panel.sourceKind === 'caption' ? 'is-caption' : ''} ${captionPanelClassName(panel)} ${panel.panelKind === 'image' && panel.activeAssetId ? 'has-image' : ''} ${cropModePanelId === panel.id ? 'is-crop-mode' : ''} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
+                          className={`story-panels-page-panel is-${panel.panelKind} ${panel.sourceKind === 'caption' ? 'is-caption' : ''} ${captionPanelClassName(panel)} ${panel.panelKind === 'image' && panel.activeAssetId ? 'has-image' : ''} ${cropModePanelId === panel.id ? 'is-crop-mode' : ''} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id && dragState.activated ? 'is-dragging' : ''}`}
                           style={{
                             ...panelStyle(panel, pageRows),
                             ...(panel.panelKind === 'text' ? panelCanvasTextStyle(
@@ -1811,7 +1841,7 @@ export function PageLayoutEditor({
                     <div
                       key={panel.id}
                       role="presentation"
-                      className={`story-panels-page-panel is-${panel.panelKind} ${panel.sourceKind === 'caption' ? 'is-caption' : ''} ${captionPanelClassName(panel)} ${panel.panelKind === 'image' && panel.activeAssetId ? 'has-image' : ''} ${cropModePanelId === panel.id ? 'is-crop-mode' : ''} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
+                      className={`story-panels-page-panel is-${panel.panelKind} ${panel.sourceKind === 'caption' ? 'is-caption' : ''} ${captionPanelClassName(panel)} ${panel.panelKind === 'image' && panel.activeAssetId ? 'has-image' : ''} ${cropModePanelId === panel.id ? 'is-crop-mode' : ''} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id && dragState.activated ? 'is-dragging' : ''}`}
                       style={{
                         ...panelStyle(panel, pageRows),
                         ...(panel.panelKind === 'text' ? panelCanvasTextStyle(
@@ -1871,7 +1901,14 @@ export function PageLayoutEditor({
               <>
                 <div className="story-panels-info-head">
                   <h3>Selected Panel</h3>
-                  <button type="button" className="danger" disabled={isSaving} onClick={requestDeleteSelectedPanel}>
+                  <button
+                    type="button"
+                    className="danger"
+                    disabled={isSaving}
+                    aria-label={selectedPanelRemoveLabel}
+                    title={layoutReadingChunkPanel ? 'Remove from layout (keeps panel in Reading)' : undefined}
+                    onClick={requestDeleteSelectedPanel}
+                  >
                     {selectedPanelRemoveLabel}
                   </button>
                 </div>

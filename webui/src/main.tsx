@@ -1390,6 +1390,37 @@ function App() {
     }
   };
 
+  const handleProjectPhaseChange = useCallback((phase: ProjectPhase) => {
+    setProjectPhase(phase);
+    if (phase !== 'layout-editor') {
+      setLayoutEditorNavigation(null);
+    }
+    setPhaseViewMode(phase === 'image-canvas' ? 'canvas' : 'list');
+    setActiveUserTagFilters([]);
+    setActiveEntityTagFilters([]);
+    setIsUserTagFilterMenuOpen(false);
+    setPopoverNodeId(null);
+    setActiveChatSessionId(null);
+  }, []);
+
+  useEffect(() => {
+    if (!openProjectSlug) return;
+    const workspacePhaseByKey: Record<string, ProjectPhase> = {
+      t: 'story',
+      l: 'layout-editor',
+      c: 'image-canvas',
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) return;
+      const phase = workspacePhaseByKey[event.key.toLowerCase()];
+      if (!phase) return;
+      event.preventDefault();
+      handleProjectPhaseChange(phase);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleProjectPhaseChange, openProjectSlug]);
+
   if (!openProjectSlug) {
     return (
       <ProjectLanding
@@ -1412,19 +1443,6 @@ function App() {
   const isStoryPanelPhaseActive = isLayoutEditorActive || isStoryActive;
   const isAdaptationListActive = !isCanvasActive && !isMomentViewActive && !isStoryPanelPhaseActive;
   const showProjectTopBar = Boolean(openProjectSlug && (isPhaseSidebarCollapsed || isCanvasActive || isStoryPanelPhaseActive));
-
-  const handleProjectPhaseChange = (phase: ProjectPhase) => {
-    setProjectPhase(phase);
-    if (phase !== 'layout-editor') {
-      setLayoutEditorNavigation(null);
-    }
-    setPhaseViewMode(phase === 'image-canvas' ? 'canvas' : 'list');
-    setActiveUserTagFilters([]);
-    setActiveEntityTagFilters([]);
-    setIsUserTagFilterMenuOpen(false);
-    setPopoverNodeId(null);
-    setActiveChatSessionId(null);
-  };
 
   const exportBookletPdf = async (pageBorder: BookletPageBorder = exportPageBorder) => {
     if (!openProjectSlug) return;
