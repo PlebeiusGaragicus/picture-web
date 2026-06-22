@@ -1,5 +1,7 @@
 # Desktop packaging plan
 
+> **Deprecated.** This document is outdated and no longer maintained. See [`AGENTS.md`](../../AGENTS.md) and the application source for current behavior.
+
 How `photo-web` could move from the current two-server development setup to a packaged desktop application for macOS and Linux.
 
 **Status:** Planning note. Not implemented. Today the app is launched with `./run`, which starts FastAPI and Vite development servers.

@@ -65,7 +65,7 @@ export function BookTextSelector({
   isCreating: boolean;
 }) {
   const textRef = useRef<HTMLDivElement | null>(null);
-  const cardRef = useRef<HTMLElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
   const panelSpanRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const [flashingPanelId, setFlashingPanelId] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
@@ -184,14 +184,8 @@ export function BookTextSelector({
   };
 
   return (
-    <section ref={cardRef} className="story-card story-panels-book-card">
-      <div className="story-panels-section-head">
-        <div>
-          <h2>Book Text</h2>
-          <p className="muted">Select a passage to open actions, or drag panel edges to refine chunks.</p>
-        </div>
-      </div>
-      {selectionError && <p className="error">{selectionError}</p>}
+    <div ref={cardRef} className="story-panels-book-text-wrap">
+      {selectionError && <p className="error story-panels-selection-error">{selectionError}</p>}
       <div
         ref={textRef}
         className="story-panels-book-text"
@@ -264,6 +258,6 @@ export function BookTextSelector({
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 }

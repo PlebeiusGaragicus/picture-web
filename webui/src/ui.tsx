@@ -21,9 +21,9 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
   );
 }
 
-export function HelpTip({ text }: { text: string }) {
+export function HelpTip({ text, placement = 'top' }: { text: string; placement?: 'top' | 'bottom' }) {
   return (
-    <span className="help-tip-wrap">
+    <span className={`help-tip-wrap ${placement === 'bottom' ? 'is-below' : ''}`.trim()}>
       <button type="button" className="help-tip" aria-label={text} onClick={(event) => event.preventDefault()}>?</button>
       <span className="help-tip-bubble" role="tooltip">{text}</span>
     </span>

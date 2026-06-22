@@ -1,5 +1,7 @@
 # Adaptation Phases
 
+> **Deprecated.** This document is outdated and no longer maintained. See [`AGENTS.md`](../AGENTS.md) and the application source for current behavior.
+
 This workflow turns story source material into reusable visual references, scene plans, and final panel/page images.
 
 ## Phase 0: Story & Style

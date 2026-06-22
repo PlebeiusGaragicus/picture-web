@@ -472,10 +472,16 @@ class StoryPanelTextStyle(BaseModel):
     fontFamily: Literal["serif", "sans", "mono", "comic"] = "serif"
     fontSize: int = Field(default=8, ge=6, le=48)
     align: Literal["left", "center", "right"] = "left"
-    shape: Literal["square", "oval"] = "square"
+    speechKind: Literal["dialogue", "narration"] = "dialogue"
     background: Literal["transparent", "white"] = "white"
     color: str = Field(default="#111827", pattern=TAG_COLOR_RE)
     outlineColor: str = Field(default="#ffffff", pattern=TAG_COLOR_RE)
+
+
+class StoryPanelImageCrop(BaseModel):
+    focalX: float = Field(default=0.5, ge=0, le=1)
+    focalY: float = Field(default=0.5, ge=0, le=1)
+    scale: float = Field(default=1, ge=1, le=4)
 
 
 class StoryPanel(BaseModel):
@@ -488,7 +494,7 @@ class StoryPanel(BaseModel):
     customText: str = ""
     richText: str = ""
     textStyle: StoryPanelTextStyle = Field(default_factory=StoryPanelTextStyle)
-    pageId: str = Field(pattern=TAG_RE)
+    pageId: str | None = None
     panelKind: Literal["image", "text"] = "image"
     rect: StoryPanelRect = Field(default_factory=lambda: StoryPanelRect(x=0, y=0, w=4, h=3))
     layer: int = Field(default=0, ge=0)
@@ -497,6 +503,7 @@ class StoryPanel(BaseModel):
     activeAssetId: str | None = None
     aspectRatio: str | None = None
     aspectRatioLocked: bool = False
+    imageCrop: StoryPanelImageCrop | None = None
     finalized: bool = False
 
     @model_validator(mode="after")
@@ -519,6 +526,8 @@ class StoryPanel(BaseModel):
             raise ValueError("Free layout items must not have book offsets")
         elif self.parentPanelId is not None:
             raise ValueError("Only caption panels may have parentPanelId")
+        if self.pageId is None and self.sourceKind != "story":
+            raise ValueError("Only story panels may be unplaced")
         if self.activeAssetId is not None and self.activeAssetId not in self.assetIds:
             raise ValueError("activeAssetId must be attached to the panel")
         return self
@@ -541,7 +550,7 @@ class StoryPanelDocument(BaseModel):
             raise ValueError("Duplicate panel ids")
         page_id_set = set(page_ids)
         for panel in self.panels:
-            if panel.pageId not in page_id_set:
+            if panel.pageId is not None and panel.pageId not in page_id_set:
                 raise ValueError(f"Panel references unknown page: {panel.pageId}")
         ranges = sorted((panel.startOffset, panel.endOffset, panel.id) for panel in self.panels if panel.sourceKind == "story")
         for previous, current in zip(ranges, ranges[1:]):
@@ -583,6 +592,7 @@ class StoryPanelPatch(BaseModel):
     activeAssetId: str | None = None
     aspectRatio: str | None = None
     aspectRatioLocked: bool | None = None
+    imageCrop: StoryPanelImageCrop | None = None
     finalized: bool | None = None
 
 

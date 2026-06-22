@@ -1,5 +1,7 @@
 # photo-web library package — idea document
 
+> **Deprecated.** This document is outdated and no longer maintained. See [`AGENTS.md`](../../AGENTS.md) and the application source for current behavior.
+
 How macOS Photos represents a “single library file,” and how photo-web could adopt the same pattern with a custom package in `~/Pictures` (or anywhere the user chooses).
 
 **Status:** Idea / direction — not implemented. Today the app uses `./photo-library/` next to the repo (see [spec.md](spec.md)).

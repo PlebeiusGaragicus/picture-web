@@ -17,7 +17,7 @@ from typing import Literal
 
 import library
 import story_panels
-from models import StoryPanel, StoryPanelDocument, StoryPanelPage
+from models import StoryPanel, StoryPanelDocument, StoryPanelImageCrop, StoryPanelPage
 
 SHEET_WIDTH, SHEET_HEIGHT = landscape(letter)
 HALF_WIDTH = SHEET_WIDTH / 2
@@ -159,6 +159,8 @@ def render_booklet_pdf(slug: str, *, page_border: PageBorder = "black") -> bytes
 def _panels_by_page(document: StoryPanelDocument) -> dict[str, list[StoryPanel]]:
     panels: dict[str, list[StoryPanel]] = {}
     for panel in document.panels:
+        if panel.pageId is None:
+            continue
         panels.setdefault(panel.pageId, []).append(panel)
     for page_panels in panels.values():
         page_panels.sort(key=lambda panel: (panel.layer, panel.rect.y, panel.rect.x, panel.order))
@@ -251,6 +253,11 @@ def _draw_panel(
     _draw_image_panel(pdf, panel, page_number, x, y, w, h, slug=slug)
 
 
+def _caption_outline_stroke_width(font_size: int) -> float:
+    # ~1pt halo at fontSize 7 on the 360pt page grid (matches CSS text-shadow spread).
+    return max(0.75, font_size / 7.0)
+
+
 def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel, x: float, y: float, w: float, h: float) -> None:
     style = panel.textStyle
     transparent = panel.sourceKind == "caption" and style.background == "transparent"
@@ -260,7 +267,7 @@ def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel, x: float, y: float, 
     else:
         pdf.setFillColor(white)
         pdf.setStrokeColor(HexColor("#cbd5e1"))
-    radius = min(w, h) / 2 if panel.sourceKind == "caption" and style.shape == "oval" else 0
+    radius = min(w, h) / 2 if panel.sourceKind == "caption" and style.speechKind == "dialogue" else 0
     if radius > 0:
         pdf.roundRect(x, y, w, h, radius, stroke=0 if transparent else 1, fill=0 if transparent else 1)
     else:
@@ -271,30 +278,7 @@ def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel, x: float, y: float, 
     text_y = y + h - 8
     text_w = w - 10
     text_h = h - 10
-    if transparent and panel.sourceKind == "caption":
-        outline_color = HexColor(style.outlineColor)
-        for dx, dy in (
-            (-0.6, 0),
-            (0.6, 0),
-            (0, -0.6),
-            (0, 0.6),
-            (-0.6, -0.6),
-            (0.6, -0.6),
-            (-0.6, 0.6),
-            (0.6, 0.6),
-        ):
-            _draw_rich_text(
-                pdf,
-                rich_text,
-                text_x + dx,
-                text_y + dy,
-                text_w,
-                text_h,
-                font_family=style.fontFamily,
-                size=style.fontSize,
-                align=style.align,
-                color=outline_color,
-            )
+    outline_color = HexColor(style.outlineColor) if transparent and panel.sourceKind == "caption" else None
     _draw_rich_text(
         pdf,
         rich_text,
@@ -306,6 +290,8 @@ def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel, x: float, y: float, 
         size=style.fontSize,
         align=style.align,
         color=text_color,
+        stroke_color=outline_color,
+        stroke_width=_caption_outline_stroke_width(style.fontSize) if outline_color is not None else 0,
     )
 
 
@@ -322,7 +308,7 @@ def _draw_image_panel(
 ) -> None:
     asset_path = _active_asset_path(slug, panel)
     if asset_path is not None:
-        _draw_cropped_image(pdf, asset_path, x, y, w, h)
+        _draw_cropped_image(pdf, asset_path, x, y, w, h, panel.imageCrop)
     else:
         pdf.setFillColor(HexColor("#dbeafe"))
         pdf.setStrokeColor(HexColor("#2563eb"))
@@ -342,20 +328,48 @@ def _active_asset_path(slug: str, panel: StoryPanel) -> Path | None:
     return path if path.is_file() else None
 
 
-def _draw_cropped_image(pdf: canvas.Canvas, path: Path, x: float, y: float, w: float, h: float) -> None:
+def _source_crop_box(
+    crop: StoryPanelImageCrop | None,
+    source_w: int,
+    source_h: int,
+    target_ratio: float,
+) -> tuple[int, int, int, int]:
+    focal_x = 0.5 if crop is None else crop.focalX
+    focal_y = 0.5 if crop is None else crop.focalY
+    scale = 1.0 if crop is None else crop.scale
+    source_ratio = source_w / source_h
+    if source_ratio > target_ratio:
+        crop_h = float(source_h)
+        crop_w = source_h * target_ratio
+    else:
+        crop_w = float(source_w)
+        crop_h = source_w / target_ratio
+    crop_w /= scale
+    crop_h /= scale
+    left = max(0.0, min(source_w - crop_w, focal_x * (source_w - crop_w)))
+    top = max(0.0, min(source_h - crop_h, focal_y * (source_h - crop_h)))
+    return (
+        int(round(left)),
+        int(round(top)),
+        int(round(left + crop_w)),
+        int(round(top + crop_h)),
+    )
+
+
+def _draw_cropped_image(
+    pdf: canvas.Canvas,
+    path: Path,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    crop: StoryPanelImageCrop | None = None,
+) -> None:
     with Image.open(path) as image:
         image = image.convert("RGB")
         source_w, source_h = image.size
         target_ratio = w / h
-        source_ratio = source_w / source_h
-        if source_ratio > target_ratio:
-            crop_w = int(source_h * target_ratio)
-            left = (source_w - crop_w) // 2
-            box = (left, 0, left + crop_w, source_h)
-        else:
-            crop_h = int(source_w / target_ratio)
-            top = (source_h - crop_h) // 2
-            box = (0, top, source_w, top + crop_h)
+        box = _source_crop_box(crop, source_w, source_h, target_ratio)
         cropped = image.crop(box)
         buffer = BytesIO()
         cropped.save(buffer, format="PNG")
@@ -477,6 +491,31 @@ def _parse_rich_text(html: str) -> list[RichTextRun | None]:
     return parser.runs or [RichTextRun("")]
 
 
+def _draw_rich_text_line(
+    pdf: canvas.Canvas,
+    line: list[RichTextRun],
+    cursor_x: float,
+    y: float,
+    *,
+    font_family: str,
+    size: int,
+    render_mode: int,
+    fill_color: HexColor | None = None,
+    stroke_color: HexColor | None = None,
+) -> None:
+    text = pdf.beginText(cursor_x, y)
+    text.setTextRenderMode(render_mode)
+    if fill_color is not None:
+        text.setFillColor(fill_color)
+    if stroke_color is not None:
+        text.setStrokeColor(stroke_color)
+    for run in line:
+        font = _font_name(font_family, bold=run.bold, italic=run.italic)
+        text.setFont(font, size)
+        text.textOut(run.text)
+    pdf.drawText(text)
+
+
 def _draw_rich_text(
     pdf: canvas.Canvas,
     html: str,
@@ -489,8 +528,10 @@ def _draw_rich_text(
     size: int,
     align: str,
     color: HexColor | None = None,
+    stroke_color: HexColor | None = None,
+    stroke_width: float = 0,
 ) -> None:
-    pdf.setFillColor(color or HexColor("#111827"))
+    fill_color = color or HexColor("#111827")
     line_height = size * 1.25
     lines: list[list[RichTextRun]] = []
     current: list[RichTextRun] = []
@@ -525,6 +566,11 @@ def _draw_rich_text(
     if current:
         push_line()
 
+    if stroke_color is not None and stroke_width > 0:
+        pdf.setLineWidth(stroke_width)
+        pdf.setLineJoin(1)
+        pdf.setLineCap(1)
+
     remaining_y = y
     min_y = y - height
     for line in lines:
@@ -539,12 +585,45 @@ def _draw_rich_text(
             cursor_x = x + max(0, (width - line_width) / 2)
         elif align == "right":
             cursor_x = x + max(0, width - line_width)
+        if stroke_color is not None and stroke_width > 0:
+            _draw_rich_text_line(
+                pdf,
+                line,
+                cursor_x,
+                remaining_y,
+                font_family=font_family,
+                size=size,
+                render_mode=1,
+                stroke_color=stroke_color,
+            )
+            _draw_rich_text_line(
+                pdf,
+                line,
+                cursor_x,
+                remaining_y,
+                font_family=font_family,
+                size=size,
+                render_mode=0,
+                fill_color=fill_color,
+            )
+        else:
+            for run in line:
+                font = _font_name(font_family, bold=run.bold, italic=run.italic)
+                pdf.setFillColor(fill_color)
+                pdf.setFont(font, size)
+                pdf.drawString(cursor_x, remaining_y, run.text)
+                cursor_x += pdf.stringWidth(run.text, font, size)
+        underline_start_x = x
+        if align == "center":
+            underline_start_x = x + max(0, (width - line_width) / 2)
+        elif align == "right":
+            underline_start_x = x + max(0, width - line_width)
         for run in line:
             font = _font_name(font_family, bold=run.bold, italic=run.italic)
-            pdf.setFont(font, size)
-            pdf.drawString(cursor_x, remaining_y, run.text)
             run_width = pdf.stringWidth(run.text, font, size)
             if run.underline and run.text.strip():
-                pdf.line(cursor_x, remaining_y - 1.5, cursor_x + run_width, remaining_y - 1.5)
-            cursor_x += run_width
+                pdf.setStrokeColor(fill_color)
+                pdf.setLineWidth(0.75)
+                pdf.line(underline_start_x, remaining_y - 1.5, underline_start_x + run_width, remaining_y - 1.5)
+            underline_start_x += run_width
         remaining_y -= line_height

@@ -12,7 +12,7 @@ import story_panels
 import story_panels_print
 from fastapi.testclient import TestClient
 from main import app
-from models import AdaptationAssetLink, StoryPanel
+from models import AdaptationAssetLink, StoryPanel, StoryPanelImageCrop
 from pydantic import ValidationError
 import pytest
 from PIL import Image
@@ -1165,8 +1165,54 @@ def test_story_panels_panel_image_assignment(tmp_path, monkeypatch):
     assert ratio_panel["aspectRatio"] == "16:9"
     assert ratio_panel["aspectRatioLocked"] is True
 
+    crop_patch = client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{panel['id']}",
+        json={"imageCrop": {"focalX": 0.25, "focalY": 0.75, "scale": 2}},
+    )
+    assert crop_patch.status_code == 200
+    crop_panel = next(candidate for candidate in crop_patch.json()["panels"] if candidate["id"] == panel["id"])
+    assert crop_panel["imageCrop"] == {"focalX": 0.25, "focalY": 0.75, "scale": 2}
+
     with pytest.raises(ValidationError, match="activeAssetId must be attached"):
         StoryPanel.model_validate({**updated, "assetIds": [], "activeAssetId": asset_id})
+
+
+def test_story_panels_unplace_story_panel(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the door.\n")
+
+    created = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
+    )
+    assert created.status_code == 200
+    panel = next(candidate for candidate in created.json()["panels"] if candidate["sourceKind"] == "story")
+    assert panel["pageId"] is not None
+
+    unplaced = client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{panel['id']}",
+        json={"pageId": None},
+    )
+    assert unplaced.status_code == 200
+    updated = next(candidate for candidate in unplaced.json()["panels"] if candidate["id"] == panel["id"])
+    assert updated["pageId"] is None
+
+    with pytest.raises(ValidationError, match="Only story panels may be unplaced"):
+        StoryPanel.model_validate({
+            "id": "free-image-block",
+            "order": 0,
+            "sourceKind": "free-image",
+            "startOffset": None,
+            "endOffset": None,
+            "pageId": None,
+            "panelKind": "image",
+            "rect": {"x": 0, "y": 0, "w": 4, "h": 3},
+            "layer": 0,
+            "finalized": False,
+        })
 
 
 def test_story_panels_caption_panel_assignment(tmp_path, monkeypatch):
@@ -1229,7 +1275,7 @@ def test_story_panels_caption_panel_assignment(tmp_path, monkeypatch):
                 "fontFamily": "sans",
                 "fontSize": 9,
                 "align": "left",
-                "shape": "oval",
+                "speechKind": "narration",
                 "background": "transparent",
                 "color": "#1e40af",
                 "outlineColor": "#eab308",
@@ -1238,7 +1284,7 @@ def test_story_panels_caption_panel_assignment(tmp_path, monkeypatch):
     )
     assert styled.status_code == 200
     updated = next(panel for panel in styled.json()["panels"] if panel["id"] == caption["id"])["textStyle"]
-    assert updated["shape"] == "oval"
+    assert updated["speechKind"] == "narration"
     assert updated["background"] == "transparent"
     assert updated["color"] == "#1e40af"
     assert updated["outlineColor"] == "#eab308"
@@ -1300,6 +1346,21 @@ def test_story_panels_reject_story_chunks_on_front_matter(tmp_path, monkeypatch)
     )
     assert response.status_code == 400
     assert "story pages" in response.json()["detail"]
+
+
+def test_story_panels_caption_outline_stroke_width_scales_with_font_size():
+    assert story_panels_print._caption_outline_stroke_width(7) == 1.0
+    assert story_panels_print._caption_outline_stroke_width(14) == 2.0
+
+
+def test_story_panels_image_crop_box_matches_object_position():
+    crop = StoryPanelImageCrop(focalX=0.25, focalY=0.75, scale=2)
+    # Wide source on a square panel: cover window 800×800, zoom 2× → 400×400.
+    assert story_panels_print._source_crop_box(crop, 1200, 800, 1.0) == (200, 300, 600, 700)
+
+    centered = StoryPanelImageCrop(focalX=0.5, focalY=0.5, scale=1)
+    # Same as centering when focal is 0.5.
+    assert story_panels_print._source_crop_box(centered, 1000, 800, 1.0) == (100, 0, 900, 800)
 
 
 def test_story_panels_booklet_imposition_order():

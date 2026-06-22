@@ -98,7 +98,7 @@ def _ensure_default_fixed_page_panels(document: StoryPanelDocument) -> None:
         },
     }
     existing_pages = {page.id for page in document.pages}
-    occupied_pages = {panel.pageId for panel in document.panels}
+    occupied_pages = {panel.pageId for panel in document.panels if panel.pageId is not None}
     next_order = max((panel.order for panel in document.panels), default=-1) + 1
     for page_id, default in defaults.items():
         if page_id not in existing_pages or page_id in occupied_pages:
@@ -193,7 +193,7 @@ def _default_rect(document: StoryPanelDocument, page_id: str) -> StoryPanelRect:
 
 def _story_order_placement(document: StoryPanelDocument, start_offset: int) -> tuple[str, StoryPanelRect]:
     ordered = sorted(
-        [panel for panel in document.panels if panel.sourceKind == "story" and panel.startOffset is not None and panel.endOffset is not None],
+        [panel for panel in document.panels if panel.sourceKind == "story" and panel.startOffset is not None and panel.endOffset is not None and panel.pageId is not None],
         key=lambda panel: (panel.startOffset, panel.endOffset, panel.order),
     )
     previous_panel = next((panel for panel in reversed(ordered) if panel.startOffset is not None and panel.startOffset <= start_offset), None)
@@ -252,13 +252,21 @@ def patch_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> StoryPane
         raise HTTPException(status_code=404, detail=f"Panel not found: {panel_id}")
     current = document.panels[index]
     updates = payload.model_dump(exclude_unset=True)
-    if "pageId" in updates and not any(page.id == updates["pageId"] for page in document.pages):
-        raise HTTPException(status_code=400, detail=f"Unknown page: {updates['pageId']}")
-    target_page_id = updates.get("pageId", current.pageId)
-    target_page = next(page for page in document.pages if page.id == target_page_id)
     next_source_kind = updates.get("sourceKind", current.sourceKind)
-    if next_source_kind == "story" and target_page.pageKind != "story":
-        raise HTTPException(status_code=400, detail="Story panel chunks can only be placed on story pages")
+    if "pageId" in updates:
+        page_id = updates["pageId"]
+        if page_id is not None and not any(page.id == page_id for page in document.pages):
+            raise HTTPException(status_code=400, detail=f"Unknown page: {page_id}")
+        if page_id is None and next_source_kind != "story":
+            raise HTTPException(status_code=400, detail="Only story panels may be unplaced")
+        if page_id is not None:
+            target_page = next(page for page in document.pages if page.id == page_id)
+            if next_source_kind == "story" and target_page.pageKind != "story":
+                raise HTTPException(status_code=400, detail="Story panel chunks can only be placed on story pages")
+    elif current.pageId is not None:
+        target_page = next(page for page in document.pages if page.id == current.pageId)
+        if next_source_kind == "story" and target_page.pageKind != "story":
+            raise HTTPException(status_code=400, detail="Story panel chunks can only be placed on story pages")
     if "activeAssetId" in updates and updates["activeAssetId"] is None:
         updates["activeAssetId"] = None
     next_panel = StoryPanel.model_validate({**current.model_dump(mode="json"), **updates})

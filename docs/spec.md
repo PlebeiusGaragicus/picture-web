@@ -1,5 +1,7 @@
 # photo-web — Image Lineage Canvas Spec
 
+> **Deprecated.** This document is outdated and no longer maintained. See [`AGENTS.md`](../AGENTS.md) and the application source for current behavior.
+
 Personal tool for organizing AI-generated and reference images on an infinite canvas, inspecting generation metadata, and running new generations. The user works only in the UI; disk layout is an implementation detail.
 
 This spec captures the intended product shape and the direction of the current in-progress implementation. The app is under active development and still has known bugs and refinement work ahead.

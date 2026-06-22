@@ -1,5 +1,7 @@
 # Refine Image In Chat
 
+> **Deprecated.** This document is outdated and no longer maintained. See [`AGENTS.md`](../AGENTS.md) and the application source for current behavior.
+
 ## Goal
 
 Add a true Gemini chat refinement mode for images. Instead of treating every edit as a stateless generation request, the user can open a chat on an existing image and iteratively ask for changes like:

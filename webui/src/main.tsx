@@ -17,13 +17,18 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import './style.css';
 import { formatRequestError } from './formatError';
+import { MouseTrail } from './MouseTrail';
 import { api } from './api';
 import { exportProjectAssetsToFolder, saveAssetImageToDisk } from './exportAssets';
 import { VisualStyleList } from './adaptation/cards';
 import { WorkflowLogPanel } from './adaptation/workflowLog';
 import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
 import { MomentSequenceView } from './adaptation/momentSequenceView';
-import { StoryPanelsView } from './storyPanels/StoryPanelsView';
+import { BookTextView } from './storyPanels/BookTextView';
+import { LayoutEditorView } from './storyPanels/LayoutEditorView';
+import { ProjectTopBar } from './ProjectTopBar';
+import { adaptationNavPhases, phaseStatus, type ProjectPhase } from './projectNavigation';
+import type { LayoutEditorNavigation } from './storyPanels/layoutEditorNavigation';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
 import { SYSTEM_TAGS, artifactKindLabel, assetLabel, adaptationFileKindToArtifactKind, capabilitiesForModel, characterEntityTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, storyArtifactKeysOnCanvas, storyArtifactNodeId, userProjectTags, visibleDisplayName } from './canvas/shared';
@@ -37,31 +42,14 @@ import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags } from '.
 import { HelpTip, Modal } from './ui';
 import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StoryKind, StyleRefKind, TagDefinition } from './types';
 
-type ProjectPhase =
-  | 'story-canvas'
-  | 'story-panels'
-  | 'phase-0-ingestion'
-  | 'phase-1-characters'
-  | 'phase-2-scenes'
-  | 'phase-3-locations'
-  | 'phase-4-moments';
-
 type PhaseViewMode = 'list' | 'canvas' | 'view';
 
-const projectPhases: Array<{ id: ProjectPhase; number: string; title: string; shortTitle: string; description: string }> = [
-  { id: 'phase-0-ingestion', number: '0', title: 'Story & Style', shortTitle: 'Story & Style', description: 'Book, archetypes & styles' },
-  { id: 'phase-1-characters', number: '1', title: 'Characters', shortTitle: 'Cast', description: 'Cast & sheets' },
-  { id: 'phase-2-scenes', number: '2', title: 'Scenes', shortTitle: 'Scenes', description: 'Story map' },
-  { id: 'phase-3-locations', number: '3', title: 'Locations', shortTitle: 'Places', description: 'Places & refs' },
-  { id: 'phase-4-moments', number: '4', title: 'Moments', shortTitle: 'Moments', description: 'Beats & images' },
-];
-
 function phaseHasCanvas(phase: ProjectPhase) {
-  return phase === 'story-canvas' || phase === 'phase-1-characters' || phase === 'phase-3-locations';
+  return phase === 'image-canvas' || phase === 'phase-1-characters' || phase === 'phase-3-locations';
 }
 
 function phaseHasList(phase: ProjectPhase) {
-  return phase !== 'story-canvas' && phase !== 'story-panels';
+  return phase !== 'image-canvas' && phase !== 'story' && phase !== 'layout-editor';
 }
 
 function phaseHasViewToggle(phase: ProjectPhase) {
@@ -280,9 +268,11 @@ function App() {
   const [activeUserTagFilters, setActiveUserTagFilters] = useState<string[]>([]);
   const [activeEntityTagFilters, setActiveEntityTagFilters] = useState<string[]>([]);
   const [isUserTagFilterMenuOpen, setIsUserTagFilterMenuOpen] = useState(false);
-  const [projectPhase, setProjectPhase] = useState<ProjectPhase>('story-canvas');
+  const [projectPhase, setProjectPhase] = useState<ProjectPhase>('image-canvas');
+  const [layoutEditorNavigation, setLayoutEditorNavigation] = useState<LayoutEditorNavigation | null>(null);
   const [phaseViewMode, setPhaseViewMode] = useState<PhaseViewMode>('list');
   const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
+  const [storyPanelChunksOpen, setStoryPanelChunksOpen] = useState(true);
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const [adaptation, setAdaptation] = useState<AdaptationStatus | null>(null);
   const [adaptationWorkflow, setAdaptationWorkflow] = useState<AdaptationWorkflowStatus | null>(null);
@@ -739,7 +729,7 @@ function App() {
 
   const openProject = async (projectSlug: string) => {
     setOpenProjectSlug(projectSlug);
-    setProjectPhase('story-canvas');
+    setProjectPhase('image-canvas');
     setPhaseViewMode('canvas');
     setActiveUserTagFilters([]);
     setActiveEntityTagFilters([]);
@@ -750,7 +740,8 @@ function App() {
 
   const closeProject = () => {
     setOpenProjectSlug('');
-    setProjectPhase('story-canvas');
+    setProjectPhase('image-canvas');
+    setLayoutEditorNavigation(null);
     setActiveUserTagFilters([]);
     setActiveEntityTagFilters([]);
     setAssets([]);
@@ -1405,8 +1396,10 @@ function App() {
   const showViewToggle = (phaseHasCanvas(projectPhase) && phaseHasList(projectPhase)) || phaseHasViewToggle(projectPhase);
   const isCanvasActive = phaseHasCanvas(projectPhase) && phaseViewMode === 'canvas';
   const isMomentViewActive = phaseHasViewToggle(projectPhase) && phaseViewMode === 'view';
-  const isStoryPanelsActive = projectPhase === 'story-panels';
-  const isAdaptationListActive = !isCanvasActive && !isMomentViewActive && !isStoryPanelsActive;
+  const isLayoutEditorActive = projectPhase === 'layout-editor';
+  const isStoryActive = projectPhase === 'story';
+  const isStoryPanelPhaseActive = isLayoutEditorActive || isStoryActive;
+  const isAdaptationListActive = !isCanvasActive && !isMomentViewActive && !isStoryPanelPhaseActive;
 
   return (
     <div className="app">
@@ -1441,7 +1434,10 @@ function App() {
         onUpdateTag={updateProjectTag}
         onPhaseChange={(phase) => {
           setProjectPhase(phase);
-          setPhaseViewMode(phase === 'story-canvas' ? 'canvas' : 'list');
+          if (phase !== 'layout-editor') {
+            setLayoutEditorNavigation(null);
+          }
+          setPhaseViewMode(phase === 'image-canvas' ? 'canvas' : 'list');
           setActiveUserTagFilters([]);
           setActiveEntityTagFilters([]);
           setIsUserTagFilterMenuOpen(false);
@@ -1451,7 +1447,7 @@ function App() {
       />
       <main
         ref={canvasRef}
-        className={`canvas ${!isCanvasActive ? 'story-adaptation-view' : ''} ${showViewToggle ? 'has-view-toggle' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
+        className={`canvas ${!isCanvasActive ? 'story-adaptation-view' : ''} ${showViewToggle ? 'has-view-toggle' : ''} ${isPhaseSidebarCollapsed ? 'has-collapsed-sidebar' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
         onDragOver={(event) => {
           if (!isCanvasActive) return;
           event.preventDefault();
@@ -1486,6 +1482,27 @@ function App() {
             </button>
           </div>
         )}
+        {isPhaseSidebarCollapsed && openProjectSlug && (
+          <ProjectTopBar
+            activePhase={projectPhase}
+            adaptation={adaptation}
+            onPhaseChange={(phase) => {
+              setProjectPhase(phase);
+              if (phase !== 'layout-editor') {
+                setLayoutEditorNavigation(null);
+              }
+              setPhaseViewMode(phase === 'image-canvas' ? 'canvas' : 'list');
+              setActiveUserTagFilters([]);
+              setActiveEntityTagFilters([]);
+              setIsUserTagFilterMenuOpen(false);
+              setPopoverNodeId(null);
+              setActiveChatSessionId(null);
+            }}
+            onExpandSidebar={() => setIsPhaseSidebarCollapsed(false)}
+            showChunksToggle={isStoryActive && !storyPanelChunksOpen}
+            onOpenChunks={() => setStoryPanelChunksOpen(true)}
+          />
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -1519,8 +1536,24 @@ function App() {
             onReloadAdaptation={loadAdaptation}
           />
         )}
-        {isStoryPanelsActive && (
-          <StoryPanelsView projectSlug={openProjectSlug} />
+        {isStoryActive && (
+          <BookTextView
+            projectSlug={openProjectSlug}
+            isPhaseSidebarCollapsed={isPhaseSidebarCollapsed}
+            panelChunksOpen={storyPanelChunksOpen}
+            onPanelChunksOpenChange={setStoryPanelChunksOpen}
+            onNavigateToLayoutEditor={(navigation) => {
+              setLayoutEditorNavigation(navigation);
+              setProjectPhase('layout-editor');
+            }}
+          />
+        )}
+        {isLayoutEditorActive && (
+          <LayoutEditorView
+            projectSlug={openProjectSlug}
+            initialNavigation={layoutEditorNavigation}
+            onNavigationComplete={() => setLayoutEditorNavigation(null)}
+          />
         )}
         {isMomentViewActive && adaptation && (
           <div className="story-adaptation-screen">
@@ -1801,30 +1834,28 @@ function ProjectLanding({
   };
   return (
     <div className="landing">
-      <div className="landing-card">
-        <h1>Story Canvas</h1>
-        {error && <p className="error error-banner">{error}</p>}
-        <section>
-          <h2>Projects</h2>
-          <div className="project-list">
-            {projects.map((project) => (
-              <button key={project.slug} className="project-tile" onClick={() => onOpen(project.slug)}>
-                <div className="project-tile-cover">
-                  {project.coverThumbnailUrl ? (
-                    <img src={project.coverThumbnailUrl} alt="" />
-                  ) : (
-                    <div className="project-tile-cover-placeholder" aria-hidden="true">🖼️</div>
-                  )}
-                </div>
-                <strong className="project-tile-name">{project.name}</strong>
-              </button>
-            ))}
-            <button className="project-tile project-create-tile" onClick={() => setCreateOpen(true)}>
-              <div className="project-tile-cover project-create-cover" aria-hidden="true">+</div>
-              <span className="project-tile-name">New project</span>
+      <MouseTrail />
+      <div className="landing-content">
+        <h1 className="landing-title">Comic Canvas</h1>
+        {error && <p className="error error-banner landing-error">{error}</p>}
+        <div className="project-list">
+          {projects.map((project) => (
+            <button key={project.slug} className="project-tile" onClick={() => onOpen(project.slug)}>
+              <div className="project-tile-cover">
+                {project.coverThumbnailUrl ? (
+                  <img src={project.coverThumbnailUrl} alt="" />
+                ) : (
+                  <div className="project-tile-cover-placeholder" aria-hidden="true">🖼️</div>
+                )}
+              </div>
+              <strong className="project-tile-name">{project.name}</strong>
             </button>
-          </div>
-        </section>
+          ))}
+          <button className="project-tile project-create-tile" onClick={() => setCreateOpen(true)}>
+            <div className="project-tile-cover project-create-cover" aria-hidden="true">+</div>
+            <span className="project-tile-name">New project</span>
+          </button>
+        </div>
       </div>
       {createOpen && (
         <Modal title="New project" onClose={closeCreate}>
@@ -1851,22 +1882,6 @@ function ProjectLanding({
       )}
     </div>
   );
-}
-
-function phaseStatus(adaptation: AdaptationStatus | null, phase: ProjectPhase) {
-  if (!adaptation) return 'pending';
-  const counts = adaptation.counts;
-  if (phase === 'phase-0-ingestion') return adaptation.hasBookSession ? 'ready' : adaptation.hasBook ? 'active' : 'pending';
-  if (phase === 'phase-1-characters') return (counts.characterSheets ?? 0) > 0 ? 'ready' : (counts.characterListLines ?? 0) > 0 || (counts.characterArtifacts ?? 0) > 0 ? 'active' : 'pending';
-  if (phase === 'phase-2-scenes') return (counts.sceneArtifacts ?? 0) > 0 ? 'ready' : (counts.sceneListLines ?? 0) > 0 ? 'active' : 'pending';
-  if (phase === 'phase-3-locations') return (counts.locationPrompts ?? 0) > 0 ? 'ready' : 'pending';
-  if (phase === 'phase-4-moments') {
-    const total = counts.momentSections ?? 0;
-    const illustrated = counts.illustratedMoments ?? 0;
-    if (!total) return (counts.sceneArtifacts ?? 0) > 0 ? 'active' : 'pending';
-    return illustrated >= total ? 'ready' : 'active';
-  }
-  return 'pending';
 }
 
 function PhaseSidebarToggleIcon({ variant }: { variant: 'collapse' | 'expand' }) {
@@ -2026,16 +2041,7 @@ function ProjectPhaseSidebar({
   const [pendingTagDelete, setPendingTagDelete] = useState<TagDefinition | null>(null);
   const [deletingTag, setDeletingTag] = useState(false);
   if (isCollapsed) {
-    return (
-      <button
-        className="phase-sidebar-expand"
-        onClick={onToggleCollapsed}
-        title="Expand sidebar"
-        aria-label="Expand sidebar"
-      >
-        <PhaseSidebarToggleIcon variant="expand" />
-      </button>
-    );
+    return null;
   }
   return (
     <div className="project-phase-sidebar-shell">
@@ -2050,29 +2056,38 @@ function ProjectPhaseSidebar({
         </strong>
       </div>
       {error && <p className="error error-banner">{error}</p>}
-      <nav className="phase-nav" aria-label="Story canvas">
+      <nav className="phase-nav" aria-label="Workspace">
         <button
           type="button"
-          className={`phase-nav-item ${activePhase === 'story-canvas' ? 'is-selected' : ''}`}
-          aria-current={activePhase === 'story-canvas' ? 'page' : undefined}
-          onClick={() => onPhaseChange('story-canvas')}
+          className={`phase-nav-item ${activePhase === 'image-canvas' ? 'is-selected' : ''}`}
+          aria-current={activePhase === 'image-canvas' ? 'page' : undefined}
+          onClick={() => onPhaseChange('image-canvas')}
         >
           <span className="phase-number" aria-hidden="true">▦</span>
-          <strong>Story Canvas</strong>
+          <strong>Image Canvas</strong>
         </button>
         <button
           type="button"
-          className={`phase-nav-item ${activePhase === 'story-panels' ? 'is-selected' : ''}`}
-          aria-current={activePhase === 'story-panels' ? 'page' : undefined}
-          onClick={() => onPhaseChange('story-panels')}
+          className={`phase-nav-item ${activePhase === 'story' ? 'is-selected' : ''}`}
+          aria-current={activePhase === 'story' ? 'page' : undefined}
+          onClick={() => onPhaseChange('story')}
+        >
+          <span className="phase-number" aria-hidden="true">▥</span>
+          <strong>Story</strong>
+        </button>
+        <button
+          type="button"
+          className={`phase-nav-item ${activePhase === 'layout-editor' ? 'is-selected' : ''}`}
+          aria-current={activePhase === 'layout-editor' ? 'page' : undefined}
+          onClick={() => onPhaseChange('layout-editor')}
         >
           <span className="phase-number" aria-hidden="true">▤</span>
-          <strong>Story Panels</strong>
+          <strong>Layout Editor</strong>
         </button>
       </nav>
       <h3 className="phase-nav-heading">Story Adaptation</h3>
       <nav className="phase-nav" aria-label="Story adaptation phases">
-        {projectPhases.map((phase) => {
+        {adaptationNavPhases.map((phase) => {
           const status = phaseStatus(adaptation, phase.id);
           const selected = activePhase === phase.id;
           return (
@@ -2169,7 +2184,7 @@ function ProjectPhaseSidebar({
             <h2>Delete project?</h2>
             <p>
               Move <strong>{project?.name ?? projectSlug}</strong> to the system Trash? This removes its canvas,
-              assets, and adaptation files from Story Canvas.
+              assets, and adaptation files from Comic Canvas.
             </p>
             <div className="row">
               <button

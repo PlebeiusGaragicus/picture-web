@@ -1,8 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { nonArchivedVariants } from '../canvas/shared';
-import type { Asset, CanvasDocument, StoryPanel, StoryPanelDocument, StoryPanelRect, StoryPanelTextStyle, TagDefinition } from '../types';
+import type { Asset, CanvasDocument, StoryPanel, StoryPanelDocument, StoryPanelImageCrop, StoryPanelRect, StoryPanelTextStyle, TagDefinition } from '../types';
 import { assetThumbnailUrl } from './panelImageAssets';
+import {
+  focalFromPanDelta,
+  imageCropForPanel,
+  isDefaultImageCrop,
+  panelImageCropStyle,
+} from './panelImageCrop';
 import {
   enforceLockedAspectOnResize,
   formatAspectRatioFromPixels,
@@ -18,17 +24,23 @@ import {
   CAPTION_COLOR_PRESETS,
   captionPanelCssProperties,
   captionPanelClassName,
+  captionSpeechKindFor,
   captionStyleForPanel,
+  captionBackgroundForSpeech,
   defaultCaptionTextStyle,
+  fitCaptionHeightRows,
 } from './captionPanelStyle';
 import {
   captionLabel,
   captionPanelsFor,
+  CAPTION_GRID_SNAP,
+  clampCaptionRect,
   defaultCaptionRect,
   imageInfoHostFor,
   parentPanelFor,
   removePanelAndCaptionChildren,
 } from './panelCaptions';
+import { removeStoryPanelFromLayout } from './panelPlacement';
 import { sortedStoryPages, storyPageNumberById as mapStoryPageNumbers } from './pageNumbers';
 import {
   PRINT_HALF_WIDTH,
@@ -42,7 +54,7 @@ import {
   PRINT_SHEET_HEIGHT,
 } from './printLayout';
 
-export type StoryPanelLayoutMode = 'spread' | 'single' | 'single-chunks' | 'all-pages' | 'book';
+export type StoryPanelLayoutMode = 'spread' | 'single' | 'single-chunks' | 'all-pages';
 
 const gridColumns = 12;
 const minPanelHeight = 2;
@@ -119,12 +131,28 @@ type DragState = {
   startRect: StoryPanelRect;
 };
 
-type PageContextMenu = {
-  kind: 'page';
-  x: number;
-  y: number;
-  pageId: string;
-  rect: StoryPanelRect;
+type PageContextMenu =
+  | {
+    kind: 'page';
+    x: number;
+    y: number;
+    pageId: string;
+    rect: StoryPanelRect;
+  }
+  | {
+    kind: 'panel';
+    x: number;
+    y: number;
+    panelId: string;
+  };
+
+type CropDragState = {
+  panelId: string;
+  startClientX: number;
+  startClientY: number;
+  startCrop: StoryPanelImageCrop;
+  panelWidth: number;
+  panelHeight: number;
 };
 
 function plainTextToRichText(value: string) {
@@ -286,11 +314,16 @@ function clampRect(rect: StoryPanelRect, panelKind: StoryPanel['panelKind'] = 'i
   return { x, y: Math.max(0, roundStep(rect.y, panelSnapScale)), w, h };
 }
 
-function resizeRectFromCorner(rect: StoryPanelRect, corner: ResizeCorner, deltaColumns: number, deltaRows: number, panelKind: StoryPanel['panelKind']): StoryPanelRect {
+function clampPanelRect(rect: StoryPanelRect, panel: Pick<StoryPanel, 'panelKind' | 'sourceKind'>): StoryPanelRect {
+  if (panel.sourceKind === 'caption') return clampCaptionRect(rect);
+  return clampRect(rect, panel.panelKind);
+}
+
+function resizeRectFromCorner(rect: StoryPanelRect, corner: ResizeCorner, deltaColumns: number, deltaRows: number, panel: Pick<StoryPanel, 'panelKind' | 'sourceKind'>): StoryPanelRect {
   const right = rect.x + rect.w;
   const bottom = rect.y + rect.h;
-  const minWidth = panelKind === 'text' ? minTextPanelWidth : minPanelWidth;
-  const minHeight = panelKind === 'text' ? minTextPanelHeight : minPanelHeight;
+  const minWidth = panel.sourceKind === 'caption' ? 0.5 : panel.panelKind === 'text' ? minTextPanelWidth : minPanelWidth;
+  const minHeight = panel.sourceKind === 'caption' ? 0.25 : panel.panelKind === 'text' ? minTextPanelHeight : minPanelHeight;
   let x = rect.x;
   let y = rect.y;
   let w = rect.w;
@@ -307,7 +340,7 @@ function resizeRectFromCorner(rect: StoryPanelRect, corner: ResizeCorner, deltaC
   } else {
     h = rect.h + deltaRows;
   }
-  return clampRect({ x, y, w, h }, panelKind);
+  return clampPanelRect({ x, y, w, h }, panel);
 }
 
 function nextPanelId(document: StoryPanelDocument) {
@@ -344,6 +377,8 @@ export function PageLayoutEditor({
   projectTags,
   canvas,
   projectSlug,
+  navigateToPanelId,
+  onNavigateToPanelComplete,
 }: {
   document: StoryPanelDocument;
   selectedPanelId: string | null;
@@ -359,6 +394,8 @@ export function PageLayoutEditor({
   projectTags: TagDefinition[];
   canvas: CanvasDocument;
   projectSlug: string;
+  navigateToPanelId?: string | null;
+  onNavigateToPanelComplete?: () => void;
 }) {
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const sideHeightSourceRef = useRef<HTMLElement | null>(null);
@@ -366,11 +403,15 @@ export function PageLayoutEditor({
   const richTextEditorRef = useRef<HTMLDivElement | null>(null);
   const customTextDraftRef = useRef<string | null>(null);
   const displayDocumentRef = useRef<StoryPanelDocument>(document);
+  const draftDocumentRef = useRef<StoryPanelDocument | null>(null);
   const richTextEditingPanelIdRef = useRef<string | null>(null);
   const infoPanelBodyRef = useRef<HTMLDivElement | null>(null);
+  const zoomDragPanelIdRef = useRef<string | null>(null);
   const persistPanelTextDraftRef = useRef<(panelId: string, draftHtml: string | null | undefined) => void>(() => {});
   const [draftDocument, setDraftDocument] = useState<StoryPanelDocument | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [cropDragState, setCropDragState] = useState<CropDragState | null>(null);
+  const [cropModePanelId, setCropModePanelId] = useState<string | null>(null);
   const [pageMenu, setPageMenu] = useState<PageContextMenu | null>(null);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
@@ -397,6 +438,7 @@ export function PageLayoutEditor({
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const displayDocument = draftDocument ?? document;
   displayDocumentRef.current = displayDocument;
+  draftDocumentRef.current = draftDocument;
   customTextDraftRef.current = customTextDraft;
   const pages = sortedPages(displayDocument);
   const clampedPageIndex = Math.min(Math.max(currentPageIndex, 0), Math.max(0, pages.length - 1));
@@ -411,8 +453,7 @@ export function PageLayoutEditor({
   const lastSpreadStartIndex = interiorSpreadPages.length > 0
     ? pages.findIndex((page) => page.id === interiorSpreadPages[lastInteriorSpreadStart]?.id)
     : 0;
-  const isPageLayoutMode = layoutMode !== 'book';
-  const isSinglePageMode = isPageLayoutMode && layoutMode !== 'spread';
+  const isSinglePageMode = layoutMode !== 'spread';
   const hasSinglePageSidePanel = layoutMode === 'single' || layoutMode === 'single-chunks';
   const singlePagePreviewAspect = singlePagePreviewMode === 'print'
     ? `${PRINT_HALF_WIDTH} / ${PRINT_SHEET_HEIGHT}`
@@ -439,7 +480,7 @@ export function PageLayoutEditor({
   const visiblePageIds = new Set(
     visiblePages.flatMap((page) => (page ? [page.id] : [])),
   );
-  const visibleSelectedPanel = selectedPanel && visiblePageIds.has(selectedPanel.pageId) ? selectedPanel : null;
+  const visibleSelectedPanel = selectedPanel && selectedPanel.pageId && visiblePageIds.has(selectedPanel.pageId) ? selectedPanel : null;
   const imageInfoHost = imageInfoHostFor(displayDocument, visibleSelectedPanel);
   const captionHostPanel = imageInfoHost;
   const childCaptions = captionHostPanel ? captionPanelsFor(displayDocument, captionHostPanel.id) : [];
@@ -506,6 +547,11 @@ export function PageLayoutEditor({
     setCaptionStylePopoverId(null);
     setCaptionFontSizeDraft(null);
   }, [selectedPanelId]);
+  useEffect(() => {
+    if (cropModePanelId && selectedPanelId !== cropModePanelId) {
+      setCropModePanelId(null);
+    }
+  }, [selectedPanelId, cropModePanelId]);
   useLayoutEffect(() => {
     if (layoutMode !== 'single' || visibleSelectedPanel?.sourceKind !== 'caption') return;
     infoPanelBodyRef.current?.scrollTo({ top: 0 });
@@ -617,7 +663,7 @@ export function PageLayoutEditor({
     }
   }, [clampedPageIndex, layoutMode, onSelectPanel, pages, selectedPanel?.id, selectedPanel?.pageId]);
   useEffect(() => {
-    if (!selectedPanel || !isPageLayoutMode || layoutMode === 'all-pages') return;
+    if (!selectedPanel || layoutMode === 'all-pages' || layoutMode === 'single-chunks') return;
     const pageIndex = pages.findIndex((page) => page.id === selectedPanel.pageId);
     if (pageIndex >= 0) {
       setCurrentPageIndex(layoutMode === 'spread' ? pageIndex === 0 ? 0 : pageIndex % 2 === 0 ? pageIndex - 1 : pageIndex : pageIndex);
@@ -629,7 +675,27 @@ export function PageLayoutEditor({
       window.clearTimeout(start);
       window.clearTimeout(stop);
     };
-  }, [isPageLayoutMode, layoutMode, selectedPanel?.id, selectedPanel?.pageId]);
+  }, [layoutMode, selectedPanel?.id, selectedPanel?.pageId]);
+  useEffect(() => {
+    if (!navigateToPanelId) return;
+    const panel = displayDocument.panels.find((candidate) => candidate.id === navigateToPanelId);
+    if (!panel) {
+      onNavigateToPanelComplete?.();
+      return;
+    }
+    const pageIndex = pages.findIndex((page) => page.id === panel.pageId);
+    if (pageIndex >= 0) {
+      setCurrentPageIndex(layoutMode === 'spread' ? pageIndex === 0 ? 0 : pageIndex % 2 === 0 ? pageIndex - 1 : pageIndex : pageIndex);
+    }
+    setFlashingPanelId(null);
+    const start = window.setTimeout(() => setFlashingPanelId(panel.id), 0);
+    const stop = window.setTimeout(() => setFlashingPanelId((current) => (current === panel.id ? null : current)), 1400);
+    onNavigateToPanelComplete?.();
+    return () => {
+      window.clearTimeout(start);
+      window.clearTimeout(stop);
+    };
+  }, [displayDocument.panels, layoutMode, navigateToPanelId, onNavigateToPanelComplete, pages]);
   useEffect(() => {
     onHistoryControlsChange?.(
       <>
@@ -800,7 +866,7 @@ export function PageLayoutEditor({
     setCurrentPageIndex((index) => index <= 1 ? 0 : Math.max(1, index - 2));
   };
   useEffect(() => {
-    if (!isPageLayoutMode || layoutMode === 'all-pages') return;
+    if (layoutMode === 'all-pages') return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) return;
       if (event.key === 'ArrowLeft') {
@@ -814,7 +880,7 @@ export function PageLayoutEditor({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPageLayoutMode, layoutMode, clampedPageIndex, pages.length, isSaving]);
+  }, [layoutMode, clampedPageIndex, pages.length, isSaving]);
   const placeSelectedPanelAt = (pageId: string, rect: StoryPanelRect) => {
     if (!selectedPanel) return;
     const page = displayDocument.pages.find((candidate) => candidate.id === pageId);
@@ -873,7 +939,34 @@ export function PageLayoutEditor({
   const updateCaptionStyle = (captionId: string, patch: Partial<StoryPanelTextStyle>) => {
     const caption = displayDocument.panels.find((panel) => panel.id === captionId);
     if (!caption) return;
-    updatePanelById(captionId, { textStyle: { ...textStyleForPanel(caption), ...patch } });
+    updatePanelById(captionId, { textStyle: { ...captionStyleForPanel(caption), ...patch } });
+  };
+  const setCaptionSpeechKind = (captionId: string, speechKind: 'dialogue' | 'narration') => {
+    const caption = displayDocument.panels.find((panel) => panel.id === captionId);
+    if (!caption) return;
+    const current = captionStyleForPanel(caption);
+    updatePanelById(captionId, {
+      textStyle: {
+        ...current,
+        speechKind,
+        background: captionBackgroundForSpeech(speechKind),
+      },
+    });
+  };
+  const shrinkCaptionToFit = (captionId: string) => {
+    const caption = displayDocument.panels.find((panel) => panel.id === captionId);
+    if (!caption?.pageId) return;
+    const grid = pageRefs.current[caption.pageId];
+    if (!grid) return;
+    const pageRows = Math.max(
+      10,
+      ...displayDocument.panels
+        .filter((panel) => panel.pageId === caption.pageId)
+        .map((panel) => panel.rect.y + panel.rect.h),
+    );
+    const text = captionTextDrafts[captionId] ?? caption.customText;
+    const nextHeight = fitCaptionHeightRows(caption, text, grid, pageRows, CAPTION_GRID_SNAP);
+    updatePanelById(captionId, { rect: clampCaptionRect({ ...caption.rect, h: nextHeight }) });
   };
   const commitCaptionFontSizeInput = (captionId: string) => {
     if (captionFontSizeDraft?.captionId !== captionId) return;
@@ -920,7 +1013,7 @@ export function PageLayoutEditor({
       textStyle: { ...defaultCaptionTextStyle },
       pageId: parent.pageId,
       panelKind: 'text',
-      rect: clampRect(defaultCaptionRect(parent, captions), 'text'),
+      rect: clampCaptionRect(defaultCaptionRect(parent, captions)),
       layer: parent.layer + 1 + captions.length,
       parentPanelId: parent.id,
       assetIds: [],
@@ -977,15 +1070,70 @@ export function PageLayoutEditor({
     const panel = displayDocument.panels.find((candidate) => candidate.id === panelId);
     if (!panel) return;
     const nextIds = panel.assetIds.includes(assetId) ? panel.assetIds : [...panel.assetIds, assetId];
-    updatePanelById(panelId, { assetIds: nextIds, activeAssetId: assetId });
+    updatePanelById(panelId, { assetIds: nextIds, activeAssetId: assetId, imageCrop: null });
+    setCropModePanelId((current) => (current === panelId ? null : current));
   };
   const clearPanelImage = (panelId: string) => {
-    updatePanelById(panelId, { assetIds: [], activeAssetId: null });
+    updatePanelById(panelId, { assetIds: [], activeAssetId: null, imageCrop: null });
+    setCropModePanelId((current) => (current === panelId ? null : current));
   };
   const setPanelActiveAsset = (panelId: string, assetId: string) => {
     updatePanelById(panelId, { activeAssetId: assetId });
   };
+  const updatePanelImageCrop = (panelId: string, patch: Partial<StoryPanelImageCrop>) => {
+    const panel = displayDocument.panels.find((candidate) => candidate.id === panelId);
+    if (!panel) return;
+    updatePanelById(panelId, { imageCrop: { ...imageCropForPanel(panel), ...patch } });
+  };
+  const resetPanelImageCrop = (panelId: string) => {
+    updatePanelById(panelId, { imageCrop: null });
+  };
+  const applyZoomDraft = (panelId: string, scalePercent: number) => {
+    const scale = scalePercent / 100;
+    setDraftDocument((current) => {
+      const doc = current ?? displayDocumentRef.current;
+      const nextDocument = {
+        ...doc,
+        panels: doc.panels.map((panel) => (
+          panel.id === panelId
+            ? { ...panel, imageCrop: { ...imageCropForPanel(panel), scale } }
+            : panel
+        )),
+      };
+      draftDocumentRef.current = nextDocument;
+      return nextDocument;
+    });
+  };
+  const beginZoomAdjust = (event: React.PointerEvent, panelId: string) => {
+    event.stopPropagation();
+    zoomDragPanelIdRef.current = panelId;
+    draftDocumentRef.current = displayDocumentRef.current;
+    setDraftDocument(displayDocumentRef.current);
+  };
+  const endZoomAdjust = (panelId: string, scalePercent: number) => {
+    if (zoomDragPanelIdRef.current !== panelId) return;
+    const scale = scalePercent / 100;
+    const doc = draftDocumentRef.current ?? displayDocumentRef.current;
+    const nextDocument = {
+      ...doc,
+      panels: doc.panels.map((panel) => (
+        panel.id === panelId
+          ? { ...panel, imageCrop: { ...imageCropForPanel(panel), scale } }
+          : panel
+      )),
+    };
+    zoomDragPanelIdRef.current = null;
+    draftDocumentRef.current = null;
+    setDraftDocument(null);
+    commitDocument(nextDocument);
+  };
+  const cancelZoomAdjust = () => {
+    zoomDragPanelIdRef.current = null;
+    draftDocumentRef.current = null;
+    setDraftDocument(null);
+  };
   const snapPanelToAspectRatio = (panel: StoryPanel, aspectRatio: string) => {
+    if (!panel.pageId) return;
     const pageRows = pageRowsForPanels(displayDocument.panels, panel.pageId);
     const nextRect = snapRectToAspectRatio(panel.rect, pageRows, parseAspectRatio(aspectRatio), panel.panelKind, clampRect);
     updatePanelById(panel.id, { rect: nextRect, aspectRatio });
@@ -1006,6 +1154,7 @@ export function PageLayoutEditor({
       updatePanelById(panel.id, { aspectRatioLocked: false });
       return;
     }
+    if (!panel.pageId) return;
     const pageRows = pageRowsForPanels(displayDocument.panels, panel.pageId);
     const visualRatio = panelVisualAspectRatio(panel.rect, pageRows);
     const currentRatio = panel.aspectRatio ?? formatAspectRatioFromPixels(
@@ -1014,15 +1163,74 @@ export function PageLayoutEditor({
     );
     updatePanelById(panel.id, { aspectRatio: currentRatio, aspectRatioLocked: true });
   };
-  const renderImagePanelBody = (panel: StoryPanel) => {
+  const renderImagePanelBody = (panel: StoryPanel, cropModeActive = false) => {
     const activeAsset = panel.activeAssetId ? assetById.get(panel.activeAssetId) ?? null : null;
     const passage = (panel.selectedText || (panel.sourceKind === 'free-image' ? 'Cover image block' : '')).replace(/\s+/g, ' ').trim();
     if (activeAsset) {
+      const crop = imageCropForPanel(panel);
+      if (cropModeActive) {
+        return (
+          <div
+            className={`story-panels-page-panel-crop-layer ${cropDragState?.panelId === panel.id ? 'is-crop-dragging' : ''}`}
+            onPointerDown={(event) => beginCropPan(event, panel)}
+            onPointerMove={(event) => {
+              if ((event.target as HTMLElement).closest('.story-panels-page-panel-crop-zoom')) return;
+              continueCropPan(event);
+            }}
+            onPointerUp={endCropPan}
+            onPointerCancel={endCropPan}
+          >
+            <img
+              className="story-panels-page-panel-image"
+              src={assetThumbnailUrl(projectSlug, activeAsset)}
+              alt=""
+              draggable={false}
+              style={panelImageCropStyle(crop)}
+            />
+            <div className="story-panels-page-panel-crop-zoom">
+              <input
+                type="range"
+                min={100}
+                max={400}
+                step={5}
+                aria-label="Image zoom"
+                disabled={isSaving}
+                value={Math.round(crop.scale * 100)}
+                onPointerDown={(event) => beginZoomAdjust(event, panel.id)}
+                onInput={(event) => {
+                  event.stopPropagation();
+                  applyZoomDraft(panel.id, Number(event.currentTarget.value));
+                }}
+                onPointerUp={(event) => {
+                  event.stopPropagation();
+                  endZoomAdjust(panel.id, Number(event.currentTarget.value));
+                }}
+                onLostPointerCapture={(event) => {
+                  if (zoomDragPanelIdRef.current === panel.id) {
+                    endZoomAdjust(panel.id, Number(event.currentTarget.value));
+                  }
+                }}
+                onPointerCancel={(event) => {
+                  event.stopPropagation();
+                  cancelZoomAdjust();
+                }}
+                onKeyUp={(event) => {
+                  if (event.key === 'Enter') {
+                    endZoomAdjust(panel.id, Number(event.currentTarget.value));
+                  }
+                }}
+              />
+            </div>
+          </div>
+        );
+      }
       return (
         <img
           className="story-panels-page-panel-image"
           src={assetThumbnailUrl(projectSlug, activeAsset)}
           alt=""
+          draggable={false}
+          style={panelImageCropStyle(crop)}
         />
       );
     }
@@ -1055,19 +1263,25 @@ export function PageLayoutEditor({
     if (!visibleSelectedPanel || isSaving) return;
     setPendingPanelDeleteId(visibleSelectedPanel.id);
   };
-  const confirmDeleteSelectedPanel = () => {
+  const confirmRemoveSelectedPanel = () => {
     const panelId = pendingPanelDeleteId;
     if (!panelId) return;
     const panel = displayDocument.panels.find((candidate) => candidate.id === panelId);
-    commitDocument({
-      ...displayDocument,
-      panels: panel?.panelKind === 'image'
-        ? removePanelAndCaptionChildren(displayDocument, panelId)
-        : displayDocument.panels.filter((candidate) => candidate.id !== panelId),
-    });
+    if (!panel) return;
+    if (panel.sourceKind === 'story') {
+      commitDocument(removeStoryPanelFromLayout(displayDocument, panelId));
+    } else {
+      commitDocument({
+        ...displayDocument,
+        panels: panel.panelKind === 'image'
+          ? removePanelAndCaptionChildren(displayDocument, panelId)
+          : displayDocument.panels.filter((candidate) => candidate.id !== panelId),
+      });
+    }
     setPendingPanelDeleteId(null);
     onSelectPanel(null);
   };
+  const selectedPanelRemoveLabel = visibleSelectedPanel?.sourceKind === 'story' ? 'Remove' : 'Delete';
   const commitCustomTextDraft = () => {
     if (!selectedPanel) return;
     persistPanelTextDraft(selectedPanel.id, richTextEditorRef.current?.innerHTML ?? customTextDraft);
@@ -1105,13 +1319,15 @@ export function PageLayoutEditor({
     const bounds = pageElement.getBoundingClientRect();
     const columnWidth = bounds.width / gridColumns;
     const rowHeight = Math.max(22, bounds.height / Math.max(10, ...displayDocument.panels.map((panel) => panel.rect.y + panel.rect.h)));
-    const deltaColumns = targetPageId === state.pageId ? roundStep((event.clientX - state.startClientX) / columnWidth, panelSnapScale) : roundStep((event.clientX - bounds.left) / columnWidth, panelSnapScale) - state.startRect.x;
-    const deltaRows = targetPageId === state.pageId ? roundStep((event.clientY - state.startClientY) / rowHeight, panelSnapScale) : roundStep((event.clientY - bounds.top) / rowHeight, panelSnapScale) - state.startRect.y;
+    const draggedPanel = displayDocument.panels.find((panel) => panel.id === state.panelId);
+    const snapScale = draggedPanel?.sourceKind === 'caption' ? CAPTION_GRID_SNAP : panelSnapScale;
+    const deltaColumns = targetPageId === state.pageId ? roundStep((event.clientX - state.startClientX) / columnWidth, snapScale) : roundStep((event.clientX - bounds.left) / columnWidth, snapScale) - state.startRect.x;
+    const deltaRows = targetPageId === state.pageId ? roundStep((event.clientY - state.startClientY) / rowHeight, snapScale) : roundStep((event.clientY - bounds.top) / rowHeight, snapScale) - state.startRect.y;
     const nextPanels = displayDocument.panels.map((panel) => {
       if (panel.id !== state.panelId) return panel;
       const pageRows = pageRowsForPanels(displayDocument.panels, targetPageId);
       if (state.mode === 'resize') {
-        let rect = resizeRectFromCorner(state.startRect, state.corner ?? 'se', deltaColumns, deltaRows, panel.panelKind);
+        let rect = resizeRectFromCorner(state.startRect, state.corner ?? 'se', deltaColumns, deltaRows, panel);
         if (panel.aspectRatioLocked && panel.aspectRatio) {
           rect = enforceLockedAspectOnResize(
             rect,
@@ -1120,7 +1336,7 @@ export function PageLayoutEditor({
             pageRows,
             parseAspectRatio(panel.aspectRatio),
             panel.panelKind,
-            clampRect,
+            (nextRect) => clampPanelRect(nextRect, panel),
           );
         }
         return { ...panel, rect };
@@ -1128,17 +1344,17 @@ export function PageLayoutEditor({
       return {
         ...panel,
         pageId: targetPageId,
-        rect: clampRect({
+        rect: clampPanelRect({
           ...state.startRect,
           x: state.startRect.x + deltaColumns,
           y: state.startRect.y + deltaRows,
-        }, panel.panelKind),
+        }, panel),
       };
     });
     setDraftDocument({ ...displayDocument, panels: nextPanels });
   };
   const beginDrag = (event: React.PointerEvent, panel: StoryPanel, mode: DragMode, corner?: ResizeCorner) => {
-    if (isSaving) return;
+    if (isSaving || !panel.pageId) return;
     event.preventDefault();
     event.stopPropagation();
     onSelectPanel(panel.id);
@@ -1165,6 +1381,57 @@ export function PageLayoutEditor({
     setDragState(null);
     setDraftDocument(null);
     commitDocument(nextDocument);
+  };
+  const beginCropPan = (event: React.PointerEvent<HTMLDivElement>, panel: StoryPanel) => {
+    if (isSaving || cropModePanelId !== panel.id || !panel.activeAssetId) return;
+    if ((event.target as HTMLElement).closest('.story-panels-page-panel-crop-zoom')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setCropDragState({
+      panelId: panel.id,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startCrop: imageCropForPanel(panel),
+      panelWidth: bounds.width,
+      panelHeight: bounds.height,
+    });
+    setDraftDocument(displayDocument);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const continueCropPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!cropDragState || !draftDocument) return;
+    const deltaX = event.clientX - cropDragState.startClientX;
+    const deltaY = event.clientY - cropDragState.startClientY;
+    const nextFocal = focalFromPanDelta(
+      cropDragState.startCrop,
+      deltaX,
+      deltaY,
+      cropDragState.panelWidth,
+      cropDragState.panelHeight,
+    );
+    setDraftDocument({
+      ...draftDocument,
+      panels: draftDocument.panels.map((panel) => (
+        panel.id === cropDragState.panelId
+          ? { ...panel, imageCrop: { ...cropDragState.startCrop, ...nextFocal } }
+          : panel
+      )),
+    });
+  };
+  const endCropPan = () => {
+    if (!cropDragState || !draftDocument) return;
+    const nextDocument = draftDocument;
+    setCropDragState(null);
+    setDraftDocument(null);
+    commitDocument(nextDocument);
+  };
+  const openPanelMenu = (event: React.MouseEvent, panel: StoryPanel) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (panel.panelKind !== 'image') return;
+    onSelectPanel(panel.id);
+    setPageMenu({ kind: 'panel', x: event.clientX, y: event.clientY, panelId: panel.id });
   };
   const openPageMenu = (event: React.MouseEvent<HTMLDivElement>, pageId: string) => {
     event.preventDefault();
@@ -1194,9 +1461,6 @@ export function PageLayoutEditor({
     }
     onSelectPanel(panel.id);
     onLayoutModeChange?.('single');
-    if (panel.panelKind === 'image') {
-      setPickerPanelId(panel.id);
-    }
   };
   const singlePrintSlotForPage = (page: StoryPanelDocument['pages'][number] | null, fallbackIndex: number) => {
     const pageIndex = page ? pages.findIndex((candidate) => candidate.id === page.id) : fallbackIndex;
@@ -1234,10 +1498,6 @@ export function PageLayoutEditor({
     }
   };
   useEffect(() => {
-    if (!isPageLayoutMode) {
-      onPageControlsChange?.(null);
-      return;
-    }
     onPageControlsChange?.(
       <div className="story-panels-page-nav" aria-label="Page navigation">
         {layoutMode === 'all-pages' ? (
@@ -1320,7 +1580,6 @@ export function PageLayoutEditor({
     clampedPageIndex,
     currentPageLabel,
     hasSinglePageSidePanel,
-    isPageLayoutMode,
     isSaving,
     layoutMode,
     onPageControlsChange,
@@ -1334,11 +1593,10 @@ export function PageLayoutEditor({
 
   return (
     <>
-      {isPageLayoutMode && (
-        <div
-          className={`story-panels-layout-workspace is-${layoutMode} ${hasSinglePageSidePanel ? `is-single-preview-${singlePagePreviewMode}` : ''}`}
-          style={pageLayoutStyle}
-        >
+      <div
+        className={`story-panels-layout-workspace is-${layoutMode} ${hasSinglePageSidePanel ? `is-single-preview-${singlePagePreviewMode}` : ''}`}
+        style={pageLayoutStyle}
+      >
         <div className="story-panels-pages">
         {visiblePages.length ? (
           layoutMode === 'spread' ? (
@@ -1400,10 +1658,10 @@ export function PageLayoutEditor({
                       onPointerCancel={endDrag}
                     >
                       {pagePanels.map((panel) => (
-                        <button
+                        <div
                           key={panel.id}
-                          type="button"
-                          className={`story-panels-page-panel is-${panel.panelKind} ${panel.sourceKind === 'caption' ? 'is-caption' : ''} ${captionPanelClassName(panel)} ${panel.panelKind === 'image' && panel.activeAssetId ? 'has-image' : ''} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
+                          role="presentation"
+                          className={`story-panels-page-panel is-${panel.panelKind} ${panel.sourceKind === 'caption' ? 'is-caption' : ''} ${captionPanelClassName(panel)} ${panel.panelKind === 'image' && panel.activeAssetId ? 'has-image' : ''} ${cropModePanelId === panel.id ? 'is-crop-mode' : ''} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
                           style={{
                             ...panelStyle(panel, pageRows),
                             ...(panel.panelKind === 'text' ? panelCanvasTextStyle(
@@ -1414,18 +1672,18 @@ export function PageLayoutEditor({
                           }}
                           onClick={() => onSelectPanel(panel.id)}
                           onDoubleClick={(event) => openPanelDetail(event, panel)}
-                          onContextMenu={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
+                          onContextMenu={(event) => openPanelMenu(event, panel)}
+                          onPointerDown={(event) => {
+                            if ((event.target as HTMLElement).closest('.story-panels-page-panel-crop-layer')) return;
+                            beginDrag(event, panel, 'move');
                           }}
-                          onPointerDown={(event) => beginDrag(event, panel, 'move')}
                         >
                           {panel.panelKind === 'text' ? (
                             <span
                               className="story-panels-page-panel-rich-text"
                               dangerouslySetInnerHTML={{ __html: sanitizeRichText(richTextForPanel(panel, panel.id === selectedPanelId ? customTextDraft : null)) }}
                             />
-                          ) : renderImagePanelBody(panel)}
+                          ) : renderImagePanelBody(panel, cropModePanelId === panel.id)}
                           {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
                             <span
                               key={corner}
@@ -1434,7 +1692,7 @@ export function PageLayoutEditor({
                               onPointerDown={(event) => beginDrag(event, panel, 'resize', corner)}
                             />
                           ))}
-                        </button>
+                        </div>
                       ))}
                     </div>
                   </article>
@@ -1506,10 +1764,10 @@ export function PageLayoutEditor({
                   onPointerCancel={endDrag}
                 >
                   {pagePanels.map((panel) => (
-                    <button
+                    <div
                       key={panel.id}
-                      type="button"
-                      className={`story-panels-page-panel is-${panel.panelKind} ${panel.sourceKind === 'caption' ? 'is-caption' : ''} ${captionPanelClassName(panel)} ${panel.panelKind === 'image' && panel.activeAssetId ? 'has-image' : ''} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
+                      role="presentation"
+                      className={`story-panels-page-panel is-${panel.panelKind} ${panel.sourceKind === 'caption' ? 'is-caption' : ''} ${captionPanelClassName(panel)} ${panel.panelKind === 'image' && panel.activeAssetId ? 'has-image' : ''} ${cropModePanelId === panel.id ? 'is-crop-mode' : ''} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
                       style={{
                         ...panelStyle(panel, pageRows),
                         ...(panel.panelKind === 'text' ? panelCanvasTextStyle(
@@ -1520,11 +1778,11 @@ export function PageLayoutEditor({
                       }}
                       onClick={layoutMode === 'all-pages' ? undefined : () => onSelectPanel(panel.id)}
                       onDoubleClick={(event) => openPanelDetail(event, panel)}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
+                      onContextMenu={(event) => openPanelMenu(event, panel)}
+                      onPointerDown={layoutMode === 'all-pages' ? undefined : (event) => {
+                        if ((event.target as HTMLElement).closest('.story-panels-page-panel-crop-layer')) return;
+                        beginDrag(event, panel, 'move');
                       }}
-                      onPointerDown={layoutMode === 'all-pages' ? undefined : (event) => beginDrag(event, panel, 'move')}
                     >
                       {layoutMode !== 'all-pages' && (
                         <>
@@ -1533,7 +1791,7 @@ export function PageLayoutEditor({
                               className="story-panels-page-panel-rich-text"
                               dangerouslySetInnerHTML={{ __html: sanitizeRichText(richTextForPanel(panel, panel.id === selectedPanelId ? customTextDraft : null)) }}
                             />
-                          ) : renderImagePanelBody(panel)}
+                          ) : renderImagePanelBody(panel, cropModePanelId === panel.id)}
                           {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
                             <span
                               key={corner}
@@ -1544,7 +1802,7 @@ export function PageLayoutEditor({
                           ))}
                         </>
                       )}
-                    </button>
+                    </div>
                   ))}
                 </div>,
                 hasSinglePageSidePanel && pageIndex === 0
@@ -1564,7 +1822,7 @@ export function PageLayoutEditor({
                 <div className="story-panels-info-head">
                   <h3>Selected Panel</h3>
                   <button type="button" className="danger" disabled={isSaving} onClick={requestDeleteSelectedPanel}>
-                    Delete
+                    {selectedPanelRemoveLabel}
                   </button>
                 </div>
                 <div className="story-panels-info-panel-body" ref={infoPanelBodyRef}>
@@ -1674,6 +1932,55 @@ export function PageLayoutEditor({
                         </div>
                       </div>
                     </div>
+                    {imageInfoHost.activeAssetId && (
+                      <div className="story-panels-info-crop-group">
+                        <div className="story-panels-info-crop-head">
+                          <span>Crop</span>
+                          {(imageInfoHost.imageCrop && !isDefaultImageCrop(imageInfoHost.imageCrop)) && (
+                            <button
+                              type="button"
+                              className="secondary story-panels-info-crop-reset"
+                              disabled={isSaving}
+                              onClick={() => resetPanelImageCrop(imageInfoHost.id)}
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                        <label className="story-panels-info-crop-control">
+                          <span>Horizontal</span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            disabled={isSaving}
+                            value={Math.round(imageCropForPanel(imageInfoHost).focalX * 100)}
+                            onChange={(event) => {
+                              updatePanelImageCrop(imageInfoHost.id, {
+                                focalX: Number(event.target.value) / 100,
+                              });
+                            }}
+                          />
+                        </label>
+                        <label className="story-panels-info-crop-control">
+                          <span>Vertical</span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            disabled={isSaving}
+                            value={Math.round(imageCropForPanel(imageInfoHost).focalY * 100)}
+                            onChange={(event) => {
+                              updatePanelImageCrop(imageInfoHost.id, {
+                                focalY: Number(event.target.value) / 100,
+                              });
+                            }}
+                          />
+                        </label>
+                      </div>
+                    )}
                     {imageInfoHost.assetIds.length > 1 && (
                       <div className="story-panels-info-image-variants moment-sequence-thumbs">
                         {nonArchivedVariants(assets, imageInfoHost.assetIds).map((asset) => (
@@ -1763,46 +2070,35 @@ export function PageLayoutEditor({
                                     onClick={(event) => event.stopPropagation()}
                                   >
                                     <div className="story-panels-caption-style-field">
-                                      <span>Shape</span>
+                                      <span>Type</span>
                                       <div className="story-panels-caption-style-options">
                                         <button
                                           type="button"
-                                          className={captionStyleForPanel(caption).shape === 'square' ? 'active' : ''}
+                                          className={captionSpeechKindFor(captionStyleForPanel(caption)) === 'dialogue' ? 'active' : ''}
                                           disabled={isSaving}
-                                          onClick={() => updateCaptionStyle(caption.id, { shape: 'square' })}
+                                          onClick={() => setCaptionSpeechKind(caption.id, 'dialogue')}
                                         >
-                                          Square
+                                          Dialogue
                                         </button>
                                         <button
                                           type="button"
-                                          className={captionStyleForPanel(caption).shape === 'oval' ? 'active' : ''}
+                                          className={captionSpeechKindFor(captionStyleForPanel(caption)) === 'narration' ? 'active' : ''}
                                           disabled={isSaving}
-                                          onClick={() => updateCaptionStyle(caption.id, { shape: 'oval' })}
+                                          onClick={() => setCaptionSpeechKind(caption.id, 'narration')}
                                         >
-                                          Oval
+                                          Narration
                                         </button>
                                       </div>
                                     </div>
                                     <div className="story-panels-caption-style-field">
-                                      <span>Background</span>
-                                      <div className="story-panels-caption-style-options">
-                                        <button
-                                          type="button"
-                                          className={captionStyleForPanel(caption).background === 'transparent' ? 'active' : ''}
-                                          disabled={isSaving}
-                                          onClick={() => updateCaptionStyle(caption.id, { background: 'transparent' })}
-                                        >
-                                          Transparent
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className={captionStyleForPanel(caption).background === 'white' ? 'active' : ''}
-                                          disabled={isSaving}
-                                          onClick={() => updateCaptionStyle(caption.id, { background: 'white' })}
-                                        >
-                                          White
-                                        </button>
-                                      </div>
+                                      <button
+                                        type="button"
+                                        className="secondary"
+                                        disabled={isSaving}
+                                        onClick={() => shrinkCaptionToFit(caption.id)}
+                                      >
+                                        Shrink height to fit text
+                                      </button>
                                     </div>
                                     <div className="story-panels-caption-style-field">
                                       <span>Text color</span>
@@ -1991,7 +2287,6 @@ export function PageLayoutEditor({
           </div>
         )}
         </div>
-      )}
       {pageMenu && (
         <div className="story-panels-page-context-menu" style={{ left: pageMenu.x, top: pageMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
           {pageMenu.kind === 'page' && (
@@ -2008,13 +2303,65 @@ export function PageLayoutEditor({
               <p className="muted">Select a panel chunk first.</p>
             )
           )}
+          {pageMenu.kind === 'panel' && (() => {
+            const menuPanel = displayDocument.panels.find((panel) => panel.id === pageMenu.panelId);
+            if (!menuPanel || menuPanel.panelKind !== 'image') return null;
+            return (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPickerPanelId(menuPanel.id);
+                    setPageMenu(null);
+                  }}
+                >
+                  Choose image…
+                </button>
+                {menuPanel.activeAssetId && (
+                  <>
+                    <button
+                      type="button"
+                      className={cropModePanelId === menuPanel.id ? 'active' : ''}
+                      onClick={() => {
+                        onSelectPanel(menuPanel.id);
+                        setCropModePanelId((current) => (current === menuPanel.id ? null : menuPanel.id));
+                        setPageMenu(null);
+                      }}
+                    >
+                      {cropModePanelId === menuPanel.id ? 'Done cropping' : 'Crop'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearPanelImage(menuPanel.id);
+                        setPageMenu(null);
+                      }}
+                    >
+                      Clear image
+                    </button>
+                    {!isDefaultImageCrop(menuPanel.imageCrop) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          resetPanelImageCrop(menuPanel.id);
+                          setPageMenu(null);
+                        }}
+                      >
+                        Reset crop
+                      </button>
+                    )}
+                  </>
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
       {pendingCaptionDelete && (
         <div className="confirm-backdrop" onClick={() => setPendingCaptionDeleteId(null)}>
           <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-story-caption-title" onClick={(event) => event.stopPropagation()}>
             <h2 id="delete-story-caption-title">Delete {panelLabelFor(pendingCaptionDelete)}?</h2>
-            <p>This will remove the caption from the page layout. This can be undone from the header.</p>
+            <p>This will remove the caption from the page layout.</p>
             <div className="modal-actions">
               <button type="button" className="secondary" onClick={() => setPendingCaptionDeleteId(null)}>Cancel</button>
               <button type="button" className="danger" disabled={isSaving} onClick={confirmDeleteCaption}>Delete caption</button>
@@ -2026,20 +2373,22 @@ export function PageLayoutEditor({
         <div className="confirm-backdrop" onClick={() => setPendingPanelDeleteId(null)}>
           <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-story-panel-title" onClick={(event) => event.stopPropagation()}>
             <h2 id="delete-story-panel-title">
-              Delete {pendingPanelDelete.sourceKind === 'caption'
-                ? panelLabelFor(pendingPanelDelete)
-                : pendingPanelDelete.sourceKind === 'story'
-                ? `Panel ${storyPanelNumberById.get(pendingPanelDelete.id) ?? ''}`
-                : pendingPanelDelete.panelKind === 'text' ? 'text block' : 'image block'}?
+              {pendingPanelDelete.sourceKind === 'story'
+                ? `Remove Panel ${storyPanelNumberById.get(pendingPanelDelete.id) ?? ''} from layout?`
+                : pendingPanelDelete.sourceKind === 'caption'
+                ? `Delete ${panelLabelFor(pendingPanelDelete)}?`
+                : pendingPanelDelete.panelKind === 'text' ? 'Delete text block?' : 'Delete image block?'}
             </h2>
             <p>
               {pendingPanelDelete.sourceKind === 'story'
-                ? 'This will remove the panel chunk and its page layout placement. This can be undone from the header.'
-                : 'This will remove the layout item from the page. This can be undone from the header.'}
+                ? 'This removes the panel from the page layout. The panel chunk stays in Panel Chunks and can be placed again.'
+                : 'This will remove the layout item from the page.'}
             </p>
             <div className="modal-actions">
               <button type="button" className="secondary" onClick={() => setPendingPanelDeleteId(null)}>Cancel</button>
-              <button type="button" className="danger" disabled={isSaving} onClick={confirmDeleteSelectedPanel}>Delete panel</button>
+              <button type="button" className="danger" disabled={isSaving} onClick={confirmRemoveSelectedPanel}>
+                {pendingPanelDelete.sourceKind === 'story' ? 'Remove from layout' : 'Delete'}
+              </button>
             </div>
           </div>
         </div>
@@ -2050,8 +2399,7 @@ export function PageLayoutEditor({
             <h2 id="delete-story-page-title">Delete {pendingPageDelete.title || pendingPageDelete.id}?</h2>
             <p>
               This will remove the page
-              {pendingPageDeletePanelCount > 0 ? ` and ${pendingPageDeletePanelCount} panel${pendingPageDeletePanelCount === 1 ? '' : 's'} on it` : ''}
-              . This can be undone from the header.
+              {pendingPageDeletePanelCount > 0 ? ` and ${pendingPageDeletePanelCount} panel${pendingPageDeletePanelCount === 1 ? '' : 's'} on it` : ''}.
             </p>
             <div className="modal-actions">
               <button type="button" className="secondary" onClick={() => setPendingPageDeleteId(null)}>Cancel</button>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { StoryPanel, StoryPanelPage } from '../types';
+import { panelIsPlacedOnLayout } from './panelPlacement';
 import { storyPageNumberById, storyPagePlacementLabel } from './pageNumbers';
 
 function compactText(value: string, maxLength = 180) {
@@ -18,6 +19,7 @@ export function PanelChunkList({
   onOpenPanelPlacement,
   onDeletePanel,
   isSaving,
+  variant = 'card',
 }: {
   bookLength: number;
   panels: StoryPanel[];
@@ -28,6 +30,7 @@ export function PanelChunkList({
   onOpenPanelPlacement?: (panelId: string) => void;
   onDeletePanel: (panelId: string) => void;
   isSaving: boolean;
+  variant?: 'card' | 'plain';
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const chunkRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -65,14 +68,23 @@ export function PanelChunkList({
     return () => window.clearTimeout(timeout);
   }, [focusedPanelId]);
 
+  const rootClassName = variant === 'plain' ? 'story-panels-chunks-pane' : 'story-card story-panels-list-card';
+
   return (
-    <section className="story-card story-panels-list-card">
-      <div className="story-panels-section-head">
-        <div>
-          <h2>Panel Chunks</h2>
-          <p className="muted">{sortedPanels.length} panels cover {coverage}% of the book text.</p>
+    <div className={rootClassName}>
+      {variant === 'card' && (
+        <div className="story-panels-section-head">
+          <div>
+            <h2>Panel Chunks</h2>
+            <p className="muted">{sortedPanels.length} panels cover {coverage}% of the book text.</p>
+          </div>
         </div>
-      </div>
+      )}
+      {variant === 'plain' && (
+        <p className="story-panels-chunks-meta muted">
+          {sortedPanels.length} panel{sortedPanels.length === 1 ? '' : 's'} · {coverage}% covered
+        </p>
+      )}
       <div ref={listRef} className="story-panels-chunk-list">
         {sortedPanels.length === 0 ? (
           <p className="muted">No panels yet. Select a passage in the book text to begin.</p>
@@ -83,29 +95,48 @@ export function PanelChunkList({
               chunkRefs.current[panel.id] = element;
             }}
             className={`story-panels-chunk ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''}`}
+            onClick={() => onSelectPanel(panel.id)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onSelectPanel(panel.id);
+              }
+            }}
+            role="button"
+            tabIndex={0}
           >
-            <button type="button" className="story-panels-chunk-main" onClick={() => onSelectPanel(panel.id)}>
+            <div className="story-panels-chunk-main">
               <strong>Panel {index + 1}</strong>
               <span>{panel.startOffset}-{panel.endOffset}</span>
-              <span
-                className={`story-panels-placement-badge ${pageNumbers.has(panel.pageId) ? 'is-placed' : 'is-unplaced'}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onOpenPanelPlacement?.(panel.id);
-                }}
-              >
-                {storyPagePlacementLabel(pages, panel.pageId)}
-              </span>
+              {panelIsPlacedOnLayout(pages, panel) ? (
+                <button
+                  type="button"
+                  className="story-panels-placement-badge is-placed"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenPanelPlacement?.(panel.id);
+                  }}
+                >
+                  {storyPagePlacementLabel(pages, panel.pageId)}
+                </button>
+              ) : (
+                <span className="story-panels-placement-badge is-unplaced">
+                  {storyPagePlacementLabel(pages, panel.pageId)}
+                </span>
+              )}
               <p>{compactText(panel.selectedText)}</p>
-            </button>
+            </div>
             <div className="story-panels-chunk-actions">
-              <button type="button" className="secondary" disabled={isSaving} onClick={() => onDeletePanel(panel.id)}>
+              <button type="button" className="secondary" disabled={isSaving} onClick={(event) => {
+                event.stopPropagation();
+                onDeletePanel(panel.id);
+              }}>
                 Delete
               </button>
             </div>
           </article>
         ))}
       </div>
-    </section>
+    </div>
   );
 }
