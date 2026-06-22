@@ -2060,6 +2060,15 @@ function ProjectPhaseSidebar({
           <span className="phase-number" aria-hidden="true">▦</span>
           <strong>Story Canvas</strong>
         </button>
+        <button
+          type="button"
+          className={`phase-nav-item ${activePhase === 'story-panels' ? 'is-selected' : ''}`}
+          aria-current={activePhase === 'story-panels' ? 'page' : undefined}
+          onClick={() => onPhaseChange('story-panels')}
+        >
+          <span className="phase-number" aria-hidden="true">▤</span>
+          <strong>Story Panels</strong>
+        </button>
       </nav>
       <h3 className="phase-nav-heading">Story Adaptation</h3>
       <nav className="phase-nav" aria-label="Story adaptation phases">
@@ -2078,18 +2087,6 @@ function ProjectPhaseSidebar({
             </button>
           );
         })}
-      </nav>
-      <h3 className="phase-nav-heading">Story / Comic Panels</h3>
-      <nav className="phase-nav" aria-label="Story panel prototype">
-        <button
-          type="button"
-          className={`phase-nav-item ${activePhase === 'story-panels' ? 'is-selected' : ''}`}
-          aria-current={activePhase === 'story-panels' ? 'page' : undefined}
-          onClick={() => onPhaseChange('story-panels')}
-        >
-          <span className="phase-number" aria-hidden="true">▤</span>
-          <strong>Story Panels</strong>
-        </button>
       </nav>
       <div className="phase-sidebar-footer">
         <button className="secondary" disabled={deleting || exportingAssets} onClick={() => setOrganizingTags(true)}>

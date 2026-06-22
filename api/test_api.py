@@ -12,7 +12,9 @@ import story_panels
 import story_panels_print
 from fastapi.testclient import TestClient
 from main import app
-from models import AdaptationAssetLink
+from models import AdaptationAssetLink, StoryPanel
+from pydantic import ValidationError
+import pytest
 from PIL import Image
 
 
@@ -1054,15 +1056,24 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
 
     empty = client.get("/api/projects/farm-comic/story-panels")
     assert empty.status_code == 200
-    assert [page["pageKind"] for page in empty.json()["pages"]] == ["cover", "inside-cover", "story", "inside-back-cover", "back-cover"]
-    assert empty.json()["pages"][2]["id"] == "page-001"
+    assert [page["pageKind"] for page in empty.json()["pages"]] == [
+        "cover",
+        "inside-cover",
+        "story",
+        "story",
+        "story",
+        "story",
+        "inside-back-cover",
+        "back-cover",
+    ]
+    assert [page["id"] for page in empty.json()["pages"][2:6]] == ["page-001", "page-002", "page-003", "page-004"]
     assert [
-        (panel["pageId"], panel["sourceKind"], panel["panelKind"], panel["customText"])
+        (panel["pageId"], panel["sourceKind"], panel["panelKind"], panel["customText"], panel["textStyle"])
         for panel in empty.json()["panels"]
     ] == [
-        ("cover", "free-text", "text", "Title goes here"),
-        ("inside-front-cover", "free-text", "text", "Copyright information goes here."),
-        ("inside-back-cover", "free-text", "text", "About this comic, acknowledgements, or bonus notes go here."),
+        ("cover", "free-text", "text", "Title goes here", {"fontFamily": "serif", "fontSize": 8, "align": "left"}),
+        ("inside-front-cover", "free-text", "text", "Copyright information goes here.", {"fontFamily": "serif", "fontSize": 8, "align": "left"}),
+        ("inside-back-cover", "free-text", "text", "About this comic, acknowledgements, or bonus notes go here.", {"fontFamily": "serif", "fontSize": 8, "align": "left"}),
     ]
 
     book = client.get("/api/projects/farm-comic/story-panels/book")
@@ -1106,6 +1117,131 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
     deleted = client.delete(f"/api/projects/farm-comic/story-panels/panels/{story_panel['id']}")
     assert deleted.status_code == 200
     assert not any(panel["sourceKind"] == "story" for panel in deleted.json()["panels"])
+
+
+def test_story_panels_panel_image_assignment(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the door.\n")
+
+    created = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
+    )
+    assert created.status_code == 200
+    panel = next(candidate for candidate in created.json()["panels"] if candidate["sourceKind"] == "story")
+
+    asset_id = "01HPANELIMG"
+    make_png(library.asset_png_path("farm-comic", asset_id), color="blue")
+    library.write_json(
+        library.asset_json_path("farm-comic", asset_id),
+        {
+            "id": asset_id,
+            "kind": "imported",
+            "title": "Panel art",
+            "tags": ["scene"],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+
+    assigned = client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{panel['id']}",
+        json={"assetIds": [asset_id], "activeAssetId": asset_id},
+    )
+    assert assigned.status_code == 200
+    updated = next(candidate for candidate in assigned.json()["panels"] if candidate["id"] == panel["id"])
+    assert updated["assetIds"] == [asset_id]
+    assert updated["activeAssetId"] == asset_id
+
+    ratio_patch = client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{panel['id']}",
+        json={"aspectRatio": "16:9", "aspectRatioLocked": True},
+    )
+    assert ratio_patch.status_code == 200
+    ratio_panel = next(candidate for candidate in ratio_patch.json()["panels"] if candidate["id"] == panel["id"])
+    assert ratio_panel["aspectRatio"] == "16:9"
+    assert ratio_panel["aspectRatioLocked"] is True
+
+    with pytest.raises(ValidationError, match="activeAssetId must be attached"):
+        StoryPanel.model_validate({**updated, "assetIds": [], "activeAssetId": asset_id})
+
+
+def test_story_panels_caption_panel_assignment(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the door.\n")
+
+    created = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
+    )
+    assert created.status_code == 200
+    parent = next(panel for panel in created.json()["panels"] if panel["sourceKind"] == "story")
+
+    patched = client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{parent['id']}",
+        json={
+            "pageId": parent["pageId"],
+            "rect": parent["rect"],
+        },
+    )
+    assert patched.status_code == 200
+
+    document = patched.json()
+    document["panels"].append(
+        {
+            "id": "panel-caption-001",
+            "order": len(document["panels"]) + 1,
+            "sourceKind": "caption",
+            "startOffset": None,
+            "endOffset": None,
+            "selectedText": "",
+            "customText": "Ponyville was busy.",
+            "richText": "",
+            "textStyle": {"fontFamily": "serif", "fontSize": 7, "align": "center"},
+            "pageId": parent["pageId"],
+            "panelKind": "text",
+            "rect": {"x": parent["rect"]["x"], "y": parent["rect"]["y"] + parent["rect"]["h"] + 0.25, "w": parent["rect"]["w"], "h": 1},
+            "layer": 1,
+            "parentPanelId": parent["id"],
+            "assetIds": [],
+            "activeAssetId": None,
+            "aspectRatio": None,
+            "aspectRatioLocked": False,
+            "finalized": False,
+        }
+    )
+    saved = client.put("/api/projects/farm-comic/story-panels", json=document)
+    assert saved.status_code == 200
+    caption = next(panel for panel in saved.json()["panels"] if panel["sourceKind"] == "caption")
+    assert caption["parentPanelId"] == parent["id"]
+    assert caption["customText"] == "Ponyville was busy."
+
+    styled = client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{caption['id']}",
+        json={
+            "textStyle": {
+                "fontFamily": "sans",
+                "fontSize": 9,
+                "align": "left",
+                "shape": "oval",
+                "background": "transparent",
+                "color": "#1e40af",
+                "outlineColor": "#eab308",
+            },
+        },
+    )
+    assert styled.status_code == 200
+    updated = next(panel for panel in styled.json()["panels"] if panel["id"] == caption["id"])["textStyle"]
+    assert updated["shape"] == "oval"
+    assert updated["background"] == "transparent"
+    assert updated["color"] == "#1e40af"
+    assert updated["outlineColor"] == "#eab308"
 
 
 def test_story_panels_missing_book(tmp_path, monkeypatch):
@@ -1191,7 +1327,7 @@ def test_story_panels_booklet_imposition_order():
 def test_story_panels_booklet_imposition_keeps_back_cover_outside():
     document = story_panels.empty_document()
     pages = story_panels_print.story_pages(document)
-    assert len(pages) == 5
+    assert len(pages) == 8
     padded = story_panels_print.padded_booklet_pages(pages)
     assert len(padded) == 8
     assert padded[-1].page is not None and padded[-1].page.pageKind == "back-cover"
@@ -1233,6 +1369,8 @@ def test_story_panels_booklet_pdf_endpoint(tmp_path, monkeypatch):
     story_panel = next(panel for panel in document["panels"] if panel["sourceKind"] == "story")
     story_panel["panelKind"] = "text"
     story_panel["customText"] = "Custom caption text."
+    story_panel["richText"] = "<strong>Custom</strong> <em>caption</em> <u>text.</u>"
+    story_panel["textStyle"] = {"fontFamily": "sans", "fontSize": 10, "align": "center"}
     saved = client.put("/api/projects/farm-comic/story-panels", json=document)
     assert saved.status_code == 200
 

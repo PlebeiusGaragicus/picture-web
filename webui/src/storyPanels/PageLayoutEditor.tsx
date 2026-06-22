@@ -1,6 +1,34 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import type { StoryPanel, StoryPanelDocument, StoryPanelRect } from '../types';
+import { nonArchivedVariants } from '../canvas/shared';
+import type { Asset, CanvasDocument, StoryPanel, StoryPanelDocument, StoryPanelRect, StoryPanelTextStyle, TagDefinition } from '../types';
+import { assetThumbnailUrl } from './panelImageAssets';
+import {
+  enforceLockedAspectOnResize,
+  formatAspectRatioFromPixels,
+  GEMINI_IMAGE_ASPECT_RATIOS,
+  loadImageDimensions,
+  pageRowsForPanels,
+  panelVisualAspectRatio,
+  parseAspectRatio,
+  snapRectToAspectRatio,
+} from './panelAspectRatio';
+import { PanelImagePicker } from './PanelImagePicker';
+import {
+  CAPTION_COLOR_PRESETS,
+  captionPanelCssProperties,
+  captionPanelClassName,
+  captionStyleForPanel,
+  defaultCaptionTextStyle,
+} from './captionPanelStyle';
+import {
+  captionLabel,
+  captionPanelsFor,
+  defaultCaptionRect,
+  imageInfoHostFor,
+  parentPanelFor,
+  removePanelAndCaptionChildren,
+} from './panelCaptions';
 import { sortedStoryPages, storyPageNumberById as mapStoryPageNumbers } from './pageNumbers';
 import {
   PRINT_HALF_WIDTH,
@@ -14,7 +42,7 @@ import {
   PRINT_SHEET_HEIGHT,
 } from './printLayout';
 
-export type StoryPanelLayoutMode = 'spread' | 'single' | 'single-chunks' | 'all-pages' | 'book' | 'book-chunks';
+export type StoryPanelLayoutMode = 'spread' | 'single' | 'single-chunks' | 'all-pages' | 'book';
 
 const gridColumns = 12;
 const minPanelHeight = 2;
@@ -23,8 +51,60 @@ const minTextPanelHeight = 0.5;
 const minTextPanelWidth = 0.75;
 const panelSnapScale = 4;
 const comicPageAspectRatio = '5.5 / 8.5';
+const defaultTextStyle: StoryPanelTextStyle = { fontFamily: 'serif', fontSize: 8, align: 'left' };
+const textFontFamilies: Record<StoryPanelTextStyle['fontFamily'], string> = {
+  serif: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+  sans: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  mono: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+  comic: '"Comic Sans MS", "Comic Sans", cursive',
+};
 
 type SinglePagePreviewMode = 'readable' | 'print';
+const SINGLE_PAGE_PREVIEW_MODE_KEY = 'story-panels-single-page-preview-mode';
+
+function readSinglePagePreviewMode(): SinglePagePreviewMode {
+  try {
+    const stored = localStorage.getItem(SINGLE_PAGE_PREVIEW_MODE_KEY);
+    if (stored === 'readable' || stored === 'print') return stored;
+  } catch {
+    // Ignore storage read failures in private browsing or restricted contexts.
+  }
+  return 'print';
+}
+
+function writeSinglePagePreviewMode(mode: SinglePagePreviewMode) {
+  try {
+    localStorage.setItem(SINGLE_PAGE_PREVIEW_MODE_KEY, mode);
+  } catch {
+    // Ignore storage write failures.
+  }
+}
+
+function TrashIcon() {
+  return (
+    <svg className="story-panels-trash-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M3 4.5h10" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+      <path d="M6 4.5V3.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+      <path d="M5 4.5l.5 8a1 1 0 0 0 1 .9h3a1 1 0 0 0 1-.9l.5-8" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
+      <path d="M7 7v4M9 7v4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function StyleIcon() {
+  return (
+    <svg className="story-panels-style-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path
+        d="M8 1.75l1.35 2.74 3.02.44-2.19 2.13.52 3.01L8 8.98 5.3 10.07l.52-3.01-2.19-2.13 3.02-.44L8 1.75z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinejoin="round"
+      />
+      <path d="M3.5 13.25h9" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+    </svg>
+  );
+}
 type StoryPanelCssProperties = CSSProperties & Record<`--${string}`, string | number>;
 
 type DragMode = 'move' | 'resize';
@@ -46,6 +126,107 @@ type PageContextMenu = {
   pageId: string;
   rect: StoryPanelRect;
 };
+
+function plainTextToRichText(value: string) {
+  const doc = document.implementation.createHTMLDocument('');
+  const container = doc.createElement('div');
+  value.split(/\n/).forEach((line, index) => {
+    if (index > 0) container.appendChild(doc.createElement('br'));
+    container.appendChild(doc.createTextNode(line));
+  });
+  return container.innerHTML;
+}
+
+function sanitizeRichText(value: string) {
+  const doc = document.implementation.createHTMLDocument('');
+  const template = doc.createElement('template');
+  template.innerHTML = value;
+  const output = doc.createElement('div');
+  const appendClean = (node: Node, parent: HTMLElement) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      parent.appendChild(doc.createTextNode(node.textContent ?? ''));
+      return;
+    }
+    if (!(node instanceof HTMLElement)) return;
+    const tagName = node.tagName.toLowerCase();
+    if (tagName === 'br') {
+      parent.appendChild(doc.createElement('br'));
+      return;
+    }
+    const mappedTag = tagName === 'b' || tagName === 'strong'
+      ? 'strong'
+      : tagName === 'i' || tagName === 'em'
+        ? 'em'
+        : tagName === 'u'
+          ? 'u'
+          : tagName === 'div' || tagName === 'p'
+            ? 'div'
+            : '';
+    const nextParent = mappedTag ? doc.createElement(mappedTag) : parent;
+    Array.from(node.childNodes).forEach((child) => appendClean(child, nextParent));
+    if (mappedTag) parent.appendChild(nextParent);
+  };
+  Array.from(template.content.childNodes).forEach((node) => appendClean(node, output));
+  return output.innerHTML.trim();
+}
+
+function richTextToPlainText(value: string) {
+  const doc = document.implementation.createHTMLDocument('');
+  const element = doc.createElement('div');
+  element.innerHTML = sanitizeRichText(value);
+  return element.textContent ?? '';
+}
+
+function richTextForPanel(panel: StoryPanel, draft: string | null = null) {
+  if (draft !== null) return draft;
+  if (panel.richText) return panel.richText;
+  return plainTextToRichText(panel.customText || panel.selectedText);
+}
+
+function textStyleForPanel(panel: StoryPanel): StoryPanelTextStyle {
+  return { ...defaultTextStyle, ...(panel.textStyle ?? {}) };
+}
+
+function textPanelCssProperties(
+  panel: StoryPanel,
+  styleOverride?: Partial<StoryPanelTextStyle>,
+  mode: 'canvas' | 'editor' = 'canvas',
+): StoryPanelCssProperties {
+  const textStyle = { ...textStyleForPanel(panel), ...styleOverride };
+  const base = {
+    fontFamily: textFontFamilies[textStyle.fontFamily],
+    textAlign: textStyle.align,
+  };
+  if (mode === 'editor') {
+    return { ...base, fontSize: textStyle.fontSize };
+  }
+  return {
+    ...base,
+    '--story-text-panel-font-size': `${(textStyle.fontSize / 360) * 100}cqw`,
+  };
+}
+
+function textStyleOverrideFromFontSizeInput(
+  panel: StoryPanel,
+  selectedPanelId: string | null,
+  fontSizeInput: string | null,
+): Partial<StoryPanelTextStyle> | undefined {
+  if (panel.id !== selectedPanelId || fontSizeInput === null) return undefined;
+  const parsed = Number(fontSizeInput);
+  if (!Number.isFinite(parsed)) return undefined;
+  return { fontSize: Math.min(48, Math.max(6, Math.trunc(parsed))) };
+}
+
+function panelCanvasTextStyle(
+  panel: StoryPanel,
+  selectedPanelId: string | null,
+  fontSizeInput: string | null,
+): StoryPanelCssProperties {
+  const override = textStyleOverrideFromFontSizeInput(panel, selectedPanelId, fontSizeInput);
+  const base = textPanelCssProperties(panel, override);
+  if (panel.sourceKind !== 'caption') return base;
+  return { ...base, ...captionPanelCssProperties(panel) };
+}
 
 function storyOffset(panel: StoryPanel) {
   return panel.startOffset ?? Number.MAX_SAFE_INTEGER;
@@ -129,13 +310,6 @@ function resizeRectFromCorner(rect: StoryPanelRect, corner: ResizeCorner, deltaC
   return clampRect({ x, y, w, h }, panelKind);
 }
 
-function nextPageId(document: StoryPanelDocument) {
-  const ids = new Set(document.pages.map((page) => page.id));
-  let index = document.pages.length + 1;
-  while (ids.has(`page-${String(index).padStart(3, '0')}`)) index += 1;
-  return `page-${String(index).padStart(3, '0')}`;
-}
-
 function nextPanelId(document: StoryPanelDocument) {
   const ids = new Set(document.panels.map((panel) => panel.id));
   let index = document.panels.length + 1;
@@ -166,6 +340,10 @@ export function PageLayoutEditor({
   onLayoutModeChange,
   onHistoryControlsChange,
   onPageControlsChange,
+  assets,
+  projectTags,
+  canvas,
+  projectSlug,
 }: {
   document: StoryPanelDocument;
   selectedPanelId: string | null;
@@ -173,14 +351,24 @@ export function PageLayoutEditor({
   onSelectPanel: (panelId: string | null) => void;
   onSaveDocument: (document: StoryPanelDocument) => void;
   isSaving: boolean;
-  sidePanel?: React.ReactNode;
+  sidePanel?: ReactNode;
   onLayoutModeChange?: (layoutMode: StoryPanelLayoutMode) => void;
-  onHistoryControlsChange?: (controls: React.ReactNode) => void;
-  onPageControlsChange?: (controls: React.ReactNode) => void;
+  onHistoryControlsChange?: (controls: ReactNode) => void;
+  onPageControlsChange?: (controls: ReactNode) => void;
+  assets: Asset[];
+  projectTags: TagDefinition[];
+  canvas: CanvasDocument;
+  projectSlug: string;
 }) {
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const sideHeightSourceRef = useRef<HTMLElement | null>(null);
   const previousPageIndexRef = useRef(0);
+  const richTextEditorRef = useRef<HTMLDivElement | null>(null);
+  const customTextDraftRef = useRef<string | null>(null);
+  const displayDocumentRef = useRef<StoryPanelDocument>(document);
+  const richTextEditingPanelIdRef = useRef<string | null>(null);
+  const infoPanelBodyRef = useRef<HTMLDivElement | null>(null);
+  const persistPanelTextDraftRef = useRef<(panelId: string, draftHtml: string | null | undefined) => void>(() => {});
   const [draftDocument, setDraftDocument] = useState<StoryPanelDocument | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [pageMenu, setPageMenu] = useState<PageContextMenu | null>(null);
@@ -188,13 +376,28 @@ export function PageLayoutEditor({
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [pendingPageDeleteId, setPendingPageDeleteId] = useState<string | null>(null);
   const [pendingPanelDeleteId, setPendingPanelDeleteId] = useState<string | null>(null);
+  const [pendingCaptionDeleteId, setPendingCaptionDeleteId] = useState<string | null>(null);
   const [undoStack, setUndoStack] = useState<StoryPanelDocument[]>([]);
   const [redoStack, setRedoStack] = useState<StoryPanelDocument[]>([]);
   const [customTextDraft, setCustomTextDraft] = useState<string | null>(null);
-  const [singlePagePreviewMode, setSinglePagePreviewMode] = useState<SinglePagePreviewMode>('readable');
+  const [fontSizeInput, setFontSizeInput] = useState<string | null>(null);
+  const [singlePagePreviewMode, setSinglePagePreviewMode] = useState<SinglePagePreviewMode>(readSinglePagePreviewMode);
+  const selectSinglePagePreviewMode = (mode: SinglePagePreviewMode) => {
+    setSinglePagePreviewMode(mode);
+    writeSinglePagePreviewMode(mode);
+  };
   const [sidePanelHeight, setSidePanelHeight] = useState<number | null>(null);
   const [flashingPanelId, setFlashingPanelId] = useState<string | null>(null);
+  const [pickerPanelId, setPickerPanelId] = useState<string | null>(null);
+  const [ratioPopoverOpen, setRatioPopoverOpen] = useState(false);
+  const [captionStylePopoverId, setCaptionStylePopoverId] = useState<string | null>(null);
+  const [captionFontSizeDraft, setCaptionFontSizeDraft] = useState<{ captionId: string; value: string } | null>(null);
+  const [isSnappingAspect, setIsSnappingAspect] = useState(false);
+  const [captionTextDrafts, setCaptionTextDrafts] = useState<Record<string, string>>({});
+  const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const displayDocument = draftDocument ?? document;
+  displayDocumentRef.current = displayDocument;
+  customTextDraftRef.current = customTextDraft;
   const pages = sortedPages(displayDocument);
   const clampedPageIndex = Math.min(Math.max(currentPageIndex, 0), Math.max(0, pages.length - 1));
   const coverPage = pages.find((page) => page.pageKind === 'cover') ?? null;
@@ -208,7 +411,7 @@ export function PageLayoutEditor({
   const lastSpreadStartIndex = interiorSpreadPages.length > 0
     ? pages.findIndex((page) => page.id === interiorSpreadPages[lastInteriorSpreadStart]?.id)
     : 0;
-  const isPageLayoutMode = layoutMode !== 'book' && layoutMode !== 'book-chunks';
+  const isPageLayoutMode = layoutMode !== 'book';
   const isSinglePageMode = isPageLayoutMode && layoutMode !== 'spread';
   const hasSinglePageSidePanel = layoutMode === 'single' || layoutMode === 'single-chunks';
   const singlePagePreviewAspect = singlePagePreviewMode === 'print'
@@ -237,6 +440,9 @@ export function PageLayoutEditor({
     visiblePages.flatMap((page) => (page ? [page.id] : [])),
   );
   const visibleSelectedPanel = selectedPanel && visiblePageIds.has(selectedPanel.pageId) ? selectedPanel : null;
+  const imageInfoHost = imageInfoHostFor(displayDocument, visibleSelectedPanel);
+  const captionHostPanel = imageInfoHost;
+  const childCaptions = captionHostPanel ? captionPanelsFor(displayDocument, captionHostPanel.id) : [];
   const selectedPage = selectedPageId ? pages.find((page) => page.id === selectedPageId) ?? null : null;
   const selectedPageCanChangeOrder = isStoryPage(selectedPage);
   const storyPages = sortedStoryPages(pages);
@@ -245,7 +451,6 @@ export function PageLayoutEditor({
     .filter((page): page is StoryPanelDocument['pages'][number] => page !== null && page.pageKind === 'story')
     .map((page) => storyPageNumberById.get(page.id))
     .filter((pageNumber): pageNumber is number => typeof pageNumber === 'number');
-  const isLastStoryPageInView = currentStoryPageNumbers.includes(storyPages.length);
   const currentPageLabel = layoutMode === 'spread' && clampedPageIndex === 0 && coverPage && backCoverPage
     ? 'F/B'
     : currentStoryPageNumbers.length > 1
@@ -259,12 +464,37 @@ export function PageLayoutEditor({
   const pendingPanelDelete = pendingPanelDeleteId
     ? displayDocument.panels.find((panel) => panel.id === pendingPanelDeleteId) ?? null
     : null;
+  const pendingCaptionDelete = pendingCaptionDeleteId
+    ? displayDocument.panels.find((panel) => panel.id === pendingCaptionDeleteId) ?? null
+    : null;
   const storyPanelNumberById = new Map(
     displayDocument.panels
       .filter((panel) => panel.sourceKind === 'story')
       .sort((a, b) => storyOffset(a) - storyOffset(b) || a.order - b.order)
       .map((panel, index) => [panel.id, index + 1]),
   );
+  const persistPanelTextDraft = (panelId: string, draftHtml: string | null | undefined) => {
+    if (draftHtml == null) return;
+    const doc = displayDocumentRef.current;
+    const panel = doc.panels.find((candidate) => candidate.id === panelId);
+    if (!panel || panel.panelKind !== 'text') return;
+    const nextRichText = sanitizeRichText(draftHtml);
+    const currentRichText = panel.richText || plainTextToRichText(panel.customText || panel.selectedText);
+    if (nextRichText === currentRichText) return;
+    const nextDocument = {
+      ...doc,
+      panels: doc.panels.map((candidate) => (
+        candidate.id === panelId
+          ? { ...candidate, richText: nextRichText, customText: richTextToPlainText(nextRichText) }
+          : candidate
+      )),
+    };
+    setDraftDocument(nextDocument);
+    setUndoStack((current) => [...current, doc]);
+    setRedoStack([]);
+    onSaveDocument(nextDocument);
+  };
+  persistPanelTextDraftRef.current = persistPanelTextDraft;
   useEffect(() => {
     if (!pageMenu) return;
     const close = () => setPageMenu(null);
@@ -272,8 +502,104 @@ export function PageLayoutEditor({
     return () => window.document.removeEventListener('pointerdown', close);
   }, [pageMenu]);
   useEffect(() => {
-    setCustomTextDraft(selectedPanel?.customText ?? null);
-  }, [selectedPanel?.id, selectedPanel?.customText]);
+    setRatioPopoverOpen(false);
+    setCaptionStylePopoverId(null);
+    setCaptionFontSizeDraft(null);
+  }, [selectedPanelId]);
+  useLayoutEffect(() => {
+    if (layoutMode !== 'single' || visibleSelectedPanel?.sourceKind !== 'caption') return;
+    infoPanelBodyRef.current?.scrollTo({ top: 0 });
+  }, [layoutMode, visibleSelectedPanel?.id, visibleSelectedPanel?.sourceKind]);
+  useEffect(() => {
+    if (!ratioPopoverOpen) return;
+    const close = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.closest('.story-panels-info-aspect-popover-wrap')) return;
+      setRatioPopoverOpen(false);
+    };
+    window.document.addEventListener('mousedown', close, true);
+    return () => window.document.removeEventListener('mousedown', close, true);
+  }, [ratioPopoverOpen]);
+  useEffect(() => {
+    if (!captionStylePopoverId) return;
+    const close = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.closest('.story-panels-info-caption-style-wrap')) return;
+      setCaptionStylePopoverId(null);
+    };
+    window.document.addEventListener('mousedown', close, true);
+    return () => window.document.removeEventListener('mousedown', close, true);
+  }, [captionStylePopoverId]);
+  useEffect(() => {
+    if (!captionStylePopoverId) setCaptionFontSizeDraft(null);
+  }, [captionStylePopoverId]);
+  useLayoutEffect(() => {
+    const previousPanelId = richTextEditingPanelIdRef.current;
+    const activePanelId = layoutMode === 'single' && visibleSelectedPanel?.panelKind === 'text' && visibleSelectedPanel.sourceKind !== 'caption'
+      ? visibleSelectedPanel.id
+      : null;
+
+    if (previousPanelId && previousPanelId !== activePanelId) {
+      persistPanelTextDraft(
+        previousPanelId,
+        customTextDraftRef.current ?? richTextEditorRef.current?.innerHTML,
+      );
+    }
+
+    if (layoutMode !== 'single' || !visibleSelectedPanel || visibleSelectedPanel.panelKind !== 'text' || visibleSelectedPanel.sourceKind === 'caption') {
+      if (!visibleSelectedPanel || visibleSelectedPanel.panelKind !== 'text' || visibleSelectedPanel.sourceKind === 'caption') {
+        setCustomTextDraft(null);
+      }
+      richTextEditingPanelIdRef.current = activePanelId;
+      return;
+    }
+    const nextDraft = richTextForPanel(visibleSelectedPanel);
+    setCustomTextDraft(nextDraft);
+    richTextEditingPanelIdRef.current = activePanelId;
+    const editor = richTextEditorRef.current;
+    if (!editor || window.document.activeElement === editor) return;
+    const nextHtml = sanitizeRichText(nextDraft);
+    if (editor.innerHTML !== nextHtml) {
+      editor.innerHTML = nextHtml;
+    }
+  }, [
+    layoutMode,
+    visibleSelectedPanel?.id,
+    visibleSelectedPanel?.panelKind,
+    visibleSelectedPanel?.richText,
+    visibleSelectedPanel?.customText,
+  ]);
+  useEffect(() => {
+    if (layoutMode !== 'single' || !visibleSelectedPanel || visibleSelectedPanel.panelKind !== 'text') return;
+    if (customTextDraft === null) return;
+    const panelId = visibleSelectedPanel.id;
+    const timer = window.setTimeout(() => {
+      persistPanelTextDraftRef.current(
+        panelId,
+        customTextDraftRef.current ?? richTextEditorRef.current?.innerHTML,
+      );
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [customTextDraft, layoutMode, visibleSelectedPanel?.id, visibleSelectedPanel?.panelKind]);
+  useEffect(() => {
+    return () => {
+      const panelId = richTextEditingPanelIdRef.current;
+      if (!panelId) return;
+      persistPanelTextDraftRef.current(
+        panelId,
+        customTextDraftRef.current ?? richTextEditorRef.current?.innerHTML,
+      );
+    };
+  }, []);
+  useEffect(() => {
+    setFontSizeInput(null);
+  }, [selectedPanel?.id]);
+  useEffect(() => {
+    if (dragState || isSaving) return;
+    setDraftDocument(null);
+  }, [document, dragState, isSaving]);
   useEffect(() => {
     if (selectedPageId && pages.some((page) => page.id === selectedPageId)) return;
     setSelectedPageId(pages[clampedPageIndex]?.id ?? pages[0]?.id ?? null);
@@ -329,24 +655,32 @@ export function PageLayoutEditor({
     observer.observe(source);
     return () => observer.disconnect();
   }, [hasSinglePageSidePanel, clampedPageIndex, visiblePages.length]);
-  const createPageDocument = (afterPageId?: string) => {
-    const id = nextPageId(displayDocument);
+  const createPageDocument = (afterPageId?: string, count = 1) => {
     const insertionIndex = afterPageId ? pages.findIndex((page) => page.id === afterPageId) + 1 : displayDocument.pages.length;
-    const page: StoryPanelDocument['pages'][number] = {
-      id,
-      order: insertionIndex,
-      title: `Page ${pages.filter((candidate) => candidate.pageKind === 'story').length + 1}`,
-      pageKind: 'story',
-    };
+    const ids = new Set(displayDocument.pages.map((page) => page.id));
+    let nextPageIndex = displayDocument.pages.length + 1;
+    const storyPageCount = pages.filter((candidate) => candidate.pageKind === 'story').length;
+    const newPages = Array.from({ length: count }, (_, offset): StoryPanelDocument['pages'][number] => {
+      while (ids.has(`page-${String(nextPageIndex).padStart(3, '0')}`)) nextPageIndex += 1;
+      const id = `page-${String(nextPageIndex).padStart(3, '0')}`;
+      ids.add(id);
+      nextPageIndex += 1;
+      return {
+        id,
+        order: insertionIndex + offset,
+        title: `Page ${storyPageCount + offset + 1}`,
+        pageKind: 'story',
+      };
+    });
     const nextPages = [...pages];
-    nextPages.splice(insertionIndex < 0 ? pages.length : insertionIndex, 0, page);
+    nextPages.splice(insertionIndex < 0 ? pages.length : insertionIndex, 0, ...newPages);
     return {
       ...displayDocument,
       pages: nextPages.map((candidate, index) => ({ ...candidate, order: index })),
     };
   };
   const commitDocument = (nextDocument: StoryPanelDocument) => {
-    setUndoStack((current) => [...current, document]);
+    setUndoStack((current) => [...current, displayDocument]);
     setRedoStack([]);
     onSaveDocument(nextDocument);
   };
@@ -364,36 +698,34 @@ export function PageLayoutEditor({
     setUndoStack((current) => [...current, document]);
     onSaveDocument(next);
   };
-  const goNext = () => {
-    if (isLastStoryPageInView) {
-      const lastStoryPage = storyPages[storyPages.length - 1];
-      if (!lastStoryPage) return;
-      const nextDocument = createPageDocument(lastStoryPage.id);
-      const insertedPageIndex = sortedPages(nextDocument).findIndex((page) => !pages.some((existingPage) => existingPage.id === page.id));
-      commitDocument(nextDocument);
-      setCurrentPageIndex(insertedPageIndex >= 0 ? insertedPageIndex : pages.findIndex((page) => page.id === lastStoryPage.id));
-      return;
-    }
-    const nextPageIndex = layoutMode === 'spread'
+  const pagesToReachNextStorySignature = () => {
+    const remainder = storyPages.length % 4;
+    return remainder === 0 ? 4 : 4 - remainder;
+  };
+  const nextExistingPageIndex = layoutMode === 'spread'
       ? clampedPageIndex === 0 ? 1 : clampedPageIndex + 2
       : clampedPageIndex + 1;
-    const lastPageIndex = layoutMode === 'spread' ? lastSpreadStartIndex : pages.length - 1;
-    if (nextPageIndex <= lastPageIndex) {
-      setCurrentPageIndex(nextPageIndex);
-      return;
+  const lastExistingPageIndex = layoutMode === 'spread' ? lastSpreadStartIndex : pages.length - 1;
+  const canGoNextExistingPage = nextExistingPageIndex <= lastExistingPageIndex;
+  const goNext = () => {
+    if (canGoNextExistingPage) {
+      setCurrentPageIndex(nextExistingPageIndex);
     }
-    const newPageIndex = pages.length;
-    commitDocument(createPageDocument());
-    setCurrentPageIndex(layoutMode === 'spread' && newPageIndex > 0 && newPageIndex % 2 === 0 ? newPageIndex - 1 : newPageIndex);
   };
   const goNextExistingPage = () => {
-    const nextPageIndex = layoutMode === 'spread'
-      ? clampedPageIndex === 0 ? 1 : clampedPageIndex + 2
-      : clampedPageIndex + 1;
-    const lastPageIndex = layoutMode === 'spread' ? lastSpreadStartIndex : pages.length - 1;
-    if (nextPageIndex <= lastPageIndex) {
-      setCurrentPageIndex(nextPageIndex);
+    if (canGoNextExistingPage) {
+      setCurrentPageIndex(nextExistingPageIndex);
     }
+  };
+  const addPagesToNextStorySignature = () => {
+    const lastStoryPage = storyPages[storyPages.length - 1];
+    const newPageIndex = pages.length;
+    const nextDocument = lastStoryPage
+      ? createPageDocument(lastStoryPage.id, pagesToReachNextStorySignature())
+      : createPageDocument(undefined, pagesToReachNextStorySignature());
+    const insertedPageIndex = sortedPages(nextDocument).findIndex((page) => !pages.some((existingPage) => existingPage.id === page.id));
+    commitDocument(nextDocument);
+    setCurrentPageIndex(insertedPageIndex >= 0 ? insertedPageIndex : layoutMode === 'spread' && newPageIndex > 0 && newPageIndex % 2 === 0 ? newPageIndex - 1 : newPageIndex);
   };
   const selectedPageIndex = selectedPageId ? pages.findIndex((page) => page.id === selectedPageId) : -1;
   const addPageAfterSelected = () => {
@@ -506,10 +838,13 @@ export function PageLayoutEditor({
       endOffset: null,
       selectedText: '',
       customText: sourceKind === 'free-text' ? page.pageKind === 'inside-cover' ? 'Copyright information' : 'Text block' : '',
+      richText: sourceKind === 'free-text' ? plainTextToRichText(page.pageKind === 'inside-cover' ? 'Copyright information' : 'Text block') : '',
+      textStyle: defaultTextStyle,
       pageId,
       panelKind: sourceKind === 'free-text' ? 'text' : 'image',
       rect: clampRect({ ...rect, w: sourceKind === 'free-text' ? 5 : 8, h: sourceKind === 'free-text' ? 1.5 : 4 }, sourceKind === 'free-text' ? 'text' : 'image'),
       layer: 0,
+      parentPanelId: null,
       assetIds: [],
       activeAssetId: null,
       finalized: false,
@@ -520,10 +855,201 @@ export function PageLayoutEditor({
   };
   const updateSelectedPanel = (patch: Partial<StoryPanel>) => {
     if (!selectedPanel) return;
-    commitDocument({
+    const nextDocument = {
       ...displayDocument,
       panels: displayDocument.panels.map((panel) => panel.id === selectedPanel.id ? { ...panel, ...patch } : panel),
+    };
+    setDraftDocument(nextDocument);
+    commitDocument(nextDocument);
+  };
+  const updatePanelById = (panelId: string, patch: Partial<StoryPanel>) => {
+    const nextDocument = {
+      ...displayDocument,
+      panels: displayDocument.panels.map((panel) => panel.id === panelId ? { ...panel, ...patch } : panel),
+    };
+    setDraftDocument(nextDocument);
+    commitDocument(nextDocument);
+  };
+  const updateCaptionStyle = (captionId: string, patch: Partial<StoryPanelTextStyle>) => {
+    const caption = displayDocument.panels.find((panel) => panel.id === captionId);
+    if (!caption) return;
+    updatePanelById(captionId, { textStyle: { ...textStyleForPanel(caption), ...patch } });
+  };
+  const commitCaptionFontSizeInput = (captionId: string) => {
+    if (captionFontSizeDraft?.captionId !== captionId) return;
+    const caption = displayDocument.panels.find((panel) => panel.id === captionId);
+    if (!caption) {
+      setCaptionFontSizeDraft(null);
+      return;
+    }
+    const parsed = Number(captionFontSizeDraft.value);
+    const currentSize = captionStyleForPanel(caption).fontSize;
+    const nextSize = Number.isFinite(parsed)
+      ? Math.min(48, Math.max(6, Math.trunc(parsed)))
+      : currentSize;
+    setCaptionFontSizeDraft(null);
+    if (nextSize !== currentSize) {
+      updateCaptionStyle(captionId, { fontSize: nextSize });
+    }
+  };
+  const panelLabelFor = (panel: StoryPanel) => {
+    if (panel.sourceKind === 'caption') {
+      const parent = parentPanelFor(displayDocument, panel);
+      const captions = parent ? captionPanelsFor(displayDocument, parent.id) : [];
+      const index = captions.findIndex((caption) => caption.id === panel.id);
+      const parentLabel = parent?.sourceKind === 'story'
+        ? `Panel ${storyPanelNumberById.get(parent.id) ?? ''}`
+        : 'image';
+      return `${captionLabel(Math.max(0, index))} for ${parentLabel}`;
+    }
+    if (panel.sourceKind === 'story') return `Panel ${storyPanelNumberById.get(panel.id) ?? ''}`;
+    if (panel.sourceKind === 'free-image') return 'Cover image block';
+    return 'Image block';
+  };
+  const addCaptionPanel = (parent: StoryPanel) => {
+    const captions = captionPanelsFor(displayDocument, parent.id);
+    const nextPanel: StoryPanel = {
+      id: nextPanelId(displayDocument),
+      order: Math.max(...displayDocument.panels.map((panel) => panel.order), -1) + 1,
+      sourceKind: 'caption',
+      startOffset: null,
+      endOffset: null,
+      selectedText: '',
+      customText: '',
+      richText: plainTextToRichText(''),
+      textStyle: { ...defaultCaptionTextStyle },
+      pageId: parent.pageId,
+      panelKind: 'text',
+      rect: clampRect(defaultCaptionRect(parent, captions), 'text'),
+      layer: parent.layer + 1 + captions.length,
+      parentPanelId: parent.id,
+      assetIds: [],
+      activeAssetId: null,
+      finalized: false,
+    };
+    commitDocument({ ...displayDocument, panels: [...displayDocument.panels, nextPanel] });
+  };
+  const removeCaptionPanel = (captionId: string) => {
+    const caption = displayDocument.panels.find((panel) => panel.id === captionId);
+    const parentId = caption?.parentPanelId ?? null;
+    const nextDocument = {
+      ...displayDocument,
+      panels: displayDocument.panels.filter((panel) => panel.id !== captionId),
+    };
+    commitDocument(nextDocument);
+    setCaptionTextDrafts((current) => {
+      const next = { ...current };
+      delete next[captionId];
+      return next;
     });
+    if (selectedPanelId === captionId && parentId) {
+      onSelectPanel(parentId);
+    }
+  };
+  const confirmDeleteCaption = () => {
+    const captionId = pendingCaptionDeleteId;
+    if (!captionId) return;
+    removeCaptionPanel(captionId);
+    setPendingCaptionDeleteId(null);
+  };
+  const commitCaptionTextDraft = (captionId: string) => {
+    const draft = captionTextDrafts[captionId];
+    if (draft === undefined) return;
+    const caption = displayDocument.panels.find((panel) => panel.id === captionId);
+    if (!caption || caption.sourceKind !== 'caption') return;
+    const nextRichText = plainTextToRichText(draft);
+    if (caption.customText === draft && (caption.richText || plainTextToRichText(caption.customText)) === nextRichText) {
+      setCaptionTextDrafts((current) => {
+        const next = { ...current };
+        delete next[captionId];
+        return next;
+      });
+      return;
+    }
+    updatePanelById(captionId, { customText: draft, richText: nextRichText });
+    setCaptionTextDrafts((current) => {
+      const next = { ...current };
+      delete next[captionId];
+      return next;
+    });
+  };
+  const assignPanelImage = (panelId: string, assetId: string) => {
+    const panel = displayDocument.panels.find((candidate) => candidate.id === panelId);
+    if (!panel) return;
+    const nextIds = panel.assetIds.includes(assetId) ? panel.assetIds : [...panel.assetIds, assetId];
+    updatePanelById(panelId, { assetIds: nextIds, activeAssetId: assetId });
+  };
+  const clearPanelImage = (panelId: string) => {
+    updatePanelById(panelId, { assetIds: [], activeAssetId: null });
+  };
+  const setPanelActiveAsset = (panelId: string, assetId: string) => {
+    updatePanelById(panelId, { activeAssetId: assetId });
+  };
+  const snapPanelToAspectRatio = (panel: StoryPanel, aspectRatio: string) => {
+    const pageRows = pageRowsForPanels(displayDocument.panels, panel.pageId);
+    const nextRect = snapRectToAspectRatio(panel.rect, pageRows, parseAspectRatio(aspectRatio), panel.panelKind, clampRect);
+    updatePanelById(panel.id, { rect: nextRect, aspectRatio });
+  };
+  const snapSelectedPanelToImageRatio = async (panel: StoryPanel) => {
+    if (!panel.activeAssetId) return;
+    setIsSnappingAspect(true);
+    try {
+      const url = `/api/projects/${projectSlug}/assets/${panel.activeAssetId}/image`;
+      const { width, height } = await loadImageDimensions(url);
+      snapPanelToAspectRatio(panel, formatAspectRatioFromPixels(width, height));
+    } finally {
+      setIsSnappingAspect(false);
+    }
+  };
+  const togglePanelAspectRatioLock = (panel: StoryPanel) => {
+    if (panel.aspectRatioLocked) {
+      updatePanelById(panel.id, { aspectRatioLocked: false });
+      return;
+    }
+    const pageRows = pageRowsForPanels(displayDocument.panels, panel.pageId);
+    const visualRatio = panelVisualAspectRatio(panel.rect, pageRows);
+    const currentRatio = panel.aspectRatio ?? formatAspectRatioFromPixels(
+      Math.round(visualRatio * 10000),
+      10000,
+    );
+    updatePanelById(panel.id, { aspectRatio: currentRatio, aspectRatioLocked: true });
+  };
+  const renderImagePanelBody = (panel: StoryPanel) => {
+    const activeAsset = panel.activeAssetId ? assetById.get(panel.activeAssetId) ?? null : null;
+    const passage = (panel.selectedText || (panel.sourceKind === 'free-image' ? 'Cover image block' : '')).replace(/\s+/g, ' ').trim();
+    if (activeAsset) {
+      return (
+        <img
+          className="story-panels-page-panel-image"
+          src={assetThumbnailUrl(projectSlug, activeAsset)}
+          alt=""
+        />
+      );
+    }
+    return (
+      <>
+        {panel.sourceKind === 'story' && (
+          <strong>Panel {storyPanelNumberById.get(panel.id) ?? ''}</strong>
+        )}
+        <span>{passage.slice(0, 120)}</span>
+      </>
+    );
+  };
+  const updateSelectedPanelTextStyle = (patch: Partial<StoryPanelTextStyle>) => {
+    if (!selectedPanel) return;
+    updateSelectedPanel({ textStyle: { ...textStyleForPanel(selectedPanel), ...patch } });
+  };
+  const commitFontSizeInput = () => {
+    if (!selectedPanel) return;
+    if (fontSizeInput === null) return;
+    const parsed = Number(fontSizeInput);
+    const nextSize = Number.isFinite(parsed)
+      ? Math.min(48, Math.max(6, Math.trunc(parsed)))
+      : textStyleForPanel(selectedPanel).fontSize;
+    setFontSizeInput(null);
+    if (nextSize !== textStyleForPanel(selectedPanel).fontSize) {
+      updateSelectedPanelTextStyle({ fontSize: nextSize });
+    }
   };
   const requestDeleteSelectedPanel = () => {
     if (!visibleSelectedPanel || isSaving) return;
@@ -532,16 +1058,19 @@ export function PageLayoutEditor({
   const confirmDeleteSelectedPanel = () => {
     const panelId = pendingPanelDeleteId;
     if (!panelId) return;
+    const panel = displayDocument.panels.find((candidate) => candidate.id === panelId);
     commitDocument({
       ...displayDocument,
-      panels: displayDocument.panels.filter((panel) => panel.id !== panelId),
+      panels: panel?.panelKind === 'image'
+        ? removePanelAndCaptionChildren(displayDocument, panelId)
+        : displayDocument.panels.filter((candidate) => candidate.id !== panelId),
     });
     setPendingPanelDeleteId(null);
     onSelectPanel(null);
   };
   const commitCustomTextDraft = () => {
-    if (!selectedPanel || customTextDraft === null || customTextDraft === (selectedPanel.customText ?? '')) return;
-    updateSelectedPanel({ customText: customTextDraft });
+    if (!selectedPanel) return;
+    persistPanelTextDraft(selectedPanel.id, richTextEditorRef.current?.innerHTML ?? customTextDraft);
   };
   const jumpToPage = (value: number) => {
     if (!Number.isFinite(value)) return;
@@ -580,11 +1109,21 @@ export function PageLayoutEditor({
     const deltaRows = targetPageId === state.pageId ? roundStep((event.clientY - state.startClientY) / rowHeight, panelSnapScale) : roundStep((event.clientY - bounds.top) / rowHeight, panelSnapScale) - state.startRect.y;
     const nextPanels = displayDocument.panels.map((panel) => {
       if (panel.id !== state.panelId) return panel;
+      const pageRows = pageRowsForPanels(displayDocument.panels, targetPageId);
       if (state.mode === 'resize') {
-        return {
-          ...panel,
-          rect: resizeRectFromCorner(state.startRect, state.corner ?? 'se', deltaColumns, deltaRows, panel.panelKind),
-        };
+        let rect = resizeRectFromCorner(state.startRect, state.corner ?? 'se', deltaColumns, deltaRows, panel.panelKind);
+        if (panel.aspectRatioLocked && panel.aspectRatio) {
+          rect = enforceLockedAspectOnResize(
+            rect,
+            state.startRect,
+            state.corner ?? 'se',
+            pageRows,
+            parseAspectRatio(panel.aspectRatio),
+            panel.panelKind,
+            clampRect,
+          );
+        }
+        return { ...panel, rect };
       }
       return {
         ...panel,
@@ -655,6 +1194,9 @@ export function PageLayoutEditor({
     }
     onSelectPanel(panel.id);
     onLayoutModeChange?.('single');
+    if (panel.panelKind === 'image') {
+      setPickerPanelId(panel.id);
+    }
   };
   const singlePrintSlotForPage = (page: StoryPanelDocument['pages'][number] | null, fallbackIndex: number) => {
     const pageIndex = page ? pages.findIndex((candidate) => candidate.id === page.id) : fallbackIndex;
@@ -670,17 +1212,26 @@ export function PageLayoutEditor({
     page: StoryPanelDocument['pages'][number] | null,
     fallbackIndex: number,
     grid: ReactNode,
+    captureSideHeight?: (element: HTMLDivElement | null) => void,
   ) => {
     if (!hasSinglePageSidePanel) return grid;
     const printSlot = singlePrintSlotForPage(page, fallbackIndex);
     return (
       <div
+        ref={captureSideHeight}
         className={`story-panels-single-page-preview is-${singlePagePreviewMode} is-print-slot-${printSlot}`}
         style={singlePagePreviewMode === 'print' ? singlePrintFrameStyle(printSlot) : undefined}
       >
         {grid}
       </div>
     );
+  };
+  const applyRichTextCommand = (command: 'bold' | 'italic' | 'underline') => {
+    window.document.execCommand(command);
+    const active = window.document.activeElement;
+    if (active instanceof HTMLElement && active.classList.contains('story-panels-rich-text-editor')) {
+      setCustomTextDraft(sanitizeRichText(active.innerHTML));
+    }
   };
   useEffect(() => {
     if (!isPageLayoutMode) {
@@ -694,7 +1245,16 @@ export function PageLayoutEditor({
             <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder || selectedStoryPageIndex <= 0} onClick={() => moveSelectedPage(-1)}>Move left</button>
             <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder || selectedStoryPageIndex < 0 || selectedStoryPageIndex >= storyPages.length - 1} onClick={() => moveSelectedPage(1)}>Move right</button>
             <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder} onClick={addPageAfterSelected}>Add story page after</button>
-            <button type="button" className="secondary" disabled={isSaving || !selectedPageCanChangeOrder || storyPages.length <= 1} onClick={requestDeleteSelectedPage}>Delete page</button>
+            <button
+              type="button"
+              className="secondary story-panels-delete-page-button"
+              disabled={isSaving || !selectedPageCanChangeOrder || storyPages.length <= 1}
+              onClick={requestDeleteSelectedPage}
+              aria-label="Delete page"
+              title="Delete page"
+            >
+              <TrashIcon />
+            </button>
           </>
         ) : (
           <>
@@ -715,27 +1275,37 @@ export function PageLayoutEditor({
             </label>
             <button
               type="button"
-              className={isLastStoryPageInView ? 'secondary' : 'secondary small-button'}
-              disabled={isSaving}
+              className="secondary small-button"
+              disabled={isSaving || !canGoNextExistingPage}
               onClick={goNext}
-              aria-label={isLastStoryPageInView ? 'Add page' : 'Next page'}
-              title={isLastStoryPageInView ? 'Add page' : 'Next page'}
+              aria-label="Next page"
+              title="Next page"
             >
-              {isLastStoryPageInView ? 'Add page' : <span aria-hidden="true">→</span>}
+              <span aria-hidden="true">→</span>
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={isSaving}
+              onClick={addPagesToNextStorySignature}
+              aria-label={`Add ${pagesToReachNextStorySignature()} pages`}
+              title={`Add ${pagesToReachNextStorySignature()} pages to reach a multiple of 4 story pages`}
+            >
+              + Pages
             </button>
             {hasSinglePageSidePanel && (
               <div className="story-panels-preview-toggle" role="group" aria-label="Single page preview mode">
                 <button
                   type="button"
                   className={singlePagePreviewMode === 'readable' ? 'active' : ''}
-                  onClick={() => setSinglePagePreviewMode('readable')}
+                  onClick={() => selectSinglePagePreviewMode('readable')}
                 >
                   Readable area
                 </button>
                 <button
                   type="button"
                   className={singlePagePreviewMode === 'print' ? 'active' : ''}
-                  onClick={() => setSinglePagePreviewMode('print')}
+                  onClick={() => selectSinglePagePreviewMode('print')}
                 >
                   Print preview
                 </button>
@@ -750,7 +1320,6 @@ export function PageLayoutEditor({
     clampedPageIndex,
     currentPageLabel,
     hasSinglePageSidePanel,
-    isLastStoryPageInView,
     isPageLayoutMode,
     isSaving,
     layoutMode,
@@ -834,8 +1403,15 @@ export function PageLayoutEditor({
                         <button
                           key={panel.id}
                           type="button"
-                          className={`story-panels-page-panel is-${panel.panelKind} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
-                          style={panelStyle(panel, pageRows)}
+                          className={`story-panels-page-panel is-${panel.panelKind} ${panel.sourceKind === 'caption' ? 'is-caption' : ''} ${captionPanelClassName(panel)} ${panel.panelKind === 'image' && panel.activeAssetId ? 'has-image' : ''} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
+                          style={{
+                            ...panelStyle(panel, pageRows),
+                            ...(panel.panelKind === 'text' ? panelCanvasTextStyle(
+                              panel,
+                              selectedPanelId,
+                              fontSizeInput,
+                            ) : {}),
+                          }}
                           onClick={() => onSelectPanel(panel.id)}
                           onDoubleClick={(event) => openPanelDetail(event, panel)}
                           onContextMenu={(event) => {
@@ -844,10 +1420,12 @@ export function PageLayoutEditor({
                           }}
                           onPointerDown={(event) => beginDrag(event, panel, 'move')}
                         >
-                          {panel.sourceKind === 'story' && panel.panelKind !== 'text' && (
-                            <strong>Panel {storyPanelNumberById.get(panel.id) ?? ''}</strong>
-                          )}
-                          <span>{(panel.panelKind === 'text' && panel.id === selectedPanelId && customTextDraft ? customTextDraft : panel.panelKind === 'text' && panel.customText ? panel.customText : panel.selectedText || (panel.sourceKind === 'free-image' ? 'Cover image block' : '')).replace(/\s+/g, ' ').trim().slice(0, 120)}</span>
+                          {panel.panelKind === 'text' ? (
+                            <span
+                              className="story-panels-page-panel-rich-text"
+                              dangerouslySetInnerHTML={{ __html: sanitizeRichText(richTextForPanel(panel, panel.id === selectedPanelId ? customTextDraft : null)) }}
+                            />
+                          ) : renderImagePanelBody(panel)}
                           {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
                             <span
                               key={corner}
@@ -883,9 +1461,6 @@ export function PageLayoutEditor({
             return (
             <article
               key="intentional-blank-start"
-              ref={(element) => {
-                if (hasSinglePageSidePanel && pageIndex === 0) sideHeightSourceRef.current = element;
-              }}
               className={`story-panels-page is-blank ${layoutMode === 'all-pages' && selectedPageId === null ? 'is-page-selected' : ''}`}
             >
                 <h3>Intentionally Blank</h3>
@@ -898,6 +1473,7 @@ export function PageLayoutEditor({
                   >
                     <p>This page intentionally left blank.</p>
                   </div>,
+                  hasSinglePageSidePanel ? (element) => { sideHeightSourceRef.current = element; } : undefined,
                 )}
               </article>
             );
@@ -907,9 +1483,6 @@ export function PageLayoutEditor({
           return (
             <article
               key={`${page.id}-${pageIndex}`}
-              ref={(element) => {
-                if (hasSinglePageSidePanel && pageIndex === 0) sideHeightSourceRef.current = element;
-              }}
               className={`story-panels-page ${layoutMode === 'all-pages' && selectedPageId === page.id ? 'is-page-selected' : ''}`}
               onClick={() => setSelectedPageId(page.id)}
               onDoubleClick={layoutMode === 'all-pages' ? () => openPageDetail(page.id) : undefined}
@@ -936,8 +1509,15 @@ export function PageLayoutEditor({
                     <button
                       key={panel.id}
                       type="button"
-                      className={`story-panels-page-panel is-${panel.panelKind} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
-                      style={panelStyle(panel, pageRows)}
+                      className={`story-panels-page-panel is-${panel.panelKind} ${panel.sourceKind === 'caption' ? 'is-caption' : ''} ${captionPanelClassName(panel)} ${panel.panelKind === 'image' && panel.activeAssetId ? 'has-image' : ''} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id ? 'is-dragging' : ''}`}
+                      style={{
+                        ...panelStyle(panel, pageRows),
+                        ...(panel.panelKind === 'text' ? panelCanvasTextStyle(
+                          panel,
+                          selectedPanelId,
+                          fontSizeInput,
+                        ) : {}),
+                      }}
                       onClick={layoutMode === 'all-pages' ? undefined : () => onSelectPanel(panel.id)}
                       onDoubleClick={(event) => openPanelDetail(event, panel)}
                       onContextMenu={(event) => {
@@ -948,10 +1528,12 @@ export function PageLayoutEditor({
                     >
                       {layoutMode !== 'all-pages' && (
                         <>
-                          {panel.sourceKind === 'story' && panel.panelKind !== 'text' && (
-                            <strong>Panel {storyPanelNumberById.get(panel.id) ?? ''}</strong>
-                          )}
-                          <span>{(panel.panelKind === 'text' && panel.id === selectedPanelId && customTextDraft ? customTextDraft : panel.panelKind === 'text' && panel.customText ? panel.customText : panel.selectedText || (panel.sourceKind === 'free-image' ? 'Cover image block' : '')).replace(/\s+/g, ' ').trim().slice(0, 120)}</span>
+                          {panel.panelKind === 'text' ? (
+                            <span
+                              className="story-panels-page-panel-rich-text"
+                              dangerouslySetInnerHTML={{ __html: sanitizeRichText(richTextForPanel(panel, panel.id === selectedPanelId ? customTextDraft : null)) }}
+                            />
+                          ) : renderImagePanelBody(panel)}
                           {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
                             <span
                               key={corner}
@@ -965,6 +1547,9 @@ export function PageLayoutEditor({
                     </button>
                   ))}
                 </div>,
+                hasSinglePageSidePanel && pageIndex === 0
+                  ? (element) => { sideHeightSourceRef.current = element; }
+                  : undefined,
               )}
             </article>
           );
@@ -982,55 +1567,418 @@ export function PageLayoutEditor({
                     Delete
                   </button>
                 </div>
+                <div className="story-panels-info-panel-body" ref={infoPanelBodyRef}>
+                {imageInfoHost && (
                 <div className="story-panels-info-control">
                   <span>Panel kind</span>
                   <div className="story-panels-kind-toggle" role="tablist" aria-label="Panel kind">
                     <button
                       type="button"
-                      className={visibleSelectedPanel.panelKind === 'image' ? 'active' : ''}
+                      className={imageInfoHost.panelKind === 'image' ? 'active' : ''}
                       role="tab"
-                      aria-selected={visibleSelectedPanel.panelKind === 'image'}
+                      aria-selected={imageInfoHost.panelKind === 'image'}
                       disabled={isSaving}
-                      onClick={() => updateSelectedPanel({ panelKind: 'image' })}
+                      onClick={() => updatePanelById(imageInfoHost.id, { panelKind: 'image' })}
                     >
                       Image panel
                     </button>
                     <button
                       type="button"
-                      className={visibleSelectedPanel.panelKind === 'text' ? 'active' : ''}
+                      className={imageInfoHost.panelKind === 'text' ? 'active' : ''}
                       role="tab"
-                      aria-selected={visibleSelectedPanel.panelKind === 'text'}
+                      aria-selected={imageInfoHost.panelKind === 'text'}
                       disabled={isSaving}
-                      onClick={() => updateSelectedPanel({ panelKind: 'text' })}
+                      onClick={() => updatePanelById(imageInfoHost.id, { panelKind: 'text' })}
                     >
                       Text / caption
                     </button>
                   </div>
                 </div>
+                )}
+                {imageInfoHost?.panelKind === 'image' && (
+                  <div className="story-panels-info-image-section">
+                    <span>Image</span>
+                    <div className="story-panels-info-image-actions">
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={isSaving}
+                        onClick={() => setPickerPanelId(imageInfoHost.id)}
+                      >
+                        Choose image…
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={isSaving || !imageInfoHost.activeAssetId}
+                        onClick={() => clearPanelImage(imageInfoHost.id)}
+                      >
+                        Clear image
+                      </button>
+                    </div>
+                    <div className="story-panels-info-aspect-group">
+                      <div className="story-panels-info-aspect-head">
+                        <span>Ratio</span>
+                        {imageInfoHost.aspectRatio && (
+                          <span className="story-panels-info-aspect-current">
+                            {imageInfoHost.aspectRatio}
+                            {imageInfoHost.aspectRatioLocked ? ' · locked' : ''}
+                          </span>
+                        )}
+                      </div>
+                      <div className="story-panels-info-aspect-controls">
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={isSaving || isSnappingAspect || !imageInfoHost.activeAssetId}
+                          onClick={() => void snapSelectedPanelToImageRatio(imageInfoHost)}
+                        >
+                          {isSnappingAspect ? 'Snapping…' : 'Snap to image ratio'}
+                        </button>
+                        <button
+                          type="button"
+                          className={`secondary ${imageInfoHost.aspectRatioLocked ? 'active' : ''}`}
+                          disabled={isSaving}
+                          onClick={() => togglePanelAspectRatioLock(imageInfoHost)}
+                        >
+                          {imageInfoHost.aspectRatioLocked ? '🔓 ratio' : '🔒 ratio'}
+                        </button>
+                        <div className="story-panels-info-aspect-popover-wrap">
+                          <button
+                            type="button"
+                            className={`secondary ${ratioPopoverOpen ? 'active' : ''}`}
+                            disabled={isSaving}
+                            onClick={() => setRatioPopoverOpen((open) => !open)}
+                          >
+                            Snap to preset…
+                          </button>
+                          {ratioPopoverOpen && (
+                            <div className="story-panels-aspect-ratio-popover" role="menu" aria-label="Image aspect ratios">
+                              {GEMINI_IMAGE_ASPECT_RATIOS.map((ratio) => (
+                                <button
+                                  key={ratio}
+                                  type="button"
+                                  role="menuitem"
+                                  className={imageInfoHost.aspectRatio === ratio ? 'active' : ''}
+                                  disabled={isSaving}
+                                  onClick={() => {
+                                    snapPanelToAspectRatio(imageInfoHost, ratio);
+                                    setRatioPopoverOpen(false);
+                                  }}
+                                >
+                                  {ratio}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {imageInfoHost.assetIds.length > 1 && (
+                      <div className="story-panels-info-image-variants moment-sequence-thumbs">
+                        {nonArchivedVariants(assets, imageInfoHost.assetIds).map((asset) => (
+                          <button
+                            key={asset.id}
+                            type="button"
+                            className={`moment-sequence-thumb ${asset.id === imageInfoHost.activeAssetId ? 'is-active' : ''}`}
+                            disabled={isSaving}
+                            onClick={() => setPanelActiveAsset(imageInfoHost.id, asset.id)}
+                          >
+                            <img src={assetThumbnailUrl(projectSlug, asset)} alt="" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {imageInfoHost?.sourceKind === 'story' && (
                 <label>
-                  {visibleSelectedPanel.sourceKind === 'story' ? `Passage text (${visibleSelectedPanel.startOffset} to ${visibleSelectedPanel.endOffset})` : 'Passage text'}
+                  {`Passage text (${imageInfoHost.startOffset} to ${imageInfoHost.endOffset})`}
                   <textarea
-                    value={visibleSelectedPanel.sourceKind === 'story' ? visibleSelectedPanel.selectedText : ''}
+                    value={imageInfoHost.selectedText}
                     rows={5}
                     readOnly
-                    disabled={visibleSelectedPanel.sourceKind !== 'story'}
-                    placeholder={visibleSelectedPanel.sourceKind !== 'story' ? 'No source passage for this free layout item' : undefined}
                   />
                 </label>
-                {visibleSelectedPanel.panelKind === 'text' && (
-                  <label>
-                    Caption text
-                    <textarea
-                      value={customTextDraft ?? ''}
-                      rows={5}
+                )}
+                {captionHostPanel && (
+                  <div className="story-panels-info-captions-group">
+                    <button
+                      type="button"
+                      className="secondary"
                       disabled={isSaving}
-                      placeholder="Text to show in the final comic panel"
+                      onClick={() => addCaptionPanel(captionHostPanel)}
+                    >
+                      Add caption
+                    </button>
+                    {childCaptions.length === 0 ? (
+                      <p className="muted">No captions yet. Add one to place linked text below this image on the layout.</p>
+                    ) : (
+                      <div className="story-panels-info-caption-list">
+                        {childCaptions.map((caption, index) => (
+                          <div
+                            key={caption.id}
+                            className={`story-panels-info-caption-entry ${visibleSelectedPanel?.id === caption.id ? 'is-selected' : ''}`}
+                          >
+                            <textarea
+                              aria-label={captionLabel(index)}
+                              value={captionTextDrafts[caption.id] ?? caption.customText}
+                              rows={3}
+                              disabled={isSaving}
+                              onChange={(event) => {
+                                setCaptionTextDrafts((current) => ({
+                                  ...current,
+                                  [caption.id]: event.target.value,
+                                }));
+                              }}
+                              onBlur={() => commitCaptionTextDraft(caption.id)}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            />
+                            <div className="story-panels-info-caption-entry-actions">
+                              <button
+                                type="button"
+                                className="story-panels-delete-caption-button"
+                                disabled={isSaving}
+                                aria-label={`Delete ${captionLabel(index)}`}
+                                onClick={() => setPendingCaptionDeleteId(caption.id)}
+                              >
+                                <TrashIcon />
+                              </button>
+                              <div className="story-panels-info-caption-style-wrap">
+                                <button
+                                  type="button"
+                                  className={`story-panels-caption-style-button ${captionStylePopoverId === caption.id ? 'active' : ''}`}
+                                  disabled={isSaving}
+                                  aria-label={`Style ${captionLabel(index)}`}
+                                  aria-expanded={captionStylePopoverId === caption.id}
+                                  onClick={() => setCaptionStylePopoverId((current) => (current === caption.id ? null : caption.id))}
+                                >
+                                  <StyleIcon />
+                                </button>
+                                {captionStylePopoverId === caption.id && (
+                                  <div
+                                    className="story-panels-caption-style-popover"
+                                    role="dialog"
+                                    aria-label={`${captionLabel(index)} appearance`}
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
+                                    <div className="story-panels-caption-style-field">
+                                      <span>Shape</span>
+                                      <div className="story-panels-caption-style-options">
+                                        <button
+                                          type="button"
+                                          className={captionStyleForPanel(caption).shape === 'square' ? 'active' : ''}
+                                          disabled={isSaving}
+                                          onClick={() => updateCaptionStyle(caption.id, { shape: 'square' })}
+                                        >
+                                          Square
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className={captionStyleForPanel(caption).shape === 'oval' ? 'active' : ''}
+                                          disabled={isSaving}
+                                          onClick={() => updateCaptionStyle(caption.id, { shape: 'oval' })}
+                                        >
+                                          Oval
+                                        </button>
+                                      </div>
+                                    </div>
+                                    <div className="story-panels-caption-style-field">
+                                      <span>Background</span>
+                                      <div className="story-panels-caption-style-options">
+                                        <button
+                                          type="button"
+                                          className={captionStyleForPanel(caption).background === 'transparent' ? 'active' : ''}
+                                          disabled={isSaving}
+                                          onClick={() => updateCaptionStyle(caption.id, { background: 'transparent' })}
+                                        >
+                                          Transparent
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className={captionStyleForPanel(caption).background === 'white' ? 'active' : ''}
+                                          disabled={isSaving}
+                                          onClick={() => updateCaptionStyle(caption.id, { background: 'white' })}
+                                        >
+                                          White
+                                        </button>
+                                      </div>
+                                    </div>
+                                    <div className="story-panels-caption-style-field">
+                                      <span>Text color</span>
+                                      <div className="story-panels-caption-color-presets">
+                                        {CAPTION_COLOR_PRESETS.map((color) => (
+                                          <button
+                                            key={color}
+                                            type="button"
+                                            className={captionStyleForPanel(caption).color === color ? 'active' : ''}
+                                            disabled={isSaving}
+                                            aria-label={color}
+                                            style={{ backgroundColor: color }}
+                                            onClick={() => updateCaptionStyle(caption.id, { color })}
+                                          />
+                                        ))}
+                                      </div>
+                                      <label className="story-panels-caption-color-input">
+                                        Custom
+                                        <input
+                                          type="color"
+                                          value={captionStyleForPanel(caption).color ?? '#111827'}
+                                          disabled={isSaving}
+                                          onChange={(event) => updateCaptionStyle(caption.id, { color: event.target.value })}
+                                        />
+                                      </label>
+                                    </div>
+                                    {captionStyleForPanel(caption).background === 'transparent' && (
+                                      <div className="story-panels-caption-style-field">
+                                        <span>Outline color</span>
+                                        <div className="story-panels-caption-color-presets">
+                                          {CAPTION_COLOR_PRESETS.map((color) => (
+                                            <button
+                                              key={`outline-${color}`}
+                                              type="button"
+                                              className={captionStyleForPanel(caption).outlineColor === color ? 'active' : ''}
+                                              disabled={isSaving}
+                                              aria-label={color}
+                                              style={{ backgroundColor: color }}
+                                              onClick={() => updateCaptionStyle(caption.id, { outlineColor: color })}
+                                            />
+                                          ))}
+                                        </div>
+                                        <label className="story-panels-caption-color-input">
+                                          Custom
+                                          <input
+                                            type="color"
+                                            value={captionStyleForPanel(caption).outlineColor ?? '#ffffff'}
+                                            disabled={isSaving}
+                                            onChange={(event) => updateCaptionStyle(caption.id, { outlineColor: event.target.value })}
+                                          />
+                                        </label>
+                                      </div>
+                                    )}
+                                    <div className="story-panels-caption-style-field">
+                                      <label>
+                                        Font
+                                        <select
+                                          value={captionStyleForPanel(caption).fontFamily}
+                                          disabled={isSaving}
+                                          onChange={(event) => updateCaptionStyle(caption.id, { fontFamily: event.target.value as StoryPanelTextStyle['fontFamily'] })}
+                                        >
+                                          <option value="serif">Serif</option>
+                                          <option value="sans">Sans</option>
+                                          <option value="mono">Mono</option>
+                                          <option value="comic">Comic Sans</option>
+                                        </select>
+                                      </label>
+                                      <label>
+                                        Size
+                                        <input
+                                          type="number"
+                                          min={6}
+                                          max={48}
+                                          value={
+                                            captionFontSizeDraft?.captionId === caption.id
+                                              ? captionFontSizeDraft.value
+                                              : captionStyleForPanel(caption).fontSize
+                                          }
+                                          disabled={isSaving}
+                                          onChange={(event) => setCaptionFontSizeDraft({ captionId: caption.id, value: event.target.value })}
+                                          onBlur={() => commitCaptionFontSizeInput(caption.id)}
+                                          onKeyDown={(event) => {
+                                            if (event.key === 'Enter') event.currentTarget.blur();
+                                          }}
+                                        />
+                                      </label>
+                                      <label>
+                                        Align
+                                        <select
+                                          value={captionStyleForPanel(caption).align}
+                                          disabled={isSaving}
+                                          onChange={(event) => updateCaptionStyle(caption.id, { align: event.target.value as StoryPanelTextStyle['align'] })}
+                                        >
+                                          <option value="left">Left</option>
+                                          <option value="center">Center</option>
+                                          <option value="right">Right</option>
+                                        </select>
+                                      </label>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {visibleSelectedPanel.panelKind === 'text' && visibleSelectedPanel.sourceKind !== 'caption' && (
+                  <div className="story-panels-text-editor-panel">
+                    <span>Caption text</span>
+                    <div className="story-panels-text-style-row">
+                      <label>
+                        Font
+                        <select
+                          value={textStyleForPanel(visibleSelectedPanel).fontFamily}
+                          disabled={isSaving}
+                          onChange={(event) => updateSelectedPanelTextStyle({ fontFamily: event.target.value as StoryPanelTextStyle['fontFamily'] })}
+                        >
+                          <option value="serif">Serif</option>
+                          <option value="sans">Sans</option>
+                          <option value="mono">Mono</option>
+                          <option value="comic">Comic Sans</option>
+                        </select>
+                      </label>
+                      <label>
+                        Size
+                        <input
+                          type="number"
+                          min={6}
+                          max={48}
+                          value={fontSizeInput ?? textStyleForPanel(visibleSelectedPanel).fontSize}
+                          disabled={isSaving}
+                          onChange={(event) => setFontSizeInput(event.target.value)}
+                          onBlur={commitFontSizeInput}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') event.currentTarget.blur();
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Align
+                        <select
+                          value={textStyleForPanel(visibleSelectedPanel).align}
+                          disabled={isSaving}
+                          onChange={(event) => updateSelectedPanelTextStyle({ align: event.target.value as StoryPanelTextStyle['align'] })}
+                        >
+                          <option value="left">Left</option>
+                          <option value="center">Center</option>
+                          <option value="right">Right</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div className="story-panels-rich-text-toolbar" aria-label="Text formatting">
+                      <button type="button" className="secondary" disabled={isSaving} onMouseDown={(event) => event.preventDefault()} onClick={() => applyRichTextCommand('bold')}>Bold</button>
+                      <button type="button" className="secondary" disabled={isSaving} onMouseDown={(event) => event.preventDefault()} onClick={() => applyRichTextCommand('italic')}>Italic</button>
+                      <button type="button" className="secondary" disabled={isSaving} onMouseDown={(event) => event.preventDefault()} onClick={() => applyRichTextCommand('underline')}>Underline</button>
+                    </div>
+                    <div
+                      ref={richTextEditorRef}
+                      className="story-panels-rich-text-editor"
+                      contentEditable={!isSaving}
+                      suppressContentEditableWarning
+                      style={textPanelCssProperties(
+                        visibleSelectedPanel,
+                        textStyleOverrideFromFontSizeInput(visibleSelectedPanel, selectedPanelId, fontSizeInput),
+                        'editor',
+                      )}
                       onKeyDown={(event) => event.stopPropagation()}
-                      onChange={(event) => setCustomTextDraft(event.target.value)}
+                      onInput={(event) => setCustomTextDraft(sanitizeRichText(event.currentTarget.innerHTML))}
                       onBlur={commitCustomTextDraft}
                     />
-                  </label>
+                  </div>
                 )}
+                </div>
               </>
             ) : (
               <p className="muted">Select a page panel to see its settings and source text.</p>
@@ -1062,11 +2010,25 @@ export function PageLayoutEditor({
           )}
         </div>
       )}
+      {pendingCaptionDelete && (
+        <div className="confirm-backdrop" onClick={() => setPendingCaptionDeleteId(null)}>
+          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-story-caption-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="delete-story-caption-title">Delete {panelLabelFor(pendingCaptionDelete)}?</h2>
+            <p>This will remove the caption from the page layout. This can be undone from the header.</p>
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={() => setPendingCaptionDeleteId(null)}>Cancel</button>
+              <button type="button" className="danger" disabled={isSaving} onClick={confirmDeleteCaption}>Delete caption</button>
+            </div>
+          </div>
+        </div>
+      )}
       {pendingPanelDelete && (
         <div className="confirm-backdrop" onClick={() => setPendingPanelDeleteId(null)}>
           <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-story-panel-title" onClick={(event) => event.stopPropagation()}>
             <h2 id="delete-story-panel-title">
-              Delete {pendingPanelDelete.sourceKind === 'story'
+              Delete {pendingPanelDelete.sourceKind === 'caption'
+                ? panelLabelFor(pendingPanelDelete)
+                : pendingPanelDelete.sourceKind === 'story'
                 ? `Panel ${storyPanelNumberById.get(pendingPanelDelete.id) ?? ''}`
                 : pendingPanelDelete.panelKind === 'text' ? 'text block' : 'image block'}?
             </h2>
@@ -1098,6 +2060,25 @@ export function PageLayoutEditor({
           </div>
         </div>
       )}
+      {pickerPanelId && (() => {
+        const pickerPanel = displayDocument.panels.find((panel) => panel.id === pickerPanelId);
+        if (!pickerPanel || pickerPanel.panelKind !== 'image') return null;
+        return (
+          <PanelImagePicker
+            projectSlug={projectSlug}
+            panelLabel={panelLabelFor(pickerPanel)}
+            assets={assets}
+            projectTags={projectTags}
+            canvas={canvas}
+            currentActiveAssetId={pickerPanel.activeAssetId}
+            onSelect={(assetId) => {
+              assignPanelImage(pickerPanelId, assetId);
+              setPickerPanelId(null);
+            }}
+            onClose={() => setPickerPanelId(null)}
+          />
+        );
+      })()}
     </>
   );
 }

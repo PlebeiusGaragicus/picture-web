@@ -468,20 +468,35 @@ class StoryPanelPageSettings(BaseModel):
     height: int = Field(default=3, ge=1, le=100)
 
 
+class StoryPanelTextStyle(BaseModel):
+    fontFamily: Literal["serif", "sans", "mono", "comic"] = "serif"
+    fontSize: int = Field(default=8, ge=6, le=48)
+    align: Literal["left", "center", "right"] = "left"
+    shape: Literal["square", "oval"] = "square"
+    background: Literal["transparent", "white"] = "white"
+    color: str = Field(default="#111827", pattern=TAG_COLOR_RE)
+    outlineColor: str = Field(default="#ffffff", pattern=TAG_COLOR_RE)
+
+
 class StoryPanel(BaseModel):
     id: str = Field(pattern=TAG_RE)
     order: int = Field(ge=0)
-    sourceKind: Literal["story", "free-text", "free-image"] = "story"
+    sourceKind: Literal["story", "free-text", "free-image", "caption"] = "story"
     startOffset: int | None = Field(default=None, ge=0)
     endOffset: int | None = Field(default=None, ge=0)
     selectedText: str = ""
     customText: str = ""
+    richText: str = ""
+    textStyle: StoryPanelTextStyle = Field(default_factory=StoryPanelTextStyle)
     pageId: str = Field(pattern=TAG_RE)
     panelKind: Literal["image", "text"] = "image"
     rect: StoryPanelRect = Field(default_factory=lambda: StoryPanelRect(x=0, y=0, w=4, h=3))
     layer: int = Field(default=0, ge=0)
+    parentPanelId: str | None = Field(default=None, pattern=TAG_RE)
     assetIds: list[str] = Field(default_factory=list)
     activeAssetId: str | None = None
+    aspectRatio: str | None = None
+    aspectRatioLocked: bool = False
     finalized: bool = False
 
     @model_validator(mode="after")
@@ -491,8 +506,19 @@ class StoryPanel(BaseModel):
                 raise ValueError("Story panels must have book offsets")
             if self.endOffset <= self.startOffset:
                 raise ValueError("Panel endOffset must be greater than startOffset")
+            if self.parentPanelId is not None:
+                raise ValueError("Story panels must not have parentPanelId")
+        elif self.sourceKind == "caption":
+            if not self.parentPanelId:
+                raise ValueError("Caption panels must have parentPanelId")
+            if self.panelKind != "text":
+                raise ValueError("Caption panels must be text panels")
+            if self.startOffset is not None or self.endOffset is not None:
+                raise ValueError("Caption panels must not have book offsets")
         elif self.startOffset is not None or self.endOffset is not None:
             raise ValueError("Free layout items must not have book offsets")
+        elif self.parentPanelId is not None:
+            raise ValueError("Only caption panels may have parentPanelId")
         if self.activeAssetId is not None and self.activeAssetId not in self.assetIds:
             raise ValueError("activeAssetId must be attached to the panel")
         return self
@@ -541,17 +567,22 @@ class StoryPanelCreate(BaseModel):
 
 class StoryPanelPatch(BaseModel):
     order: int | None = Field(default=None, ge=0)
-    sourceKind: Literal["story", "free-text", "free-image"] | None = None
+    sourceKind: Literal["story", "free-text", "free-image", "caption"] | None = None
     startOffset: int | None = Field(default=None, ge=0)
     endOffset: int | None = Field(default=None, ge=0)
     selectedText: str | None = None
     customText: str | None = None
+    richText: str | None = None
+    textStyle: StoryPanelTextStyle | None = None
     pageId: str | None = Field(default=None, pattern=TAG_RE)
     panelKind: Literal["image", "text"] | None = None
     rect: StoryPanelRect | None = None
     layer: int | None = Field(default=None, ge=0)
+    parentPanelId: str | None = Field(default=None, pattern=TAG_RE)
     assetIds: list[str] | None = None
     activeAssetId: str | None = None
+    aspectRatio: str | None = None
+    aspectRatioLocked: bool | None = None
     finalized: bool | None = None
 
 

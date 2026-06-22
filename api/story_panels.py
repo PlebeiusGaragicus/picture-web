@@ -28,12 +28,19 @@ def document_path(slug: str) -> Path:
     return story_panels_dir(slug) / "panels.json"
 
 
+def default_story_pages() -> list[StoryPanelPage]:
+    return [
+        StoryPanelPage(id=f"page-{index:03d}", order=index + 1, title=f"Page {index}", pageKind="story")
+        for index in range(1, 5)
+    ]
+
+
 def default_page() -> StoryPanelPage:
-    return StoryPanelPage(id="page-001", order=2, title="Page 1", pageKind="story")
+    return default_story_pages()[0]
 
 
 def empty_document() -> StoryPanelDocument:
-    return _normalize_document_pages(StoryPanelDocument(pages=[default_page()], panels=[]))
+    return _normalize_document_pages(StoryPanelDocument(pages=default_story_pages(), panels=[]))
 
 
 def _fixed_page(id: str, order: int, title: str, page_kind: str) -> StoryPanelPage:
@@ -47,7 +54,7 @@ def _normalize_document_pages(document: StoryPanelDocument) -> StoryPanelDocumen
         key=lambda page: (page.order, page.id),
     )
     if not story_pages:
-        story_pages = [default_page()]
+        story_pages = default_story_pages()
     fixed_front = [
         _fixed_page("cover", 0, "Front Cover", "cover"),
         _fixed_page("inside-front-cover", 1, "Inside Front Cover", "inside-cover"),

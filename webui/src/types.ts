@@ -318,20 +318,35 @@ export interface StoryPanelPageSettings {
   height: number;
 }
 
+export interface StoryPanelTextStyle {
+  fontFamily: 'serif' | 'sans' | 'mono' | 'comic';
+  fontSize: number;
+  align: 'left' | 'center' | 'right';
+  shape?: 'square' | 'oval';
+  background?: 'transparent' | 'white';
+  color?: string;
+  outlineColor?: string;
+}
+
 export interface StoryPanel {
   id: string;
   order: number;
-  sourceKind: 'story' | 'free-text' | 'free-image';
+  sourceKind: 'story' | 'free-text' | 'free-image' | 'caption';
   startOffset: number | null;
   endOffset: number | null;
   selectedText: string;
   customText: string;
+  richText: string;
+  textStyle: StoryPanelTextStyle;
   pageId: string;
   panelKind: 'image' | 'text';
   rect: StoryPanelRect;
   layer: number;
+  parentPanelId?: string | null;
   assetIds: string[];
   activeAssetId?: string | null;
+  aspectRatio?: string | null;
+  aspectRatioLocked?: boolean;
   finalized: boolean;
 }
 
@@ -353,7 +368,7 @@ export interface StoryPanelCreatePayload {
 }
 
 export type StoryPanelPatchPayload = Partial<
-  Pick<StoryPanel, 'order' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'customText' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'assetIds' | 'activeAssetId' | 'finalized'>
+  Pick<StoryPanel, 'order' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'customText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'finalized'>
 >;
 
 export interface SceneListLine {

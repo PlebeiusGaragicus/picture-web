@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
 
@@ -40,6 +41,55 @@ class ImposedSheet:
     front_right: PrintPage
     back_left: PrintPage
     back_right: PrintPage
+
+
+@dataclass
+class RichTextRun:
+    text: str
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+
+
+class RichTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.runs: list[RichTextRun | None] = []
+        self._bold = 0
+        self._italic = 0
+        self._underline = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"strong", "b"}:
+            self._bold += 1
+        elif tag in {"em", "i"}:
+            self._italic += 1
+        elif tag == "u":
+            self._underline += 1
+        elif tag in {"br", "div", "p"}:
+            self.runs.append(None)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"strong", "b"}:
+            self._bold = max(0, self._bold - 1)
+        elif tag in {"em", "i"}:
+            self._italic = max(0, self._italic - 1)
+        elif tag == "u":
+            self._underline = max(0, self._underline - 1)
+        elif tag in {"div", "p"}:
+            self.runs.append(None)
+
+    def handle_data(self, data: str) -> None:
+        if not data:
+            return
+        self.runs.append(
+            RichTextRun(
+                text=data,
+                bold=self._bold > 0,
+                italic=self._italic > 0,
+                underline=self._underline > 0,
+            )
+        )
 
 
 def story_pages(document: StoryPanelDocument) -> list[PrintPage]:
@@ -202,11 +252,61 @@ def _draw_panel(
 
 
 def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel, x: float, y: float, w: float, h: float) -> None:
-    pdf.setFillColor(HexColor("#ede9fe"))
-    pdf.setStrokeColor(HexColor("#8b5cf6"))
-    pdf.rect(x, y, w, h, stroke=1, fill=1)
-    text = (panel.customText or panel.selectedText).strip()
-    _draw_wrapped_text(pdf, text, x + 5, y + h - 12, w - 10, h - 10, font="Times-Roman", size=8)
+    style = panel.textStyle
+    transparent = panel.sourceKind == "caption" and style.background == "transparent"
+    if transparent:
+        pdf.setFillColor(white)
+        pdf.setStrokeColor(white)
+    else:
+        pdf.setFillColor(white)
+        pdf.setStrokeColor(HexColor("#cbd5e1"))
+    radius = min(w, h) / 2 if panel.sourceKind == "caption" and style.shape == "oval" else 0
+    if radius > 0:
+        pdf.roundRect(x, y, w, h, radius, stroke=0 if transparent else 1, fill=0 if transparent else 1)
+    else:
+        pdf.rect(x, y, w, h, stroke=0 if transparent else 1, fill=0 if transparent else 1)
+    rich_text = panel.richText or _plain_text_to_rich_text(panel.customText or panel.selectedText)
+    text_color = HexColor(style.color) if panel.sourceKind == "caption" else black
+    text_x = x + 5
+    text_y = y + h - 8
+    text_w = w - 10
+    text_h = h - 10
+    if transparent and panel.sourceKind == "caption":
+        outline_color = HexColor(style.outlineColor)
+        for dx, dy in (
+            (-0.6, 0),
+            (0.6, 0),
+            (0, -0.6),
+            (0, 0.6),
+            (-0.6, -0.6),
+            (0.6, -0.6),
+            (-0.6, 0.6),
+            (0.6, 0.6),
+        ):
+            _draw_rich_text(
+                pdf,
+                rich_text,
+                text_x + dx,
+                text_y + dy,
+                text_w,
+                text_h,
+                font_family=style.fontFamily,
+                size=style.fontSize,
+                align=style.align,
+                color=outline_color,
+            )
+    _draw_rich_text(
+        pdf,
+        rich_text,
+        text_x,
+        text_y,
+        text_w,
+        text_h,
+        font_family=style.fontFamily,
+        size=style.fontSize,
+        align=style.align,
+        color=text_color,
+    )
 
 
 def _draw_image_panel(
@@ -297,3 +397,154 @@ def _draw_wrapped_text(
             remaining_y -= line_height
         if remaining_y < min_y:
             return
+
+
+def _plain_text_to_rich_text(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+
+
+def _comic_sans_paths() -> list[Path]:
+    return [
+        Path("/System/Library/Fonts/Supplemental/Comic Sans MS.ttf"),
+        Path("/Library/Fonts/Comic Sans MS.ttf"),
+        Path.home() / "Library/Fonts/Comic Sans MS.ttf",
+        Path("C:/Windows/Fonts/comic.ttf"),
+    ]
+
+
+def _ensure_comic_sans_registered() -> bool:
+    cached = getattr(_ensure_comic_sans_registered, "_available", None)
+    if cached is not None:
+        return cached
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    for path in _comic_sans_paths():
+        if not path.is_file():
+            continue
+        try:
+            pdfmetrics.registerFont(TTFont("ComicSans", str(path)))
+        except Exception:
+            continue
+        _ensure_comic_sans_registered._available = True
+        return True
+    _ensure_comic_sans_registered._available = False
+    return False
+
+
+def _base_font(font_family: str) -> str:
+    if font_family == "sans":
+        return "Helvetica"
+    if font_family == "mono":
+        return "Courier"
+    if font_family == "comic":
+        return "ComicSans" if _ensure_comic_sans_registered() else "Helvetica"
+    return "Times"
+
+
+def _font_name(font_family: str, *, bold: bool = False, italic: bool = False) -> str:
+    base = _base_font(font_family)
+    if base == "ComicSans":
+        return "ComicSans"
+    if base == "Times":
+        if bold and italic:
+            return "Times-BoldItalic"
+        if bold:
+            return "Times-Bold"
+        if italic:
+            return "Times-Italic"
+        return "Times-Roman"
+    if base == "Courier":
+        if bold and italic:
+            return "Courier-BoldOblique"
+        if bold:
+            return "Courier-Bold"
+        if italic:
+            return "Courier-Oblique"
+        return "Courier"
+    if bold and italic:
+        return "Helvetica-BoldOblique"
+    if bold:
+        return "Helvetica-Bold"
+    if italic:
+        return "Helvetica-Oblique"
+    return "Helvetica"
+
+
+def _parse_rich_text(html: str) -> list[RichTextRun | None]:
+    parser = RichTextParser()
+    parser.feed(html)
+    return parser.runs or [RichTextRun("")]
+
+
+def _draw_rich_text(
+    pdf: canvas.Canvas,
+    html: str,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    *,
+    font_family: str,
+    size: int,
+    align: str,
+    color: HexColor | None = None,
+) -> None:
+    pdf.setFillColor(color or HexColor("#111827"))
+    line_height = size * 1.25
+    lines: list[list[RichTextRun]] = []
+    current: list[RichTextRun] = []
+    current_width = 0.0
+
+    def push_line() -> None:
+        nonlocal current, current_width
+        lines.append(current)
+        current = []
+        current_width = 0.0
+
+    for run in _parse_rich_text(html):
+        if run is None:
+            if current:
+                push_line()
+            else:
+                lines.append([])
+            continue
+        for token in run.text.split(" "):
+            if token == "" and current:
+                continue
+            word = token
+            prefix = " " if current else ""
+            font = _font_name(font_family, bold=run.bold, italic=run.italic)
+            token_width = pdf.stringWidth(prefix + word, font, size)
+            if current and current_width + token_width > width:
+                push_line()
+                prefix = ""
+                token_width = pdf.stringWidth(word, font, size)
+            current.append(RichTextRun(prefix + word, bold=run.bold, italic=run.italic, underline=run.underline))
+            current_width += token_width
+    if current:
+        push_line()
+
+    remaining_y = y
+    min_y = y - height
+    for line in lines:
+        if remaining_y < min_y:
+            return
+        line_width = sum(
+            pdf.stringWidth(run.text, _font_name(font_family, bold=run.bold, italic=run.italic), size)
+            for run in line
+        )
+        cursor_x = x
+        if align == "center":
+            cursor_x = x + max(0, (width - line_width) / 2)
+        elif align == "right":
+            cursor_x = x + max(0, width - line_width)
+        for run in line:
+            font = _font_name(font_family, bold=run.bold, italic=run.italic)
+            pdf.setFont(font, size)
+            pdf.drawString(cursor_x, remaining_y, run.text)
+            run_width = pdf.stringWidth(run.text, font, size)
+            if run.underline and run.text.strip():
+                pdf.line(cursor_x, remaining_y - 1.5, cursor_x + run_width, remaining_y - 1.5)
+            cursor_x += run_width
+        remaining_y -= line_height

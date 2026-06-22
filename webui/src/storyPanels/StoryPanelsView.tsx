@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type React from 'react';
 import { formatRequestError } from '../formatError';
 import { api } from '../api';
-import type { StoryPanel, StoryPanelDocument } from '../types';
+import type { Asset, CanvasDocument, StoryPanel, StoryPanelDocument, TagDefinition } from '../types';
+
+const emptyCanvas: CanvasDocument = { version: 2, viewport: { x: 0, y: 0, zoom: 1 }, nodes: {} };
 import { BookTextSelector, type TextSelectionRange } from './BookTextSelector';
 import { PageLayoutEditor, type StoryPanelLayoutMode } from './PageLayoutEditor';
 import { PanelChunkList } from './PanelChunkList';
@@ -23,6 +25,20 @@ function isEditableShortcutTarget(target: EventTarget | null) {
   return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable;
 }
 
+function PanelChunksToggleIcon({ variant }: { variant: 'collapse' | 'expand' }) {
+  return (
+    <svg className="story-panels-chunks-toggle-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      <line x1="10.5" y1="2.5" x2="10.5" y2="13.5" stroke="currentColor" strokeWidth="1.25" />
+      {variant === 'collapse' ? (
+        <path d="M9 8 L6 5.5 M9 8 L6 10.5" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+      ) : (
+        <path d="M5 8 L8 5.5 M5 8 L8 10.5" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+      )}
+    </svg>
+  );
+}
+
 export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
   const [bookText, setBookText] = useState('');
   const [document, setDocument] = useState<StoryPanelDocument | null>(null);
@@ -31,6 +47,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
   const [focusedBookPanelId, setFocusedBookPanelId] = useState<string | null>(null);
   const [focusedChunkPanelId, setFocusedChunkPanelId] = useState<string | null>(null);
   const [layoutMode, setLayoutMode] = useState<StoryPanelLayoutMode>('spread');
+  const [isPanelChunksOpen, setIsPanelChunksOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -40,17 +57,25 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
   const [historyControls, setHistoryControls] = useState<React.ReactNode>(null);
   const [pageControls, setPageControls] = useState<React.ReactNode>(null);
   const [error, setError] = useState<string | null>(null);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [projectTags, setProjectTags] = useState<TagDefinition[]>([]);
+  const [canvas, setCanvas] = useState<CanvasDocument>(emptyCanvas);
 
   const load = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const [book, panels] = await Promise.all([
+      const [book, panels, projectDetail, nextCanvas] = await Promise.all([
         api.getStoryPanelBook(projectSlug),
         api.getStoryPanels(projectSlug),
+        api.getProject(projectSlug),
+        api.getCanvas(projectSlug),
       ]);
       setBookText(book.text);
       setDocument(panels);
+      setAssets(projectDetail.assets);
+      setProjectTags(projectDetail.tags);
+      setCanvas(nextCanvas);
       setSelectedPanelId((current) => current ?? sortedPanels(panels.panels).find((panel) => panel.sourceKind === 'story')?.id ?? null);
     } catch (err) {
       setError(formatRequestError(err));
@@ -189,18 +214,28 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
       i: 'single',
       p: 'single-chunks',
       b: 'book',
-      c: 'book-chunks',
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) return;
-      const nextMode = shortcuts[event.key.toLowerCase()];
+      const key = event.key.toLowerCase();
+      if (key === 'c') {
+        event.preventDefault();
+        if (layoutMode === 'book') {
+          setIsPanelChunksOpen((open) => !open);
+        } else {
+          setLayoutMode('book');
+          setIsPanelChunksOpen(true);
+        }
+        return;
+      }
+      const nextMode = shortcuts[key];
       if (!nextMode) return;
       event.preventDefault();
       setLayoutMode(nextMode);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [layoutMode]);
 
   if (isLoading) {
     return (
@@ -245,7 +280,7 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
       isSaving={isSaving}
     />
   );
-  const showBookText = layoutMode === 'book' || layoutMode === 'book-chunks';
+  const showBookText = layoutMode === 'book';
 
   return (
     <div className="story-adaptation-screen story-panels-screen">
@@ -259,7 +294,6 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
                 <option value="spread">Two-page spread (2)</option>
                 <option value="single">Single page + info (i)</option>
                 <option value="single-chunks">Single page + panel chunks (p)</option>
-                <option value="book-chunks">Book text + panel chunks (c)</option>
                 <option value="book">Book text (b)</option>
               </select>
             </label>
@@ -325,22 +359,51 @@ export function StoryPanelsView({ projectSlug }: { projectSlug: string }) {
           onLayoutModeChange={setLayoutMode}
           onHistoryControlsChange={setHistoryControls}
           onPageControlsChange={setPageControls}
+          assets={assets}
+          projectTags={projectTags}
+          canvas={canvas}
+          projectSlug={projectSlug}
         />
         {showBookText && (
-          <div className={`story-panels-text-row is-book-mode ${layoutMode === 'book' ? 'is-book-only' : ''}`}>
-            <BookTextSelector
-              bookText={bookText}
-              panels={storyPanels}
-              selection={selection}
-              focusedPanelId={focusedBookPanelId}
-              onSelectionChange={setSelection}
-              onCreatePanel={createPanel}
-              onDeletePanel={deletePanel}
-              onAdjustPanelRange={adjustPanelRange}
-              onFocusPanelChunk={focusPanelChunk}
-              isCreating={isCreating}
-            />
-            {layoutMode === 'book-chunks' && panelChunks}
+          <div className={`story-panels-book-layout ${isPanelChunksOpen ? 'is-chunks-open' : 'is-chunks-collapsed'}`}>
+            <div className="story-panels-text-row is-book-mode">
+              <BookTextSelector
+                bookText={bookText}
+                panels={storyPanels}
+                selection={selection}
+                focusedPanelId={focusedBookPanelId}
+                onSelectionChange={setSelection}
+                onCreatePanel={createPanel}
+                onDeletePanel={deletePanel}
+                onAdjustPanelRange={adjustPanelRange}
+                onFocusPanelChunk={focusPanelChunk}
+                isCreating={isCreating}
+              />
+            </div>
+            {isPanelChunksOpen ? (
+              <div className="story-panels-chunks-shell">
+                {panelChunks}
+                <button
+                  type="button"
+                  className="story-panels-chunks-toggle is-collapse"
+                  onClick={() => setIsPanelChunksOpen(false)}
+                  title="Hide panel chunks"
+                  aria-label="Hide panel chunks"
+                >
+                  <PanelChunksToggleIcon variant="collapse" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="story-panels-chunks-toggle is-expand"
+                onClick={() => setIsPanelChunksOpen(true)}
+                title="Show panel chunks"
+                aria-label="Show panel chunks"
+              >
+                <PanelChunksToggleIcon variant="expand" />
+              </button>
+            )}
           </div>
         )}
       </div>
