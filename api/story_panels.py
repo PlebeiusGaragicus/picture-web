@@ -250,6 +250,37 @@ def _story_order_placement(document: StoryPanelDocument, start_offset: int) -> t
     return page_id, _clamp_panel_rect(StoryPanelRect(x=anchor.rect.x, y=y, w=anchor.rect.w, h=anchor.rect.h))
 
 
+def _place_below_panel(document: StoryPanelDocument, anchor: StoryPanel) -> tuple[str, StoryPanelRect]:
+    page_id = anchor.pageId
+    if page_id is None:
+        page_id = _next_page(document).id
+        return page_id, _default_rect(document, page_id)
+    anchor_bottom = anchor.rect.y + anchor.rect.h
+    panels_below_anchor = [
+        panel
+        for panel in document.panels
+        if panel.pageId == page_id and panel.layer == 0 and panel.rect.y >= anchor.rect.y
+    ]
+    y = max([anchor_bottom, *[panel.rect.y + panel.rect.h for panel in panels_below_anchor]], default=anchor_bottom)
+    return page_id, _clamp_panel_rect(StoryPanelRect(x=anchor.rect.x, y=y, w=anchor.rect.w, h=anchor.rect.h))
+
+
+def _draft_order_placement(document: StoryPanelDocument, insert_after_panel_id: str | None) -> tuple[str, StoryPanelRect]:
+    if insert_after_panel_id:
+        anchor = next((panel for panel in document.panels if panel.id == insert_after_panel_id), None)
+        if anchor and anchor.sourceKind in {"story", "draft"}:
+            if anchor.pageId is not None:
+                return _place_below_panel(document, anchor)
+    placed = sorted(
+        [panel for panel in document.panels if panel.sourceKind in {"story", "draft"} and panel.pageId is not None],
+        key=lambda panel: panel.order,
+    )
+    if placed:
+        return _place_below_panel(document, placed[-1])
+    page_id = _next_page(document).id
+    return page_id, _default_rect(document, page_id)
+
+
 def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
     document = read_document(slug)
     if payload.autoPlace:
@@ -314,7 +345,16 @@ def create_draft_panel(slug: str, payload: StoryPanelDraftCreate) -> StoryPanelD
     text = payload.customText.strip()
     page_id = payload.pageId
     rect = payload.rect
-    if page_id is not None:
+    if payload.autoPlace:
+        inferred_page_id, inferred_rect = _draft_order_placement(document, payload.insertAfterPanelId)
+        page_id = page_id or inferred_page_id
+        target_page = next((page for page in document.pages if page.id == page_id), None)
+        if target_page is None:
+            raise HTTPException(status_code=400, detail=f"Unknown page: {page_id}")
+        if target_page.pageKind != "story":
+            raise HTTPException(status_code=400, detail="Draft panel chunks can only be created on story pages")
+        rect = rect or (inferred_rect if page_id == inferred_page_id else _default_rect(document, page_id))
+    elif page_id is not None:
         target_page = next((page for page in document.pages if page.id == page_id), None)
         if target_page is None:
             raise HTTPException(status_code=400, detail=f"Unknown page: {page_id}")

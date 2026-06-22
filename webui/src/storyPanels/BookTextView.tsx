@@ -8,6 +8,7 @@ import { StorySetupView } from './StorySetupView';
 import type { LayoutEditorNavigation } from './layoutEditorNavigation';
 import type { InsertDraftPayload } from './storyPanelSidebar';
 import { sortedPanels, withSelectedText } from './storyPanelUtils';
+import { autoPlaceDraftPanel } from './autoPlace';
 import { useStoryPanelDocument } from './useStoryPanelDocument';
 
 export function BookTextView({
@@ -150,7 +151,11 @@ export function BookTextView({
   const insertDraft = async ({ customText, insertAfterPanelId }: InsertDraftPayload) => {
     if (!document) return;
     const beforeIds = new Set(document.panels.map((panel) => panel.id));
-    const next = await api.createDraftStoryPanel(projectSlug, { customText, insertAfterPanelId });
+    const next = await api.createDraftStoryPanel(projectSlug, {
+      customText,
+      insertAfterPanelId,
+      autoPlace: autoPlaceDraftPanel(sidebarPanels.length, autoPlaceEnabled),
+    });
     setDocument(next);
     const created = next.panels.find((panel) => !beforeIds.has(panel.id));
     if (created) {

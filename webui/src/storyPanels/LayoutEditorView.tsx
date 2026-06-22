@@ -4,6 +4,7 @@ import { PageLayoutEditor, type StoryPanelLayoutMode } from './PageLayoutEditor'
 import { LayoutViewModeSelect } from './LayoutViewModeSelect';
 import { PanelChunkList } from './PanelChunkList';
 import type { InsertDraftPayload } from './storyPanelSidebar';
+import { autoPlaceDraftPanel, readAutoPlaceEnabled } from './autoPlace';
 import type { LayoutEditorNavigation } from './layoutEditorNavigation';
 import { readSingleSidePanel, writeSingleSidePanel, type SingleSidePanel } from './singleSidePanel';
 import { readSinglePagePreviewMode, writeSinglePagePreviewMode, type SinglePagePreviewMode } from './singlePagePreview';
@@ -142,7 +143,11 @@ export function LayoutEditorView({
 
   const insertDraft = async ({ customText, insertAfterPanelId }: InsertDraftPayload) => {
     const beforeIds = new Set(document?.panels.map((panel) => panel.id) ?? []);
-    const next = await api.createDraftStoryPanel(projectSlug, { customText, insertAfterPanelId });
+    const next = await api.createDraftStoryPanel(projectSlug, {
+      customText,
+      insertAfterPanelId,
+      autoPlace: autoPlaceDraftPanel(sidebarPanels.length, readAutoPlaceEnabled()),
+    });
     setDocument(next);
     const created = next.panels.find((panel) => !beforeIds.has(panel.id));
     if (created) {

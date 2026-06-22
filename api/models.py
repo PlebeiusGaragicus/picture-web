@@ -610,6 +610,7 @@ class StoryPanelBookmarkCreate(BaseModel):
 class StoryPanelDraftCreate(BaseModel):
     customText: str = Field(min_length=1)
     insertAfterPanelId: str | None = Field(default=None, pattern=TAG_RE)
+    autoPlace: bool = True
     pageId: str | None = Field(default=None, pattern=TAG_RE)
     rect: StoryPanelRect | None = None
     layer: int = Field(default=0, ge=0)

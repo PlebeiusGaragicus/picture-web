@@ -388,6 +388,7 @@ export interface StoryPanelBookmarkCreatePayload {
 export interface StoryPanelDraftCreatePayload {
   customText: string;
   insertAfterPanelId?: string | null;
+  autoPlace?: boolean;
   pageId?: string | null;
   rect?: StoryPanelRect | null;
   layer?: number;

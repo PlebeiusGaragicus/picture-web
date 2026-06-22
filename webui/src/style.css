@@ -839,6 +839,11 @@ button {
   justify-self: start;
 }
 
+.story-setup-auto-place-note {
+  color: #93c5fd;
+  font-size: 0.82rem;
+}
+
 .layout-view-screen {
   gap: 0;
   padding: 0;

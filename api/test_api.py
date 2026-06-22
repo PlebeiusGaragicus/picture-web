@@ -1437,6 +1437,37 @@ def test_story_panels_draft_insert_after_panel(tmp_path, monkeypatch):
     assert second_panel["order"] + 1 == next(panel for panel in inserted["panels"] if panel["id"] == second_panel["id"])["order"]
 
 
+def test_story_panels_draft_auto_place(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    unplaced = client.post(
+        "/api/projects/farm-comic/story-panels/panels/draft",
+        json={"customText": "First panel.", "autoPlace": False},
+    )
+    assert unplaced.status_code == 200
+    first = next(panel for panel in unplaced.json()["panels"] if panel["customText"] == "First panel.")
+    assert first["pageId"] is None
+
+    placed = client.post(
+        "/api/projects/farm-comic/story-panels/panels/draft",
+        json={"customText": "Second panel.", "autoPlace": True},
+    )
+    assert placed.status_code == 200
+    second = next(panel for panel in placed.json()["panels"] if panel["customText"] == "Second panel.")
+    assert second["pageId"] == "page-001"
+    assert second["rect"] == {"x": 0, "y": 0, "w": 4, "h": 3}
+
+    stacked = client.post(
+        "/api/projects/farm-comic/story-panels/panels/draft",
+        json={"customText": "Third panel.", "autoPlace": True},
+    )
+    assert stacked.status_code == 200
+    third = next(panel for panel in stacked.json()["panels"] if panel["customText"] == "Third panel.")
+    assert third["pageId"] == "page-001"
+    assert third["rect"]["y"] == 3
+
+
 def test_story_panels_create_panel_note_and_bookmark(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)

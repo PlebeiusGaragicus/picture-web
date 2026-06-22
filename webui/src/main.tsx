@@ -1549,7 +1549,7 @@ function App() {
             showPanelChunksToggle={isStoryActive}
             panelChunksOpen={storyPanelChunksOpen}
             onTogglePanelChunks={() => setStoryPanelChunksOpen((open) => !open)}
-            showAutoPlaceToggle={isStoryActive && storyHasBookText}
+            showAutoPlaceToggle={isStoryActive}
             autoPlaceEnabled={storyAutoPlaceEnabled}
             onAutoPlaceChange={(enabled) => {
               writeAutoPlaceEnabled(enabled);

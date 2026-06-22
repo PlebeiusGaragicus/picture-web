@@ -15,3 +15,8 @@ export function writeAutoPlaceEnabled(enabled: boolean) {
     // Ignore storage write failures.
   }
 }
+
+/** Manual-story projects always auto-place the first panel; later panels follow the toggle. */
+export function autoPlaceDraftPanel(sidebarPanelCount: number, autoPlaceEnabled: boolean): boolean {
+  return sidebarPanelCount === 0 || autoPlaceEnabled;
+}

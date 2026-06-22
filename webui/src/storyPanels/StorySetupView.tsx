@@ -49,7 +49,7 @@ export function StorySetupView({
       <div className="story-setup-options">
         <section className="story-setup-card">
           <h3>Write panels</h3>
-          <p className="muted">Build the story beat by beat. Each panel becomes a scene you place in Layout.</p>
+          <p className="muted">Build the story beat by beat. Your first panel is placed on the layout automatically.</p>
           <label className="story-setup-field">
             First panel
             <textarea
