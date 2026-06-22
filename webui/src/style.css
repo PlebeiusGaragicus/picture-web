@@ -950,7 +950,6 @@ button {
 }
 
 .story-view-head-center {
-  position: relative;
   display: flex;
   grid-column: 2;
   align-items: center;
@@ -962,16 +961,6 @@ button {
   grid-column: 3;
   align-items: center;
   justify-self: end;
-}
-
-.story-view-sidebar-collapse {
-  position: absolute;
-  top: 50%;
-  right: calc(100% + 10px);
-  left: auto;
-  flex-shrink: 0;
-  box-shadow: none;
-  transform: translateY(-50%);
 }
 
 .story-view-title {
@@ -1163,9 +1152,35 @@ button {
   padding: 20px 24px 24px;
 }
 
-.story-panels-new-panel-dialog textarea {
+.story-panels-new-panel-dialog textarea,
+.story-panels-insert-dialog textarea {
   min-height: 140px;
   resize: vertical;
+}
+
+.story-panels-insert-dialog {
+  width: min(420px, calc(100vw - 32px));
+}
+
+.story-panels-insert-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.story-panels-insert-context {
+  margin: 0 0 12px;
+}
+
+.story-panels-insert-dialog label input {
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 10px;
+  color: #e2e8f0;
+  background: #0a0a0a;
+  border: 1px solid #333;
+  border-radius: 8px;
 }
 
 .story-view-screen .story-panels-chunk {
@@ -3687,13 +3702,20 @@ button {
   gap: 8px;
 }
 
-.project-top-bar-sidebar-collapse {
-  position: absolute;
-  top: 50%;
-  right: calc(100% + 10px);
+.project-top-bar-start .phase-sidebar-collapse {
+  position: static;
+  top: auto;
   left: auto;
   box-shadow: none;
-  transform: translateY(-50%);
+  transform: none;
+}
+
+.project-top-bar-title {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .project-top-bar-end {
@@ -3805,7 +3827,8 @@ button {
   color: #93c5fd;
 }
 
-.canvas.has-collapsed-sidebar.story-adaptation-view .story-panels-screen {
+.canvas.has-collapsed-sidebar.story-adaptation-view .story-panels-screen,
+.canvas.has-canvas-top-bar.story-adaptation-view .story-panels-screen {
   flex: 1 1 0;
   min-height: 0;
   padding: 0;

@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 TAG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 SLUG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 TAG_COLOR_RE = r"^#[0-9a-fA-F]{6}$"
+LAYOUT_GRID_COLUMNS = 12
+LAYOUT_PAGE_ROWS = 10
 
 AssetKind = Literal["imported", "generated"]
 StoryKind = Literal["picture-book", "illustrated-story", "comic-book"]
@@ -451,8 +453,10 @@ class StoryPanelRect(BaseModel):
 
     @model_validator(mode="after")
     def fits_page_grid(self) -> "StoryPanelRect":
-        if self.x + self.w > 12:
+        if self.x + self.w > LAYOUT_GRID_COLUMNS:
             raise ValueError("Panel layout must fit within the 12-column page grid")
+        if self.y + self.h > LAYOUT_PAGE_ROWS:
+            raise ValueError("Panel layout must fit within the page height grid")
         return self
 
 
@@ -487,7 +491,7 @@ class StoryPanelImageCrop(BaseModel):
 class StoryPanel(BaseModel):
     id: str = Field(pattern=TAG_RE)
     order: int = Field(ge=0)
-    sourceKind: Literal["story", "draft", "note", "bookmark", "free-text", "free-image", "caption"] = "story"
+    sourceKind: Literal["story", "draft", "bookmark", "free-text", "free-image", "caption"] = "story"
     startOffset: int | None = Field(default=None, ge=0)
     endOffset: int | None = Field(default=None, ge=0)
     selectedText: str = ""
@@ -520,15 +524,13 @@ class StoryPanel(BaseModel):
                 raise ValueError("Draft panels must not have book offsets")
             if self.parentPanelId is not None:
                 raise ValueError("Draft panels must not have parentPanelId")
-        elif self.sourceKind in {"note", "bookmark"}:
+        elif self.sourceKind == "bookmark":
             if self.startOffset is None or self.endOffset is None:
-                raise ValueError(f"{self.sourceKind.title()} items must have book offsets")
+                raise ValueError("Bookmark items must have book offsets")
             if self.endOffset <= self.startOffset:
                 raise ValueError("Panel endOffset must be greater than startOffset")
             if self.parentPanelId is not None:
-                raise ValueError(f"{self.sourceKind.title()} items must not have parentPanelId")
-            if self.sourceKind == "note" and not self.customText.strip():
-                raise ValueError("Notes must have customText")
+                raise ValueError("Bookmark items must not have parentPanelId")
         elif self.sourceKind == "caption":
             if not self.parentPanelId:
                 raise ValueError("Caption panels must have parentPanelId")
@@ -540,8 +542,8 @@ class StoryPanel(BaseModel):
             raise ValueError("Free layout items must not have book offsets")
         elif self.parentPanelId is not None:
             raise ValueError("Only caption panels may have parentPanelId")
-        if self.pageId is None and self.sourceKind not in {"story", "draft", "note", "bookmark"}:
-            raise ValueError("Only story, draft, note, and bookmark panels may be unplaced")
+        if self.pageId is None and self.sourceKind not in {"story", "draft", "bookmark"}:
+            raise ValueError("Only story, draft, and bookmark panels may be unplaced")
         if self.activeAssetId is not None and self.activeAssetId not in self.assetIds:
             raise ValueError("activeAssetId must be attached to the panel")
         return self
@@ -577,6 +579,8 @@ class StoryPanelCreate(BaseModel):
     startOffset: int = Field(ge=0)
     endOffset: int = Field(ge=0)
     selectedText: str = ""
+    customText: str = ""
+    insertAfterPanelId: str | None = Field(default=None, pattern=TAG_RE)
     pageId: str | None = Field(default=None, pattern=TAG_RE)
     rect: StoryPanelRect | None = None
     layer: int = Field(default=0, ge=0)
@@ -588,19 +592,17 @@ class StoryPanelCreate(BaseModel):
         return self
 
 
-class StoryPanelAnchorCreate(BaseModel):
-    sourceKind: Literal["note", "bookmark"]
+class StoryPanelBookmarkCreate(BaseModel):
     startOffset: int = Field(ge=0)
     endOffset: int = Field(ge=0)
     selectedText: str = ""
     customText: str = ""
+    insertAfterPanelId: str | None = Field(default=None, pattern=TAG_RE)
 
     @model_validator(mode="after")
-    def validate_anchor(self) -> "StoryPanelAnchorCreate":
+    def validate_bookmark(self) -> "StoryPanelBookmarkCreate":
         if self.endOffset <= self.startOffset:
-            raise ValueError("Anchor endOffset must be greater than startOffset")
-        if self.sourceKind == "note" and not self.customText.strip():
-            raise ValueError("Notes must include customText")
+            raise ValueError("Bookmark endOffset must be greater than startOffset")
         return self
 
 
@@ -614,7 +616,7 @@ class StoryPanelDraftCreate(BaseModel):
 
 class StoryPanelPatch(BaseModel):
     order: int | None = Field(default=None, ge=0)
-    sourceKind: Literal["story", "draft", "note", "bookmark", "free-text", "free-image", "caption"] | None = None
+    sourceKind: Literal["story", "draft", "bookmark", "free-text", "free-image", "caption"] | None = None
     startOffset: int | None = Field(default=None, ge=0)
     endOffset: int | None = Field(default=None, ge=0)
     selectedText: str | None = None

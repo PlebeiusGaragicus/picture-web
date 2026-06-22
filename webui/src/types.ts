@@ -337,7 +337,7 @@ export interface StoryPanelTextStyle {
 export interface StoryPanel {
   id: string;
   order: number;
-  sourceKind: 'story' | 'draft' | 'note' | 'bookmark' | 'free-text' | 'free-image' | 'caption';
+  sourceKind: 'story' | 'draft' | 'bookmark' | 'free-text' | 'free-image' | 'caption';
   startOffset: number | null;
   endOffset: number | null;
   selectedText: string;
@@ -369,17 +369,19 @@ export interface StoryPanelCreatePayload {
   startOffset: number;
   endOffset: number;
   selectedText?: string;
+  customText?: string;
+  insertAfterPanelId?: string | null;
   pageId?: string | null;
   rect?: StoryPanelRect | null;
   layer?: number;
 }
 
-export interface StoryPanelAnchorCreatePayload {
-  sourceKind: 'note' | 'bookmark';
+export interface StoryPanelBookmarkCreatePayload {
   startOffset: number;
   endOffset: number;
   selectedText?: string;
   customText?: string;
+  insertAfterPanelId?: string | null;
 }
 
 export interface StoryPanelDraftCreatePayload {

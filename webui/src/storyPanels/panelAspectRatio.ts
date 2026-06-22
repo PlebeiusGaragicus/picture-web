@@ -1,9 +1,9 @@
 import { modelCapabilities } from '../canvas/shared';
 import type { StoryPanel, StoryPanelRect } from '../types';
-import { PRINT_PAGE_HEIGHT, PRINT_PAGE_WIDTH } from './printLayout';
+import { LAYOUT_GRID_COLUMNS, LAYOUT_PAGE_ROWS, PRINT_PAGE_HEIGHT, PRINT_PAGE_WIDTH } from './printLayout';
 
+export { LAYOUT_GRID_COLUMNS, LAYOUT_PAGE_ROWS };
 export const PAGE_LAYOUT_ASPECT = PRINT_PAGE_WIDTH / PRINT_PAGE_HEIGHT;
-export const LAYOUT_GRID_COLUMNS = 12;
 
 export const GEMINI_IMAGE_ASPECT_RATIOS = Array.from(
   new Set(Object.values(modelCapabilities).flatMap((capabilities) => capabilities.aspectRatios)),
@@ -47,11 +47,8 @@ export function panelVisualAspectRatio(rect: StoryPanelRect, pageRows: number): 
   return (rect.w * rows * PAGE_LAYOUT_ASPECT) / (rect.h * LAYOUT_GRID_COLUMNS);
 }
 
-export function pageRowsForPanels(panels: StoryPanel[], pageId: string): number {
-  return Math.max(
-    10,
-    ...panels.filter((panel) => panel.pageId === pageId).map((panel) => panel.rect.y + panel.rect.h),
-  );
+export function pageRowsForPanels(_panels?: StoryPanel[], _pageId?: string): number {
+  return LAYOUT_PAGE_ROWS;
 }
 
 export function snapRectToAspectRatio(

@@ -10,6 +10,7 @@ import {
   sidebarItemPrimaryText,
   sidebarItemSecondaryText,
   sortSidebarItems,
+  type InsertDraftPayload,
   type SidebarFilter,
 } from './storyPanelSidebar';
 
@@ -19,10 +20,8 @@ function compactText(value: string, maxLength = 180) {
   return `${normalized.slice(0, maxLength - 1)}...`;
 }
 
-function itemTitle(panel: StoryPanel, storyIndex: number | null) {
-  const kind = sidebarItemLabel(panel.sourceKind as 'story' | 'draft' | 'note' | 'bookmark');
-  if (panel.sourceKind === 'story' && storyIndex !== null) return `${kind} ${storyIndex}`;
-  return kind;
+function itemTitle(panel: StoryPanel) {
+  return sidebarItemLabel(panel.sourceKind as 'story' | 'draft' | 'bookmark');
 }
 
 function ChunkActionsMenu({
@@ -30,16 +29,20 @@ function ChunkActionsMenu({
   onToggle,
   onClose,
   onDelete,
-  onNewPanel,
-  showNewPanel,
+  onInsertAfter,
+  onEditNote,
+  showInsert,
+  showEditNote,
   isSaving,
 }: {
   isOpen: boolean;
   onToggle: () => void;
   onClose: () => void;
   onDelete?: () => void;
-  onNewPanel?: () => void;
-  showNewPanel: boolean;
+  onInsertAfter?: () => void;
+  onEditNote?: () => void;
+  showInsert: boolean;
+  showEditNote: boolean;
   isSaving: boolean;
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -73,7 +76,7 @@ function ChunkActionsMenu({
       return;
     }
     updatePopoverPosition();
-  }, [isOpen, showNewPanel, updatePopoverPosition]);
+  }, [isOpen, showInsert, showEditNote, updatePopoverPosition]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -118,7 +121,7 @@ function ChunkActionsMenu({
         visibility: isPositioned ? 'visible' : 'hidden',
       }}
     >
-      {showNewPanel && onNewPanel && (
+      {showInsert && onInsertAfter && (
         <button
           type="button"
           role="menuitem"
@@ -126,10 +129,24 @@ function ChunkActionsMenu({
           disabled={isSaving}
           onClick={() => {
             onClose();
-            onNewPanel();
+            onInsertAfter();
           }}
         >
-          New panel
+          Insert after…
+        </button>
+      )}
+      {showEditNote && onEditNote && (
+        <button
+          type="button"
+          role="menuitem"
+          className="story-panels-chunk-menu-item"
+          disabled={isSaving}
+          onClick={() => {
+            onClose();
+            onEditNote();
+          }}
+        >
+          Edit note…
         </button>
       )}
       {onDelete && (
@@ -180,7 +197,8 @@ export function PanelChunkList({
   onSelectPanel,
   onOpenPanelPlacement,
   onDeletePanel,
-  onCreatePanel,
+  onInsertDraft,
+  onEditPanelNote,
   isSaving,
   variant = 'card',
 }: {
@@ -192,7 +210,8 @@ export function PanelChunkList({
   onSelectPanel: (panelId: string) => void;
   onOpenPanelPlacement?: (panelId: string) => void;
   onDeletePanel: (panelId: string) => void;
-  onCreatePanel?: (customText: string, insertAfterPanelId?: string | null) => Promise<void>;
+  onInsertDraft?: (payload: InsertDraftPayload) => Promise<void>;
+  onEditPanelNote?: (panelId: string, noteText: string) => Promise<void>;
   isSaving: boolean;
   variant?: 'card' | 'plain';
 }) {
@@ -202,25 +221,26 @@ export function PanelChunkList({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [insertAfterPanelId, setInsertAfterPanelId] = useState<string | null>(null);
   const [sidebarFilter, setSidebarFilter] = useState<SidebarFilter>('all');
-  const [showNewPanelDialog, setShowNewPanelDialog] = useState(false);
-  const [newPanelText, setNewPanelText] = useState('');
+  const [showInsertDialog, setShowInsertDialog] = useState(false);
+  const [showNoteDialog, setShowNoteDialog] = useState(false);
+  const [notePanelId, setNotePanelId] = useState<string | null>(null);
+  const [draftText, setDraftText] = useState('');
+  const [noteText, setNoteText] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const hasBookText = bookLength > 0;
   const allItems = sortSidebarItems(panels);
   const sortedPanels = filterSidebarItems(panels, sidebarFilter);
-  const storyNumberById = new Map(
-    allItems.filter((panel) => panel.sourceKind === 'story').map((panel, index) => [panel.id, index + 1]),
-  );
   const coveredChars = allItems
     .filter((panel) => panel.sourceKind === 'story' && panel.startOffset !== null && panel.endOffset !== null)
     .reduce((total, panel) => total + (panel.endOffset! - panel.startOffset!), 0);
   const counts = {
     all: allItems.length,
     story: allItems.filter((panel) => panel.sourceKind === 'story').length,
-    note: allItems.filter((panel) => panel.sourceKind === 'note').length,
     bookmark: allItems.filter((panel) => panel.sourceKind === 'bookmark').length,
     draft: allItems.filter((panel) => panel.sourceKind === 'draft').length,
   };
   const coverage = bookLength > 0 ? Math.round((coveredChars / bookLength) * 100) : 0;
+  const canInsertDraft = Boolean(onInsertDraft) && !hasBookText;
 
   useEffect(() => {
     if (!focusedPanelId) return;
@@ -248,28 +268,47 @@ export function PanelChunkList({
     return () => window.clearTimeout(timeout);
   }, [focusedPanelId]);
 
-  const openNewPanelDialog = (afterPanelId: string | null = null) => {
+  const openInsertDialog = (afterPanelId: string | null = null) => {
     setInsertAfterPanelId(afterPanelId);
+    setDraftText('');
     setOpenMenuId(null);
-    setShowNewPanelDialog(true);
+    setShowInsertDialog(true);
   };
 
-  const submitNewPanel = async () => {
-    const text = newPanelText.trim();
-    if (!text || !onCreatePanel) return;
+  const openNoteDialog = (panelId: string) => {
+    const panel = panels.find((item) => item.id === panelId);
+    setNotePanelId(panelId);
+    setNoteText(panel?.customText ?? '');
+    setOpenMenuId(null);
+    setShowNoteDialog(true);
+  };
+
+  const submitInsertDraft = async () => {
+    const text = draftText.trim();
+    if (!text || !onInsertDraft) return;
     setIsCreating(true);
     try {
-      await onCreatePanel(text, insertAfterPanelId);
-      setNewPanelText('');
+      await onInsertDraft({ customText: text, insertAfterPanelId });
+      setDraftText('');
       setInsertAfterPanelId(null);
-      setShowNewPanelDialog(false);
+      setShowInsertDialog(false);
     } finally {
       setIsCreating(false);
     }
   };
 
-  const rootClassName = variant === 'plain' ? 'story-panels-chunks-pane' : 'story-card story-panels-list-card';
-  const canCreatePanel = Boolean(onCreatePanel);
+  const submitPanelNote = async () => {
+    if (!notePanelId || !onEditPanelNote) return;
+    setIsCreating(true);
+    try {
+      await onEditPanelNote(notePanelId, noteText.trim());
+      setNotePanelId(null);
+      setNoteText('');
+      setShowNoteDialog(false);
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   const filterRow = (
     <div className="story-panels-sidebar-filters" role="tablist" aria-label="Filter reading items">
@@ -290,7 +329,7 @@ export function PanelChunkList({
   );
 
   return (
-    <div className={rootClassName}>
+    <div className={variant === 'plain' ? 'story-panels-chunks-pane' : 'story-card story-panels-list-card'}>
       {variant === 'card' && (
         <div className="story-panels-section-head">
           <div>
@@ -316,27 +355,26 @@ export function PanelChunkList({
         {sortedPanels.length === 0 ? (
           <div className="story-panels-chunk-empty">
             <p className="muted">
-              {canCreatePanel
-                ? 'No items yet. Open the menu to add one, or select a passage in Story.'
+              {canInsertDraft
+                ? 'No items yet. Open the menu to insert a draft, or select a passage in Story.'
                 : 'No items yet. Select a passage in the book text to begin.'}
             </p>
-            {canCreatePanel && (
+            {canInsertDraft && (
               <ChunkActionsMenu
                 isOpen={openMenuId === '__empty__'}
                 onToggle={() => setOpenMenuId((current) => (current === '__empty__' ? null : '__empty__'))}
                 onClose={() => setOpenMenuId(null)}
-                onNewPanel={() => openNewPanelDialog(null)}
-                showNewPanel
+                onInsertAfter={() => openInsertDialog(null)}
+                showInsert
+                showEditNote={false}
                 isSaving={isSaving || isCreating}
               />
             )}
           </div>
         ) : sortedPanels.map((panel) => {
-          const storyIndex = panel.sourceKind === 'story' ? storyNumberById.get(panel.id) ?? null : null;
           const primaryText = sidebarItemPrimaryText(panel);
           const secondaryText = sidebarItemSecondaryText(panel);
           const showPlacement = panel.sourceKind === 'story' || panel.sourceKind === 'draft';
-          const showNewPanelAction = canCreatePanel && (panel.sourceKind === 'story' || panel.sourceKind === 'draft');
           return (
           <article
             key={panel.id}
@@ -356,14 +394,16 @@ export function PanelChunkList({
           >
             <div className="story-panels-chunk-main">
               <div className="story-panels-chunk-title-row">
-                <strong>{itemTitle(panel, storyIndex)}</strong>
+                <strong>{itemTitle(panel)}</strong>
                 <ChunkActionsMenu
                   isOpen={openMenuId === panel.id}
                   onToggle={() => setOpenMenuId((current) => (current === panel.id ? null : panel.id))}
                   onClose={() => setOpenMenuId(null)}
                   onDelete={() => onDeletePanel(panel.id)}
-                  onNewPanel={showNewPanelAction ? () => openNewPanelDialog(panel.id) : undefined}
-                  showNewPanel={showNewPanelAction}
+                  onInsertAfter={canInsertDraft ? () => openInsertDialog(panel.id) : undefined}
+                  onEditNote={onEditPanelNote && panel.sourceKind === 'story' ? () => openNoteDialog(panel.id) : undefined}
+                  showInsert={canInsertDraft}
+                  showEditNote={Boolean(onEditPanelNote && panel.sourceKind === 'story')}
                   isSaving={isSaving || isCreating}
                 />
                 {panel.sourceKind === 'story' && panel.startOffset !== null && panel.endOffset !== null ? (
@@ -399,34 +439,56 @@ export function PanelChunkList({
           );
         })}
       </div>
-      {showNewPanelDialog && onCreatePanel && (
-        <div className="confirm-backdrop" onClick={() => !isCreating && setShowNewPanelDialog(false)}>
-          <div className="confirm-dialog story-panels-new-panel-dialog" role="dialog" aria-modal="true" aria-labelledby="new-panel-title" onClick={(event) => event.stopPropagation()}>
-            <h2 id="new-panel-title">New panel</h2>
-            <p className="muted">
-              {insertAfterPanelId
-                ? 'Write the passage for the new panel inserted after this one.'
-                : 'Write the passage, caption, or scene text for this panel chunk.'}
-            </p>
+      {showInsertDialog && onInsertDraft && (
+        <div className="confirm-backdrop" onClick={() => !isCreating && setShowInsertDialog(false)}>
+          <div className="confirm-dialog story-panels-insert-dialog" role="dialog" aria-modal="true" aria-labelledby="insert-draft-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="insert-draft-title">Insert after</h2>
+            <p className="muted">Write the passage, caption, or scene text for this draft chunk.</p>
             <label>
-              Panel text
+              Draft text
               <textarea
-                value={newPanelText}
+                value={draftText}
                 rows={6}
                 autoFocus
                 disabled={isCreating}
                 placeholder="Once upon a time..."
-                onChange={(event) => setNewPanelText(event.target.value)}
+                onChange={(event) => setDraftText(event.target.value)}
                 onKeyDown={(event) => event.stopPropagation()}
               />
             </label>
             <div className="modal-actions">
               <button type="button" className="secondary" disabled={isCreating} onClick={() => {
-                setShowNewPanelDialog(false);
+                setShowInsertDialog(false);
                 setInsertAfterPanelId(null);
               }}>Cancel</button>
-              <button type="button" disabled={isCreating || !newPanelText.trim()} onClick={() => void submitNewPanel()}>
-                {isCreating ? 'Creating…' : 'Create panel'}
+              <button type="button" disabled={isCreating || !draftText.trim()} onClick={() => void submitInsertDraft()}>
+                {isCreating ? 'Inserting…' : 'Insert draft'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showNoteDialog && onEditPanelNote && (
+        <div className="confirm-backdrop" onClick={() => !isCreating && setShowNoteDialog(false)}>
+          <div className="confirm-dialog story-panels-insert-dialog" role="dialog" aria-modal="true" aria-labelledby="panel-note-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="panel-note-title">Panel note</h2>
+            <p className="muted">Optional note about this passage.</p>
+            <label>
+              Note
+              <textarea
+                value={noteText}
+                rows={5}
+                autoFocus
+                disabled={isCreating}
+                placeholder="Adaptation notes, tone reminders..."
+                onChange={(event) => setNoteText(event.target.value)}
+                onKeyDown={(event) => event.stopPropagation()}
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="secondary" disabled={isCreating} onClick={() => setShowNoteDialog(false)}>Cancel</button>
+              <button type="button" disabled={isCreating} onClick={() => void submitPanelNote()}>
+                {isCreating ? 'Saving…' : 'Save note'}
               </button>
             </div>
           </div>

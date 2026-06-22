@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type React from 'react';
 import { PageLayoutEditor, type StoryPanelLayoutMode } from './PageLayoutEditor';
 import { PanelChunkList } from './PanelChunkList';
+import type { InsertDraftPayload } from './storyPanelSidebar';
 import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './printLayout';
 import type { LayoutEditorNavigation } from './layoutEditorNavigation';
 import { isEditableShortcutTarget, sortedPanels } from './storyPanelUtils';
@@ -41,7 +42,7 @@ export function LayoutEditorView({
   const {
     bookText,
     document,
-    storyPanels,
+    sidebarPanels,
     isLoading,
     isSaving,
     error,
@@ -121,9 +122,9 @@ export function LayoutEditorView({
     }
   };
 
-  const createDraftPanel = async (customText: string, insertAfterPanelId?: string | null) => {
+  const insertDraft = async ({ customText, insertAfterPanelId }: InsertDraftPayload) => {
     const beforeIds = new Set(document?.panels.map((panel) => panel.id) ?? []);
-    const next = await api.createDraftStoryPanel(projectSlug, { customText, insertAfterPanelId: insertAfterPanelId ?? null });
+    const next = await api.createDraftStoryPanel(projectSlug, { customText, insertAfterPanelId });
     setDocument(next);
     const created = next.panels.find((panel) => !beforeIds.has(panel.id));
     if (created) {
@@ -131,6 +132,11 @@ export function LayoutEditorView({
       setFocusedChunkPanelId(null);
       window.setTimeout(() => setFocusedChunkPanelId(created.id), 0);
     }
+  };
+
+  const editPanelNote = async (panelId: string, noteText: string) => {
+    const next = await api.patchStoryPanel(projectSlug, panelId, { customText: noteText });
+    setDocument(next);
   };
 
   const exportBookletPdf = async (pageBorder: BookletPageBorder = exportPageBorder) => {
@@ -186,14 +192,15 @@ export function LayoutEditorView({
   const panelChunks = (
     <PanelChunkList
       bookLength={bookText.length}
-      panels={storyPanels}
+      panels={sidebarPanels}
       pages={document.pages}
       selectedPanelId={selectedPanelId}
       focusedPanelId={focusedChunkPanelId}
       onSelectPanel={selectPanelChunk}
       onOpenPanelPlacement={openPanelPlacement}
       onDeletePanel={handleDeletePanel}
-      onCreatePanel={createDraftPanel}
+      onInsertDraft={bookText.length === 0 ? insertDraft : undefined}
+      onEditPanelNote={bookText.length > 0 ? editPanelNote : undefined}
       isSaving={isSaving}
     />
   );

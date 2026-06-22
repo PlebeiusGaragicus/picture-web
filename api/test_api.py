@@ -12,7 +12,7 @@ import story_panels
 import story_panels_print
 from fastapi.testclient import TestClient
 from main import app
-from models import AdaptationAssetLink, StoryPanel, StoryPanelImageCrop
+from models import AdaptationAssetLink, LAYOUT_PAGE_ROWS, StoryPanel, StoryPanelImageCrop, StoryPanelRect
 from pydantic import ValidationError
 import pytest
 from PIL import Image
@@ -1068,12 +1068,12 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
     ]
     assert [page["id"] for page in empty.json()["pages"][2:6]] == ["page-001", "page-002", "page-003", "page-004"]
     assert [
-        (panel["pageId"], panel["sourceKind"], panel["panelKind"], panel["customText"], panel["textStyle"])
+        (panel["pageId"], panel["sourceKind"], panel["panelKind"], panel["customText"])
         for panel in empty.json()["panels"]
     ] == [
-        ("cover", "free-text", "text", "Title goes here", {"fontFamily": "serif", "fontSize": 8, "align": "left"}),
-        ("inside-front-cover", "free-text", "text", "Copyright information goes here.", {"fontFamily": "serif", "fontSize": 8, "align": "left"}),
-        ("inside-back-cover", "free-text", "text", "About this comic, acknowledgements, or bonus notes go here.", {"fontFamily": "serif", "fontSize": 8, "align": "left"}),
+        ("cover", "free-text", "text", "Title goes here"),
+        ("inside-front-cover", "free-text", "text", "Copyright information goes here."),
+        ("inside-back-cover", "free-text", "text", "About this comic, acknowledgements, or bonus notes go here."),
     ]
 
     book = client.get("/api/projects/farm-comic/story-panels/book")
@@ -1107,7 +1107,6 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
     assert panel["finalized"] is True
 
     document = patched.json()
-    document["pages"].append({"id": "page-002", "order": 5, "title": "Page 2", "pageKind": "story"})
     story_panel = next(panel for panel in document["panels"] if panel["sourceKind"] == "story")
     story_panel["pageId"] = "page-002"
     saved = client.put("/api/projects/farm-comic/story-panels", json=document)
@@ -1349,7 +1348,7 @@ def test_story_panels_draft_insert_after_panel(tmp_path, monkeypatch):
     assert second_panel["order"] + 1 == next(panel for panel in inserted["panels"] if panel["id"] == second_panel["id"])["order"]
 
 
-def test_story_panels_create_note_and_bookmark(tmp_path, monkeypatch):
+def test_story_panels_create_panel_note_and_bookmark(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
     root = library.project_dir("farm-comic") / "adaptation"
@@ -1357,53 +1356,107 @@ def test_story_panels_create_note_and_bookmark(tmp_path, monkeypatch):
     book_text = "Chapter One\n\nThe air was warm.\n"
     (root / "book.txt").write_text(book_text)
 
-    story = client.post(
+    panel = client.post(
         "/api/projects/farm-comic/story-panels/panels",
-        json={"startOffset": 0, "endOffset": 11, "selectedText": "Chapter One"},
-    )
-    assert story.status_code == 200
-
-    note = client.post(
-        "/api/projects/farm-comic/story-panels/panels/anchor",
         json={
-            "sourceKind": "note",
             "startOffset": 13,
             "endOffset": 30,
             "selectedText": "The air was warm.",
             "customText": "Nice opening line.",
         },
     )
-    assert note.status_code == 200
-    note_panel = next(panel for panel in note.json()["panels"] if panel["sourceKind"] == "note")
-    assert note_panel["customText"] == "Nice opening line."
-    assert note_panel["selectedText"] == "The air was warm."
-    assert note_panel["pageId"] is None
+    assert panel.status_code == 200
+    story_panel = next(item for item in panel.json()["panels"] if item["sourceKind"] == "story" and item["customText"] == "Nice opening line.")
+    assert story_panel["selectedText"] == "The air was warm."
+
+    overlap = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={
+            "startOffset": 13,
+            "endOffset": 20,
+            "selectedText": "The air",
+        },
+    )
+    assert overlap.status_code == 400
 
     bookmark = client.post(
-        "/api/projects/farm-comic/story-panels/panels/anchor",
+        "/api/projects/farm-comic/story-panels/panels/bookmark",
         json={
-            "sourceKind": "bookmark",
             "startOffset": 0,
             "endOffset": 11,
             "selectedText": "Chapter One",
         },
     )
     assert bookmark.status_code == 200
-    bookmark_panel = next(panel for panel in bookmark.json()["panels"] if panel["sourceKind"] == "bookmark")
+    bookmark_panel = next(item for item in bookmark.json()["panels"] if item["sourceKind"] == "bookmark")
     assert bookmark_panel["customText"] == "Chapter One"
     assert bookmark_panel["pageId"] is None
 
-    missing_note_text = client.post(
-        "/api/projects/farm-comic/story-panels/panels/anchor",
-        json={
+
+def test_story_panels_legacy_note_loads_as_story(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha.\n")
+    document = client.get("/api/projects/farm-comic/story-panels").json()
+    document["panels"].append(
+        {
+            "id": "panel-legacy-note",
+            "order": 20,
             "sourceKind": "note",
+            "startOffset": 0,
+            "endOffset": 6,
+            "selectedText": "Alpha.",
+            "customText": "Legacy note.",
+            "pageId": None,
+            "panelKind": "text",
+            "rect": {"x": 0, "y": 0, "w": 4, "h": 3},
+            "layer": 0,
+            "assetIds": [],
+            "finalized": False,
+        }
+    )
+    panels_path = library.project_dir("farm-comic") / "story-panels" / "panels.json"
+    library.write_json(panels_path, document)
+    loaded = client.get("/api/projects/farm-comic/story-panels").json()
+    legacy = next(panel for panel in loaded["panels"] if panel["id"] == "panel-legacy-note")
+    assert legacy["sourceKind"] == "story"
+    assert legacy["customText"] == "Legacy note."
+
+
+def test_story_panels_insert_after_reorders_items(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha. Beta. Gamma.\n")
+
+    first = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 6, "selectedText": "Alpha."},
+    ).json()
+    first_panel = next(panel for panel in first["panels"] if panel["sourceKind"] == "story")
+
+    second = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 7, "endOffset": 12, "selectedText": "Beta."},
+    ).json()
+    second_panel = next(panel for panel in second["panels"] if panel["sourceKind"] == "story" and panel["id"] != first_panel["id"])
+
+    inserted = client.post(
+        "/api/projects/farm-comic/story-panels/panels/bookmark",
+        json={
             "startOffset": 13,
-            "endOffset": 30,
-            "selectedText": "The air was warm.",
-            "customText": "   ",
+            "endOffset": 19,
+            "selectedText": "Gamma.",
+            "insertAfterPanelId": first_panel["id"],
         },
     )
-    assert missing_note_text.status_code == 422
+    assert inserted.status_code == 200
+    bookmark_panel = next(panel for panel in inserted.json()["panels"] if panel["customText"] == "Gamma.")
+    assert bookmark_panel["order"] == first_panel["order"] + 1
+    assert next(panel for panel in inserted.json()["panels"] if panel["id"] == second_panel["id"])["order"] == second_panel["order"] + 1
 
 
 def test_story_panels_create_uses_story_neighbor_page(tmp_path, monkeypatch):
@@ -1448,6 +1501,14 @@ def test_story_panels_reject_story_chunks_on_front_matter(tmp_path, monkeypatch)
     )
     assert response.status_code == 400
     assert "story pages" in response.json()["detail"]
+
+
+def test_story_panel_rect_rejects_layout_past_page_height():
+    with pytest.raises(ValueError, match="page height grid"):
+        StoryPanelRect(x=0, y=8, w=4, h=3)
+
+    rect = StoryPanelRect(x=0, y=LAYOUT_PAGE_ROWS - 2, w=4, h=2)
+    assert rect.y + rect.h == LAYOUT_PAGE_ROWS
 
 
 def test_story_panels_caption_outline_stroke_width_scales_with_font_size():

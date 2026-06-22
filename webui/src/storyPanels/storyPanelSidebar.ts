@@ -1,20 +1,19 @@
 import type { StoryPanel } from '../types';
 
-export type SidebarItemKind = 'story' | 'draft' | 'note' | 'bookmark';
+export type SidebarItemKind = 'story' | 'draft' | 'bookmark';
 
 export type SidebarFilter = 'all' | SidebarItemKind;
 
 export const SIDEBAR_FILTER_OPTIONS: Array<{ id: SidebarFilter; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'story', label: 'Panels' },
-  { id: 'note', label: 'Notes' },
   { id: 'bookmark', label: 'Bookmarks' },
   { id: 'draft', label: 'Drafts' },
 ];
 
 export function isSidebarItem(panel: StoryPanel): panel is StoryPanel & { sourceKind: SidebarItemKind } {
   if (panel.sourceKind === 'draft') return true;
-  if (panel.sourceKind === 'story' || panel.sourceKind === 'note' || panel.sourceKind === 'bookmark') {
+  if (panel.sourceKind === 'story' || panel.sourceKind === 'bookmark') {
     return panel.startOffset !== null && panel.endOffset !== null;
   }
   return false;
@@ -26,8 +25,6 @@ export function sidebarItemLabel(kind: SidebarItemKind) {
       return 'Panel';
     case 'draft':
       return 'Draft';
-    case 'note':
-      return 'Note';
     case 'bookmark':
       return 'Bookmark';
   }
@@ -50,13 +47,15 @@ export function filterSidebarItems(panels: StoryPanel[], filter: SidebarFilter) 
 }
 
 export function sidebarItemPrimaryText(panel: StoryPanel) {
-  if (panel.sourceKind === 'note') return panel.customText.trim();
   if (panel.sourceKind === 'bookmark') return panel.customText.trim() || panel.selectedText.trim();
+  if (panel.sourceKind === 'story') return panel.selectedText.trim();
   return panel.customText || panel.selectedText;
 }
 
 export function sidebarItemSecondaryText(panel: StoryPanel) {
-  if (panel.sourceKind === 'note') return panel.selectedText.trim();
+  if (panel.sourceKind === 'story' && panel.customText.trim()) {
+    return panel.customText.trim();
+  }
   if (panel.sourceKind === 'bookmark' && panel.customText.trim() && panel.selectedText.trim() !== panel.customText.trim()) {
     return panel.selectedText.trim();
   }
@@ -65,8 +64,13 @@ export function sidebarItemSecondaryText(panel: StoryPanel) {
 
 export function bookAnchorPanels(panels: StoryPanel[]) {
   return panels.filter(
-    (panel) => (panel.sourceKind === 'story' || panel.sourceKind === 'note' || panel.sourceKind === 'bookmark')
+    (panel) => (panel.sourceKind === 'story' || panel.sourceKind === 'bookmark')
       && panel.startOffset !== null
       && panel.endOffset !== null,
   );
 }
+
+export type InsertDraftPayload = {
+  customText: string;
+  insertAfterPanelId: string | null;
+};

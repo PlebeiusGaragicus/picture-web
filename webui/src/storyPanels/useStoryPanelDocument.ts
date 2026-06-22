@@ -58,7 +58,6 @@ export function useStoryPanelDocument(projectSlug: string, options?: { withCanva
     () => panels.filter(
       (panel) => panel.sourceKind === 'story'
         || panel.sourceKind === 'draft'
-        || panel.sourceKind === 'note'
         || panel.sourceKind === 'bookmark',
     ),
     [panels],

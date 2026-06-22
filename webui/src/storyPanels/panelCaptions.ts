@@ -1,4 +1,5 @@
 import type { StoryPanel, StoryPanelDocument, StoryPanelRect } from '../types';
+import { LAYOUT_PAGE_ROWS } from './printLayout';
 
 export const CAPTION_GRID_SNAP = 12;
 const CAPTION_GRID_COLUMNS = 12;
@@ -19,9 +20,12 @@ function roundCaptionStep(value: number) {
 
 export function clampCaptionRect(rect: StoryPanelRect): StoryPanelRect {
   const w = Math.min(CAPTION_GRID_COLUMNS, Math.max(CAPTION_MIN_WIDTH, roundCaptionStep(rect.w)));
-  const h = Math.max(CAPTION_MIN_HEIGHT, roundCaptionStep(rect.h));
+  let h = Math.max(CAPTION_MIN_HEIGHT, roundCaptionStep(rect.h));
+  h = Math.min(h, LAYOUT_PAGE_ROWS);
   const x = Math.min(CAPTION_GRID_COLUMNS - w, Math.max(0, roundCaptionStep(rect.x)));
-  return { x, y: Math.max(0, roundCaptionStep(rect.y)), w, h };
+  let y = Math.max(0, roundCaptionStep(rect.y));
+  y = Math.min(y, LAYOUT_PAGE_ROWS - h);
+  return { x, y, w, h };
 }
 
 export function defaultCaptionRect(parent: StoryPanel, captions: StoryPanel[]): StoryPanelRect {

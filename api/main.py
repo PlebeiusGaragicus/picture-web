@@ -51,7 +51,7 @@ from models import (
     MomentSequenceEntry,
     MomentPatch,
     StoryPanelCreate,
-    StoryPanelAnchorCreate,
+    StoryPanelBookmarkCreate,
     StoryPanelDraftCreate,
     StoryPanelDocument,
     StoryPanelPatch,
@@ -356,9 +356,9 @@ def create_draft_story_panel(slug: str, payload: StoryPanelDraftCreate) -> Story
     return story_panels.create_draft_panel(slug, payload)
 
 
-@app.post("/api/projects/{slug}/story-panels/panels/anchor", response_model=StoryPanelDocument)
-def create_story_panel_anchor(slug: str, payload: StoryPanelAnchorCreate) -> StoryPanelDocument:
-    return story_panels.create_anchor(slug, payload)
+@app.post("/api/projects/{slug}/story-panels/panels/bookmark", response_model=StoryPanelDocument)
+def create_story_panel_bookmark(slug: str, payload: StoryPanelBookmarkCreate) -> StoryPanelDocument:
+    return story_panels.create_bookmark(slug, payload)
 
 
 @app.patch("/api/projects/{slug}/story-panels/panels/{panel_id}", response_model=StoryPanelDocument)

@@ -41,7 +41,7 @@ export function projectPhaseIcon(phase: ProjectPhase) {
 export function projectPhaseHelp(phase: ProjectPhase) {
   switch (phase) {
     case 'story':
-      return 'Select a passage to open actions, or drag panel edges to refine chunks.';
+      return 'Select a passage for panels or bookmarks. Panels can include an optional note. Drag panel edges to refine chunks.';
     default:
       return undefined;
   }

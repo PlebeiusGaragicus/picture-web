@@ -20,7 +20,6 @@ type BoundaryDrag = {
 type TextPiece = {
   text: string;
   storyId?: string;
-  noteId?: string;
   bookmarkId?: string;
   isSelection?: boolean;
 };
@@ -44,13 +43,11 @@ function buildTextPieces(bookText: string, panels: StoryPanel[], selection: Text
     if (start >= end) continue;
     const covering = anchors.filter((panel) => panel.startOffset! <= start && panel.endOffset! >= end);
     const story = covering.find((panel) => panel.sourceKind === 'story');
-    const note = covering.find((panel) => panel.sourceKind === 'note');
     const bookmark = covering.find((panel) => panel.sourceKind === 'bookmark');
     const isSelection = Boolean(selection && selection.startOffset <= start && selection.endOffset >= end);
     pieces.push({
       text: bookText.slice(start, end),
       storyId: story?.id,
-      noteId: note?.id,
       bookmarkId: bookmark?.id,
       isSelection,
     });
@@ -65,7 +62,6 @@ export function BookTextSelector({
   focusedPanelId,
   onSelectionChange,
   onCreatePanel,
-  onCreateNote,
   onCreateBookmark,
   onDeletePanel,
   onAdjustPanelRange,
@@ -77,8 +73,7 @@ export function BookTextSelector({
   selection: TextSelectionRange | null;
   focusedPanelId: string | null;
   onSelectionChange: (selection: TextSelectionRange | null) => void;
-  onCreatePanel: () => void;
-  onCreateNote: (noteText: string) => Promise<void>;
+  onCreatePanel: (panelNote?: string) => Promise<void>;
   onCreateBookmark: () => Promise<void>;
   onDeletePanel: (panelId: string) => void;
   onAdjustPanelRange: (panelId: string, startOffset: number, endOffset: number) => void;
@@ -92,9 +87,9 @@ export function BookTextSelector({
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [boundaryDrag, setBoundaryDrag] = useState<BoundaryDrag | null>(null);
-  const [showNoteDialog, setShowNoteDialog] = useState(false);
-  const [noteText, setNoteText] = useState('');
-  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [showPanelDialog, setShowPanelDialog] = useState(false);
+  const [panelNoteText, setPanelNoteText] = useState('');
+  const [isSavingPanel, setIsSavingPanel] = useState(false);
   const storyPanels = useMemo(
     () => panels.filter((panel) => panel.sourceKind === 'story' && panel.startOffset !== null && panel.endOffset !== null),
     [panels],
@@ -203,7 +198,6 @@ export function BookTextSelector({
     const target = event.target as HTMLElement | null;
     if (
       target?.closest('.story-panels-text-panel')
-      || target?.closest('.story-panels-text-note')
       || target?.closest('.story-panels-text-bookmark')
       || target?.closest('.story-panels-boundary-handle')
       || target?.closest('.story-panels-text-menu')
@@ -221,35 +215,32 @@ export function BookTextSelector({
     setMenu({ kind: 'anchor', panelId, x: rect.left + rect.width / 2, y: rect.top });
   };
 
-  const submitNote = async () => {
-    const text = noteText.trim();
-    if (!text) return;
-    setIsSavingNote(true);
+  const submitPanel = async () => {
+    setIsSavingPanel(true);
     try {
-      await onCreateNote(text);
-      setNoteText('');
-      setShowNoteDialog(false);
+      await onCreatePanel(panelNoteText.trim() || undefined);
+      setPanelNoteText('');
+      setShowPanelDialog(false);
       setMenu(null);
       onSelectionChange(null);
       window.getSelection()?.removeAllRanges();
     } finally {
-      setIsSavingNote(false);
+      setIsSavingPanel(false);
     }
   };
 
   const pieceClasses = (piece: TextPiece) => {
     const classes = [];
     if (piece.storyId) classes.push('story-panels-text-panel');
-    if (piece.noteId) classes.push('story-panels-text-note');
     if (piece.bookmarkId) classes.push('story-panels-text-bookmark');
     if (piece.isSelection) classes.push('story-panels-text-selection');
-    const anchorId = piece.storyId ?? piece.noteId ?? piece.bookmarkId;
+    const anchorId = piece.storyId ?? piece.bookmarkId;
     if (anchorId === focusedPanelId) classes.push('is-focused');
     if (anchorId === flashingPanelId) classes.push('is-flashing');
     return classes.join(' ') || undefined;
   };
 
-  const pieceAnchorId = (piece: TextPiece) => piece.storyId ?? piece.noteId ?? piece.bookmarkId;
+  const pieceAnchorId = (piece: TextPiece) => piece.storyId ?? piece.bookmarkId;
 
   return (
     <div ref={cardRef} className="story-panels-book-text-wrap">
@@ -303,20 +294,10 @@ export function BookTextSelector({
                 disabled={!selection || isCreating}
                 onClick={() => {
                   setMenu(null);
-                  onCreatePanel();
+                  setShowPanelDialog(true);
                 }}
               >
-                {isCreating ? 'Creating...' : 'Create panel'}
-              </button>
-              <button
-                type="button"
-                disabled={!selection || isCreating}
-                onClick={() => {
-                  setMenu(null);
-                  setShowNoteDialog(true);
-                }}
-              >
-                Add note
+                Create panel…
               </button>
               <button
                 type="button"
@@ -346,28 +327,28 @@ export function BookTextSelector({
           )}
         </div>
       )}
-      {showNoteDialog && (
-        <div className="confirm-backdrop" onClick={() => !isSavingNote && setShowNoteDialog(false)}>
-          <div className="confirm-dialog story-panels-new-panel-dialog" role="dialog" aria-modal="true" aria-labelledby="book-note-title" onClick={(event) => event.stopPropagation()}>
-            <h2 id="book-note-title">Add note</h2>
-            <p className="muted">Write your note about the selected passage.</p>
-            {selection && <p className="story-panels-note-quote muted">{selection.selectedText.trim()}</p>}
+      {showPanelDialog && (
+        <div className="confirm-backdrop" onClick={() => !isSavingPanel && setShowPanelDialog(false)}>
+          <div className="confirm-dialog story-panels-insert-dialog" role="dialog" aria-modal="true" aria-labelledby="book-panel-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="book-panel-title">Create panel</h2>
+            <p className="muted">Turn the selected passage into a layout panel. Add an optional note for yourself.</p>
+            {selection && <blockquote className="story-panels-note-quote">{selection.selectedText.trim()}</blockquote>}
             <label>
-              Note
+              Note <span className="muted">(optional)</span>
               <textarea
-                value={noteText}
-                rows={5}
+                value={panelNoteText}
+                rows={4}
                 autoFocus
-                disabled={isSavingNote}
-                placeholder="Remember to revisit this scene..."
-                onChange={(event) => setNoteText(event.target.value)}
+                disabled={isSavingPanel || isCreating}
+                placeholder="Adaptation notes, tone reminders..."
+                onChange={(event) => setPanelNoteText(event.target.value)}
                 onKeyDown={(event) => event.stopPropagation()}
               />
             </label>
             <div className="modal-actions">
-              <button type="button" className="secondary" disabled={isSavingNote} onClick={() => setShowNoteDialog(false)}>Cancel</button>
-              <button type="button" disabled={isSavingNote || !noteText.trim()} onClick={() => void submitNote()}>
-                {isSavingNote ? 'Saving…' : 'Save note'}
+              <button type="button" className="secondary" disabled={isSavingPanel || isCreating} onClick={() => setShowPanelDialog(false)}>Cancel</button>
+              <button type="button" disabled={isSavingPanel || isCreating || !selection} onClick={() => void submitPanel()}>
+                {isSavingPanel || isCreating ? 'Creating…' : 'Create panel'}
               </button>
             </div>
           </div>

@@ -1,28 +1,23 @@
 import { useEffect, useState } from 'react';
 import { formatRequestError } from '../formatError';
 import { api } from '../api';
-import { HelpTip } from '../ui';
 import { BookTextSelector, type TextSelectionRange } from './BookTextSelector';
 import { PanelChunkList } from './PanelChunkList';
 import type { LayoutEditorNavigation } from './layoutEditorNavigation';
+import type { InsertDraftPayload } from './storyPanelSidebar';
 import { sortedPanels, withSelectedText } from './storyPanelUtils';
 import { useStoryPanelDocument } from './useStoryPanelDocument';
 
 import { PanelChunksToggleButton } from './PanelChunksToggle';
-import { SidebarCollapseButton } from '../PhaseSidebarToggle';
 
 export function BookTextView({
   projectSlug,
   onNavigateToLayoutEditor,
-  onCollapseSidebar,
-  isPhaseSidebarCollapsed,
   panelChunksOpen,
   onPanelChunksOpenChange,
 }: {
   projectSlug: string;
   onNavigateToLayoutEditor: (navigation: LayoutEditorNavigation) => void;
-  onCollapseSidebar: () => void;
-  isPhaseSidebarCollapsed: boolean;
   panelChunksOpen: boolean;
   onPanelChunksOpenChange: (open: boolean) => void;
 }) {
@@ -72,12 +67,15 @@ export function BookTextView({
     onNavigateToLayoutEditor({ panelId, layoutMode: 'single-chunks' });
   };
 
-  const createPanel = async () => {
+  const createPanel = async (panelNote?: string) => {
     if (!selection) return;
     setIsCreating(true);
     setError(null);
     try {
-      const next = await api.createStoryPanel(projectSlug, selection);
+      const next = await api.createStoryPanel(projectSlug, {
+        ...selection,
+        customText: panelNote ?? '',
+      });
       setDocument(next);
       setSelection(null);
       setSelectedPanelId(
@@ -97,24 +95,18 @@ export function BookTextView({
     const next = await deletePanel(panelId);
     if (next) {
       setSelectedPanelId(sortedPanels(next.panels).find((panel) => (
-        panel.sourceKind === 'story' || panel.sourceKind === 'draft' || panel.sourceKind === 'note' || panel.sourceKind === 'bookmark'
+        panel.sourceKind === 'story' || panel.sourceKind === 'draft' || panel.sourceKind === 'bookmark'
       ))?.id ?? null);
     }
   };
 
-  const createAnchor = async (sourceKind: 'note' | 'bookmark', customText = '') => {
+  const createBookmark = async () => {
     if (!selection) return;
     setIsCreating(true);
     setError(null);
     try {
       const beforeIds = new Set(document?.panels.map((panel) => panel.id) ?? []);
-      const next = await api.createStoryAnchor(projectSlug, {
-        sourceKind,
-        startOffset: selection.startOffset,
-        endOffset: selection.endOffset,
-        selectedText: selection.selectedText,
-        customText,
-      });
+      const next = await api.createStoryBookmark(projectSlug, selection);
       setDocument(next);
       setSelection(null);
       const created = next.panels.find((panel) => !beforeIds.has(panel.id));
@@ -131,24 +123,26 @@ export function BookTextView({
     }
   };
 
-  const createNote = async (noteText: string) => {
-    await createAnchor('note', noteText);
-  };
-
-  const createBookmark = async () => {
-    await createAnchor('bookmark');
-  };
-
-  const createDraftPanel = async (customText: string, insertAfterPanelId?: string | null) => {
+  const insertDraft = async ({ customText, insertAfterPanelId }: InsertDraftPayload) => {
     if (!document) return;
     const beforeIds = new Set(document.panels.map((panel) => panel.id));
-    const next = await api.createDraftStoryPanel(projectSlug, { customText, insertAfterPanelId: insertAfterPanelId ?? null });
+    const next = await api.createDraftStoryPanel(projectSlug, { customText, insertAfterPanelId });
     setDocument(next);
     const created = next.panels.find((panel) => !beforeIds.has(panel.id));
     if (created) {
       setSelectedPanelId(created.id);
       setFocusedChunkPanelId(null);
       window.setTimeout(() => setFocusedChunkPanelId(created.id), 0);
+    }
+  };
+
+  const editPanelNote = async (panelId: string, noteText: string) => {
+    setError(null);
+    try {
+      const next = await api.patchStoryPanel(projectSlug, panelId, { customText: noteText });
+      setDocument(next);
+    } catch (err) {
+      setError(formatRequestError(err));
     }
   };
 
@@ -207,35 +201,14 @@ export function BookTextView({
       onSelectPanel={selectPanelChunk}
       onOpenPanelPlacement={openPanelPlacement}
       onDeletePanel={handleDeletePanel}
-      onCreatePanel={createDraftPanel}
+      onInsertDraft={hasBookText ? undefined : insertDraft}
+      onEditPanelNote={hasBookText ? editPanelNote : undefined}
       isSaving={isSaving}
     />
   );
 
-  const helpText = hasBookText
-    ? 'Select a passage for panels, notes, or bookmarks. Drag panel edges to refine chunks.'
-    : 'Write panel chunks directly, then place them in Layout.';
-
-  const showChunksToggle = hasBookText && !panelChunksOpen;
-
   return (
     <div className="story-adaptation-screen story-panels-screen story-view-screen">
-      {!isPhaseSidebarCollapsed && (
-        <header className="story-view-head">
-          <div className="story-view-head-center">
-            <SidebarCollapseButton className="story-view-sidebar-collapse" onClick={onCollapseSidebar} />
-            <div className="archetype-card-title">
-              <h1 className="story-view-title">Story</h1>
-              <HelpTip text={helpText} placement="bottom" />
-            </div>
-          </div>
-          <div className="story-view-head-end">
-            {showChunksToggle && (
-              <PanelChunksToggleButton variant="expand" onClick={() => onPanelChunksOpenChange(true)} />
-            )}
-          </div>
-        </header>
-      )}
       {error && <p className="error error-banner story-view-error">{error}</p>}
       <div
         className={[
@@ -248,12 +221,11 @@ export function BookTextView({
           <div className="story-view-text-pane">
             <BookTextSelector
               bookText={bookText}
-              panels={sidebarPanels.filter((panel) => panel.sourceKind === 'story' || panel.sourceKind === 'note' || panel.sourceKind === 'bookmark')}
+              panels={sidebarPanels.filter((panel) => panel.sourceKind === 'story' || panel.sourceKind === 'bookmark')}
               selection={selection}
               focusedPanelId={focusedBookPanelId}
               onSelectionChange={setSelection}
               onCreatePanel={createPanel}
-              onCreateNote={createNote}
               onCreateBookmark={createBookmark}
               onDeletePanel={handleDeletePanel}
               onAdjustPanelRange={adjustPanelRange}
@@ -265,7 +237,7 @@ export function BookTextView({
           <div className="story-view-create-pane">
             <div className="story-view-create-head">
               <h2 className="story-view-chunks-title">Your story</h2>
-              <p className="muted">Add panel chunks with New panel, then open Layout to place them on pages.</p>
+              <p className="muted">Add chunks with Insert after in the Reading list, then open Layout to place them on pages.</p>
             </div>
             {panelChunks}
           </div>

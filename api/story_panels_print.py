@@ -17,7 +17,7 @@ from typing import Literal
 
 import library
 import story_panels
-from models import StoryPanel, StoryPanelDocument, StoryPanelImageCrop, StoryPanelPage
+from models import StoryPanel, StoryPanelDocument, StoryPanelImageCrop, StoryPanelPage, LAYOUT_PAGE_ROWS
 
 SHEET_WIDTH, SHEET_HEIGHT = landscape(letter)
 HALF_WIDTH = SHEET_WIDTH / 2
@@ -216,7 +216,7 @@ def _draw_comic_page(
         _draw_blank_page(pdf, page_x, page_y, page_w, page_h)
         return
     page_panels = panels_by_page.get(print_page.page.id, [])
-    page_rows = max([10.0, *(panel.rect.y + panel.rect.h for panel in page_panels)])
+    page_rows = float(LAYOUT_PAGE_ROWS)
     for panel in page_panels:
         _draw_panel(pdf, panel, print_page.number, page_x, page_y, page_w, page_h, page_rows, slug=slug)
     if print_page.number is not None:

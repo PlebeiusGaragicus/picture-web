@@ -10,8 +10,9 @@ from fastapi import HTTPException
 import adaptation
 import library
 from models import (
+    LAYOUT_PAGE_ROWS,
     StoryPanel,
-    StoryPanelAnchorCreate,
+    StoryPanelBookmarkCreate,
     StoryPanelCreate,
     StoryPanelDocument,
     StoryPanelDraftCreate,
@@ -142,7 +143,7 @@ def _validate_against_book(slug: str, document: StoryPanelDocument) -> StoryPane
         return document
     book_len = len(book)
     for panel in document.panels:
-        if panel.sourceKind not in {"story", "note", "bookmark"}:
+        if panel.sourceKind not in {"story", "bookmark"}:
             continue
         assert panel.startOffset is not None and panel.endOffset is not None
         if panel.endOffset > book_len:
@@ -158,7 +159,12 @@ def read_document(slug: str) -> StoryPanelDocument:
     path = document_path(slug)
     if not path.is_file():
         return empty_document()
-    return _validate_against_book(slug, _normalize_document_pages(StoryPanelDocument.model_validate(library.read_json(path))))
+    raw = library.read_json(path)
+    for panel in raw.get("panels", []):
+        if panel.get("sourceKind") == "note":
+            panel["sourceKind"] = "story"
+    document = StoryPanelDocument.model_validate(raw)
+    return _validate_against_book(slug, _normalize_document_pages(document))
 
 
 def _write_document(slug: str, document: StoryPanelDocument) -> StoryPanelDocument:
@@ -166,6 +172,17 @@ def _write_document(slug: str, document: StoryPanelDocument) -> StoryPanelDocume
     path.parent.mkdir(parents=True, exist_ok=True)
     library.write_json(path, document.model_dump(mode="json"))
     return document
+
+
+def _validate_story_overlaps(document: StoryPanelDocument) -> None:
+    ranges = sorted(
+        (panel.startOffset, panel.endOffset, panel.id)
+        for panel in document.panels
+        if panel.sourceKind == "story" and panel.startOffset is not None and panel.endOffset is not None
+    )
+    for previous, current in zip(ranges, ranges[1:]):
+        if previous[1] > current[0]:
+            raise HTTPException(status_code=400, detail=f"Panel text ranges overlap: {previous[2]} and {current[2]}")
 
 
 def save_document(slug: str, document: StoryPanelDocument) -> StoryPanelDocument:
@@ -196,12 +213,18 @@ def _next_page(document: StoryPanelDocument) -> StoryPanelPage:
     return page
 
 
+def _clamp_panel_rect(rect: StoryPanelRect) -> StoryPanelRect:
+    h = min(rect.h, float(LAYOUT_PAGE_ROWS))
+    y = min(rect.y, float(LAYOUT_PAGE_ROWS) - h)
+    return StoryPanelRect(x=rect.x, y=max(0.0, y), w=rect.w, h=h)
+
+
 def _default_rect(document: StoryPanelDocument, page_id: str) -> StoryPanelRect:
     panels_on_page = [panel for panel in document.panels if panel.pageId == page_id and panel.layer == 0]
-    y = 0
+    y = 0.0
     if panels_on_page:
         y = max(panel.rect.y + panel.rect.h for panel in panels_on_page)
-    return StoryPanelRect(x=0, y=y, w=4, h=3)
+    return _clamp_panel_rect(StoryPanelRect(x=0, y=y, w=4, h=3))
 
 
 def _story_order_placement(document: StoryPanelDocument, start_offset: int) -> tuple[str, StoryPanelRect]:
@@ -223,7 +246,7 @@ def _story_order_placement(document: StoryPanelDocument, start_offset: int) -> t
         if panel.pageId == page_id and panel.layer == 0 and panel.rect.y >= anchor.rect.y
     ]
     y = max([anchor_bottom, *[panel.rect.y + panel.rect.h for panel in panels_below_anchor]], default=anchor_bottom)
-    return page_id, StoryPanelRect(x=anchor.rect.x, y=y, w=anchor.rect.w, h=anchor.rect.h)
+    return page_id, _clamp_panel_rect(StoryPanelRect(x=anchor.rect.x, y=y, w=anchor.rect.w, h=anchor.rect.h))
 
 
 def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
@@ -242,7 +265,7 @@ def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
     selected = book[payload.startOffset:payload.endOffset]
     if payload.selectedText and payload.selectedText != selected:
         raise HTTPException(status_code=400, detail="Panel selectedText does not match book range")
-    next_order = max((panel.order for panel in document.panels), default=-1) + 1
+    next_order = _order_for_insert_after(document, payload.insertAfterPanelId)
     panel = StoryPanel(
         id=_next_panel_id(document),
         order=next_order,
@@ -250,11 +273,13 @@ def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
         startOffset=payload.startOffset,
         endOffset=payload.endOffset,
         selectedText=selected,
+        customText=payload.customText.strip(),
         pageId=page_id,
         rect=rect,
         layer=payload.layer,
     )
     document.panels.append(panel)
+    _validate_story_overlaps(document)
     return save_document(slug, document)
 
 
@@ -302,24 +327,24 @@ def create_draft_panel(slug: str, payload: StoryPanelDraftCreate) -> StoryPanelD
     return save_document(slug, document)
 
 
-def create_anchor(slug: str, payload: StoryPanelAnchorCreate) -> StoryPanelDocument:
+def create_bookmark(slug: str, payload: StoryPanelBookmarkCreate) -> StoryPanelDocument:
     document = read_document(slug)
     book = optional_book_text(slug)
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
     if payload.endOffset > len(book):
-        raise HTTPException(status_code=400, detail="Anchor range exceeds book length")
+        raise HTTPException(status_code=400, detail="Bookmark range exceeds book length")
     selected = book[payload.startOffset:payload.endOffset]
     if payload.selectedText and payload.selectedText != selected:
-        raise HTTPException(status_code=400, detail="Anchor selectedText does not match book range")
+        raise HTTPException(status_code=400, detail="Bookmark selectedText does not match book range")
     custom_text = payload.customText.strip()
-    if payload.sourceKind == "bookmark" and not custom_text:
+    if not custom_text:
         custom_text = selected.replace("\n", " ").strip()[:120]
-    next_order = max((panel.order for panel in document.panels), default=-1) + 1
+    next_order = _order_for_insert_after(document, payload.insertAfterPanelId)
     panel = StoryPanel(
         id=_next_panel_id(document),
         order=next_order,
-        sourceKind=payload.sourceKind,
+        sourceKind="bookmark",
         startOffset=payload.startOffset,
         endOffset=payload.endOffset,
         selectedText=selected,
@@ -327,7 +352,7 @@ def create_anchor(slug: str, payload: StoryPanelAnchorCreate) -> StoryPanelDocum
         pageId=None,
         panelKind="text",
         rect=StoryPanelRect(x=0, y=0, w=4, h=3),
-        layer=payload.sourceKind == "note",
+        layer=0,
     )
     document.panels.append(panel)
     return save_document(slug, document)
@@ -345,8 +370,8 @@ def patch_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> StoryPane
         page_id = updates["pageId"]
         if page_id is not None and not any(page.id == page_id for page in document.pages):
             raise HTTPException(status_code=400, detail=f"Unknown page: {page_id}")
-        if page_id is None and next_source_kind not in {"story", "draft", "note", "bookmark"}:
-            raise HTTPException(status_code=400, detail="Only story, draft, note, and bookmark panels may be unplaced")
+        if page_id is None and next_source_kind not in {"story", "draft", "bookmark"}:
+            raise HTTPException(status_code=400, detail="Only story, draft, and bookmark panels may be unplaced")
         if page_id is not None:
             target_page = next(page for page in document.pages if page.id == page_id)
             if next_source_kind in {"story", "draft"} and target_page.pageKind != "story":
@@ -359,6 +384,8 @@ def patch_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> StoryPane
         updates["activeAssetId"] = None
     next_panel = StoryPanel.model_validate({**current.model_dump(mode="json"), **updates})
     document.panels[index] = next_panel
+    if next_panel.sourceKind == "story":
+        _validate_story_overlaps(document)
     return save_document(slug, document)
 
 

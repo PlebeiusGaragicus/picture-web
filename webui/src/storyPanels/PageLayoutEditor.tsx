@@ -13,6 +13,7 @@ import {
   enforceLockedAspectOnResize,
   formatAspectRatioFromPixels,
   GEMINI_IMAGE_ASPECT_RATIOS,
+  LAYOUT_PAGE_ROWS,
   loadImageDimensions,
   pageRowsForPanels,
   panelVisualAspectRatio,
@@ -312,9 +313,12 @@ function clampRect(rect: StoryPanelRect, panelKind: StoryPanel['panelKind'] = 'i
   const minWidth = panelKind === 'text' ? minTextPanelWidth : minPanelWidth;
   const minHeight = panelKind === 'text' ? minTextPanelHeight : minPanelHeight;
   const w = Math.min(gridColumns, Math.max(minWidth, roundStep(rect.w, panelSnapScale)));
-  const h = Math.max(minHeight, roundStep(rect.h, panelSnapScale));
+  let h = Math.max(minHeight, roundStep(rect.h, panelSnapScale));
+  h = Math.min(h, LAYOUT_PAGE_ROWS);
   const x = Math.min(gridColumns - w, Math.max(0, roundStep(rect.x, panelSnapScale)));
-  return { x, y: Math.max(0, roundStep(rect.y, panelSnapScale)), w, h };
+  let y = Math.max(0, roundStep(rect.y, panelSnapScale));
+  y = Math.min(y, LAYOUT_PAGE_ROWS - h);
+  return { x, y, w, h };
 }
 
 function clampPanelRect(rect: StoryPanelRect, panel: Pick<StoryPanel, 'panelKind' | 'sourceKind'>): StoryPanelRect {
@@ -1007,12 +1011,7 @@ export function PageLayoutEditor({
     if (!caption?.pageId) return;
     const grid = pageRefs.current[caption.pageId];
     if (!grid) return;
-    const pageRows = Math.max(
-      10,
-      ...displayDocument.panels
-        .filter((panel) => panel.pageId === caption.pageId)
-        .map((panel) => panel.rect.y + panel.rect.h),
-    );
+    const pageRows = LAYOUT_PAGE_ROWS;
     const text = captionTextDrafts[captionId] ?? caption.customText;
     const nextHeight = fitCaptionHeightRows(caption, text, grid, pageRows, CAPTION_GRID_SNAP);
     updatePanelById(captionId, { rect: clampCaptionRect({ ...caption.rect, h: nextHeight }) });
@@ -1367,7 +1366,7 @@ export function PageLayoutEditor({
     if (!pageElement) return;
     const bounds = pageElement.getBoundingClientRect();
     const columnWidth = bounds.width / gridColumns;
-    const rowHeight = Math.max(22, bounds.height / Math.max(10, ...displayDocument.panels.map((panel) => panel.rect.y + panel.rect.h)));
+    const rowHeight = Math.max(22, bounds.height / LAYOUT_PAGE_ROWS);
     const draggedPanel = displayDocument.panels.find((panel) => panel.id === state.panelId);
     const snapScale = draggedPanel?.sourceKind === 'caption' ? CAPTION_GRID_SNAP : panelSnapScale;
     const deltaColumns = targetPageId === state.pageId ? roundStep((event.clientX - state.startClientX) / columnWidth, snapScale) : roundStep((event.clientX - bounds.left) / columnWidth, snapScale) - state.startRect.x;
@@ -1487,7 +1486,7 @@ export function PageLayoutEditor({
     event.preventDefault();
     const bounds = event.currentTarget.getBoundingClientRect();
     const columnWidth = bounds.width / gridColumns;
-    const rows = Math.max(10, ...displayDocument.panels.filter((panel) => panel.pageId === pageId).map((panel) => panel.rect.y + panel.rect.h));
+    const rows = LAYOUT_PAGE_ROWS;
     const rowHeight = Math.max(22, bounds.height / rows);
     const minWidth = selectedPanel?.panelKind === 'text' ? minTextPanelWidth : minPanelWidth;
     const x = Math.min(gridColumns - minWidth, Math.max(0, roundStep((event.clientX - bounds.left) / columnWidth, panelSnapScale)));
@@ -1715,7 +1714,7 @@ export function PageLayoutEditor({
                   );
                 }
                 const pagePanels = sortedPanelsForPage(displayDocument, page.id);
-                const pageRows = Math.max(10, ...pagePanels.map((panel) => panel.rect.y + panel.rect.h));
+                const pageRows = LAYOUT_PAGE_ROWS;
                 return (
                   <article
                     key={`${page.id}-${pageIndex}`}
@@ -1813,7 +1812,7 @@ export function PageLayoutEditor({
             );
           }
           const pagePanels = sortedPanelsForPage(displayDocument, page.id);
-          const pageRows = Math.max(10, ...pagePanels.map((panel) => panel.rect.y + panel.rect.h));
+          const pageRows = LAYOUT_PAGE_ROWS;
           return (
             <article
               key={`${page.id}-${pageIndex}`}

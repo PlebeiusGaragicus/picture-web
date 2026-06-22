@@ -1401,7 +1401,7 @@ function App() {
   const isStoryActive = projectPhase === 'story';
   const isStoryPanelPhaseActive = isLayoutEditorActive || isStoryActive;
   const isAdaptationListActive = !isCanvasActive && !isMomentViewActive && !isStoryPanelPhaseActive;
-  const showProjectTopBar = Boolean(openProjectSlug && (isPhaseSidebarCollapsed || isCanvasActive));
+  const showProjectTopBar = Boolean(openProjectSlug && (isPhaseSidebarCollapsed || isCanvasActive || isStoryPanelPhaseActive));
 
   const handleProjectPhaseChange = (phase: ProjectPhase) => {
     setProjectPhase(phase);
@@ -1451,7 +1451,7 @@ function App() {
       />
       <main
         ref={canvasRef}
-        className={`canvas ${!isCanvasActive ? 'story-adaptation-view' : ''} ${showViewToggle ? 'has-view-toggle' : ''} ${isPhaseSidebarCollapsed ? 'has-collapsed-sidebar' : ''} ${isCanvasActive ? 'has-canvas-top-bar' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
+        className={`canvas ${!isCanvasActive ? 'story-adaptation-view' : ''} ${showViewToggle ? 'has-view-toggle' : ''} ${isPhaseSidebarCollapsed ? 'has-collapsed-sidebar' : ''} ${showProjectTopBar ? 'has-canvas-top-bar' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
         onDragOver={(event) => {
           if (!isCanvasActive) return;
           event.preventDefault();
@@ -1534,14 +1534,12 @@ function App() {
         {isStoryActive && (
           <BookTextView
             projectSlug={openProjectSlug}
-            isPhaseSidebarCollapsed={isPhaseSidebarCollapsed}
             panelChunksOpen={storyPanelChunksOpen}
             onPanelChunksOpenChange={setStoryPanelChunksOpen}
             onNavigateToLayoutEditor={(navigation) => {
               setLayoutEditorNavigation(navigation);
               setProjectPhase('layout-editor');
             }}
-            onCollapseSidebar={() => setIsPhaseSidebarCollapsed(true)}
           />
         )}
         {isLayoutEditorActive && (
@@ -2190,7 +2188,7 @@ function ProjectPhaseSidebar({
         </div>
       )}
       </aside>
-      {activePhase !== 'story' && activePhase !== 'image-canvas' && (
+      {activePhase !== 'story' && activePhase !== 'image-canvas' && activePhase !== 'layout-editor' && (
         <SidebarCollapseButton onClick={onToggleCollapsed} />
       )}
     </div>
