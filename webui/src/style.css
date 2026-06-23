@@ -2971,7 +2971,8 @@ button {
   gap: 8px;
 }
 
-.story-panels-info-aspect-popover-wrap {
+.story-panels-info-aspect-popover-wrap,
+.story-panels-info-size-popover-wrap {
   position: relative;
 }
 
@@ -2999,6 +3000,48 @@ button {
 }
 
 .story-panels-aspect-ratio-popover button.active {
+  background: #1e293b;
+  border-color: #93c5fd;
+}
+
+.story-panels-page-size-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+  padding: 8px;
+  background: #0f172a;
+  border: 1px solid #475569;
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.45);
+}
+
+.story-panels-page-size-popover-head,
+.story-panels-page-size-popover-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.story-panels-page-size-popover-head span {
+  padding: 0 6px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.story-panels-page-size-popover-row button {
+  justify-content: center;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.story-panels-page-size-popover-row button.active {
   background: #1e293b;
   border-color: #93c5fd;
 }
