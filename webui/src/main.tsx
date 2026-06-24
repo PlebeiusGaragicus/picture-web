@@ -16,11 +16,11 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import './style.css';
-import { formatRequestError } from './formatError';
+import { formatRequestError, formatWorkflowStatusError } from './formatError';
 import { MouseTrail } from './MouseTrail';
 import { api } from './api';
 import { exportProjectAssetsToFolder, saveAssetImageToDisk } from './exportAssets';
-import { VisualStyleList } from './adaptation/cards';
+import { StyleRefCard, VisualStyleList } from './adaptation/cards';
 import { WorkflowLogPanel } from './adaptation/workflowLog';
 import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
 import { MomentSequenceView } from './adaptation/momentSequenceView';
@@ -29,30 +29,38 @@ import { readAutoPlaceEnabled, writeAutoPlaceEnabled } from './storyPanels/autoP
 import { LayoutEditorView } from './storyPanels/LayoutEditorView';
 import { ProjectTopBar } from './ProjectTopBar';
 import { SidebarCollapseButton } from './PhaseSidebarToggle';
-import { adaptationNavPhases, phaseStatus, type ProjectPhase } from './projectNavigation';
+import { adaptationNavPhases, phaseHasSidebarEdgeCollapse, phaseStatus, workspaceNavItems, type ProjectPhase } from './projectNavigation';
 import type { LayoutEditorNavigation } from './storyPanels/layoutEditorNavigation';
 import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './storyPanels/printLayout';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
-import { SYSTEM_TAGS, artifactKindLabel, assetLabel, adaptationFileKindToArtifactKind, capabilitiesForModel, characterEntityTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, storyArtifactKeysOnCanvas, storyArtifactNodeId, userProjectTags, visibleDisplayName } from './canvas/shared';
+import { SYSTEM_TAGS, artifactKindLabel, assetLabel, adaptationFileKindToArtifactKind, capabilitiesForModel, characterEntityTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, partitionAssetTagIds, storyArtifactKeysOnCanvas, storyArtifactNodeId, userProjectTags, visibleDisplayName } from './canvas/shared';
 import { NodeSidebar } from './canvas/sidebars';
 import { NodeTagButton, TagControlButton } from './canvas/assetTagRow';
 import { nodeTagActionsRef } from './canvas/nodeTagActions';
 import { SplitTagPopover } from './canvas/splitTagPopover';
 import { TagColorPickerPopover } from './canvas/tagEditor';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './canvas/types';
-import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags } from './styleRefs';
-import { HelpTip, Modal } from './ui';
-import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StoryKind, StyleRefKind, TagDefinition } from './types';
+import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags, styleRefStatusFromAdaptation } from './styleRefs';
+import { HelpTip, HoverTooltip, Modal } from './ui';
+import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, CharacterRecord, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StoryKind, StyleRefKind, TagDefinition } from './types';
+import { BookChatView } from './adaptation/bookChatView';
+import { ConceptArtView } from './adaptation/conceptArtView';
+import { HubCardMenu } from './adaptation/hubCardMenu';
+import { useBookSessionLoad } from './adaptation/useBookSessionLoad';
 
 type PhaseViewMode = 'list' | 'canvas' | 'view';
 
 function phaseHasCanvas(phase: ProjectPhase) {
-  return phase === 'image-canvas' || phase === 'phase-1-characters' || phase === 'phase-3-locations';
+  return phase === 'image-canvas' || phase === 'phase-1-characters' || phase === 'phase-3-locations' || phase === 'characters-hub' || phase === 'concept-art';
 }
 
 function phaseHasList(phase: ProjectPhase) {
-  return phase !== 'image-canvas' && phase !== 'story' && phase !== 'layout-editor';
+  return adaptationNavPhases.some((item) => item.id === phase);
+}
+
+function isAdaptationPhase(phase: ProjectPhase) {
+  return adaptationNavPhases.some((item) => item.id === phase);
 }
 
 function phaseHasViewToggle(phase: ProjectPhase) {
@@ -738,6 +746,32 @@ function App() {
     updateAssetTags(nodeId, assetId, Array.from(new Set([...preserved, ...userTags, ...characterTags, ...locationTags])));
   }, [updateAssetTags]);
 
+  const patchAssetTags = useCallback(async (assetId: string, nextTags: string[]) => {
+    if (!openProjectSlug) return;
+    const asset = assetsRef.current.find((item) => item.id === assetId);
+    if (!asset) return;
+    setAssets((current) => current.map((item) => (item.id === assetId ? { ...item, tags: nextTags } : item)));
+    setNodes((current) => current.map((node) => {
+      if (node.data.kind !== 'imageGroup' || !node.data.assetIds.includes(assetId)) return node;
+      const nextAssets = node.data.assets.map((item) => (item.id === assetId ? { ...item, tags: nextTags } : item));
+      const nextActiveAsset = node.data.activeAsset?.id === assetId ? { ...node.data.activeAsset, tags: nextTags } : node.data.activeAsset;
+      return { ...node, data: { ...node.data, assets: nextAssets, activeAsset: nextActiveAsset } };
+    }));
+    await api.patchDisplay(openProjectSlug, assetId, asset.title, nextTags);
+  }, [openProjectSlug]);
+
+  const saveProjectTagName = useCallback(async (tagId: string, name: string) => {
+    if (!openProjectSlug) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const tags = await api.getProjectTags(openProjectSlug);
+    const current = tags.find((tag) => tag.id === tagId);
+    if (!current || current.name === trimmed) return;
+    const nextTags = tags.map((tag) => (tag.id === tagId ? { ...tag, name: trimmed } : tag));
+    setProjectTags(nextTags);
+    await api.saveProjectTags(openProjectSlug, nextTags);
+  }, [openProjectSlug]);
+
   const openProject = async (projectSlug: string) => {
     setOpenProjectSlug(projectSlug);
     setProjectPhase('image-canvas');
@@ -1202,6 +1236,17 @@ function App() {
     void loadAdaptation();
   }, [loadAdaptation, assets]);
 
+  useEffect(() => {
+    if (projectPhase === 'concept-art' && openProjectSlug) {
+      void loadAdaptation();
+    }
+  }, [loadAdaptation, openProjectSlug, projectPhase]);
+
+  const { isLoading: isReadingBook, startLoad: startReadBook } = useBookSessionLoad(
+    openProjectSlug,
+    loadAdaptation,
+  );
+
   const loadAdaptationWorkflow = useCallback(async () => {
     const stage = phaseWorkflowStage(projectPhase);
     setAdaptationWorkflow(null);
@@ -1435,14 +1480,83 @@ function App() {
     );
   }
 
-  const showViewToggle = (phaseHasCanvas(projectPhase) && phaseHasList(projectPhase)) || phaseHasViewToggle(projectPhase);
+  const showViewToggle = ((phaseHasCanvas(projectPhase) && phaseHasList(projectPhase)) || phaseHasViewToggle(projectPhase))
+    && projectPhase !== 'characters-hub'
+    && projectPhase !== 'concept-art';
   const isCanvasActive = phaseHasCanvas(projectPhase) && phaseViewMode === 'canvas';
   const isMomentViewActive = phaseHasViewToggle(projectPhase) && phaseViewMode === 'view';
+  const isBookChatActive = projectPhase === 'chat';
+  const isConceptArtActive = projectPhase === 'concept-art';
   const isLayoutEditorActive = projectPhase === 'layout-editor';
   const isStoryActive = projectPhase === 'story';
   const isStoryPanelPhaseActive = isLayoutEditorActive || isStoryActive;
-  const isAdaptationListActive = !isCanvasActive && !isMomentViewActive && !isStoryPanelPhaseActive;
-  const showProjectTopBar = Boolean(openProjectSlug && (isPhaseSidebarCollapsed || isCanvasActive || isStoryPanelPhaseActive));
+  const bookAlreadyRead = adaptation?.hasBookSession ?? false;
+  const readBookTopBarControl = isStoryActive && storyHasBookText ? (() => {
+    const button = (
+      <button
+        className="generate-button project-top-bar-read-book"
+        type="button"
+        onClick={() => void startReadBook()}
+        disabled={isReadingBook || bookAlreadyRead}
+      >
+        {isReadingBook ? 'Reading book…' : 'Read book'}
+      </button>
+    );
+    return bookAlreadyRead && !isReadingBook ? (
+      <HoverTooltip text="Book already read" placement="bottom">
+        {button}
+      </HoverTooltip>
+    ) : button;
+  })() : null;
+  const isWorkspaceHubActive = isBookChatActive || isConceptArtActive || projectPhase === 'characters-hub';
+  const isAdaptationListActive = isAdaptationPhase(projectPhase) && !isCanvasActive && !isMomentViewActive;
+  const showProjectTopBar = Boolean(openProjectSlug && (isPhaseSidebarCollapsed || isCanvasActive || isStoryPanelPhaseActive || isWorkspaceHubActive));
+
+  const charactersHubViewToggle = projectPhase === 'characters-hub' ? (
+    <div className="phase-view-toggle project-top-bar-view-toggle" role="tablist" aria-label="Characters view">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={phaseViewMode !== 'canvas'}
+        className={phaseViewMode !== 'canvas' ? 'active' : ''}
+        onClick={() => setPhaseViewMode('list')}
+      >
+        List
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={phaseViewMode === 'canvas'}
+        className={phaseViewMode === 'canvas' ? 'active' : ''}
+        onClick={() => setPhaseViewMode('canvas')}
+      >
+        Canvas
+      </button>
+    </div>
+  ) : null;
+
+  const conceptArtViewToggle = projectPhase === 'concept-art' ? (
+    <div className="phase-view-toggle project-top-bar-view-toggle" role="tablist" aria-label="Concept art view">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={phaseViewMode !== 'canvas'}
+        className={phaseViewMode !== 'canvas' ? 'active' : ''}
+        onClick={() => setPhaseViewMode('list')}
+      >
+        List
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={phaseViewMode === 'canvas'}
+        className={phaseViewMode === 'canvas' ? 'active' : ''}
+        onClick={() => setPhaseViewMode('canvas')}
+      >
+        Canvas
+      </button>
+    </div>
+  ) : null;
 
   const exportBookletPdf = async (pageBorder: BookletPageBorder = exportPageBorder) => {
     if (!openProjectSlug) return;
@@ -1496,6 +1610,17 @@ function App() {
           try {
             await api.resetStoryPanelChunks(openProjectSlug);
             setStoryPanelRecoveryKey((current) => current + 1);
+            setError(null);
+          } catch (err) {
+            setError(formatRequestError(err));
+            throw err;
+          }
+        }}
+        onResetCharacterData={async () => {
+          try {
+            await api.resetCharacterData(openProjectSlug);
+            await loadAdaptation();
+            await loadProject(openProjectSlug);
             setError(null);
           } catch (err) {
             setError(formatRequestError(err));
@@ -1573,8 +1698,11 @@ function App() {
               writeAutoPlaceEnabled(enabled);
               setStoryAutoPlaceEnabled(enabled);
             }}
+            endLeadingContent={readBookTopBarControl}
             endContent={(
               <>
+                {charactersHubViewToggle}
+                {conceptArtViewToggle}
                 {layoutEditorTopBarEnd}
                 {isCanvasActive ? (
                   <FloatingTagsMenu
@@ -1629,6 +1757,50 @@ function App() {
             onPublishPhaseToCanvas={publishAdaptationPhaseToCanvas}
             onDraftArtifactToCanvas={draftArtifactToCanvas}
             onReloadAdaptation={loadAdaptation}
+          />
+        )}
+        {isBookChatActive && adaptation && (
+          <BookChatView
+            projectSlug={openProjectSlug}
+            adaptation={adaptation}
+            onReloadAdaptation={loadAdaptation}
+          />
+        )}
+        {isConceptArtActive && adaptation && (
+          <ConceptArtView
+            projectSlug={openProjectSlug}
+            adaptation={adaptation}
+            assets={assets}
+            canvas={canvas}
+            viewMode={phaseViewMode === 'canvas' ? 'canvas' : 'list'}
+            onDraftArtifactToCanvas={(key) => draftArtifactToCanvas('concept-art', key)}
+            onOpenChatForAsset={openChatForAsset}
+            onViewAsset={openAssetInViewer}
+            onReloadProject={async () => {
+              await loadProject(openProjectSlug);
+              await loadAdaptation();
+            }}
+            onReloadAdaptation={loadAdaptation}
+          />
+        )}
+        {projectPhase === 'characters-hub' && adaptation && (
+          <CharactersHubView
+            projectSlug={openProjectSlug}
+            adaptation={adaptation}
+            assets={assets}
+            canvas={canvas}
+            projectTags={projectTags}
+            viewMode={phaseViewMode === 'canvas' ? 'canvas' : 'list'}
+            onDraftArtifactToCanvas={(key) => draftArtifactToCanvas('character-sheet', key)}
+            onOpenChatForAsset={openChatForAsset}
+            onViewAsset={openAssetInViewer}
+            onCreateTag={createProjectTag}
+            onSaveProjectTagName={saveProjectTagName}
+            onPatchAssetTags={patchAssetTags}
+            onReloadProject={async () => {
+              await loadProject(openProjectSlug);
+              await loadAdaptation();
+            }}
           />
         )}
         {isStoryActive && (
@@ -2115,6 +2287,7 @@ function ProjectPhaseSidebar({
   onDeleteProject,
   onResetStoryPanelLayout,
   onResetStoryPanelChunks,
+  onResetCharacterData,
   onExportAssets,
   onExportPdf,
   exportingPdf = false,
@@ -2135,6 +2308,7 @@ function ProjectPhaseSidebar({
   onDeleteProject: () => Promise<void>;
   onResetStoryPanelLayout: () => Promise<void>;
   onResetStoryPanelChunks: () => Promise<void>;
+  onResetCharacterData: () => Promise<void>;
   onExportAssets: () => Promise<void>;
   onExportPdf: () => void;
   exportingPdf?: boolean;
@@ -2143,7 +2317,7 @@ function ProjectPhaseSidebar({
   onPhaseChange: (phase: ProjectPhase) => void;
 }) {
   const [pendingDelete, setPendingDelete] = useState(false);
-  const [deleteAction, setDeleteAction] = useState<'layout' | 'chunks' | 'project' | null>(null);
+  const [deleteAction, setDeleteAction] = useState<'layout' | 'chunks' | 'characters' | 'project' | null>(null);
   const deleting = deleteAction !== null;
   const [exportingAssets, setExportingAssets] = useState(false);
   const [organizingTags, setOrganizingTags] = useState(false);
@@ -2166,33 +2340,18 @@ function ProjectPhaseSidebar({
       </div>
       {error && <p className="error error-banner">{error}</p>}
       <nav className="phase-nav" aria-label="Workspace">
-        <button
-          type="button"
-          className={`phase-nav-item ${activePhase === 'story' ? 'is-selected' : ''}`}
-          aria-current={activePhase === 'story' ? 'page' : undefined}
-          onClick={() => onPhaseChange('story')}
-        >
-          <span className="phase-number" aria-hidden="true">▥</span>
-          <strong>Story</strong>
-        </button>
-        <button
-          type="button"
-          className={`phase-nav-item ${activePhase === 'layout-editor' ? 'is-selected' : ''}`}
-          aria-current={activePhase === 'layout-editor' ? 'page' : undefined}
-          onClick={() => onPhaseChange('layout-editor')}
-        >
-          <span className="phase-number" aria-hidden="true">▤</span>
-          <strong>Layout</strong>
-        </button>
-        <button
-          type="button"
-          className={`phase-nav-item ${activePhase === 'image-canvas' ? 'is-selected' : ''}`}
-          aria-current={activePhase === 'image-canvas' ? 'page' : undefined}
-          onClick={() => onPhaseChange('image-canvas')}
-        >
-          <span className="phase-number" aria-hidden="true">▦</span>
-          <strong>Canvas</strong>
-        </button>
+        {workspaceNavItems.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={`phase-nav-item ${activePhase === item.id ? 'is-selected' : ''}`}
+            aria-current={activePhase === item.id ? 'page' : undefined}
+            onClick={() => onPhaseChange(item.id)}
+          >
+            <span className="phase-number" aria-hidden="true">{item.icon}</span>
+            <strong>{item.label}</strong>
+          </button>
+        ))}
       </nav>
       <h3 className="phase-nav-heading">Story Adaptation</h3>
       <nav className="phase-nav" aria-label="Story adaptation phases">
@@ -2304,8 +2463,24 @@ function ProjectPhaseSidebar({
             </p>
             <p className="muted">
               Use layout or chunk reset to recover projects whose Story or Layout views fail after schema changes.
+              Delete character data to wipe list files, character sheets, and entity tags so you can re-run List and Extract.
             </p>
             <div className="row project-delete-actions">
+              <button
+                className="danger"
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleteAction('characters');
+                  try {
+                    await onResetCharacterData();
+                    setPendingDelete(false);
+                  } finally {
+                    setDeleteAction(null);
+                  }
+                }}
+              >
+                {deleteAction === 'characters' ? 'Deleting character data...' : 'Delete character data'}
+              </button>
               <button
                 className="danger"
                 disabled={deleting}
@@ -2357,7 +2532,7 @@ function ProjectPhaseSidebar({
         </div>
       )}
       </aside>
-      {activePhase !== 'story' && activePhase !== 'image-canvas' && activePhase !== 'layout-editor' && (
+      {phaseHasSidebarEdgeCollapse(activePhase) && (
         <SidebarCollapseButton onClick={onToggleCollapsed} />
       )}
     </div>
@@ -2649,8 +2824,497 @@ function fileKindLabel(kind: AdaptationFileKind) {
     characters: 'Characters',
     locations: 'Locations',
     scenes: 'Scenes',
+    'concept-art': 'Concept Art',
   };
   return labels[kind];
+}
+
+function characterEntityTagForKey(key: string, projectTags: TagDefinition[]) {
+  const tagId = slugifyFileKey(key);
+  return projectTags.find((tag) => tag.id === tagId && tag.entityKind === 'character') ?? null;
+}
+
+function characterLabel(key: string, projectTags: TagDefinition[]) {
+  return characterEntityTagForKey(key, projectTags)?.name ?? characterDisplayName(key);
+}
+
+function characterDisplayName(key: string) {
+  return key
+    .split('-')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function latestAssetForLink(link: AdaptationAssetLink, assetsById: Map<string, Asset>) {
+  const assetId = link.activeAssetId ?? link.assetIds[link.assetIds.length - 1];
+  return assetId ? assetsById.get(assetId) ?? null : null;
+}
+
+function characterDraftTagIds(key: string, link: AdaptationAssetLink, asset: Asset | null) {
+  const entityTagId = slugifyFileKey(key);
+  if (asset?.tags.length) {
+    return asset.tags;
+  }
+  return Array.from(new Set([entityTagId, ...link.userTags]));
+}
+
+function mergeCharacterTagSelection(editingKey: string, draftTagIds: string[], userTags: string[], characterTags: string[], locationTags: string[]) {
+  const entityTagId = slugifyFileKey(editingKey);
+  const preserved = draftTagIds.filter((tagId) => SYSTEM_TAGS.has(tagId));
+  return Array.from(new Set([
+    ...preserved,
+    ...userTags,
+    entityTagId,
+    ...characterTags.filter((tagId) => tagId !== entityTagId),
+    ...locationTags,
+  ]));
+}
+
+function characterBaseLink(record: CharacterRecord): AdaptationAssetLink | null {
+  return record.variants.base ?? null;
+}
+
+function characterHubState(record: CharacterRecord): string {
+  const base = characterBaseLink(record);
+  if (base?.assetIds?.length) return 'Generated';
+  if (base?.prompt) return 'Extracted';
+  if (record.description.trim()) return 'Listed';
+  return 'Not listed';
+}
+
+function characterVariantLabel(variantKey: string): string {
+  if (variantKey === 'base') return 'Base';
+  return variantKey
+    .split('-')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function sortedVariantKeyList(keys: string[]): string[] {
+  return [...keys].sort((left, right) => {
+    if (left === 'base') return -1;
+    if (right === 'base') return 1;
+    return left.localeCompare(right);
+  });
+}
+
+function CharactersHubView({
+  projectSlug,
+  adaptation,
+  assets,
+  canvas,
+  projectTags,
+  viewMode,
+  onDraftArtifactToCanvas,
+  onOpenChatForAsset,
+  onViewAsset,
+  onCreateTag,
+  onSaveProjectTagName,
+  onPatchAssetTags,
+  onReloadProject,
+}: {
+  projectSlug: string;
+  adaptation: AdaptationStatus;
+  assets: Asset[];
+  canvas: CanvasDocument;
+  projectTags: TagDefinition[];
+  viewMode: 'list' | 'canvas';
+  onDraftArtifactToCanvas: (key: string) => Promise<void>;
+  onOpenChatForAsset: (nodeId: string, assetId: string) => void;
+  onViewAsset: (assetId: string) => void;
+  onCreateTag: (tag: TagDefinition) => void;
+  onSaveProjectTagName: (tagId: string, name: string) => Promise<void>;
+  onPatchAssetTags: (assetId: string, tags: string[]) => Promise<void>;
+  onReloadProject: () => Promise<void>;
+}) {
+  const assetsById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
+  const entries = useMemo(() => Object.entries(adaptation.characters).sort(([left], [right]) => left.localeCompare(right)), [adaptation.characters]);
+  const canvasKeys = useMemo(() => storyArtifactKeysOnCanvas(canvas.nodes, 'character-sheet'), [canvas.nodes]);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState('');
+  const [draftDescription, setDraftDescription] = useState('');
+  const [draftVariantPrompts, setDraftVariantPrompts] = useState<Record<string, string>>({});
+  const [draftTagIds, setDraftTagIds] = useState<string[]>([]);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [listJobRunning, setListJobRunning] = useState(false);
+  const [extractAllRunning, setExtractAllRunning] = useState(false);
+  const [extractingSlug, setExtractingSlug] = useState<string | null>(null);
+  const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
+  const [deletingCharacter, setDeletingCharacter] = useState(false);
+  const editingRecord = editingKey ? adaptation.characters[editingKey] : null;
+  const editingLink = editingRecord ? characterBaseLink(editingRecord) : null;
+  const editingAsset = editingLink ? latestAssetForLink(editingLink, assetsById) : null;
+
+  const openEdit = (key: string, record: CharacterRecord) => {
+    const link = characterBaseLink(record);
+    const asset = link ? latestAssetForLink(link, assetsById) : null;
+    setEditingKey(key);
+    setDraftName(characterLabel(key, projectTags));
+    setDraftDescription(record.description);
+    setDraftVariantPrompts(Object.fromEntries(
+      Object.entries(record.variants).map(([variantKey, variantLink]) => [variantKey, variantLink.prompt]),
+    ));
+    setDraftTagIds(characterDraftTagIds(key, link ?? { userTags: record.userTags } as AdaptationAssetLink, asset));
+  };
+
+  const saveEdit = async () => {
+    if (!editingKey || !editingRecord) return;
+    setBusyKey(editingKey);
+    setError(null);
+    try {
+      const trimmedName = draftName.trim() || characterDisplayName(editingKey);
+      const nextKey = slugifyFileKey(trimmedName);
+      const shouldRenameKey = nextKey !== editingKey && !adaptation.characters[nextKey];
+      const savedKey = shouldRenameKey ? nextKey : editingKey;
+      const partitioned = partitionAssetTagIds(draftTagIds, projectTags);
+
+      await api.updateAdaptationFile(projectSlug, 'characters', editingKey, {
+        key: shouldRenameKey ? nextKey : editingKey,
+        description: draftDescription,
+        variants: Object.fromEntries(
+          Object.entries(draftVariantPrompts).map(([variantKey, prompt]) => [variantKey, { prompt }]),
+        ),
+        userTags: partitioned.user,
+      });
+      await onReloadProject();
+
+      if (trimmedName !== characterDisplayName(savedKey)) {
+        await onSaveProjectTagName(savedKey, trimmedName);
+      }
+
+      if (editingAsset) {
+        const entityTagId = slugifyFileKey(savedKey);
+        const nextTags = Array.from(new Set([
+          ...draftTagIds.filter((tagId) => SYSTEM_TAGS.has(tagId)),
+          ...partitioned.user,
+          entityTagId,
+          ...partitioned.character.filter((tagId) => tagId !== entityTagId),
+          ...partitioned.location,
+        ]));
+        await onPatchAssetTags(editingAsset.id, nextTags);
+      }
+
+      setEditingKey(null);
+    } catch (err) {
+      setError(formatRequestError(err));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const draftToCanvas = async (key: string) => {
+    setBusyKey(key);
+    setError(null);
+    try {
+      await onDraftArtifactToCanvas(key);
+    } catch (err) {
+      setError(formatRequestError(err));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const deleteCharacter = async (key: string) => {
+    setBusyKey(key);
+    setDeletingCharacter(true);
+    setError(null);
+    try {
+      await api.deleteAdaptationFile(projectSlug, 'characters', key);
+      await onReloadProject();
+      if (editingKey === key) {
+        setEditingKey(null);
+      }
+      setPendingDeleteKey(null);
+    } catch (err) {
+      setError(formatRequestError(err));
+    } finally {
+      setBusyKey(null);
+      setDeletingCharacter(false);
+    }
+  };
+
+  const createCharacter = async () => {
+    const existingKeys = entries.map(([key]) => key);
+    let index = existingKeys.length + 1;
+    let key = `new-character-${index}`;
+    while (existingKeys.includes(key)) {
+      index += 1;
+      key = `new-character-${index}`;
+    }
+    setBusyKey('__create__');
+    setError(null);
+    try {
+      await api.createAdaptationFile(projectSlug, 'characters', {
+        key,
+        body: '',
+        mode: 'new-image',
+        styleRef: '',
+      });
+      await onReloadProject();
+      setEditingKey(key);
+      setDraftName(characterDisplayName(key));
+      setDraftDescription('');
+      setDraftVariantPrompts({});
+      setDraftTagIds([slugifyFileKey(key)]);
+    } catch (err) {
+      setError(formatRequestError(err));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const listCharacters = async () => {
+    setError(null);
+    setListJobRunning(true);
+    try {
+      await api.startCharacterList(projectSlug);
+    } catch (err) {
+      setListJobRunning(false);
+      setError(formatRequestError(err));
+    }
+  };
+
+  const extractAllCharacters = async () => {
+    setError(null);
+    setExtractAllRunning(true);
+    try {
+      await api.startCharacterExtractAll(projectSlug);
+    } catch (err) {
+      setExtractAllRunning(false);
+      setError(formatRequestError(err));
+    }
+  };
+
+  const extractCharacter = async (key: string) => {
+    setExtractingSlug(key);
+    setError(null);
+    try {
+      await api.startCharacterExtract(projectSlug, key);
+    } catch (err) {
+      setExtractingSlug(null);
+      setError(formatRequestError(err));
+    }
+  };
+
+  useEffect(() => {
+    if (!listJobRunning) return;
+    const timer = window.setInterval(async () => {
+      const status = await api.getCharacterList(projectSlug);
+      if (!status.running) {
+        setListJobRunning(false);
+        const workflowError = formatWorkflowStatusError(status);
+        if (workflowError) setError(workflowError);
+        await onReloadProject();
+      }
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [listJobRunning, onReloadProject, projectSlug]);
+
+  useEffect(() => {
+    if (!extractAllRunning) return;
+    const timer = window.setInterval(async () => {
+      const status = await api.getCharacterExtractAll(projectSlug);
+      if (!status.running) {
+        setExtractAllRunning(false);
+        const workflowError = formatWorkflowStatusError(status);
+        if (workflowError) setError(workflowError);
+        await onReloadProject();
+      }
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [extractAllRunning, onReloadProject, projectSlug]);
+
+  useEffect(() => {
+    if (!extractingSlug) return;
+    const timer = window.setInterval(async () => {
+      const status = await api.getCharacterExtract(projectSlug, extractingSlug);
+      if (!status.running) {
+        setExtractingSlug(null);
+        const workflowError = formatWorkflowStatusError(status);
+        if (workflowError) setError(workflowError);
+        await onReloadProject();
+      }
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [extractingSlug, onReloadProject, projectSlug]);
+
+  const workflowBusy = listJobRunning || extractAllRunning || Boolean(extractingSlug);
+
+  return (
+    <>
+      {viewMode === 'list' && (
+        <div className="story-adaptation-screen story-panels-screen characters-hub-screen">
+          <header className="layout-view-toolbar characters-hub-toolbar">
+            <div className="layout-view-toolbar-primary">
+              <button className="secondary" type="button" onClick={() => void createCharacter()} disabled={busyKey === '__create__'}>
+                {busyKey === '__create__' ? 'Creating…' : '+ character'}
+              </button>
+              <button className="secondary" type="button" onClick={() => void listCharacters()} disabled={!adaptation.hasBookSession || workflowBusy}>
+                {listJobRunning ? 'Listing…' : 'List characters'}
+              </button>
+              <button className="generate-button" type="button" onClick={() => void extractAllCharacters()} disabled={!adaptation.hasBookSession || workflowBusy}>
+                {extractAllRunning ? 'Extracting all…' : 'Extract all'}
+              </button>
+            </div>
+          </header>
+          {error && <p className="error error-banner layout-view-error">{error}</p>}
+          <div className="characters-hub-workspace">
+            <section className="character-card-grid">
+              {entries.map(([key, record]) => {
+                const link = characterBaseLink(record);
+                const asset = link ? latestAssetForLink(link, assetsById) : null;
+                const onCanvas = canvasKeys.has(key);
+                const busy = busyKey === key || extractingSlug === key;
+                const canExtract = characterHubState(record) === 'Listed';
+                return (
+                  <article key={key} className="story-card character-hub-card">
+                    <div className={`character-hub-thumb ${asset ? 'has-image' : ''}`} onClick={() => asset && onViewAsset(asset.id)} role={asset ? 'button' : undefined}>
+                      {asset ? <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb`} alt="" /> : <span className="muted">No image</span>}
+                    </div>
+                    <div className="character-hub-body">
+                      <div className="character-hub-card-header">
+                        <h3>{characterLabel(key, projectTags)}</h3>
+                        <HubCardMenu
+                          disabled={busy || deletingCharacter}
+                          ariaLabel="Character actions"
+                          onDelete={() => setPendingDeleteKey(key)}
+                        />
+                      </div>
+                      <div className="character-hub-actions">
+                        {canExtract && (
+                          <button className="secondary" type="button" disabled={busy || !adaptation.hasBookSession} onClick={() => void extractCharacter(key)}>
+                            {extractingSlug === key ? 'Extracting…' : 'Extract'}
+                          </button>
+                        )}
+                        <button className="secondary" type="button" onClick={() => openEdit(key, record)}>Edit</button>
+                        <button className="secondary" type="button" disabled={busy || onCanvas || !link?.prompt} onClick={() => void draftToCanvas(key)}>
+                          {onCanvas ? 'On canvas' : busy ? 'Working...' : 'Draft'}
+                        </button>
+                        {asset && (
+                          <button className="secondary" type="button" onClick={() => onOpenChatForAsset(storyArtifactNodeId('character-sheet', key), asset.id)}>
+                            Refine
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+              {!entries.length && <p className="muted">Add a character or list characters from the book to create cards.</p>}
+            </section>
+          </div>
+        </div>
+      )}
+      {editingKey && editingRecord && (
+        <Modal
+          title={draftName || characterLabel(editingKey, projectTags)}
+          dialogClassName="editor-dialog--character-edit"
+          hideHeader
+          onClose={() => setEditingKey(null)}
+        >
+          <div className="adaptation-file-form character-edit-form">
+            <label className="field-label character-edit-name">
+              Character name
+              <input
+                type="text"
+                value={draftName}
+                onChange={(event) => setDraftName(event.target.value)}
+                placeholder="Character name"
+              />
+            </label>
+            <div className="field-label">
+              Tags
+              <div className="character-edit-tags">
+                <TagControlButton
+                  tagIds={draftTagIds}
+                  projectTags={projectTags}
+                  onPartitionedTagsChange={(userTags, characterTags, locationTags) => {
+                    setDraftTagIds(mergeCharacterTagSelection(editingKey, draftTagIds, userTags, characterTags, locationTags));
+                  }}
+                  onCreateTag={onCreateTag}
+                  className="character-edit-tag-control"
+                  portaled
+                />
+              </div>
+            </div>
+            <label className="field-label">
+              Character summary
+              <textarea
+                className="modal-textarea character-edit-description"
+                rows={10}
+                value={draftDescription}
+                onChange={(event) => setDraftDescription(event.target.value)}
+                placeholder={'## Summary\n\n...\n\n## Visual Description\n\n...'}
+              />
+            </label>
+            {sortedVariantKeyList(Object.keys(draftVariantPrompts)).length > 0 ? (
+              <div className="character-edit-variant-list">
+                <h3 className="character-edit-section-heading">Image prompts</h3>
+                {sortedVariantKeyList(Object.keys(draftVariantPrompts)).map((variantKey) => (
+                  <label key={variantKey} className="field-label character-edit-variant-item">
+                    {characterVariantLabel(variantKey)}
+                    <textarea
+                      className="modal-textarea"
+                      rows={6}
+                      value={draftVariantPrompts[variantKey] ?? ''}
+                      onChange={(event) => {
+                        setDraftVariantPrompts((current) => ({
+                          ...current,
+                          [variantKey]: event.target.value,
+                        }));
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">No image prompts yet. Run Extract to generate variant prompts.</p>
+            )}
+          </div>
+          <div className="modal-actions">
+            <button className="secondary" onClick={() => setEditingKey(null)} disabled={busyKey === editingKey}>Cancel</button>
+            <button className="generate-button" onClick={() => void saveEdit()} disabled={busyKey === editingKey || !draftName.trim()}>
+              {busyKey === editingKey ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </Modal>
+      )}
+      {pendingDeleteKey && createPortal(
+        <div
+          className="confirm-backdrop character-delete-confirm"
+          onClick={() => !deletingCharacter && setPendingDeleteKey(null)}
+        >
+          <div
+            className="confirm-dialog character-delete-confirm-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="character-delete-confirm-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="character-delete-confirm-title">Delete character?</h2>
+            <p>
+              Remove <strong>{characterLabel(pendingDeleteKey, projectTags)}</strong> from this project?
+              The character file and adaptation metadata will be deleted. Generated images on the canvas are kept.
+            </p>
+            <div className="row">
+              <button
+                className="danger"
+                disabled={deletingCharacter}
+                onClick={() => void deleteCharacter(pendingDeleteKey)}
+              >
+                {deletingCharacter ? 'Deleting...' : 'Delete character'}
+              </button>
+              <button className="secondary" disabled={deletingCharacter} onClick={() => setPendingDeleteKey(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
 }
 
 function singularFileKindLabel(kind: AdaptationFileKind) {
@@ -2658,6 +3322,7 @@ function singularFileKindLabel(kind: AdaptationFileKind) {
     characters: 'character',
     locations: 'location',
     scenes: 'scene',
+    'concept-art': 'concept',
   };
   return labels[kind];
 }

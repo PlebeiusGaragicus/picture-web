@@ -247,7 +247,12 @@ def read_tag_registry(slug: str) -> TagRegistryDocument:
     return TagRegistryDocument(tags=tags)
 
 
-def write_tag_registry(slug: str, registry: TagRegistryDocument) -> TagRegistryDocument:
+def write_tag_registry(
+    slug: str,
+    registry: TagRegistryDocument,
+    *,
+    preserve_orphan_locked_entity_tags: bool = True,
+) -> TagRegistryDocument:
     require_project(slug)
     existing = read_tag_registry(slug)
     locked_by_id = {tag.id: tag for tag in existing.tags if tag.locked}
@@ -268,8 +273,9 @@ def write_tag_registry(slug: str, registry: TagRegistryDocument) -> TagRegistryD
             next_by_id[tag.id] = existing_locked
         else:
             next_by_id[tag.id] = tag
-    for tag_id, locked_tag in locked_by_id.items():
-        next_by_id.setdefault(tag_id, locked_tag)
+    if preserve_orphan_locked_entity_tags:
+        for tag_id, locked_tag in locked_by_id.items():
+            next_by_id.setdefault(tag_id, locked_tag)
     normalized = TagRegistryDocument(
         tags=sorted(next_by_id.values(), key=lambda item: item.name),
     )
@@ -306,7 +312,11 @@ def sync_entity_tags(slug: str, *, character_keys: list[str], location_keys: lis
         *[entity_tag_for_key(key, "character") for key in sorted(character_keys)],
         *[entity_tag_for_key(key, "location") for key in sorted(location_keys)],
     ]
-    return write_tag_registry(slug, TagRegistryDocument(tags=[*user_tags, *entity_tags]))
+    return write_tag_registry(
+        slug,
+        TagRegistryDocument(tags=[*user_tags, *entity_tags]),
+        preserve_orphan_locked_entity_tags=False,
+    )
 
 
 def locked_entity_tag_ids(slug: str) -> set[str]:

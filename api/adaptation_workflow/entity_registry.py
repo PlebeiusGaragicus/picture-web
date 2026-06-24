@@ -54,25 +54,38 @@ def character_stems(root: Path) -> set[str]:
                 continue
             name = stripped.split(":", 1)[0]
             stems.add(slugify_name(name))
-    sheets_dir = root / "characters" / "sheets"
-    if sheets_dir.is_dir():
-        for sheet in sheets_dir.glob("*.md"):
-            stems.add(sheet.stem)
-    artifacts_dir = root / "characters" / "artifacts"
-    if artifacts_dir.is_dir():
-        for artifact in artifacts_dir.glob("*.md"):
-            stems.add(artifact.stem)
+    characters_dir = root / "characters"
+    if characters_dir.is_dir():
+        for char_file in characters_dir.glob("*.md"):
+            stems.add(char_file.stem)
     return stems
+
+
+def character_variant_keys_from_file(path: Path) -> list[str]:
+    from adaptation_workflow.character_file import parse_character_file, variant_entity_key
+
+    try:
+        parsed = parse_character_file(path)
+    except ValueError:
+        return []
+    return [variant_entity_key(parsed.slug, variant_key) for variant_key in parsed.variants.keys()]
 
 
 def character_entity_keys(root: Path, metadata_characters: dict[str, object] | None = None) -> list[str]:
     keys: set[str] = set()
+    characters_dir = root / "characters"
+    if characters_dir.is_dir():
+        for char_file in characters_dir.glob("*.md"):
+            keys.update(character_variant_keys_from_file(char_file))
     if metadata_characters:
-        keys.update(metadata_characters.keys())
-    sheets_dir = root / "characters" / "sheets"
-    if sheets_dir.is_dir():
-        for sheet in sheets_dir.glob("*.md"):
-            keys.update(sheet_section_keys(sheet))
+        for slug, record in metadata_characters.items():
+            if isinstance(record, dict):
+                variants = record.get("variants") or {}
+                if isinstance(variants, dict):
+                    for variant_key in variants.keys():
+                        from adaptation_workflow.character_file import variant_entity_key
+
+                        keys.add(variant_entity_key(str(slug), str(variant_key)))
     return sorted(keys)
 
 
@@ -156,10 +169,20 @@ def assert_character_registry_ready(
     root: Path,
     metadata_characters: dict[str, object] | None = None,
 ) -> None:
-    keys = character_entity_keys(root, metadata_characters)
-    if not keys:
+    from adaptation_workflow.character_file import character_file_has_variants
+
+    characters_dir = root / "characters"
+    ready = False
+    if characters_dir.is_dir():
+        for char_file in characters_dir.glob("*.md"):
+            if character_file_has_variants(char_file):
+                ready = True
+                break
+    if not ready:
+        keys = character_entity_keys(root, metadata_characters)
         raise CharacterRegistryNotReadyError(
-            f"Complete character sheets before scene extract or moment plan. Found {len(keys)} character entity keys."
+            "Complete character extraction before scene extract or moment plan. "
+            f"Found {len(keys)} character entity keys but no extracted # base variants."
         )
 
 

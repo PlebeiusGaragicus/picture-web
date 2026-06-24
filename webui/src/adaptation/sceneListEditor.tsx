@@ -122,7 +122,8 @@ export function SceneListEditor({
   };
 
   const isExtracted = (slug: string) => Boolean(adaptation.scenes[slug]);
-  const hasCharacterSheets = (adaptation.counts.characterSheets ?? 0) > 0;
+  const hasCharacterSheets = (adaptation.counts.characterFiles ?? 0) > 0
+    && Object.values(adaptation.characters).some((record) => Boolean(record.variants?.base?.prompt));
   const extractBlockedReason = hasCharacterSheets
     ? undefined
     : 'Complete Phase 1 character sheets before extracting scenes.';

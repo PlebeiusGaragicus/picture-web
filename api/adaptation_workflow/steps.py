@@ -13,7 +13,6 @@ from adaptation_workflow.moments import moment_output_path, read_story_kind
 from adaptation_workflow.locations import cleanup_staging, merge_staging_into_index, staging_dir
 from adaptation_workflow.scene_list import find_scene_list_line
 from adaptation_workflow.sections import parse_index_sections_file
-from adaptation_workflow.slugify import slugify_name
 from adaptation_workflow.entity_registry import (
     assert_character_registry_ready,
     format_entity_registry_prompt,
@@ -21,8 +20,7 @@ from adaptation_workflow.entity_registry import (
 )
 from adaptation_workflow.validate import (
     ValidationError,
-    validate_character_artifact,
-    validate_character_sheet,
+    validate_character_file,
     validate_location_prompt,
     validate_moment_file,
     validate_scene_artifact,
@@ -64,7 +62,9 @@ class StepRunner:
             self.book_session = existing
             self.logger.write_line(f"[load] Reusing book session: {existing.session_id}")
             return existing
+        return self.load_fresh_book_session()
 
+    def load_fresh_book_session(self) -> BookSession:
         task_name = f"read book {self.ctx.project_slug}"
         self.logger.write_step_header("load", f"Creating clean book-load session from {self.ctx.book_root}/book.txt", str(self.ctx.book_path))
         task = self.logger.begin_task(task_name)
@@ -189,60 +189,67 @@ class StepRunner:
         if not out.is_file():
             raise RuntimeError(f"Missing {out}")
 
-    def step_character_artifacts(self) -> None:
-        list_path = self.ctx.book_root_abs / "characters" / "list.txt"
-        lines = [line for line in list_path.read_text().splitlines() if line.strip()]
-        total = len(lines)
-        n = 0
-        for character_line in lines:
-            if ": See " in character_line:
-                continue
-            n += 1
-            character_name = character_line.split(":", 1)[0]
-            slug = slugify_name(character_name)
-            out = self.ctx.book_root_abs / "characters" / "artifacts" / f"{slug}.md"
-            rel_out = f"{self.ctx.book_root}/characters/artifacts/{slug}.md"
-            if out.is_file():
-                self.logger.write_skip("characters", f"character artifact [{n}/{total}] {slug}", rel_out)
-                self.logger.record_task(name=f"character artifact {slug}", skipped=True, duration_ms=0)
-                self._notify_progress()
-                continue
-            prompt = write_multiline_prompt(
-                f"/skill:character-artifact {self.ctx.book_root_abs} {out}",
-                character_line,
-            )
-            self.run_pi_step("characters", f"character artifact {slug}", rel_out, prompt)
-            try:
-                validate_character_artifact(out)
-            except ValidationError as exc:
-                raise RuntimeError(str(exc)) from exc
+    def sync_character_stubs_from_list(self) -> None:
+        from adaptation_workflow.character_file import sync_character_stubs_from_list
 
-    def step_character_sheets(self) -> None:
-        artifacts_dir = self.ctx.book_root_abs / "characters" / "artifacts"
-        artifacts = sorted(artifacts_dir.glob("*.md"))
-        total = len(artifacts)
-        for n, artifact in enumerate(artifacts, start=1):
-            slug = artifact.stem
-            out = self.ctx.book_root_abs / "characters" / "sheets" / f"{slug}.md"
-            rel_out = f"{self.ctx.book_root}/characters/sheets/{slug}.md"
-            if out.is_file():
-                self.logger.write_skip("characters", f"character sheet [{n}/{total}] {slug}", rel_out)
-                self.logger.record_task(name=f"character sheet {slug}", skipped=True, duration_ms=0)
-                self._notify_progress()
-                continue
-            prompt = (
-                f"/skill:character-sheet {self.ctx.book_root_abs} {out} @{artifact}"
-            )
-            self.run_pi_step("characters", f"character sheet {slug}", rel_out, prompt)
+        written = sync_character_stubs_from_list(self.ctx.book_root_abs)
+        for path in written:
+            rel_out = f"{self.ctx.book_root}/{path.relative_to(self.ctx.book_root_abs).as_posix()}"
+            self.logger.write_line(f"[characters] Created stub {rel_out}")
+        self.logger.record_task(name="character stub sync", skipped=not written, duration_ms=0)
+        self._notify_progress()
+
+    def step_character_file(self, character_slug: str, *, force: bool = False) -> None:
+        from adaptation_workflow.character_file import find_character_list_line
+
+        list_path = self.ctx.book_root_abs / "characters" / "list.txt"
+        list_line = find_character_list_line(list_path, character_slug)
+        if list_line is None:
+            raise RuntimeError(f"Character slug not found in list.txt: {character_slug}")
+
+        out = self.ctx.book_root_abs / "characters" / f"{character_slug}.md"
+        rel_out = f"{self.ctx.book_root}/characters/{character_slug}.md"
+        if out.is_file() and not force:
             try:
-                validate_character_sheet(out)
-            except ValidationError as exc:
-                raise RuntimeError(str(exc)) from exc
+                validate_character_file(out, require_variants=True)
+                self.logger.write_skip("characters", f"character file {character_slug}", rel_out)
+                self.logger.record_task(name=f"character file {character_slug}", skipped=True, duration_ms=0)
+                self._notify_progress()
+                return
+            except ValidationError:
+                self.logger.write_line(f"replacing incomplete character file: {rel_out}")
+
+        prompt = write_multiline_prompt(
+            f"/skill:character-file {self.ctx.book_root_abs} {out}",
+            list_line,
+        )
+        if out.is_file() and force:
+            out.unlink()
+        self.run_pi_step("characters", f"character file {character_slug}", rel_out, prompt)
+        try:
+            validate_character_file(out, require_variants=True)
+        except ValidationError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    def extract_all_characters(self) -> None:
+        from adaptation_workflow.character_file import character_list_lines
+
+        list_path = self.ctx.book_root_abs / "characters" / "list.txt"
+        if not list_path.is_file():
+            self.step_character_list()
+        self.sync_character_stubs_from_list()
+        slugs = [slug for slug, _line in character_list_lines(list_path)]
+        total = len(slugs)
+        for index, character_slug in enumerate(slugs, start=1):
+            self.logger.write_line(f"[characters] Extract [{index}/{total}] {character_slug}")
+            self.step_character_file(character_slug)
 
     def stage_characters(self) -> None:
+        self.extract_all_characters()
+
+    def list_characters(self) -> None:
         self.step_character_list()
-        self.step_character_artifacts()
-        self.step_character_sheets()
+        self.sync_character_stubs_from_list()
 
     def step_scene_list(self) -> None:
         out = self.ctx.book_root_abs / "scenes" / "list.txt"

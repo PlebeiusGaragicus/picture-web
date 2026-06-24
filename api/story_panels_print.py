@@ -253,9 +253,19 @@ def _draw_panel(
     _draw_image_panel(pdf, panel, page_number, x, y, w, h, slug=slug)
 
 
-def _caption_outline_stroke_width(font_size: int) -> float:
-    # ~1pt halo at fontSize 7 on the 360pt page grid (matches CSS text-shadow spread).
-    return max(0.75, font_size / 7.0)
+def _caption_outline_offsets() -> tuple[tuple[float, float], ...]:
+    # CSS uses a fixed 1px text-shadow halo; 1 CSS px is 0.75pt in print.
+    offset = 0.75
+    return (
+        (-offset, offset),
+        (offset, offset),
+        (-offset, -offset),
+        (offset, -offset),
+        (0, offset),
+        (0, -offset),
+        (-offset, 0),
+        (offset, 0),
+    )
 
 
 def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel, x: float, y: float, w: float, h: float) -> None:
@@ -290,8 +300,8 @@ def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel, x: float, y: float, 
         size=style.fontSize,
         align=style.align,
         color=text_color,
-        stroke_color=outline_color,
-        stroke_width=_caption_outline_stroke_width(style.fontSize) if outline_color is not None else 0,
+        outline_color=outline_color,
+        outline_offsets=_caption_outline_offsets() if outline_color is not None else (),
     )
 
 
@@ -501,14 +511,11 @@ def _draw_rich_text_line(
     size: int,
     render_mode: int,
     fill_color: HexColor | None = None,
-    stroke_color: HexColor | None = None,
 ) -> None:
     text = pdf.beginText(cursor_x, y)
     text.setTextRenderMode(render_mode)
     if fill_color is not None:
         text.setFillColor(fill_color)
-    if stroke_color is not None:
-        text.setStrokeColor(stroke_color)
     for run in line:
         font = _font_name(font_family, bold=run.bold, italic=run.italic)
         text.setFont(font, size)
@@ -528,8 +535,8 @@ def _draw_rich_text(
     size: int,
     align: str,
     color: HexColor | None = None,
-    stroke_color: HexColor | None = None,
-    stroke_width: float = 0,
+    outline_color: HexColor | None = None,
+    outline_offsets: tuple[tuple[float, float], ...] = (),
 ) -> None:
     fill_color = color or HexColor("#111827")
     line_height = size * 1.25
@@ -566,11 +573,6 @@ def _draw_rich_text(
     if current:
         push_line()
 
-    if stroke_color is not None and stroke_width > 0:
-        pdf.setLineWidth(stroke_width)
-        pdf.setLineJoin(1)
-        pdf.setLineCap(1)
-
     remaining_y = y
     min_y = y - height
     for line in lines:
@@ -585,17 +587,18 @@ def _draw_rich_text(
             cursor_x = x + max(0, (width - line_width) / 2)
         elif align == "right":
             cursor_x = x + max(0, width - line_width)
-        if stroke_color is not None and stroke_width > 0:
-            _draw_rich_text_line(
-                pdf,
-                line,
-                cursor_x,
-                remaining_y,
-                font_family=font_family,
-                size=size,
-                render_mode=1,
-                stroke_color=stroke_color,
-            )
+        if outline_color is not None and outline_offsets:
+            for offset_x, offset_y in outline_offsets:
+                _draw_rich_text_line(
+                    pdf,
+                    line,
+                    cursor_x + offset_x,
+                    remaining_y + offset_y,
+                    font_family=font_family,
+                    size=size,
+                    render_mode=0,
+                    fill_color=outline_color,
+                )
             _draw_rich_text_line(
                 pdf,
                 line,

@@ -56,18 +56,100 @@ def test_project_event_tool_end() -> None:
     assert projected["isError"] is False
 
 
-def test_validate_character_artifact_and_sheet(tmp_path: Path) -> None:
-    artifact = tmp_path / "hero.md"
-    artifact.write_text(
-        "## Summary\nx\n## Visual Description\nx\n## Visual Variants\nx\n## Source References\nx\n"
-    )
-    validate_character_artifact(artifact)
+def test_step_character_file_uses_list_line(tmp_path: Path) -> None:
+    from adaptation_workflow.character_file import format_character_stub
+    from adaptation_workflow.config import AdaptationContext, REPO_ROOT, SKILLS_DIR
+    from adaptation_workflow.steps import StepRunner
 
-    sheet = tmp_path / "hero-sheet.md"
-    sheet.write_text(
-        "## hero\nmode: new-image\nstyle_ref: ref\n\nLayout: top row\nExpressions:\n"
+    book_root = tmp_path / "proj" / "adaptation"
+    characters = book_root / "characters"
+    characters.mkdir(parents=True)
+    (characters / "list.txt").write_text("Gilda: A yellow filly.\n")
+    (characters / "gilda.md").write_text(format_character_stub("gilda", "Gilda: A yellow filly."))
+
+    ctx = AdaptationContext(
+        repo_root=REPO_ROOT,
+        project_slug="proj",
+        book_root=Path("photo-library/projects/proj/adaptation"),
+        book_root_abs=book_root,
+        pi_workspace=book_root / "sessions" / "pi-workspace",
+        pi_session_dir=book_root / "sessions" / "pi",
+        skills_dir=SKILLS_DIR,
+        book_session_path=book_root / "sessions" / "book-session.json",
+        book_path=book_root / "book.txt",
     )
-    validate_character_sheet(sheet)
+
+    captured: dict[str, str] = {}
+
+    class FakeLogger:
+        def write_line(self, *_args, **_kwargs) -> None:
+            return None
+
+        def write_skip(self, *_args, **_kwargs) -> None:
+            return None
+
+        def record_task(self, **_kwargs) -> None:
+            return None
+
+    steps = StepRunner(ctx, FakeLogger())  # type: ignore[arg-type]
+
+    def fake_run_pi_step(_stage: str, _name: str, _rel_out: str, prompt: str) -> None:
+        captured["prompt"] = prompt
+        (characters / "gilda.md").write_text(
+            "# gilda\n\n"
+            "## Summary\n\nGilda: A yellow filly.\n\n"
+            "## Visual Description\n\nYellow coat.\n\n"
+            "## Behaviour, mannerisms and personality\n\nShy.\n\n"
+            "## Continuity Notes\n\nStay yellow.\n\n"
+            "## Source References\n\n- `L001`: \"Hi.\"\n\n"
+            "# base\n"
+            "mode: new-image\n"
+            "style_ref: style-refs/archetype-character.png\n\n"
+            "Character reference sheet for Gilda. "
+            "Layout: top row — front full-body, three-quarter full-body, back full-body, same neutral standing pose, consistent scale. "
+            "Bottom row — four head close-ups. White background. No text, no labels, no watermarks. "
+            "Expressions: joy, surprise, concern, determination.\n"
+        )
+
+    steps.run_pi_step = fake_run_pi_step  # type: ignore[method-assign]
+    steps.step_character_file("gilda")
+    assert "Gilda: A yellow filly." in captured["prompt"]
+
+
+def test_validate_character_file_stub_and_full(tmp_path: Path) -> None:
+    from adaptation_workflow.character_file import format_character_stub
+    from adaptation_workflow.validate import (
+        ValidationError,
+        validate_character_file,
+        validate_character_stub,
+    )
+
+    stub = tmp_path / "hero.md"
+    stub.write_text(format_character_stub("hero", "Hero: A hero."))
+    validate_character_stub(stub)
+
+    full = tmp_path / "pinkie-pie.md"
+    full.write_text(
+        "# pinkie-pie\n\n"
+        "## Summary\n\nPinkie Pie summary.\n\n"
+        "## Visual Description\n\nPink body.\n\n"
+        "## Behaviour, mannerisms and personality\n\nBouncy.\n\n"
+        "## Continuity Notes\n\nStay pink.\n\n"
+        "## Source References\n\n- `L001`: \"Hi.\"\n\n"
+        "# base\n"
+        "mode: new-image\n"
+        "style_ref: style-refs/archetype-character.png\n\n"
+        "Character reference sheet for Pinkie Pie. "
+        "Layout: top row — front full-body, three-quarter full-body, back full-body, same neutral standing pose, consistent scale. "
+        "Bottom row — four head close-ups. White background. No text, no labels, no watermarks. "
+        "Expressions: joy, surprise, concern, determination.\n"
+    )
+    validate_character_file(full, require_variants=True)
+
+    bad = tmp_path / "bad.md"
+    bad.write_text("# bad\n\n## Summary\n\nOnly summary.\n")
+    with pytest.raises(ValidationError):
+        validate_character_file(bad, require_variants=False)
 
 
 def test_validate_style_refs_reports_missing_archetypes(tmp_path: Path) -> None:

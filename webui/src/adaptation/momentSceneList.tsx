@@ -139,7 +139,8 @@ export function MomentSceneList({
 
   const extractedCount = lines.filter((line) => Boolean(adaptation.scenes[line.slug])).length;
   const plannedCount = lines.filter((line) => momentsBySlug[line.slug]?.exists).length;
-  const hasCharacterSheets = (adaptation.counts.characterSheets ?? 0) > 0;
+  const hasCharacterSheets = (adaptation.counts.characterFiles ?? 0) > 0
+    && Object.values(adaptation.characters).some((record) => Boolean(record.variants?.base?.prompt));
   const planBlockedReason = hasCharacterSheets
     ? undefined
     : 'Complete Phase 1 character sheets before planning moments.';

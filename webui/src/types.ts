@@ -113,8 +113,9 @@ export interface DraftCanvasNode extends CanvasNodeLayout {
   visualStyleId?: string | null;
 }
 
-export type ArtifactKind = 'character-sheet' | 'location-prompt' | 'scene-artifact' | 'page-plan' | 'panel-prompt';
-export type AdaptationFileKind = 'characters' | 'locations' | 'scenes';
+export type ArtifactKind = 'character-sheet' | 'location-prompt' | 'scene-artifact' | 'page-plan' | 'panel-prompt' | 'concept-art';
+export type AdaptationFileKind = 'characters' | 'locations' | 'scenes' | 'concept-art';
+export type ConceptArtSubjectKind = 'character' | 'location';
 
 export interface StoryArtifactCanvasNode extends CanvasNodeLayout {
   type: 'storyArtifact';
@@ -164,6 +165,7 @@ export interface GenerateStyleRefPayload {
 export interface GenerateArtifactPayload {
   artifactKind: ArtifactKind;
   artifactKey: string;
+  variantKey?: string;
   canvasNodeId?: string | null;
   visualStyleId?: string | null;
   model?: string | null;
@@ -171,6 +173,14 @@ export interface GenerateArtifactPayload {
   imageSize?: string | null;
   seed?: number | null;
   batchCount?: number;
+}
+
+export interface CharacterRecord {
+  slug: string;
+  promptPath: string;
+  description: string;
+  userTags: string[];
+  variants: Record<string, AdaptationAssetLink>;
 }
 
 export interface VisualStyleDefinition {
@@ -183,6 +193,7 @@ export interface VisualStyleDefinition {
 export interface AdaptationAssetLink {
   artifactKind: ArtifactKind;
   promptPath: string;
+  subjectKind?: ConceptArtSubjectKind | null;
   mode: string;
   styleRef: string;
   prompt: string;
@@ -193,6 +204,7 @@ export interface AdaptationAssetLink {
   activeAssetId?: string | null;
   finalized: boolean;
   status: 'missing' | 'ready' | 'generated';
+  userTags: string[];
 }
 
 export interface StyleRefStatus {
@@ -218,8 +230,9 @@ export interface AdaptationStatus {
   counts: Record<string, number>;
   visualStyles: VisualStyleDefinition[];
   defaultVisualStyleId?: string | null;
-  characters: Record<string, AdaptationAssetLink>;
+  characters: Record<string, CharacterRecord>;
   locations: Record<string, AdaptationAssetLink>;
+  conceptArt: Record<string, AdaptationAssetLink>;
   scenes: Record<string, AdaptationAssetLink>;
   pages: Record<string, AdaptationAssetLink>;
   panels: Record<string, AdaptationAssetLink>;
@@ -446,13 +459,24 @@ export interface AdaptationFilePayload {
   body: string;
   mode?: string;
   styleRef?: string;
+  subjectKind?: ConceptArtSubjectKind;
+}
+
+export interface CharacterVariantUpdatePayload {
+  prompt?: string;
+  mode?: string;
+  styleRef?: string;
 }
 
 export interface AdaptationFileUpdatePayload {
   key?: string;
   body?: string;
+  description?: string;
+  variants?: Record<string, CharacterVariantUpdatePayload>;
   mode?: string;
   styleRef?: string;
+  subjectKind?: ConceptArtSubjectKind;
+  userTags?: string[];
 }
 
 export interface ChatTurnSettings {
@@ -509,4 +533,89 @@ export interface ChatTurnPayload {
 export interface ChatTurnResponse {
   session: ChatSession;
   assets: Asset[];
+}
+
+export interface BookChatTurn {
+  id: string;
+  role: 'user' | 'assistant';
+  createdAt: string;
+  text: string;
+  piSessionId?: string | null;
+  events: Array<Record<string, unknown>>;
+  error?: string | null;
+}
+
+export interface BookChatSession {
+  version: 1;
+  id: string;
+  projectSlug: string;
+  status: 'active' | 'archived';
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+  forkRootSessionId: string;
+  piSessionId?: string | null;
+  piSessionFile?: string | null;
+  turns: BookChatTurn[];
+}
+
+export interface PiTraceUsage {
+  input?: number | null;
+  output?: number | null;
+  cacheRead?: number | null;
+  cacheWrite?: number | null;
+  totalTokens?: number | null;
+}
+
+export interface PiTraceUserStep {
+  kind: 'user';
+  timestamp?: string | null;
+  text: string;
+}
+
+export interface PiTraceToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  result?: string | null;
+  isError?: boolean;
+  details?: { diff?: string; firstChangedLine?: number } | null;
+}
+
+export interface PiTraceAssistantStep {
+  kind: 'assistant';
+  timestamp?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  thinkingLevel?: string | null;
+  stopReason?: string | null;
+  usage?: PiTraceUsage | null;
+  thinking: string[];
+  text?: string | null;
+  toolCalls: PiTraceToolCall[];
+}
+
+export interface PiTraceInfoBanner {
+  kind: 'compaction' | 'branch_summary';
+  timestamp?: string | null;
+  text: string;
+  tokensBefore?: number | null;
+}
+
+export type PiTraceStep = PiTraceUserStep | PiTraceAssistantStep | PiTraceInfoBanner;
+
+export interface PiTraceStats {
+  messageCount: number;
+  toolCount: number;
+  userCount: number;
+  assistantCount: number;
+}
+
+export interface PiTraceDocument {
+  sessionId?: string | null;
+  cwd?: string | null;
+  version?: number | null;
+  steps: PiTraceStep[];
+  stats: PiTraceStats;
 }

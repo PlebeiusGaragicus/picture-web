@@ -24,6 +24,7 @@ from models import (
     AdaptationGenerateArtifactRequest,
     AdaptationAssetLink,
     AdaptationGenerateResponse,
+    CharacterRecord,
     AdaptationMetadata,
     AdaptationSettingsPatch,
     AdaptationStatus,
@@ -273,26 +274,95 @@ def clear_stale_style_ref_assets(slug: str, metadata: AdaptationMetadata) -> tup
     return metadata, changed
 
 
+def _clear_stale_link_group(slug: str, group: dict[str, AdaptationAssetLink]) -> bool:
+    changed = False
+    for key, link in list(group.items()):
+        asset_ids = [asset_id for asset_id in link.assetIds if asset_exists(slug, asset_id)]
+        active_asset_id = link.activeAssetId if link.activeAssetId in asset_ids else (asset_ids[-1] if asset_ids else None)
+        next_status = "generated" if asset_ids else ("ready" if link.prompt else "missing")
+        if asset_ids != link.assetIds or active_asset_id != link.activeAssetId or next_status != link.status:
+            group[key] = link.model_copy(
+                update={
+                    "assetIds": asset_ids,
+                    "activeAssetId": active_asset_id,
+                    "status": next_status,
+                }
+            )
+            changed = True
+    return changed
+
+
 def artifact_link_groups(metadata: AdaptationMetadata) -> tuple[dict[str, AdaptationAssetLink], ...]:
-    return (metadata.characters, metadata.locations, metadata.scenes, metadata.pages, metadata.panels)
+    return (metadata.locations, metadata.conceptArt, metadata.scenes, metadata.pages, metadata.panels)
+
+
+def character_entries_from_records(characters: dict[str, CharacterRecord]) -> dict[str, AdaptationAssetLink]:
+    return {key: link for key, (_slug, _variant, link) in character_flat_entries_from_records(characters).items()}
+
+
+def character_flat_entries_from_records(characters: dict[str, CharacterRecord]) -> dict[str, tuple[str, str, AdaptationAssetLink]]:
+    from adaptation_workflow.character_file import variant_entity_key
+
+    entries: dict[str, tuple[str, str, AdaptationAssetLink]] = {}
+    for slug, record in characters.items():
+        for variant_key, link in record.variants.items():
+            entries[variant_entity_key(slug, variant_key)] = (slug, variant_key, link)
+    return entries
+
+
+def character_flat_entries(metadata: AdaptationMetadata) -> dict[str, tuple[str, str, AdaptationAssetLink]]:
+    return character_flat_entries_from_records(metadata.characters)
+
+
+def resolve_character_link(
+    metadata: AdaptationMetadata,
+    character_slug: str,
+    variant_key: str = "base",
+) -> AdaptationAssetLink | None:
+    record = metadata.characters.get(character_slug)
+    if record is None:
+        return None
+    return record.variants.get(variant_key)
+
+
+def resolve_character_flat_link(metadata: AdaptationMetadata, flat_key: str) -> tuple[str, str, AdaptationAssetLink] | None:
+    from adaptation_workflow.character_file import resolve_character_variant_key
+
+    for slug in metadata.characters:
+        resolved = resolve_character_variant_key(slug, flat_key)
+        if resolved is None:
+            continue
+        character_slug, variant_key = resolved
+        link = resolve_character_link(metadata, character_slug, variant_key)
+        if link is not None:
+            return character_slug, variant_key, link
+    return None
+
+
+def update_character_variant_link(
+    metadata: AdaptationMetadata,
+    character_slug: str,
+    variant_key: str,
+    link: AdaptationAssetLink,
+) -> None:
+    record = metadata.characters.get(character_slug)
+    if record is None:
+        return
+    variants = dict(record.variants)
+    variants[variant_key] = link
+    metadata.characters[character_slug] = record.model_copy(update={"variants": variants})
 
 
 def clear_stale_artifact_assets(slug: str, metadata: AdaptationMetadata) -> tuple[AdaptationMetadata, bool]:
     changed = False
     for group in artifact_link_groups(metadata):
-        for key, link in list(group.items()):
-            asset_ids = [asset_id for asset_id in link.assetIds if asset_exists(slug, asset_id)]
-            active_asset_id = link.activeAssetId if link.activeAssetId in asset_ids else (asset_ids[-1] if asset_ids else None)
-            next_status = "generated" if asset_ids else ("ready" if link.prompt else "missing")
-            if asset_ids != link.assetIds or active_asset_id != link.activeAssetId or next_status != link.status:
-                group[key] = link.model_copy(
-                    update={
-                        "assetIds": asset_ids,
-                        "activeAssetId": active_asset_id,
-                        "status": next_status,
-                    }
-                )
-                changed = True
+        if _clear_stale_link_group(slug, group):
+            changed = True
+    for character_slug, record in list(metadata.characters.items()):
+        variants = dict(record.variants)
+        if _clear_stale_link_group(slug, variants):
+            metadata.characters[character_slug] = record.model_copy(update={"variants": variants})
+            changed = True
     return metadata, changed
 
 
@@ -394,6 +464,7 @@ def ensure_adaptation(slug: str) -> Path:
     for path in [
         root / "sessions",
         root / "style-refs",
+        root / "characters",
         root / "characters" / "artifacts",
         root / "characters" / "sheets",
         root / "acts",
@@ -404,6 +475,7 @@ def ensure_adaptation(slug: str) -> Path:
         root / "pages" / "plans",
         root / "panels" / "prompts",
         root / "locations" / "prompts",
+        root / "concept-art",
     ]:
         path.mkdir(parents=True, exist_ok=True)
     styles_path = visual_styles_path(root)
@@ -601,21 +673,33 @@ def import_artifact_to_canvas(slug: str, artifact_kind: str, artifact_key: str) 
         location_keys=list(metadata.locations.keys()),
     )
     if artifact_kind == "character-sheet":
-        entries = metadata.characters
+        resolved = resolve_character_flat_link(metadata, artifact_key)
+        if resolved is None:
+            raise HTTPException(status_code=404, detail=f"Unknown adaptation artifact: {artifact_kind}:{artifact_key}")
+        character_slug, variant_key, entry = resolved
+        flat_entries = {key: link for key, (_slug, _variant, link) in character_flat_entries(metadata).items()}
+        canvas_key = character_slug if variant_key == "base" else f"{character_slug}-{variant_key}"
     elif artifact_kind == "location-prompt":
-        entries = metadata.locations
+        entry = metadata.locations.get(artifact_key)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"Unknown adaptation artifact: {artifact_kind}:{artifact_key}")
+        flat_entries = metadata.locations
+        canvas_key = artifact_key
+    elif artifact_kind == "concept-art":
+        entry = metadata.conceptArt.get(artifact_key)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"Unknown adaptation artifact: {artifact_kind}:{artifact_key}")
+        flat_entries = metadata.conceptArt
+        canvas_key = artifact_key
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for draft import: {artifact_kind}")
-    entry = entries.get(artifact_key)
-    if entry is None:
-        raise HTTPException(status_code=404, detail=f"Unknown adaptation artifact: {artifact_kind}:{artifact_key}")
     before = library.read_stored_canvas(slug)
     after, created, _node_id = library.sync_single_story_artifact_node(
         before,
         artifact_kind=artifact_kind,
-        artifact_key=artifact_key,
+        artifact_key=canvas_key,
         entry=entry,
-        entries=entries,
+        entries=flat_entries,
     )
     saved = library.write_canvas(slug, after)
     return AdaptationCanvasImportResponse(canvas=saved, importedNodeCount=1 if created else 0)
@@ -629,11 +713,8 @@ def migrate_legacy_canonical(slug: str, metadata: AdaptationMetadata) -> Adaptat
     if not isinstance(raw, dict):
         return metadata
     changed = False
-    entity_groups: tuple[tuple[str, dict[str, AdaptationAssetLink]], ...] = (
-        ("characters", metadata.characters),
-        ("locations", metadata.locations),
-    )
-    for group_name, links in entity_groups:
+    for group_name in ("locations",):
+        links = metadata.locations if group_name == "locations" else {}
         raw_group = raw.get(group_name, {})
         if not isinstance(raw_group, dict):
             continue
@@ -658,6 +739,46 @@ def migrate_legacy_canonical(slug: str, metadata: AdaptationMetadata) -> Adaptat
             )
             if asset_exists(slug, canonical):
                 library.apply_entity_tag_to_asset(slug, canonical, key)
+    raw_characters = raw.get("characters", {})
+    if isinstance(raw_characters, dict):
+        for slug_key, entry_raw in raw_characters.items():
+            if not isinstance(entry_raw, dict):
+                continue
+            variants_raw = entry_raw.get("variants")
+            if isinstance(variants_raw, dict):
+                for variant_key, link_raw in variants_raw.items():
+                    if not isinstance(link_raw, dict):
+                        continue
+                    canonical = link_raw.pop("canonicalAssetId", None)
+                    if not canonical:
+                        continue
+                    changed = True
+                    record = metadata.characters.get(slug_key)
+                    if record is None:
+                        continue
+                    link = record.variants.get(variant_key)
+                    if link is None:
+                        continue
+                    asset_ids = list(link.assetIds)
+                    if asset_exists(slug, canonical) and canonical not in asset_ids:
+                        asset_ids.append(canonical)
+                    update_character_variant_link(
+                        metadata,
+                        slug_key,
+                        variant_key,
+                        link.model_copy(
+                            update={
+                                "assetIds": asset_ids,
+                                "status": "generated" if asset_ids else link.status,
+                            }
+                        ),
+                    )
+                    if asset_exists(slug, canonical):
+                        library.apply_entity_tag_to_asset(slug, canonical, slug_key)
+            elif "canonicalAssetId" in entry_raw:
+                canonical = entry_raw.pop("canonicalAssetId", None)
+                if canonical:
+                    changed = True
     for group_name in ("characters", "locations", "scenes", "pages", "panels"):
         raw_group = raw.get(group_name, {})
         if not isinstance(raw_group, dict):
@@ -706,6 +827,7 @@ def parse_prompt_sections(path: Path) -> dict[str, dict[str, str]]:
     current: str | None = None
     mode = ""
     style_ref = ""
+    subject = ""
     prompt_lines: list[str] = []
     in_prompt = False
     for raw_line in read_text(path).splitlines():
@@ -714,11 +836,13 @@ def parse_prompt_sections(path: Path) -> dict[str, dict[str, str]]:
                 sections[current] = {
                     "mode": mode,
                     "style_ref": style_ref,
+                    "subject": subject,
                     "prompt": "\n".join(prompt_lines).strip(),
                 }
             current = slug_from_heading(raw_line)
             mode = ""
             style_ref = ""
+            subject = ""
             prompt_lines = []
             in_prompt = False
             continue
@@ -730,7 +854,10 @@ def parse_prompt_sections(path: Path) -> dict[str, dict[str, str]]:
         if raw_line.startswith("style_ref:"):
             style_ref = raw_line.split(":", 1)[1].strip()
             continue
-        if raw_line == "" and style_ref:
+        if raw_line.startswith("subject:"):
+            subject = raw_line.split(":", 1)[1].strip()
+            continue
+        if raw_line == "" and not in_prompt:
             in_prompt = True
             continue
         if in_prompt:
@@ -739,6 +866,7 @@ def parse_prompt_sections(path: Path) -> dict[str, dict[str, str]]:
         sections[current] = {
             "mode": mode,
             "style_ref": style_ref,
+            "subject": subject,
             "prompt": "\n".join(prompt_lines).strip(),
         }
     return sections
@@ -758,9 +886,10 @@ def parse_scene_artifact(path: Path) -> dict[str, str]:
 def file_kind_config(kind: AdaptationFileKind) -> tuple[ArtifactKind, Path]:
     root = Path()
     configs: dict[AdaptationFileKind, tuple[ArtifactKind, Path]] = {
-        "characters": ("character-sheet", root / "characters" / "sheets"),
+        "characters": ("character-sheet", root / "characters"),
         "locations": ("location-prompt", root / "locations" / "prompts"),
         "scenes": ("scene-artifact", root / "scenes" / "artifacts"),
+        "concept-art": ("concept-art", root / "concept-art"),
     }
     return configs[kind]
 
@@ -771,13 +900,38 @@ def adaptation_file_path(slug: str, kind: AdaptationFileKind, key: str) -> Path:
     return root / directory / f"{key}.md"
 
 
-def format_prompt_file(key: str, body: str, mode: str, style_ref: str) -> str:
-    return f"## {key}\nmode: {mode.strip()}\nstyle_ref: {style_ref.strip()}\n\n{body.strip()}\n"
+def format_prompt_file(key: str, body: str, mode: str, style_ref: str, *, subject: str = "") -> str:
+    subject_line = f"subject: {subject.strip()}\n" if subject.strip() else ""
+    return f"## {key}\n{subject_line}mode: {mode.strip()}\nstyle_ref: {style_ref.strip()}\n\n{body.strip()}\n"
 
 
-def format_adaptation_file(kind: AdaptationFileKind, key: str, body: str, mode: str, style_ref: str) -> str:
+def format_adaptation_file(
+    kind: AdaptationFileKind,
+    key: str,
+    body: str,
+    mode: str,
+    style_ref: str,
+    *,
+    subject_kind: str = "",
+) -> str:
+    if kind == "characters":
+        from adaptation_workflow.character_file import format_character_stub
+
+        name = key.replace("-", " ").title()
+        summary = body.strip() or "New character."
+        return format_character_stub(key, f"{name}: {summary}")
     if kind == "scenes":
         return (body.strip() or f"# {key}") + "\n"
+    if kind == "concept-art":
+        from adaptation_workflow.character_file import (
+            default_character_reference_sheet_prompt,
+            display_name_from_slug,
+        )
+
+        prompt_body = body.strip()
+        if not prompt_body and (subject_kind or "character") == "character":
+            prompt_body = default_character_reference_sheet_prompt(display_name_from_slug(key))
+        return format_prompt_file(key, prompt_body, mode or "new-image", style_ref, subject=subject_kind or "character")
     return format_prompt_file(key, body, mode or "new-image", style_ref)
 
 
@@ -796,6 +950,7 @@ def adaptation_file_from_link(
         body=link.prompt,
         mode=link.mode,
         styleRef=link.styleRef,
+        subjectKind=link.subjectKind,
         status=link.status,
     )
 
@@ -803,10 +958,16 @@ def adaptation_file_from_link(
 def list_adaptation_files(slug: str, kind: AdaptationFileKind) -> list[AdaptationFileDocument]:
     root = ensure_adaptation(slug)
     metadata = sync_prompt_links(slug, read_metadata(slug))
+    if kind == "characters":
+        return [
+            adaptation_file_from_character_record(slug=slug, record=record)
+            for _slug, record in sorted(metadata.characters.items())
+            if (root / record.promptPath).is_file()
+        ]
     groups: dict[AdaptationFileKind, dict[str, AdaptationAssetLink]] = {
-        "characters": metadata.characters,
         "locations": metadata.locations,
         "scenes": metadata.scenes,
+        "concept-art": metadata.conceptArt,
     }
     return [
         adaptation_file_from_link(slug=slug, kind=kind, key=key, link=link)
@@ -815,12 +976,41 @@ def list_adaptation_files(slug: str, kind: AdaptationFileKind) -> list[Adaptatio
     ]
 
 
+def adaptation_file_from_character_record(*, slug: str, record: CharacterRecord) -> AdaptationFileDocument:
+    base = record.variants.get("base")
+    return AdaptationFileDocument(
+        kind="characters",
+        key=record.slug,
+        promptPath=record.promptPath,
+        artifactKind="character-sheet",
+        body=record.description,
+        mode=base.mode if base else "",
+        styleRef=base.styleRef if base else "",
+        status=base.status if base else "missing",
+    )
+
+
 def create_adaptation_file(slug: str, kind: AdaptationFileKind, payload: AdaptationFileCreate) -> AdaptationFileDocument:
     path = adaptation_file_path(slug, kind, payload.key)
     if path.exists():
         raise HTTPException(status_code=409, detail=f"{kind} file already exists: {payload.key}")
-    path.write_text(format_adaptation_file(kind, payload.key, payload.body, payload.mode, payload.styleRef))
+    if kind == "concept-art" and payload.subjectKind not in {"character", "location"}:
+        raise HTTPException(status_code=400, detail="subjectKind is required for concept-art files")
+    path.write_text(
+        format_adaptation_file(
+            kind,
+            payload.key,
+            payload.body,
+            payload.mode,
+            payload.styleRef,
+            subject_kind=payload.subjectKind or "",
+        )
+    )
+    metadata = sync_prompt_links(slug, read_metadata(slug))
+    write_metadata(slug, metadata)
     files = {item.key: item for item in list_adaptation_files(slug, kind)}
+    if payload.key not in files:
+        raise HTTPException(status_code=500, detail=f"Failed to register {kind} file: {payload.key}")
     return files[payload.key]
 
 
@@ -839,22 +1029,99 @@ def update_adaptation_file(slug: str, kind: AdaptationFileKind, key: str, payloa
     next_body = current.body if payload.body is None else payload.body
     next_mode = current.mode if payload.mode is None else payload.mode
     next_style_ref = current.styleRef if payload.styleRef is None else payload.styleRef
-    if next_key != key:
-        current_path.unlink()
-    next_path.write_text(format_adaptation_file(kind, next_key, next_body, next_mode, next_style_ref))
+    subject_kind = ""
+    if kind == "concept-art":
+        metadata = sync_prompt_links(slug, read_metadata(slug))
+        existing_link = metadata.conceptArt.get(key)
+        subject_kind = payload.subjectKind or (existing_link.subjectKind if existing_link else None) or "character"
+    if kind == "characters":
+        from adaptation_workflow.character_file import format_character_file, parse_character_file
+
+        parsed = parse_character_file(current_path)
+        file_slug = next_key
+        if payload.description is not None:
+            parsed.description = payload.description
+        if payload.variants is not None:
+            for variant_key, variant_update in payload.variants.items():
+                existing = dict(
+                    parsed.variants.get(
+                        variant_key,
+                        {"mode": "new-image", "style_ref": "", "prompt": ""},
+                    )
+                )
+                if variant_update.prompt is not None:
+                    existing["prompt"] = variant_update.prompt
+                if variant_update.mode is not None:
+                    existing["mode"] = variant_update.mode
+                if variant_update.styleRef is not None:
+                    existing["style_ref"] = variant_update.styleRef
+                parsed.variants[variant_key] = existing
+        elif payload.body is not None or payload.mode is not None or payload.styleRef is not None:
+            base = dict(parsed.variants.get("base", {"mode": next_mode, "style_ref": next_style_ref, "prompt": ""}))
+            if payload.body is not None:
+                base["prompt"] = next_body
+            if payload.mode is not None:
+                base["mode"] = next_mode
+            if payload.styleRef is not None:
+                base["style_ref"] = next_style_ref
+            parsed.variants["base"] = base
+        if next_key != key:
+            current_path.unlink()
+        next_path.write_text(format_character_file(file_slug, parsed.description, parsed.variants))
+    else:
+        if next_key != key:
+            current_path.unlink()
+        next_path.write_text(
+            format_adaptation_file(
+                kind,
+                next_key,
+                next_body,
+                next_mode,
+                next_style_ref,
+                subject_kind=subject_kind,
+            )
+        )
     if next_key != key:
         metadata = read_metadata(slug)
-        groups: dict[AdaptationFileKind, dict[str, AdaptationAssetLink]] = {
-            "characters": metadata.characters,
-            "locations": metadata.locations,
-            "scenes": metadata.scenes,
-        }
-        existing = groups[kind].pop(key, None)
-        if existing is not None:
-            groups[kind][next_key] = existing
-            write_metadata(slug, metadata)
+        if kind == "characters":
+            record = metadata.characters.pop(key, None)
+            if record is not None:
+                metadata.characters[next_key] = record.model_copy(update={"slug": next_key, "promptPath": relpath(ensure_adaptation(slug), next_path)})
+                write_metadata(slug, metadata)
+        else:
+            groups: dict[AdaptationFileKind, dict[str, AdaptationAssetLink]] = {
+                "locations": metadata.locations,
+                "scenes": metadata.scenes,
+                "concept-art": metadata.conceptArt,
+            }
+            existing = groups[kind].pop(key, None)
+            if existing is not None:
+                groups[kind][next_key] = existing
+                write_metadata(slug, metadata)
+    if payload.userTags is not None and kind in {"characters", "locations"}:
+        metadata = sync_prompt_links(slug, read_metadata(slug))
+        if kind == "characters":
+            record = metadata.characters.get(next_key)
+            if record is not None:
+                metadata.characters[next_key] = record.model_copy(update={"userTags": list(payload.userTags)})
+                write_metadata(slug, metadata)
+        else:
+            link = metadata.locations.get(next_key)
+            if link is not None:
+                metadata.locations[next_key] = link.model_copy(update={"userTags": list(payload.userTags)})
+                write_metadata(slug, metadata)
     files = {item.key: item for item in list_adaptation_files(slug, kind)}
     return files[next_key]
+
+
+def delete_adaptation_file(slug: str, kind: AdaptationFileKind, key: str) -> AdaptationStatus:
+    current_path = adaptation_file_path(slug, kind, key)
+    if not current_path.exists():
+        raise HTTPException(status_code=404, detail=f"{kind} file not found: {key}")
+    current_path.unlink()
+    metadata = sync_prompt_links(slug, read_metadata(slug))
+    write_metadata(slug, metadata)
+    return status(slug)
 
 
 def scene_list_path(slug: str) -> Path:
@@ -968,6 +1235,166 @@ def scene_extract_status(slug: str, scene_slug: str) -> AdaptationWorkflowStatus
         scene_extract_log_path(slug, scene_slug),
         validation=False,
     )
+
+
+def character_list_stage_name() -> str:
+    return "character-list"
+
+
+def character_extract_all_stage_name() -> str:
+    return "character-extract-all"
+
+
+def character_extract_stage_name(character_slug: str) -> str:
+    from adaptation_workflow.runner import character_extract_stage
+
+    return character_extract_stage(character_slug)
+
+
+def character_list_status_path(slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{character_list_stage_name()}-status.json"
+
+
+def character_list_log_path(slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{character_list_stage_name()}.log"
+
+
+def character_list_launcher_log_path(slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{character_list_stage_name()}-launcher.log"
+
+
+def character_extract_all_status_path(slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{character_extract_all_stage_name()}-status.json"
+
+
+def character_extract_all_log_path(slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{character_extract_all_stage_name()}.log"
+
+
+def character_extract_all_launcher_log_path(slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{character_extract_all_stage_name()}-launcher.log"
+
+
+def character_extract_status_path(slug: str, character_slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{character_extract_stage_name(character_slug)}-status.json"
+
+
+def character_extract_log_path(slug: str, character_slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{character_extract_stage_name(character_slug)}.log"
+
+
+def character_extract_launcher_log_path(slug: str, character_slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{character_extract_stage_name(character_slug)}-launcher.log"
+
+
+def _require_book_session_for_characters(slug: str) -> None:
+    root = ensure_adaptation(slug)
+    if not _has_book_session(root):
+        raise HTTPException(status_code=409, detail="Load book session before running character workflows")
+
+
+def start_character_list(slug: str) -> AdaptationWorkflowStatus:
+    _require_book_session_for_characters(slug)
+    return start_logged_process(
+        slug,
+        log_path=character_list_log_path(slug),
+        launcher_log_path=character_list_launcher_log_path(slug),
+        status_path=character_list_status_path(slug),
+        start_line=f"Starting character list for {slug}",
+        script_command=f'cd api && {workflow_python()} -m adaptation_workflow list-characters "$SLUG"',
+        validation=False,
+    )
+
+
+def character_list_status(slug: str) -> AdaptationWorkflowStatus:
+    return process_status(
+        slug,
+        character_list_status_path(slug),
+        character_list_log_path(slug),
+        validation=False,
+    )
+
+
+def start_character_extract_all(slug: str) -> AdaptationWorkflowStatus:
+    root = ensure_adaptation(slug)
+    _require_book_session_for_characters(slug)
+    if not (root / "characters" / "list.txt").is_file():
+        raise HTTPException(status_code=409, detail="List characters before extract-all")
+    return start_logged_process(
+        slug,
+        log_path=character_extract_all_log_path(slug),
+        launcher_log_path=character_extract_all_launcher_log_path(slug),
+        status_path=character_extract_all_status_path(slug),
+        start_line=f"Starting character extract-all for {slug}",
+        script_command=f'cd api && {workflow_python()} -m adaptation_workflow extract-characters "$SLUG"',
+        validation=False,
+    )
+
+
+def character_extract_all_status(slug: str) -> AdaptationWorkflowStatus:
+    return process_status(
+        slug,
+        character_extract_all_status_path(slug),
+        character_extract_all_log_path(slug),
+        validation=False,
+    )
+
+
+def start_character_extract(slug: str, character_slug: str, *, force: bool = False) -> AdaptationWorkflowStatus:
+    root = ensure_adaptation(slug)
+    _require_book_session_for_characters(slug)
+    if not (root / "characters" / "list.txt").is_file():
+        raise HTTPException(status_code=409, detail="List characters before extract")
+    from adaptation_workflow.character_file import character_list_lines
+
+    listed = {entry_slug for entry_slug, _line in character_list_lines(root / "characters" / "list.txt")}
+    if character_slug not in listed:
+        raise HTTPException(status_code=404, detail=f"Character not in list: {character_slug}")
+    force_flag = " --force" if force else ""
+    return start_logged_process(
+        slug,
+        log_path=character_extract_log_path(slug, character_slug),
+        launcher_log_path=character_extract_launcher_log_path(slug, character_slug),
+        status_path=character_extract_status_path(slug, character_slug),
+        start_line=f"Starting character extract for {character_slug} in {slug}",
+        script_command=(
+            f'cd api && {workflow_python()} -m adaptation_workflow extract-character "$SLUG" "{character_slug}"{force_flag}'
+        ),
+        validation=False,
+    )
+
+
+def character_extract_status(slug: str, character_slug: str) -> AdaptationWorkflowStatus:
+    return process_status(
+        slug,
+        character_extract_status_path(slug, character_slug),
+        character_extract_log_path(slug, character_slug),
+        validation=False,
+    )
+
+
+def reset_character_data(slug: str) -> AdaptationStatus:
+    root = ensure_adaptation(slug)
+    characters_dir = root / "characters"
+    if characters_dir.is_dir():
+        for path in characters_dir.iterdir():
+            if path.is_file():
+                path.unlink()
+    sessions = adaptation_dir(slug) / "sessions"
+    if sessions.is_dir():
+        for path in sessions.iterdir():
+            name = path.name
+            if not path.is_file():
+                continue
+            if name.startswith("run-character-list") or name.startswith("run-character-extract-"):
+                path.unlink()
+    metadata = sync_prompt_links(slug, read_metadata(slug))
+    library.sync_entity_tags(
+        slug,
+        character_keys=[],
+        location_keys=list(metadata.locations.keys()),
+    )
+    return status(slug)
 
 
 def scene_plan_stage_name(scene_slug: str) -> str:
@@ -1280,9 +1707,14 @@ def prompt_link(
         active_asset_id = asset_ids[-1] if asset_ids else None
     elif not active_asset_id and asset_ids:
         active_asset_id = asset_ids[-1]
+    subject_raw = section.get("subject", "").strip()
+    subject_kind = subject_raw if subject_raw in {"character", "location"} else None
+    if subject_kind is None and existing is not None:
+        subject_kind = existing.subjectKind
     return AdaptationAssetLink(
         artifactKind=artifact_kind,
         promptPath=prompt_path,
+        subjectKind=subject_kind,
         mode=section.get("mode", ""),
         styleRef=section.get("style_ref", ""),
         prompt=section.get("prompt", ""),
@@ -1293,44 +1725,89 @@ def prompt_link(
         activeAssetId=active_asset_id,
         finalized=existing.finalized if existing else False,
         status="generated" if asset_ids else "ready",
+        userTags=list(existing.userTags) if existing else [],
     )
 
 
 def sync_prompt_links(slug: str, metadata: AdaptationMetadata) -> AdaptationMetadata:
+    from adaptation_workflow.character_file import parse_character_file
+
     root = ensure_adaptation(slug)
-    for sheet in sorted((root / "characters" / "sheets").glob("*.md")):
-        prompt_path = relpath(root, sheet)
-        for key, section in parse_prompt_sections(sheet).items():
-            existing = metadata.characters.get(key)
-            metadata.characters[key] = prompt_link(
-                artifact_kind="character-sheet",
-                prompt_path=prompt_path,
-                section=section,
-                existing=existing,
+    old_characters = metadata.characters
+    new_characters: dict[str, CharacterRecord] = {}
+    characters_dir = root / "characters"
+    if characters_dir.is_dir():
+        for char_file in sorted(characters_dir.glob("*.md")):
+            slug_key = char_file.stem
+            prompt_path = relpath(root, char_file)
+            try:
+                parsed = parse_character_file(char_file)
+            except ValueError:
+                continue
+            old_record = old_characters.get(slug_key)
+            old_variants = old_record.variants if old_record else {}
+            new_variants: dict[str, AdaptationAssetLink] = {}
+            for variant_key, section in parsed.variants.items():
+                existing = old_variants.get(variant_key)
+                new_variants[variant_key] = prompt_link(
+                    artifact_kind="character-sheet",
+                    prompt_path=prompt_path,
+                    section=section,
+                    existing=existing,
+                )
+            user_tags = list(old_record.userTags) if old_record else []
+            new_characters[slug_key] = CharacterRecord(
+                slug=slug_key,
+                promptPath=prompt_path,
+                description=parsed.description,
+                userTags=user_tags,
+                variants=new_variants,
             )
+    metadata.characters = new_characters
+    old_locations = metadata.locations
+    new_locations: dict[str, AdaptationAssetLink] = {}
     for prompt_file in sorted((root / "locations" / "prompts").glob("*.md")):
         prompt_path = relpath(root, prompt_file)
         for key, section in parse_prompt_sections(prompt_file).items():
-            existing = metadata.locations.get(key)
-            metadata.locations[key] = prompt_link(
+            existing = old_locations.get(key)
+            new_locations[key] = prompt_link(
                 artifact_kind="location-prompt",
                 prompt_path=prompt_path,
                 section=section,
                 existing=existing,
             )
+    metadata.locations = new_locations
+    old_concept_art = metadata.conceptArt
+    new_concept_art: dict[str, AdaptationAssetLink] = {}
+    concept_art_dir = root / "concept-art"
+    if concept_art_dir.is_dir():
+        for prompt_file in sorted(concept_art_dir.glob("*.md")):
+            prompt_path = relpath(root, prompt_file)
+            for key, section in parse_prompt_sections(prompt_file).items():
+                existing = old_concept_art.get(key)
+                new_concept_art[key] = prompt_link(
+                    artifact_kind="concept-art",
+                    prompt_path=prompt_path,
+                    section=section,
+                    existing=existing,
+                )
+    metadata.conceptArt = new_concept_art
+    old_scenes = metadata.scenes
+    new_scenes: dict[str, AdaptationAssetLink] = {}
     for artifact_file in sorted((root / "scenes" / "artifacts").glob("*.md")):
         prompt_path = relpath(root, artifact_file)
         key = artifact_file.stem
         section = parse_scene_artifact(artifact_file)
         if not section:
             continue
-        existing = metadata.scenes.get(key)
-        metadata.scenes[key] = prompt_link(
+        existing = old_scenes.get(key)
+        new_scenes[key] = prompt_link(
             artifact_kind="scene-artifact",
             prompt_path=prompt_path,
             section=section,
             existing=existing,
         )
+    metadata.scenes = new_scenes
     old_pages = metadata.pages
     new_pages: dict[str, AdaptationAssetLink] = {}
     for plan_file in sorted((root / "pages" / "plans").glob("*.md")):
@@ -1389,11 +1866,11 @@ def status(slug: str) -> AdaptationStatus:
         archetypeScenePromptText=statuses["archetype-scene"].promptText,
         counts={
             "characterListLines": count_nonempty_lines(root / "characters" / "list.txt"),
-            "characterArtifacts": len(list((root / "characters" / "artifacts").glob("*.md"))),
-            "characterSheets": len(list((root / "characters" / "sheets").glob("*.md"))),
+            "characterFiles": len(list((root / "characters").glob("*.md"))),
             "sceneListLines": count_nonempty_lines(root / "scenes" / "list.txt"),
             "sceneArtifacts": len(list((root / "scenes" / "artifacts").glob("*.md"))),
             "locationPrompts": len(list((root / "locations" / "prompts").glob("*.md"))),
+            "conceptArt": len(list((root / "concept-art").glob("*.md"))),
             "pagePlans": len(list((root / "pages" / "plans").glob("*.md"))),
             "panelPrompts": len(list((root / "panels" / "prompts").glob("*.md"))),
             "momentSections": _count_moment_sections(root),
@@ -1404,6 +1881,7 @@ def status(slug: str) -> AdaptationStatus:
         defaultVisualStyleId=resolve_default_visual_style_id(styles),
         characters=metadata.characters,
         locations=metadata.locations,
+        conceptArt=metadata.conceptArt,
         scenes=metadata.scenes,
         pages=metadata.pages,
         panels=metadata.panels,
@@ -1551,23 +2029,38 @@ def generate_style_ref(slug: str, request: AdaptationGenerateStyleRefRequest) ->
 def next_base_character(slug: str) -> tuple[str, Path, dict[str, str]] | None:
     root = ensure_adaptation(slug)
     metadata = sync_prompt_links(slug, read_metadata(slug))
-    for sheet in sorted((root / "characters" / "sheets").glob("*.md")):
-        for key, section in parse_prompt_sections(sheet).items():
-            if section.get("mode") != "new-image":
-                continue
-            link = metadata.characters.get(key)
-            if link is None or not link.assetIds:
-                return key, sheet, section
+    from adaptation_workflow.character_file import parse_character_file
+
+    for char_file in sorted((root / "characters").glob("*.md")):
+        character_slug = char_file.stem
+        record = metadata.characters.get(character_slug)
+        base = record.variants.get("base") if record else None
+        if base is None:
+            continue
+        if base.mode != "new-image":
+            continue
+        if base.assetIds:
+            continue
+        try:
+            parsed = parse_character_file(char_file)
+        except ValueError:
+            continue
+        section = parsed.variants.get("base")
+        if section is None:
+            continue
+        return character_slug, char_file, section
     return None
 
 
 def artifact_entries(metadata: AdaptationMetadata, artifact_kind: ArtifactKind) -> dict[str, AdaptationAssetLink]:
+    if artifact_kind == "character-sheet":
+        return {key: link for key, (_slug, _variant, link) in character_flat_entries(metadata).items()}
     groups = {
-        "character-sheet": metadata.characters,
         "location-prompt": metadata.locations,
         "scene-artifact": metadata.scenes,
         "page-plan": metadata.pages,
         "panel-prompt": metadata.panels,
+        "concept-art": metadata.conceptArt,
     }
     return groups[artifact_kind]
 
@@ -1619,6 +2112,9 @@ def link_for_semantic_ref(metadata: AdaptationMetadata, ref: str) -> AdaptationA
     group_name = entity_kind_for_semantic_ref(kind)
     if group_name is None:
         return None
+    if group_name == "characters":
+        resolved = resolve_character_flat_link(metadata, key)
+        return resolved[2] if resolved else None
     group = getattr(metadata, group_name)
     return group.get(key)
 
@@ -1639,6 +2135,8 @@ def artifact_ref_asset_ids(
     model: str | None = None,
 ) -> list[str]:
     if artifact_kind == "scene-artifact":
+        return []
+    if artifact_kind == "concept-art":
         return []
     if artifact_kind in {"page-plan", "panel-prompt"}:
         import gemini
@@ -1692,14 +2190,27 @@ def attach_artifact_asset_to_canvas(
 def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> AdaptationGenerateResponse:
     root = ensure_adaptation(slug)
     metadata = sync_prompt_links(slug, read_metadata(slug))
-    entries = artifact_entries(metadata, request.artifactKind)
-    link = entries.get(request.artifactKey)
-    if link is None:
-        raise HTTPException(status_code=404, detail=f"Story artifact not found: {request.artifactKey}")
+    flat_key = request.artifactKey
+    if request.artifactKind == "character-sheet":
+        record = metadata.characters.get(request.artifactKey)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"Story artifact not found: {request.artifactKey}")
+        link = record.variants.get(request.variantKey)
+        if link is None:
+            raise HTTPException(status_code=404, detail=f"Character variant not found: {request.artifactKey}/{request.variantKey}")
+        from adaptation_workflow.character_file import variant_entity_key
+
+        flat_key = variant_entity_key(request.artifactKey, request.variantKey)
+    else:
+        entries = artifact_entries(metadata, request.artifactKind)
+        link = entries.get(request.artifactKey)
+        if link is None:
+            raise HTTPException(status_code=404, detail=f"Story artifact not found: {request.artifactKey}")
     if request.artifactKind == "scene-artifact":
         raise HTTPException(status_code=400, detail="Scene artifacts are planning artifacts and cannot be generated directly")
     canvas = library.read_stored_canvas(slug)
     canvas_node_id = request.canvasNodeId
+    canvas_artifact_key = flat_key if request.artifactKind == "character-sheet" else request.artifactKey
     if canvas_node_id is None:
         canvas_node_id = next(
             (
@@ -1707,7 +2218,7 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
                 for node_id, node in canvas.nodes.items()
                 if isinstance(node, StoryArtifactCanvasNode)
                 and node.artifactKind == request.artifactKind
-                and node.artifactKey == request.artifactKey
+                and node.artifactKey == canvas_artifact_key
             ),
             None,
         )
@@ -1736,8 +2247,8 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
         imageSize=request.imageSize or (artifact_params.imageSize if artifact_params else None) or "1K",
         seed=request.seed if request.seed is not None else (artifact_params.seed if artifact_params else None),
         batchCount=request.batchCount,
-        title=f"{link.artifactKind.replace('-', ' ').title()}: {request.artifactKey}",
-        tags=list(dict.fromkeys(["comic-adaptation", link.artifactKind, *entity_tags])),
+        title=f"{link.artifactKind.replace('-', ' ').title()}: {flat_key}",
+        tags=list(dict.fromkeys(["comic-adaptation", link.artifactKind, *entity_tags, *link.userTags])),
         canvasNodeId=canvas_node_id,
         visualStyleId=visual_style_id,
     )
@@ -1746,28 +2257,33 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
     if entity_tags:
         library.apply_entity_tag_to_asset(slug, asset.id, request.artifactKey)
     next_asset_ids = list(dict.fromkeys([*link.assetIds, asset.id]))
-    entries[request.artifactKey] = link.model_copy(
+    updated_link = link.model_copy(
         update={
             "assetIds": next_asset_ids,
             "activeAssetId": asset.id,
             "status": "generated",
         }
     )
+    if request.artifactKind == "character-sheet":
+        update_character_variant_link(metadata, request.artifactKey, request.variantKey, updated_link)
+    else:
+        entries = artifact_entries(metadata, request.artifactKind)
+        entries[request.artifactKey] = updated_link
     write_metadata(slug, metadata)
     attach_artifact_asset_to_canvas(
         slug,
         artifact_kind=request.artifactKind,
-        artifact_key=request.artifactKey,
+        artifact_key=canvas_artifact_key,
         asset_id=asset.id,
         canvas_node_id=canvas_node_id,
     )
     return AdaptationGenerateResponse(
         generated=True,
         kind="artifact",
-        key=request.artifactKey,
+        key=flat_key,
         asset=asset,
         status=status(slug),
-        message=f"Generated {request.artifactKey}.",
+        message=f"Generated {flat_key}.",
     )
 
 
@@ -1781,6 +2297,10 @@ def generate_next_character_sheet(slug: str) -> AdaptationGenerateResponse:
     key, _sheet, _section = next_item
     response = generate_artifact(
         slug,
-        AdaptationGenerateArtifactRequest(artifactKind="character-sheet", artifactKey=key),
+        AdaptationGenerateArtifactRequest(
+            artifactKind="character-sheet",
+            artifactKey=key,
+            variantKey="base",
+        ),
     )
     return response.model_copy(update={"kind": "character"})

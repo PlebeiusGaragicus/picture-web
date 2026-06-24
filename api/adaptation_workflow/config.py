@@ -130,8 +130,7 @@ def ensure_adaptation_dirs(book_root: Path) -> None:
     for relative in [
         "sessions",
         "style-refs",
-        "characters/artifacts",
-        "characters/sheets",
+        "characters",
         "acts",
         "locations",
         "locations/staging",

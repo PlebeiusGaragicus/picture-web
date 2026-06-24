@@ -17,8 +17,9 @@ DEFAULT_AUTO_PLACE_H = LAYOUT_PAGE_ROWS / 3.0
 
 AssetKind = Literal["imported", "generated"]
 StoryKind = Literal["picture-book", "illustrated-story", "comic-book"]
-ArtifactKind = Literal["character-sheet", "location-prompt", "scene-artifact", "page-plan", "panel-prompt"]
-AdaptationFileKind = Literal["characters", "locations", "scenes"]
+ArtifactKind = Literal["character-sheet", "location-prompt", "scene-artifact", "page-plan", "panel-prompt", "concept-art"]
+AdaptationFileKind = Literal["characters", "locations", "scenes", "concept-art"]
+ConceptArtSubjectKind = Literal["character", "location"]
 StyleRefKind = Literal["archetype-character", "archetype-scene"]
 MODEL_CAPABILITIES = {
     "gemini-2.5-flash-image": {
@@ -176,6 +177,7 @@ class AdaptationSettings(BaseModel):
 class AdaptationAssetLink(BaseModel):
     artifactKind: ArtifactKind
     promptPath: str
+    subjectKind: ConceptArtSubjectKind | None = None
     mode: str = ""
     styleRef: str = ""
     prompt: str = ""
@@ -186,6 +188,15 @@ class AdaptationAssetLink(BaseModel):
     activeAssetId: str | None = None
     finalized: bool = False
     status: Literal["missing", "ready", "generated"] = "missing"
+    userTags: list[str] = Field(default_factory=list)
+
+
+class CharacterRecord(BaseModel):
+    slug: str = Field(pattern=SLUG_RE)
+    promptPath: str
+    description: str = ""
+    userTags: list[str] = Field(default_factory=list)
+    variants: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
 
 
 class AdaptationStyleRefs(BaseModel):
@@ -206,8 +217,9 @@ class AdaptationMetadata(BaseModel):
     version: int = 2
     settings: AdaptationSettings = Field(default_factory=AdaptationSettings)
     styleRefs: AdaptationStyleRefs = Field(default_factory=AdaptationStyleRefs)
-    characters: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
+    characters: dict[str, CharacterRecord] = Field(default_factory=dict)
     locations: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
+    conceptArt: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
     scenes: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
     pages: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
     panels: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
@@ -245,8 +257,9 @@ class AdaptationStatus(BaseModel):
     counts: dict[str, int]
     visualStyles: list[VisualStyleDefinition]
     defaultVisualStyleId: str | None = Field(default=None, pattern=TAG_RE)
-    characters: dict[str, AdaptationAssetLink]
+    characters: dict[str, CharacterRecord]
     locations: dict[str, AdaptationAssetLink]
+    conceptArt: dict[str, AdaptationAssetLink]
     scenes: dict[str, AdaptationAssetLink]
     pages: dict[str, AdaptationAssetLink]
     panels: dict[str, AdaptationAssetLink]
@@ -259,6 +272,102 @@ class AdaptationWorkflowStatus(BaseModel):
     completedAt: str | None = None
     log: str = ""
     logFiles: dict[str, str] = Field(default_factory=dict)
+
+
+class BookChatTurn(BaseModel):
+    id: str
+    role: Literal["user", "assistant"]
+    createdAt: str
+    text: str = ""
+    piSessionId: str | None = None
+    events: list[dict[str, Any]] = Field(default_factory=list)
+    error: str | None = None
+
+
+class BookChatSessionDocument(BaseModel):
+    version: int = 1
+    id: str
+    projectSlug: str
+    status: Literal["active", "archived"] = "active"
+    title: str
+    createdAt: str
+    updatedAt: str
+    archivedAt: str | None = None
+    forkRootSessionId: str
+    piSessionId: str | None = None
+    piSessionFile: str | None = None
+    turns: list[BookChatTurn] = Field(default_factory=list)
+
+
+class PiTraceUsage(BaseModel):
+    input: int | None = None
+    output: int | None = None
+    cacheRead: int | None = None
+    cacheWrite: int | None = None
+    totalTokens: int | None = None
+
+
+class PiTraceUserStep(BaseModel):
+    kind: Literal["user"] = "user"
+    timestamp: str | None = None
+    text: str
+
+
+class PiTraceToolCall(BaseModel):
+    id: str
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    result: str | None = None
+    isError: bool = False
+    details: dict[str, Any] | None = None
+
+
+class PiTraceAssistantStep(BaseModel):
+    kind: Literal["assistant"] = "assistant"
+    timestamp: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    thinkingLevel: str | None = None
+    stopReason: str | None = None
+    usage: PiTraceUsage | None = None
+    thinking: list[str] = Field(default_factory=list)
+    text: str | None = None
+    toolCalls: list[PiTraceToolCall] = Field(default_factory=list)
+
+
+class PiTraceInfoBanner(BaseModel):
+    kind: Literal["compaction", "branch_summary"]
+    timestamp: str | None = None
+    text: str
+    tokensBefore: int | None = None
+
+
+class PiTraceStats(BaseModel):
+    messageCount: int = 0
+    toolCount: int = 0
+    userCount: int = 0
+    assistantCount: int = 0
+
+
+class PiTraceDocument(BaseModel):
+    sessionId: str | None = None
+    cwd: str | None = None
+    version: int | None = None
+    steps: list[PiTraceUserStep | PiTraceAssistantStep | PiTraceInfoBanner] = Field(default_factory=list)
+    stats: PiTraceStats = Field(default_factory=PiTraceStats)
+
+
+class BookChatSessionCreate(BaseModel):
+    title: str | None = Field(default=None, min_length=1)
+
+
+class BookChatSessionPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1)
+    archived: bool | None = None
+
+
+class BookChatTurnRequest(BaseModel):
+    text: str = Field(min_length=1)
 
 
 class AdaptationCanvasImportResponse(BaseModel):
@@ -386,17 +495,28 @@ class AdaptationFileBase(BaseModel):
     body: str = ""
     mode: str = ""
     styleRef: str = ""
+    subjectKind: ConceptArtSubjectKind | None = None
 
 
 class AdaptationFileCreate(AdaptationFileBase):
     pass
 
 
+class CharacterVariantUpdate(BaseModel):
+    prompt: str | None = None
+    mode: str | None = None
+    styleRef: str | None = None
+
+
 class AdaptationFileUpdate(BaseModel):
     key: str | None = Field(default=None, pattern=SLUG_RE)
     body: str | None = None
+    description: str | None = None
+    variants: dict[str, CharacterVariantUpdate] | None = None
     mode: str | None = None
     styleRef: str | None = None
+    subjectKind: ConceptArtSubjectKind | None = None
+    userTags: list[str] | None = None
 
 
 class AdaptationFileDocument(AdaptationFileBase):
@@ -429,6 +549,7 @@ class AdaptationGenerateStyleRefRequest(BaseModel):
 class AdaptationGenerateArtifactRequest(BaseModel):
     artifactKind: ArtifactKind
     artifactKey: str = Field(min_length=1)
+    variantKey: str = Field(default="base", pattern=SLUG_RE)
     canvasNodeId: str | None = None
     visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
     model: str | None = None

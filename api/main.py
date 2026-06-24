@@ -12,6 +12,8 @@ from starlette import status
 
 import adaptation
 import library
+import book_chat_sessions
+import book_session_load
 import chat_sessions
 import story_panels
 import story_panels_print
@@ -24,6 +26,11 @@ from models import (
     AdaptationFileKind,
     AdaptationFileUpdate,
     AssetSummary,
+    BookChatSessionCreate,
+    BookChatSessionDocument,
+    BookChatSessionPatch,
+    BookChatTurnRequest,
+    PiTraceDocument,
     CanvasDocument,
     ChatSessionCreate,
     ChatSessionDocument,
@@ -216,6 +223,11 @@ def update_adaptation_file(slug: str, kind: AdaptationFileKind, key: str, payloa
     return adaptation.update_adaptation_file(slug, kind, key, payload)
 
 
+@app.delete("/api/projects/{slug}/adaptation/files/{kind}/{key}", response_model=AdaptationStatus)
+def delete_adaptation_file(slug: str, kind: AdaptationFileKind, key: str) -> AdaptationStatus:
+    return adaptation.delete_adaptation_file(slug, kind, key)
+
+
 @app.get("/api/projects/{slug}/adaptation/scenes/list", response_model=SceneListDocument)
 def get_scene_list(slug: str) -> SceneListDocument:
     return adaptation.scene_list_document(slug)
@@ -234,6 +246,41 @@ def add_scene_list_line(slug: str, payload: SceneListLineCreate) -> SceneListDoc
 @app.delete("/api/projects/{slug}/adaptation/scenes/list/lines/{key}", response_model=SceneListDocument)
 def delete_scene_list_line(slug: str, key: str) -> SceneListDocument:
     return adaptation.delete_scene_list_line(slug, key)
+
+
+@app.post("/api/projects/{slug}/adaptation/characters/list", response_model=AdaptationWorkflowStatus)
+def start_character_list(slug: str) -> AdaptationWorkflowStatus:
+    return adaptation.start_character_list(slug)
+
+
+@app.get("/api/projects/{slug}/adaptation/characters/list", response_model=AdaptationWorkflowStatus)
+def get_character_list(slug: str) -> AdaptationWorkflowStatus:
+    return adaptation.character_list_status(slug)
+
+
+@app.post("/api/projects/{slug}/adaptation/characters/extract-all", response_model=AdaptationWorkflowStatus)
+def start_character_extract_all(slug: str) -> AdaptationWorkflowStatus:
+    return adaptation.start_character_extract_all(slug)
+
+
+@app.get("/api/projects/{slug}/adaptation/characters/extract-all", response_model=AdaptationWorkflowStatus)
+def get_character_extract_all(slug: str) -> AdaptationWorkflowStatus:
+    return adaptation.character_extract_all_status(slug)
+
+
+@app.post("/api/projects/{slug}/adaptation/characters/{key}/extract", response_model=AdaptationWorkflowStatus)
+def start_character_extract(slug: str, key: str, force: bool = False) -> AdaptationWorkflowStatus:
+    return adaptation.start_character_extract(slug, key, force=force)
+
+
+@app.get("/api/projects/{slug}/adaptation/characters/{key}/extract", response_model=AdaptationWorkflowStatus)
+def get_character_extract(slug: str, key: str) -> AdaptationWorkflowStatus:
+    return adaptation.character_extract_status(slug, key)
+
+
+@app.post("/api/projects/{slug}/adaptation/characters/reset", response_model=AdaptationStatus)
+def reset_character_data(slug: str) -> AdaptationStatus:
+    return adaptation.reset_character_data(slug)
 
 
 @app.post("/api/projects/{slug}/adaptation/scenes/{key}/extract", response_model=AdaptationWorkflowStatus)
@@ -316,6 +363,46 @@ async def import_adaptation_book(slug: str, file: UploadFile = File(...)) -> Ada
 @app.get("/api/projects/{slug}/adaptation/book")
 def get_adaptation_book(slug: str) -> dict[str, str]:
     return {"text": adaptation.read_book(slug)}
+
+
+@app.get("/api/projects/{slug}/adaptation/book-session/load", response_model=AdaptationWorkflowStatus)
+def get_book_session_load(slug: str) -> AdaptationWorkflowStatus:
+    return book_session_load.book_session_load_status(slug)
+
+
+@app.post("/api/projects/{slug}/adaptation/book-session/load", response_model=AdaptationWorkflowStatus)
+def start_book_session_load(slug: str) -> AdaptationWorkflowStatus:
+    return book_session_load.start_book_session_load(slug)
+
+
+@app.get("/api/projects/{slug}/adaptation/book-chats", response_model=list[BookChatSessionDocument])
+def list_book_chats(slug: str, includeArchived: bool = Query(default=False)) -> list[BookChatSessionDocument]:
+    return book_chat_sessions.list_sessions(slug, include_archived=includeArchived)
+
+
+@app.post("/api/projects/{slug}/adaptation/book-chats", response_model=BookChatSessionDocument)
+def create_book_chat(slug: str, payload: BookChatSessionCreate = BookChatSessionCreate()) -> BookChatSessionDocument:
+    return book_chat_sessions.create_session(slug, payload)
+
+
+@app.get("/api/projects/{slug}/adaptation/book-chats/{session_id}", response_model=BookChatSessionDocument)
+def get_book_chat(slug: str, session_id: str) -> BookChatSessionDocument:
+    return book_chat_sessions.read_session(slug, session_id)
+
+
+@app.patch("/api/projects/{slug}/adaptation/book-chats/{session_id}", response_model=BookChatSessionDocument)
+def patch_book_chat(slug: str, session_id: str, payload: BookChatSessionPatch) -> BookChatSessionDocument:
+    return book_chat_sessions.patch_session(slug, session_id, payload)
+
+
+@app.post("/api/projects/{slug}/adaptation/book-chats/{session_id}/turns", response_model=BookChatSessionDocument)
+def send_book_chat_turn(slug: str, session_id: str, payload: BookChatTurnRequest) -> BookChatSessionDocument:
+    return book_chat_sessions.append_turn(slug, session_id, payload)
+
+
+@app.get("/api/projects/{slug}/adaptation/book-chats/{session_id}/trace", response_model=PiTraceDocument)
+def get_book_chat_trace(slug: str, session_id: str) -> PiTraceDocument:
+    return book_chat_sessions.read_trace(slug, session_id)
 
 
 @app.get("/api/projects/{slug}/story-panels/book")

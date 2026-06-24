@@ -27,6 +27,7 @@ export function ProjectTopBar({
   showAutoPlaceToggle,
   autoPlaceEnabled,
   onAutoPlaceChange,
+  endLeadingContent,
   endContent,
 }: {
   activePhase: ProjectPhase;
@@ -41,6 +42,7 @@ export function ProjectTopBar({
   showAutoPlaceToggle: boolean;
   autoPlaceEnabled: boolean;
   onAutoPlaceChange: (enabled: boolean) => void;
+  endLeadingContent?: ReactNode;
   endContent?: ReactNode;
 }) {
   const [navOpen, setNavOpen] = useState(false);
@@ -141,6 +143,7 @@ export function ProjectTopBar({
         )}
       </div>
       <div className="project-top-bar-end">
+        {endLeadingContent}
         {showAutoPlaceToggle && (
           <AutoPlaceToggle enabled={autoPlaceEnabled} onChange={onAutoPlaceChange} />
         )}

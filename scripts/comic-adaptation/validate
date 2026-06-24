@@ -14,7 +14,7 @@ Validates generated comic-adaptation text artifacts without invoking Pi.
 
 Stages:
   ingest      Phase 0: style refs.
-  characters  Phase 1: character list, artifacts, and sheets.
+  characters  Phase 1: character list and unified character files.
   scene-list  Phase 2: scene list.
   scenes      Phase 2: scene list and extracted artifacts.
   locations   Phase 3: location index and prompts.
@@ -103,21 +103,18 @@ validate_character_list() {
 
     character_name="${character_line%%:*}"
     slug="$(slugify_name "$character_name")"
-    artifact="$BOOK_ROOT/characters/artifacts/$slug.md"
-    sheet="$BOOK_ROOT/characters/sheets/$slug.md"
-
-    validate_character_artifact "$artifact"
-    validate_character_sheet "$sheet"
+    character_file="$BOOK_ROOT/characters/$slug.md"
+    validate_character_file "$character_file"
   done < "$BOOK_ROOT/characters/list.txt"
 
   pass "checked $expected_characters character list entries"
 }
 
-validate_character_artifact() {
+validate_character_file() {
   local path="$1"
   validate_common_file "$path" || return 0
 
-  for required in "## Summary" "## Visual Description" "## Visual Variants" "## Source References"; do
+  for required in "## Summary" "## Visual Description" "## Behaviour, mannerisms and personality" "## Continuity Notes" "## Source References" "# base" "mode:" "style_ref:" "Layout: top row" "Expressions:"; do
     if file_has "$path" "$required"; then
       :
     else
@@ -126,17 +123,12 @@ validate_character_artifact() {
   done
 }
 
-validate_character_sheet() {
-  local path="$1"
-  validate_common_file "$path" || return 0
+validate_character_artifact() {
+  validate_character_file "$1"
+}
 
-  for required in "mode:" "style_ref:" "Layout: top row" "Expressions:"; do
-    if file_has "$path" "$required"; then
-      :
-    else
-      fail "$path missing $required"
-    fi
-  done
+validate_character_sheet() {
+  validate_character_file "$1"
 }
 
 validate_scene_list() {

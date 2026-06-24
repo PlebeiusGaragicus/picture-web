@@ -28,6 +28,7 @@ def story_artifact_base_tags(kind: str) -> list[str]:
         "scene-artifact": ["adaptation", "scene"],
         "page-plan": ["adaptation", "page"],
         "panel-prompt": ["adaptation", "panel"],
+        "concept-art": ["adaptation", "concept-art"],
     }
     return tags_by_kind.get(kind, ["adaptation"])
 
@@ -42,12 +43,14 @@ def sync_existing_story_artifacts(slug: str, canvas: CanvasDocument) -> CanvasDo
     import adaptation
 
     status = adaptation.status(slug)
+    character_entries = adaptation.character_entries_from_records(status.characters)
     groups = {
-        "character-sheet": status.characters,
+        "character-sheet": character_entries,
         "location-prompt": status.locations,
         "scene-artifact": status.scenes,
         "page-plan": status.pages,
         "panel-prompt": status.panels,
+        "concept-art": status.conceptArt,
     }
     next_canvas = canvas.model_copy(deep=True)
     for node_id, node in list(next_canvas.nodes.items()):
@@ -396,12 +399,13 @@ def default_canvas_for_story_artifacts(slug: str, canvas: CanvasDocument) -> Can
     columns = 5
     y_gap = 230
     character_start_y = 320
-    character_rows = max(1, (len(status.characters) + columns - 1) // columns)
+    character_entries = adaptation.character_entries_from_records(status.characters)
+    character_rows = max(1, (len(character_entries) + columns - 1) // columns)
     location_start_y = character_start_y + character_rows * y_gap + 180
     scene_start_y = location_start_y + max(1, (len(status.locations) + columns - 1) // columns) * y_gap + 180
     page_start_y = location_start_y + max(1, (len(status.locations) + len(status.scenes) + columns - 1) // columns) * y_gap + 360
     panel_start_y = location_start_y + max(1, (len(status.locations) + len(status.scenes) + len(status.pages) + columns - 1) // columns) * y_gap + 540
-    next_canvas = sync_character_nodes(next_canvas, status.characters, character_start_y)
+    next_canvas = sync_character_nodes(next_canvas, character_entries, character_start_y)
     next_canvas = sync_location_nodes(next_canvas, status.locations, location_start_y)
     next_canvas = sync_scene_nodes(next_canvas, ordered_scene_entries(slug, status.scenes), scene_start_y)
     next_canvas = sync_moment_nodes(next_canvas, status.pages, status.panels, page_start_y, panel_start_y)

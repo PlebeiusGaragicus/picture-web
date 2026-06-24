@@ -1,6 +1,18 @@
 import React, { useEffect } from 'react';
 
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+export function Modal({
+  title,
+  onClose,
+  children,
+  dialogClassName,
+  hideHeader = false,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  dialogClassName?: string;
+  hideHeader?: boolean;
+}) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -10,11 +22,19 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
   }, [onClose]);
   return (
     <div className="confirm-backdrop" onClick={onClose}>
-      <div className="editor-dialog" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-        <div className="editor-dialog-head">
-          <h2>{title}</h2>
-          <button className="icon-button" onClick={onClose} aria-label="Close">×</button>
-        </div>
+      <div
+        className={`editor-dialog${dialogClassName ? ` ${dialogClassName}` : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={hideHeader ? title : undefined}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {!hideHeader && (
+          <div className="editor-dialog-head">
+            <h2>{title}</h2>
+            <button className="icon-button" onClick={onClose} aria-label="Close">×</button>
+          </div>
+        )}
         {children}
       </div>
     </div>

@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, MomentLayoutSection, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelDraftCreatePayload, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, BookChatSession, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, MomentLayoutSection, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, PiTraceDocument, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelDraftCreatePayload, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = true;
 
@@ -129,6 +129,10 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+  deleteAdaptationFile: (slug: string, kind: AdaptationFileKind, key: string) =>
+    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/files/${kind}/${key}`, {
+      method: 'DELETE',
+    }),
   getSceneList: (slug: string) => request<SceneListDocument>(`/api/projects/${slug}/adaptation/scenes/list`),
   putSceneList: (slug: string, lines: SceneListLine[]) =>
     request<SceneListDocument>(`/api/projects/${slug}/adaptation/scenes/list`, {
@@ -153,6 +157,22 @@ export const api = {
     ),
   getSceneExtract: (slug: string, sceneKey: string) =>
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/extract`),
+  startCharacterList: (slug: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/list`, { method: 'POST' }),
+  getCharacterList: (slug: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/list`),
+  startCharacterExtractAll: (slug: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/extract-all`, { method: 'POST' }),
+  getCharacterExtractAll: (slug: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/extract-all`),
+  startCharacterExtract: (slug: string, characterKey: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/${characterKey}/extract`, { method: 'POST' }),
+  getCharacterExtract: (slug: string, characterKey: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/${characterKey}/extract`),
+  resetCharacterData: (slug: string) =>
+    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/characters/reset`, {
+      method: 'POST',
+    }),
   startScenePlan: (slug: string, sceneKey: string) =>
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/plan`, {
       method: 'POST',
@@ -202,6 +222,31 @@ export const api = {
     }),
   getAdaptationBook: (slug: string) =>
     request<{ text: string }>(`/api/projects/${slug}/adaptation/book`),
+  getBookSessionLoad: (slug: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/book-session/load`),
+  startBookSessionLoad: (slug: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/book-session/load`, {
+      method: 'POST',
+    }),
+  listBookChatSessions: (slug: string, includeArchived = false) =>
+    request<BookChatSession[]>(`/api/projects/${slug}/adaptation/book-chats${includeArchived ? '?includeArchived=true' : ''}`),
+  createBookChatSession: (slug: string, payload: { title?: string | null } = {}) =>
+    request<BookChatSession>(`/api/projects/${slug}/adaptation/book-chats`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  patchBookChatSession: (slug: string, sessionId: string, payload: { title?: string | null; archived?: boolean | null }) =>
+    request<BookChatSession>(`/api/projects/${slug}/adaptation/book-chats/${sessionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  sendBookChatTurn: (slug: string, sessionId: string, text: string) =>
+    request<BookChatSession>(`/api/projects/${slug}/adaptation/book-chats/${sessionId}/turns`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
+  getBookChatTrace: (slug: string, sessionId: string) =>
+    request<PiTraceDocument>(`/api/projects/${slug}/adaptation/book-chats/${sessionId}/trace`),
   getStoryPanelBook: (slug: string) =>
     request<{ text: string }>(`/api/projects/${slug}/story-panels/book`),
   getStoryPanels: (slug: string) =>

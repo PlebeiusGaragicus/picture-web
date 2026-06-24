@@ -147,6 +147,7 @@ export function locationEntityTagsOnAsset(tagIds: string[], projectTags: TagDefi
 export function adaptationFileKindToArtifactKind(kind: AdaptationFileKind): ArtifactKind {
   if (kind === 'characters') return 'character-sheet';
   if (kind === 'locations') return 'location-prompt';
+  if (kind === 'concept-art') return 'concept-art';
   return 'scene-artifact';
 }
 
@@ -227,6 +228,7 @@ export function artifactKindLabel(kind: ArtifactKind) {
     'scene-artifact': 'Scene Artifact',
     'page-plan': 'Page Plan',
     'panel-prompt': 'Panel Prompt',
+    'concept-art': 'Concept Art',
   };
   return labels[kind];
 }
