@@ -11,6 +11,8 @@ from fastapi.responses import Response
 from starlette import status
 
 import adaptation
+import agent_sessions
+import concept_cards
 import library
 import book_chat_sessions
 import book_session_load
@@ -20,7 +22,14 @@ import story_panels_print
 from models import (
     ArchivePatch,
     AdaptationCanvasImportResponse,
-    ConceptArtUploadResponse,
+    AgentSessionDocument,
+    AgentSessionPatch,
+    ConceptCardDocument,
+    ConceptCardPatch,
+    ConceptNodeCreate,
+    ConceptNodeResponse,
+    ImageGroupNodeCreate,
+    ImageGroupNodeResponse,
     AdaptationImportArtifactRequest,
     AdaptationFileCreate,
     AdaptationFileDocument,
@@ -229,14 +238,44 @@ def delete_adaptation_file(slug: str, kind: AdaptationFileKind, key: str) -> Ada
     return adaptation.delete_adaptation_file(slug, kind, key)
 
 
-@app.post("/api/projects/{slug}/adaptation/concept-art/{key}/import-image", response_model=AdaptationStatus)
-async def import_concept_art_image(slug: str, key: str, file: UploadFile = File(...)) -> AdaptationStatus:
-    return await adaptation.import_concept_art_image(slug, key, file)
+@app.get("/api/projects/{slug}/concept-cards", response_model=list[ConceptCardDocument])
+def list_concept_cards(slug: str, includeArchived: bool = Query(default=False)) -> list[ConceptCardDocument]:
+    return concept_cards.list_cards(slug, include_archived=includeArchived)
 
 
-@app.post("/api/projects/{slug}/adaptation/concept-art/upload", response_model=ConceptArtUploadResponse)
-async def upload_concept_art(slug: str, file: UploadFile = File(...)) -> ConceptArtUploadResponse:
-    return await adaptation.upload_concept_art(slug, file)
+@app.post("/api/projects/{slug}/concept-cards", response_model=ConceptCardDocument)
+def create_concept_card(slug: str, payload: ConceptNodeCreate) -> ConceptCardDocument:
+    return concept_cards.create_card(slug, payload)
+
+
+@app.patch("/api/projects/{slug}/concept-cards/{card_id}", response_model=ConceptCardDocument)
+def patch_concept_card(slug: str, card_id: str, payload: ConceptCardPatch) -> ConceptCardDocument:
+    return concept_cards.update_card(slug, card_id, payload)
+
+
+@app.delete("/api/projects/{slug}/concept-cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_concept_card(slug: str, card_id: str) -> None:
+    concept_cards.delete_card(slug, card_id)
+
+
+@app.post("/api/projects/{slug}/concept-cards/{card_id}/draft", response_model=ConceptNodeResponse)
+def draft_concept_card(slug: str, card_id: str) -> ConceptNodeResponse:
+    return concept_cards.draft_card_to_canvas(slug, card_id)
+
+
+@app.post("/api/projects/{slug}/concept-nodes", response_model=ConceptCardDocument)
+def create_concept_node(slug: str, payload: ConceptNodeCreate) -> ConceptCardDocument:
+    return concept_cards.create_card(slug, payload)
+
+
+@app.post("/api/projects/{slug}/canvas/image-groups", response_model=ImageGroupNodeResponse)
+def create_canvas_image_group(slug: str, payload: ImageGroupNodeCreate) -> ImageGroupNodeResponse:
+    return adaptation.create_image_group(slug, payload)
+
+
+@app.post("/api/projects/{slug}/adaptation/concept-art/upload", response_model=ConceptCardDocument)
+async def upload_concept_art(slug: str, file: UploadFile = File(...)) -> ConceptCardDocument:
+    return await concept_cards.upload_card_image(slug, file)
 
 
 @app.get("/api/projects/{slug}/adaptation/scenes/list", response_model=SceneListDocument)
@@ -434,6 +473,26 @@ def send_book_chat_turn(slug: str, session_id: str, payload: BookChatTurnRequest
 @app.get("/api/projects/{slug}/adaptation/book-chats/{session_id}/trace", response_model=PiTraceDocument)
 def get_book_chat_trace(slug: str, session_id: str) -> PiTraceDocument:
     return book_chat_sessions.read_trace(slug, session_id)
+
+
+@app.get("/api/projects/{slug}/agent-sessions", response_model=list[AgentSessionDocument])
+def list_agent_sessions(slug: str, includeArchived: bool = Query(default=False)) -> list[AgentSessionDocument]:
+    return agent_sessions.list_sessions(slug, include_archived=includeArchived)
+
+
+@app.get("/api/projects/{slug}/agent-sessions/{session_id}", response_model=AgentSessionDocument)
+def get_agent_session(slug: str, session_id: str) -> AgentSessionDocument:
+    return agent_sessions.read_session(slug, session_id)
+
+
+@app.patch("/api/projects/{slug}/agent-sessions/{session_id}", response_model=AgentSessionDocument)
+def patch_agent_session(slug: str, session_id: str, payload: AgentSessionPatch) -> AgentSessionDocument:
+    return agent_sessions.patch_session(slug, session_id, payload)
+
+
+@app.get("/api/projects/{slug}/agent-sessions/{session_id}/trace", response_model=PiTraceDocument)
+def get_agent_session_trace(slug: str, session_id: str) -> PiTraceDocument:
+    return agent_sessions.read_trace(slug, session_id)
 
 
 @app.get("/api/projects/{slug}/story-panels/book")

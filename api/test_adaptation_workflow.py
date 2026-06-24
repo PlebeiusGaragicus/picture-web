@@ -116,14 +116,14 @@ def test_step_character_file_uses_list_line(tmp_path: Path) -> None:
     assert "Gilda: A yellow filly." in captured["prompt"]
 
 
-def test_step_generate_concept_character_writes_file(tmp_path: Path) -> None:
+def test_step_generate_concept_character_writes_file(tmp_path: Path, monkeypatch) -> None:
     from adaptation_workflow.character_file import CHARACTER_SHEET_LAYOUT_BLOCK
+    from adaptation_workflow.concept_art import concept_scratch_path, next_character_concept_key
     from adaptation_workflow.config import AdaptationContext, REPO_ROOT, SKILLS_DIR
     from adaptation_workflow.steps import StepRunner
 
     book_root = tmp_path / "proj" / "adaptation"
-    concept_dir = book_root / "concept-art"
-    concept_dir.mkdir(parents=True)
+    book_root.mkdir(parents=True)
     (book_root / "characters" / "list.txt").parent.mkdir(parents=True, exist_ok=True)
     (book_root / "characters" / "list.txt").write_text("Pinkie Pie: Party pony.\n")
 
@@ -152,12 +152,13 @@ def test_step_generate_concept_character_writes_file(tmp_path: Path) -> None:
             return None
 
     steps = StepRunner(ctx, FakeLogger())  # type: ignore[arg-type]
+    key = next_character_concept_key(book_root)
 
     def fake_run_pi_step(_stage: str, _name: str, _rel_out: str, prompt: str) -> None:
         captured["prompt"] = prompt
-        out = concept_dir / "character-concept-1.md"
+        out = concept_scratch_path(book_root, key)
         out.write_text(
-            "## character-concept-1\n"
+            f"## {key}\n"
             "subject: character\n"
             "mode: new-image\n"
             "style_ref:\n\n"
@@ -167,21 +168,31 @@ def test_step_generate_concept_character_writes_file(tmp_path: Path) -> None:
             "Expressions: alert, tired, stern, amused.\n"
         )
 
+    def fake_create_from_pi(slug: str, subject_kind: str, path: Path, *, expected_key: str) -> str:
+        assert slug == "proj"
+        assert subject_kind == "character"
+        assert expected_key == key
+        assert path.is_file()
+        path.unlink()
+        return f"draft_{expected_key}"
+
     steps.run_pi_step = fake_run_pi_step  # type: ignore[method-assign]
-    key = steps.step_generate_concept_character()
-    assert key == "character-concept-1"
+    monkeypatch.setattr("concept_canvas.create_concept_draft_from_pi_file", fake_create_from_pi)
+    monkeypatch.setattr("concept_canvas.existing_concept_summaries", lambda _slug: [])
+    node_id = steps.step_generate_concept_character()
+    assert node_id == f"draft_{key}"
     assert "/skill:concept-character" in captured["prompt"]
     assert "Pinkie Pie: Party pony." in captured["prompt"]
-    assert "File key: character-concept-1" in captured["prompt"]
+    assert f"File key: {key}" in captured["prompt"]
 
 
-def test_step_generate_concept_location_writes_file(tmp_path: Path) -> None:
+def test_step_generate_concept_location_writes_file(tmp_path: Path, monkeypatch) -> None:
+    from adaptation_workflow.concept_art import concept_scratch_path, next_location_concept_key
     from adaptation_workflow.config import AdaptationContext, REPO_ROOT, SKILLS_DIR
     from adaptation_workflow.steps import StepRunner
 
     book_root = tmp_path / "proj" / "adaptation"
-    concept_dir = book_root / "concept-art"
-    concept_dir.mkdir(parents=True)
+    book_root.mkdir(parents=True)
     locations_dir = book_root / "locations"
     locations_dir.mkdir(parents=True)
     (locations_dir / "index.md").write_text("## sunny-barn\nName: Sunny Barn\n")
@@ -211,12 +222,13 @@ def test_step_generate_concept_location_writes_file(tmp_path: Path) -> None:
             return None
 
     steps = StepRunner(ctx, FakeLogger())  # type: ignore[arg-type]
+    key = next_location_concept_key(book_root)
 
     def fake_run_pi_step(_stage: str, _name: str, _rel_out: str, prompt: str) -> None:
         captured["prompt"] = prompt
-        out = concept_dir / "location-concept-1.md"
+        out = concept_scratch_path(book_root, key)
         out.write_text(
-            "## location-concept-1\n"
+            f"## {key}\n"
             "subject: location\n"
             "mode: new-image\n"
             "style_ref:\n\n"
@@ -225,12 +237,21 @@ def test_step_generate_concept_location_writes_file(tmp_path: Path) -> None:
             "rendering, palette, lighting, and detail level. No characters, no text, no labels, no watermarks.\n"
         )
 
+    def fake_create_from_pi(slug: str, subject_kind: str, path: Path, *, expected_key: str) -> str:
+        assert slug == "proj"
+        assert subject_kind == "location"
+        assert expected_key == key
+        path.unlink()
+        return f"draft_{expected_key}"
+
     steps.run_pi_step = fake_run_pi_step  # type: ignore[method-assign]
-    key = steps.step_generate_concept_location()
-    assert key == "location-concept-1"
+    monkeypatch.setattr("concept_canvas.create_concept_draft_from_pi_file", fake_create_from_pi)
+    monkeypatch.setattr("concept_canvas.existing_concept_summaries", lambda _slug: [])
+    node_id = steps.step_generate_concept_location()
+    assert node_id == f"draft_{key}"
     assert "/skill:concept-location" in captured["prompt"]
     assert "sunny-barn" in captured["prompt"]
-    assert "File key: location-concept-1" in captured["prompt"]
+    assert f"File key: {key}" in captured["prompt"]
 
 
 def test_validate_character_file_stub_and_full(tmp_path: Path) -> None:

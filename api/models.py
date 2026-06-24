@@ -18,7 +18,7 @@ DEFAULT_AUTO_PLACE_H = LAYOUT_PAGE_ROWS / 3.0
 AssetKind = Literal["imported", "generated"]
 StoryKind = Literal["picture-book", "illustrated-story", "comic-book"]
 ArtifactKind = Literal["character-sheet", "location-prompt", "scene-artifact", "page-plan", "panel-prompt", "concept-art"]
-AdaptationFileKind = Literal["characters", "locations", "scenes", "concept-art"]
+AdaptationFileKind = Literal["characters", "locations", "scenes"]
 ConceptArtSubjectKind = Literal["character", "location"]
 StyleRefKind = Literal["archetype-character", "archetype-scene"]
 MODEL_CAPABILITIES = {
@@ -219,7 +219,6 @@ class AdaptationMetadata(BaseModel):
     styleRefs: AdaptationStyleRefs = Field(default_factory=AdaptationStyleRefs)
     characters: dict[str, CharacterRecord] = Field(default_factory=dict)
     locations: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
-    conceptArt: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
     scenes: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
     pages: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
     panels: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
@@ -259,7 +258,6 @@ class AdaptationStatus(BaseModel):
     defaultVisualStyleId: str | None = Field(default=None, pattern=TAG_RE)
     characters: dict[str, CharacterRecord]
     locations: dict[str, AdaptationAssetLink]
-    conceptArt: dict[str, AdaptationAssetLink]
     scenes: dict[str, AdaptationAssetLink]
     pages: dict[str, AdaptationAssetLink]
     panels: dict[str, AdaptationAssetLink]
@@ -272,6 +270,40 @@ class AdaptationWorkflowStatus(BaseModel):
     completedAt: str | None = None
     log: str = ""
     logFiles: dict[str, str] = Field(default_factory=dict)
+
+
+AgentSessionKind = Literal[
+    "read-book",
+    "book-chat",
+    "concept-character-suggest",
+    "concept-location-suggest",
+]
+AgentSessionStatus = Literal["running", "succeeded", "failed", "archived"]
+
+
+class AgentSessionDocument(BaseModel):
+    version: int = 1
+    id: str
+    projectSlug: str
+    title: str
+    kind: AgentSessionKind
+    status: AgentSessionStatus
+    createdAt: str
+    updatedAt: str
+    completedAt: str | None = None
+    archivedAt: str | None = None
+    piSessionId: str | None = None
+    piSessionFile: str | None = None
+    parentSessionId: str | None = None
+    source: dict[str, Any] = Field(default_factory=dict)
+    logFiles: dict[str, str] = Field(default_factory=dict)
+    error: str | None = None
+    stats: dict[str, Any] | None = None
+
+
+class AgentSessionPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1)
+    archived: bool | None = None
 
 
 class BookChatTurn(BaseModel):
@@ -373,12 +405,51 @@ class BookChatTurnRequest(BaseModel):
 class AdaptationCanvasImportResponse(BaseModel):
     canvas: CanvasDocument
     importedNodeCount: int
+    nodeId: str | None = None
 
 
-class ConceptArtUploadResponse(BaseModel):
-    key: str
+class ConceptCardDocument(BaseModel):
+    version: int = 1
+    id: str
+    projectSlug: str
+    subjectKind: ConceptArtSubjectKind
+    displayName: str = ""
+    prompt: str = ""
+    assetIds: list[str] = Field(default_factory=list)
+    activeAssetId: str | None = None
+    createdAt: str
+    updatedAt: str
+    archivedAt: str | None = None
+
+
+class ConceptNodeCreate(BaseModel):
+    subjectKind: ConceptArtSubjectKind
+    prompt: str | None = None
+    displayName: str = ""
+
+
+class ConceptCardPatch(BaseModel):
+    displayName: str | None = None
+    prompt: str | None = None
+    archived: bool | None = None
+
+
+class ConceptNodeResponse(BaseModel):
+    nodeId: str
     canvas: CanvasDocument
-    importedNodeCount: int
+
+
+class ImageGroupNodeCreate(BaseModel):
+    displayName: str = ""
+    tags: list[str] = Field(default_factory=list)
+    prompt: str = ""
+    refs: list[str] = Field(default_factory=list)
+    visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
+
+
+class ImageGroupNodeResponse(BaseModel):
+    nodeId: str
+    canvas: CanvasDocument
 
 
 class AdaptationImportArtifactRequest(BaseModel):
@@ -938,14 +1009,25 @@ class StoryArtifactCanvasNode(CanvasNodeLayout):
 
 class ImageGroupCanvasNode(CanvasNodeLayout):
     type: Literal["imageGroup"] = "imageGroup"
-    assetIds: list[str] = Field(default_factory=list, min_length=1)
+    refs: list[str] = Field(default_factory=list)
+    prompt: str = ""
+    params: GenerationParams = Field(default_factory=GenerationParams)
+    visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
+    assetIds: list[str] = Field(default_factory=list)
     activeAssetId: str | None = None
+    sourceConceptCardId: str | None = None
 
     @model_validator(mode="after")
     def active_asset_defaults_to_first(self) -> "ImageGroupCanvasNode":
-        if self.activeAssetId is None or self.activeAssetId not in self.assetIds:
+        if not self.assetIds:
+            self.activeAssetId = None
+        elif self.activeAssetId is None or self.activeAssetId not in self.assetIds:
             self.activeAssetId = self.assetIds[0]
         return self
+
+
+def is_prompt_only_image_group(node: ImageGroupCanvasNode) -> bool:
+    return not node.assetIds
 
 
 CanvasNode = Annotated[DraftCanvasNode | StoryArtifactCanvasNode | ImageGroupCanvasNode, Field(discriminator="type")]

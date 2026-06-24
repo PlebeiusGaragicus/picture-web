@@ -1,5 +1,28 @@
 import type { AdaptationFileKind, ArtifactKind, Asset, EntityKind, GenerationParams, TagDefinition } from '../types';
 
+export const CONCEPT_TAG = 'concept';
+
+export function isConceptTagged(tags: string[] | undefined): boolean {
+  return tags?.includes(CONCEPT_TAG) ?? false;
+}
+
+export function conceptSubjectFromTags(tags: string[] | undefined): 'character' | 'location' | null {
+  if (tags?.includes('concept-character')) return 'character';
+  if (tags?.includes('concept-location')) return 'location';
+  return null;
+}
+
+export function isCharacterCanvasNode(tags: string[] | undefined, projectTags: TagDefinition[]): boolean {
+  if (!tags?.length) return false;
+  if (tags.includes('character-sheet')) return true;
+  const entityCharacterTagIds = new Set(projectTags.filter((tag) => tag.entityKind === 'character').map((tag) => tag.id));
+  return tags.some((tagId) => entityCharacterTagIds.has(tagId));
+}
+
+export function isPromptOnlyImageGroup(node: { type?: string; assetIds?: string[] }): boolean {
+  return node.type === 'imageGroup' && !(node.assetIds?.length);
+}
+
 export const defaultDraftParams: GenerationParams = { model: 'gemini-3.1-flash-image', aspectRatio: '16:9', imageSize: '1K', seed: null, batchCount: 1 };
 export const SYSTEM_TAGS = new Set([
   'adaptation',
@@ -7,6 +30,9 @@ export const SYSTEM_TAGS = new Set([
   'character-sheet',
   'character-style',
   'comic-adaptation',
+  'concept',
+  'concept-character',
+  'concept-location',
   'generated',
   'generated-image',
   'imported-image',
@@ -147,7 +173,6 @@ export function locationEntityTagsOnAsset(tagIds: string[], projectTags: TagDefi
 export function adaptationFileKindToArtifactKind(kind: AdaptationFileKind): ArtifactKind {
   if (kind === 'characters') return 'character-sheet';
   if (kind === 'locations') return 'location-prompt';
-  if (kind === 'concept-art') return 'concept-art';
   return 'scene-artifact';
 }
 

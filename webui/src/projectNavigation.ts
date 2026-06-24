@@ -21,7 +21,7 @@ export const workspaceNavItems: Array<{ id: ProjectPhase; icon: string; label: s
   { id: 'image-canvas', icon: '▦', label: 'Canvas' },
   { id: 'concept-art', icon: '▧', label: 'Concept Art' },
   { id: 'characters-hub', icon: '▨', label: 'Characters' },
-  { id: 'chat', icon: '◌', label: 'Chat' },
+  { id: 'chat', icon: '◌', label: 'Agent' },
 ];
 
 export const adaptationNavPhases: Array<{ id: ProjectPhase; number: string; title: string }> = [
@@ -54,7 +54,7 @@ export function projectPhaseIcon(phase: ProjectPhase) {
 export function projectPhaseHelp(phase: ProjectPhase) {
   switch (phase) {
     case 'chat':
-      return 'Browse Pi session traces for book-context conversations forked from the read-book session.';
+      return 'Browse Pi coding-agent sessions, traces, running work, and book-context conversations.';
     case 'story':
       return 'Write panels one at a time, or upload book.txt to highlight passages into panel chunks. Use Reading to manage order and open Layout to place panels.';
     case 'concept-art':

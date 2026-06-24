@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 from adaptation_workflow.config import (
@@ -326,6 +327,7 @@ def concept_character_generate_stage() -> str:
 
 
 def run_generate_concept_character(project_slug: str) -> int:
+    agent_session_id = os.environ.get("AGENT_SESSION_ID")
     stage = concept_character_generate_stage()
     try:
         ctx = AdaptationContext.for_slug(project_slug)
@@ -351,6 +353,17 @@ def run_generate_concept_character(project_slug: str) -> int:
             running=False,
         )
         diagnostics.write_manifest(ctx.book_root_abs, extra={"project": ctx.project_slug, "error": str(exc)})
+        if agent_session_id:
+            import agent_sessions
+
+            agent_sessions.update_session(
+                ctx.project_slug,
+                agent_session_id,
+                status="failed",
+                error=str(exc),
+                log_files={"log": diagnostics.rel(diagnostics.ui_log_path, ctx.book_root_abs)},
+                completed=True,
+            )
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
@@ -381,18 +394,48 @@ def run_generate_concept_character(project_slug: str) -> int:
     error: str | None = None
     created_key = ""
     try:
-        import adaptation as adaptation_module
-
         steps = StepRunner(ctx, logger, on_progress=lambda: flush_progress(running=True))
         steps.require_book_session()
         created_key = steps.step_generate_concept_character()
-        metadata = adaptation_module.sync_prompt_links(project_slug, adaptation_module.read_metadata(project_slug))
-        adaptation_module.write_metadata(project_slug, metadata)
+        if agent_session_id:
+            import agent_sessions
+
+            agent_sessions.update_session(
+                ctx.project_slug,
+                agent_session_id,
+                status="succeeded",
+                source={"outputCardId": created_key},
+                log_files={
+                    "log": diagnostics.rel(diagnostics.ui_log_path, ctx.book_root_abs),
+                    "events": diagnostics.rel(diagnostics.events_path, ctx.book_root_abs),
+                    "summary": diagnostics.rel(diagnostics.summary_path, ctx.book_root_abs),
+                    "manifest": diagnostics.rel(diagnostics.manifest_path, ctx.book_root_abs),
+                    "tasksDir": diagnostics.rel(diagnostics.tasks_dir, ctx.book_root_abs),
+                },
+                completed=True,
+            )
         logger.write_line()
-        logger.write_line(f"[concept-art] Done. Wrote {ctx.book_root}/concept-art/{created_key}.md")
+        logger.write_line(f"[concept-art] Done. Created concept card {created_key}")
     except Exception as exc:
         return_code = 1
         error = str(exc)
+        if agent_session_id:
+            import agent_sessions
+
+            agent_sessions.update_session(
+                ctx.project_slug,
+                agent_session_id,
+                status="failed",
+                error=error,
+                log_files={
+                    "log": diagnostics.rel(diagnostics.ui_log_path, ctx.book_root_abs),
+                    "events": diagnostics.rel(diagnostics.events_path, ctx.book_root_abs),
+                    "summary": diagnostics.rel(diagnostics.summary_path, ctx.book_root_abs),
+                    "manifest": diagnostics.rel(diagnostics.manifest_path, ctx.book_root_abs),
+                    "tasksDir": diagnostics.rel(diagnostics.tasks_dir, ctx.book_root_abs),
+                },
+                completed=True,
+            )
         logger.write_line(f"error: {error}")
         print(f"error: {error}", file=sys.stderr)
     finally:
@@ -407,6 +450,7 @@ def concept_location_generate_stage() -> str:
 
 
 def run_generate_concept_location(project_slug: str) -> int:
+    agent_session_id = os.environ.get("AGENT_SESSION_ID")
     stage = concept_location_generate_stage()
     try:
         ctx = AdaptationContext.for_slug(project_slug)
@@ -432,6 +476,17 @@ def run_generate_concept_location(project_slug: str) -> int:
             running=False,
         )
         diagnostics.write_manifest(ctx.book_root_abs, extra={"project": ctx.project_slug, "error": str(exc)})
+        if agent_session_id:
+            import agent_sessions
+
+            agent_sessions.update_session(
+                ctx.project_slug,
+                agent_session_id,
+                status="failed",
+                error=str(exc),
+                log_files={"log": diagnostics.rel(diagnostics.ui_log_path, ctx.book_root_abs)},
+                completed=True,
+            )
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
@@ -462,18 +517,48 @@ def run_generate_concept_location(project_slug: str) -> int:
     error: str | None = None
     created_key = ""
     try:
-        import adaptation as adaptation_module
-
         steps = StepRunner(ctx, logger, on_progress=lambda: flush_progress(running=True))
         steps.require_book_session()
         created_key = steps.step_generate_concept_location()
-        metadata = adaptation_module.sync_prompt_links(project_slug, adaptation_module.read_metadata(project_slug))
-        adaptation_module.write_metadata(project_slug, metadata)
+        if agent_session_id:
+            import agent_sessions
+
+            agent_sessions.update_session(
+                ctx.project_slug,
+                agent_session_id,
+                status="succeeded",
+                source={"outputCardId": created_key},
+                log_files={
+                    "log": diagnostics.rel(diagnostics.ui_log_path, ctx.book_root_abs),
+                    "events": diagnostics.rel(diagnostics.events_path, ctx.book_root_abs),
+                    "summary": diagnostics.rel(diagnostics.summary_path, ctx.book_root_abs),
+                    "manifest": diagnostics.rel(diagnostics.manifest_path, ctx.book_root_abs),
+                    "tasksDir": diagnostics.rel(diagnostics.tasks_dir, ctx.book_root_abs),
+                },
+                completed=True,
+            )
         logger.write_line()
-        logger.write_line(f"[concept-art] Done. Wrote {ctx.book_root}/concept-art/{created_key}.md")
+        logger.write_line(f"[concept-art] Done. Created concept card {created_key}")
     except Exception as exc:
         return_code = 1
         error = str(exc)
+        if agent_session_id:
+            import agent_sessions
+
+            agent_sessions.update_session(
+                ctx.project_slug,
+                agent_session_id,
+                status="failed",
+                error=error,
+                log_files={
+                    "log": diagnostics.rel(diagnostics.ui_log_path, ctx.book_root_abs),
+                    "events": diagnostics.rel(diagnostics.events_path, ctx.book_root_abs),
+                    "summary": diagnostics.rel(diagnostics.summary_path, ctx.book_root_abs),
+                    "manifest": diagnostics.rel(diagnostics.manifest_path, ctx.book_root_abs),
+                    "tasksDir": diagnostics.rel(diagnostics.tasks_dir, ctx.book_root_abs),
+                },
+                completed=True,
+            )
         logger.write_line(f"error: {error}")
         print(f"error: {error}", file=sys.stderr)
     finally:

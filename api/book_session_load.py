@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 from fastapi import HTTPException
 
 import adaptation
+import agent_sessions
 import library
 from adaptation_workflow.config import AdaptationContext, ensure_node_runtime, find_pi_binary, pi_version
 from adaptation_workflow.diagnostics import RunDiagnostics
@@ -43,6 +45,16 @@ def start_book_session_load(slug: str) -> AdaptationWorkflowStatus:
     root = adaptation.ensure_adaptation(slug)
     if not (root / "book.txt").is_file():
         raise HTTPException(status_code=400, detail="Upload book.txt before loading the book session")
+    current = book_session_load_status(slug)
+    if current.running:
+        raise HTTPException(status_code=409, detail="Process is already running")
+    session = agent_sessions.create_session(
+        slug,
+        kind="read-book",
+        title="Read book",
+        source={"type": "read-book", "stage": BOOK_SESSION_LOAD_STAGE},
+        log_files=adaptation.workflow_log_files(slug, BOOK_SESSION_LOAD_STAGE),
+    )
     return adaptation.start_logged_process(
         slug,
         log_path=book_session_load_log_path(slug),
@@ -51,10 +63,12 @@ def start_book_session_load(slug: str) -> AdaptationWorkflowStatus:
         start_line=f"Starting read-book session load for {slug}",
         script_command=f"cd api && {adaptation.workflow_python()} -m book_session_load \"$SLUG\"",
         validation=False,
+        extra_env={"AGENT_SESSION_ID": session.id},
     )
 
 
 def run_load(project_slug: str) -> int:
+    agent_session_id = os.environ.get("AGENT_SESSION_ID")
     try:
         ctx = AdaptationContext.for_slug(project_slug)
     except FileNotFoundError as exc:
@@ -79,6 +93,14 @@ def run_load(project_slug: str) -> int:
             running=False,
         )
         diagnostics.write_manifest(ctx.book_root_abs, extra={"project": ctx.project_slug, "error": str(exc)})
+        agent_sessions.update_session(
+            ctx.project_slug,
+            agent_session_id,
+            status="failed",
+            error=str(exc),
+            log_files=adaptation.workflow_log_files(ctx.project_slug, BOOK_SESSION_LOAD_STAGE),
+            completed=True,
+        )
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
@@ -115,6 +137,16 @@ def run_load(project_slug: str) -> int:
     try:
         steps = StepRunner(ctx, logger, on_progress=lambda: flush_progress(running=True))
         session = steps.load_fresh_book_session()
+        agent_sessions.update_session(
+            ctx.project_slug,
+            agent_session_id,
+            status="succeeded",
+            pi_session_id=session.session_id,
+            pi_session_file=session.session_file,
+            source={"bookPath": session.book_path},
+            log_files=adaptation.workflow_log_files(ctx.project_slug, BOOK_SESSION_LOAD_STAGE),
+            completed=True,
+        )
         logger.write_line()
         logger.write_line(f"[load] Read-book session ready for {ctx.project_slug}")
         logger.write_line(f"Session:   {session.session_id}")
@@ -122,6 +154,14 @@ def run_load(project_slug: str) -> int:
     except Exception as exc:
         return_code = 1
         error = str(exc)
+        agent_sessions.update_session(
+            ctx.project_slug,
+            agent_session_id,
+            status="failed",
+            error=error,
+            log_files=adaptation.workflow_log_files(ctx.project_slug, BOOK_SESSION_LOAD_STAGE),
+            completed=True,
+        )
         logger.write_line(f"error: {error}")
         print(f"error: {error}", file=sys.stderr)
     finally:

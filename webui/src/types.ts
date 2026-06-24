@@ -114,7 +114,7 @@ export interface DraftCanvasNode extends CanvasNodeLayout {
 }
 
 export type ArtifactKind = 'character-sheet' | 'location-prompt' | 'scene-artifact' | 'page-plan' | 'panel-prompt' | 'concept-art';
-export type AdaptationFileKind = 'characters' | 'locations' | 'scenes' | 'concept-art';
+export type AdaptationFileKind = 'characters' | 'locations' | 'scenes';
 export type ConceptArtSubjectKind = 'character' | 'location';
 
 export interface StoryArtifactCanvasNode extends CanvasNodeLayout {
@@ -131,8 +131,13 @@ export interface StoryArtifactCanvasNode extends CanvasNodeLayout {
 
 export interface ImageGroupCanvasNode extends CanvasNodeLayout {
   type: 'imageGroup';
+  refs: string[];
+  prompt: string;
+  params: GenerationParams;
+  visualStyleId?: string | null;
   assetIds: string[];
   activeAssetId?: string | null;
+  sourceConceptCardId?: string | null;
 }
 
 export type CanvasNode = DraftCanvasNode | StoryArtifactCanvasNode | ImageGroupCanvasNode;
@@ -232,7 +237,6 @@ export interface AdaptationStatus {
   defaultVisualStyleId?: string | null;
   characters: Record<string, CharacterRecord>;
   locations: Record<string, AdaptationAssetLink>;
-  conceptArt: Record<string, AdaptationAssetLink>;
   scenes: Record<string, AdaptationAssetLink>;
   pages: Record<string, AdaptationAssetLink>;
   panels: Record<string, AdaptationAssetLink>;
@@ -441,12 +445,17 @@ export interface AdaptationGenerateResponse {
 export interface AdaptationCanvasImportResponse {
   canvas: CanvasDocument;
   importedNodeCount: number;
+  nodeId?: string | null;
 }
 
-export interface ConceptArtUploadResponse {
-  key: string;
+export interface ImageGroupNodeResponse {
+  nodeId: string;
   canvas: CanvasDocument;
-  importedNodeCount: number;
+}
+
+export interface ConceptNodeResponse {
+  nodeId: string;
+  canvas: CanvasDocument;
 }
 
 export interface AdaptationFileDocument {
@@ -564,6 +573,48 @@ export interface BookChatSession {
   piSessionId?: string | null;
   piSessionFile?: string | null;
   turns: BookChatTurn[];
+}
+
+export interface ConceptCard {
+  version: 1;
+  id: string;
+  projectSlug: string;
+  subjectKind: ConceptArtSubjectKind;
+  displayName: string;
+  prompt: string;
+  assetIds: string[];
+  activeAssetId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+}
+
+export type AgentSessionKind =
+  | 'read-book'
+  | 'book-chat'
+  | 'concept-character-suggest'
+  | 'concept-location-suggest';
+
+export type AgentSessionStatus = 'running' | 'succeeded' | 'failed' | 'archived';
+
+export interface AgentSession {
+  version: 1;
+  id: string;
+  projectSlug: string;
+  title: string;
+  kind: AgentSessionKind;
+  status: AgentSessionStatus;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  archivedAt?: string | null;
+  piSessionId?: string | null;
+  piSessionFile?: string | null;
+  parentSessionId?: string | null;
+  source: Record<string, unknown>;
+  logFiles: Record<string, string>;
+  error?: string | null;
+  stats?: Record<string, unknown> | null;
 }
 
 export interface PiTraceUsage {

@@ -5,11 +5,15 @@ export function HubCardMenu({
   disabled,
   ariaLabel = 'Card actions',
   onUploadImage,
+  onEdit,
+  onSetDefault,
   onDelete,
 }: {
   disabled?: boolean;
   ariaLabel?: string;
   onUploadImage?: () => void;
+  onEdit?: () => void;
+  onSetDefault?: () => void;
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -86,6 +90,38 @@ export function HubCardMenu({
           }}
         >
           Upload image
+        </button>
+      )}
+      {onEdit && (
+        <button
+          type="button"
+          role="menuitem"
+          className="story-panels-chunk-menu-item"
+          disabled={disabled}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen(false);
+            window.setTimeout(() => onEdit(), 0);
+          }}
+        >
+          Edit
+        </button>
+      )}
+      {onSetDefault && (
+        <button
+          type="button"
+          role="menuitem"
+          className="story-panels-chunk-menu-item"
+          disabled={disabled}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen(false);
+            window.setTimeout(() => onSetDefault(), 0);
+          }}
+        >
+          Set as default
         </button>
       )}
       <button

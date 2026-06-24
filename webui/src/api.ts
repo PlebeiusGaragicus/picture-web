@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, BookChatSession, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtUploadResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, MomentLayoutSection, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, PiTraceDocument, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelDraftCreatePayload, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, AgentSession, ArtifactKind, Asset, BookChatSession, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, ImageGroupNodeResponse, MomentLayoutSection, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, PiTraceDocument, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelDraftCreatePayload, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = true;
 
@@ -177,18 +177,40 @@ export const api = {
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/concept-art/generate-location`, { method: 'POST' }),
   getGenerateConceptLocation: (slug: string) =>
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/concept-art/generate-location`),
-  importConceptArtImage: (slug: string, key: string, file: File) => {
-    const data = new FormData();
-    data.append('file', file);
-    return request<AdaptationStatus>(`/api/projects/${slug}/adaptation/concept-art/${key}/import-image`, {
+  listConceptCards: (slug: string, includeArchived = false) =>
+    request<ConceptCard[]>(`/api/projects/${slug}/concept-cards${includeArchived ? '?includeArchived=true' : ''}`),
+  createConceptCard: (slug: string, payload: { subjectKind: ConceptArtSubjectKind; prompt?: string; displayName?: string }) =>
+    request<ConceptCard>(`/api/projects/${slug}/concept-cards`, {
       method: 'POST',
-      body: data,
-    });
-  },
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  updateConceptCard: (slug: string, cardId: string, payload: { displayName?: string; prompt?: string; archived?: boolean | null }) =>
+    request<ConceptCard>(`/api/projects/${slug}/concept-cards/${cardId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  deleteConceptCard: (slug: string, cardId: string) =>
+    request<void>(`/api/projects/${slug}/concept-cards/${cardId}`, { method: 'DELETE' }),
+  draftConceptCard: (slug: string, cardId: string) =>
+    request<ConceptNodeResponse>(`/api/projects/${slug}/concept-cards/${cardId}/draft`, { method: 'POST' }),
+  createConceptNode: (slug: string, payload: { subjectKind: ConceptArtSubjectKind; prompt?: string; displayName?: string }) =>
+    request<ConceptCard>(`/api/projects/${slug}/concept-nodes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  createImageGroup: (slug: string, payload: { displayName?: string; tags?: string[]; prompt?: string; refs?: string[]; visualStyleId?: string | null }) =>
+    request<ImageGroupNodeResponse>(`/api/projects/${slug}/canvas/image-groups`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
   uploadConceptArt: (slug: string, file: File) => {
     const data = new FormData();
     data.append('file', file);
-    return request<ConceptArtUploadResponse>(`/api/projects/${slug}/adaptation/concept-art/upload`, {
+    return request<ConceptCard>(`/api/projects/${slug}/adaptation/concept-art/upload`, {
       method: 'POST',
       body: data,
     });
@@ -254,6 +276,8 @@ export const api = {
     }),
   listBookChatSessions: (slug: string, includeArchived = false) =>
     request<BookChatSession[]>(`/api/projects/${slug}/adaptation/book-chats${includeArchived ? '?includeArchived=true' : ''}`),
+  getBookChatSession: (slug: string, sessionId: string) =>
+    request<BookChatSession>(`/api/projects/${slug}/adaptation/book-chats/${sessionId}`),
   createBookChatSession: (slug: string, payload: { title?: string | null } = {}) =>
     request<BookChatSession>(`/api/projects/${slug}/adaptation/book-chats`, {
       method: 'POST',
@@ -271,6 +295,17 @@ export const api = {
     }),
   getBookChatTrace: (slug: string, sessionId: string) =>
     request<PiTraceDocument>(`/api/projects/${slug}/adaptation/book-chats/${sessionId}/trace`),
+  listAgentSessions: (slug: string, includeArchived = false) =>
+    request<AgentSession[]>(`/api/projects/${slug}/agent-sessions${includeArchived ? '?includeArchived=true' : ''}`),
+  getAgentSession: (slug: string, sessionId: string) =>
+    request<AgentSession>(`/api/projects/${slug}/agent-sessions/${sessionId}`),
+  patchAgentSession: (slug: string, sessionId: string, payload: { title?: string | null; archived?: boolean | null }) =>
+    request<AgentSession>(`/api/projects/${slug}/agent-sessions/${sessionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  getAgentSessionTrace: (slug: string, sessionId: string) =>
+    request<PiTraceDocument>(`/api/projects/${slug}/agent-sessions/${sessionId}/trace`),
   getStoryPanelBook: (slug: string) =>
     request<{ text: string }>(`/api/projects/${slug}/story-panels/book`),
   getStoryPanels: (slug: string) =>

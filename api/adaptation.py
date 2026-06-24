@@ -16,7 +16,8 @@ import gemini
 import library
 from models import (
     AdaptationCanvasImportResponse,
-    ConceptArtUploadResponse,
+    ImageGroupNodeCreate,
+    ImageGroupNodeResponse,
     AdaptationImportArtifactRequest,
     AdaptationFileCreate,
     AdaptationFileDocument,
@@ -51,6 +52,7 @@ from models import (
     AssetSummary,
     DraftCanvasNode,
     GenerateRequest,
+    ImageGroupCanvasNode,
     StyleRefKind,
     StyleRefStatus,
     StoryArtifactCanvasNode,
@@ -62,6 +64,25 @@ from models import (
 
 
 STYLE_TEMPLATE = "Style:\nColor palette:\nRealism:\nLighting:\n"
+
+DEFAULT_VISUAL_STYLE_PROMPT = (
+    "Style: Textured, hand-drawn crayon illustration featuring bold, expressive, and coarse strokes "
+    'that create a deliberate "rough" or unpolished sketchbook aesthetic.\n'
+    "Color palette: Highly saturated, vibrant primary and secondary colors with heavy layering of pigments.\n"
+    "Realism: Stylized/Non-realistic; uses simplified shapes, exaggerated character features, and prominent medium texture over anatomical precision.\n"
+    "Lighting: Flat to moderate, achieved through coarse cross-hatching and visible colored strokes rather than smooth gradients.\n"
+)
+
+
+def default_visual_styles() -> list[VisualStyleDefinition]:
+    return [
+        VisualStyleDefinition(
+            id="crayons",
+            name="crayons",
+            prompt=DEFAULT_VISUAL_STYLE_PROMPT,
+            default=True,
+        )
+    ]
 
 
 def visual_styles_path(root: Path) -> Path:
@@ -296,7 +317,7 @@ def _clear_stale_link_group(slug: str, group: dict[str, AdaptationAssetLink]) ->
 
 
 def artifact_link_groups(metadata: AdaptationMetadata) -> tuple[dict[str, AdaptationAssetLink], ...]:
-    return (metadata.locations, metadata.conceptArt, metadata.scenes, metadata.pages, metadata.panels)
+    return (metadata.locations, metadata.scenes, metadata.pages, metadata.panels)
 
 
 def character_entries_from_records(characters: dict[str, CharacterRecord]) -> dict[str, AdaptationAssetLink]:
@@ -478,12 +499,11 @@ def ensure_adaptation(slug: str) -> Path:
         root / "pages" / "plans",
         root / "panels" / "prompts",
         root / "locations" / "prompts",
-        root / "concept-art",
     ]:
         path.mkdir(parents=True, exist_ok=True)
     styles_path = visual_styles_path(root)
     if not styles_path.is_file():
-        write_visual_styles(root, [])
+        write_visual_styles(root, default_visual_styles())
     if not metadata_path(slug).exists():
         write_metadata(slug, AdaptationMetadata())
     return root
@@ -555,6 +575,7 @@ def start_logged_process(
     start_line: str,
     script_command: str,
     validation: bool = False,
+    extra_env: dict[str, str] | None = None,
 ) -> AdaptationWorkflowStatus:
     root = ensure_adaptation(slug)
     current = process_status(slug, status_path, log_path, validation=validation)
@@ -593,6 +614,8 @@ def start_logged_process(
     env = pi_runtime_env(env)
     env["SLUG"] = slug
     env["STATUS_PATH"] = str(status_path)
+    if extra_env:
+        env.update(extra_env)
     process = subprocess.Popen(
         command,
         cwd=library.REPO_ROOT,
@@ -675,37 +698,26 @@ def import_artifact_to_canvas(slug: str, artifact_kind: str, artifact_key: str) 
         character_keys=list(metadata.characters.keys()),
         location_keys=list(metadata.locations.keys()),
     )
+    from canvas_nodes import spawn_from_character_variant, spawn_from_location
+
     if artifact_kind == "character-sheet":
         resolved = resolve_character_flat_link(metadata, artifact_key)
         if resolved is None:
             raise HTTPException(status_code=404, detail=f"Unknown adaptation artifact: {artifact_kind}:{artifact_key}")
         character_slug, variant_key, entry = resolved
-        flat_entries = {key: link for key, (_slug, _variant, link) in character_flat_entries(metadata).items()}
-        canvas_key = character_slug if variant_key == "base" else f"{character_slug}-{variant_key}"
+        if not entry.prompt.strip():
+            raise HTTPException(status_code=400, detail=f"Missing prompt for character: {artifact_key}")
+        node_id, saved = spawn_from_character_variant(slug, character_slug, variant_key)
     elif artifact_kind == "location-prompt":
         entry = metadata.locations.get(artifact_key)
         if entry is None:
             raise HTTPException(status_code=404, detail=f"Unknown adaptation artifact: {artifact_kind}:{artifact_key}")
-        flat_entries = metadata.locations
-        canvas_key = artifact_key
-    elif artifact_kind == "concept-art":
-        entry = metadata.conceptArt.get(artifact_key)
-        if entry is None:
-            raise HTTPException(status_code=404, detail=f"Unknown adaptation artifact: {artifact_kind}:{artifact_key}")
-        flat_entries = metadata.conceptArt
-        canvas_key = artifact_key
+        if not entry.prompt.strip():
+            raise HTTPException(status_code=400, detail=f"Missing prompt for location: {artifact_key}")
+        node_id, saved = spawn_from_location(slug, artifact_key)
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for draft import: {artifact_kind}")
-    before = library.read_stored_canvas(slug)
-    after, created, _node_id = library.sync_single_story_artifact_node(
-        before,
-        artifact_kind=artifact_kind,
-        artifact_key=canvas_key,
-        entry=entry,
-        entries=flat_entries,
-    )
-    saved = library.write_canvas(slug, after)
-    return AdaptationCanvasImportResponse(canvas=saved, importedNodeCount=1 if created else 0)
+    return AdaptationCanvasImportResponse(canvas=saved, importedNodeCount=1, nodeId=node_id)
 
 
 def migrate_legacy_canonical(slug: str, metadata: AdaptationMetadata) -> AdaptationMetadata:
@@ -892,7 +904,6 @@ def file_kind_config(kind: AdaptationFileKind) -> tuple[ArtifactKind, Path]:
         "characters": ("character-sheet", root / "characters"),
         "locations": ("location-prompt", root / "locations" / "prompts"),
         "scenes": ("scene-artifact", root / "scenes" / "artifacts"),
-        "concept-art": ("concept-art", root / "concept-art"),
     }
     return configs[kind]
 
@@ -925,16 +936,6 @@ def format_adaptation_file(
         return format_character_stub(key, f"{name}: {summary}")
     if kind == "scenes":
         return (body.strip() or f"# {key}") + "\n"
-    if kind == "concept-art":
-        from adaptation_workflow.character_file import (
-            default_character_reference_sheet_prompt,
-            display_name_from_slug,
-        )
-
-        prompt_body = body.strip()
-        if not prompt_body and (subject_kind or "character") == "character":
-            prompt_body = default_character_reference_sheet_prompt(display_name_from_slug(key))
-        return format_prompt_file(key, prompt_body, mode or "new-image", style_ref, subject=subject_kind or "character")
     return format_prompt_file(key, body, mode or "new-image", style_ref)
 
 
@@ -970,7 +971,6 @@ def list_adaptation_files(slug: str, kind: AdaptationFileKind) -> list[Adaptatio
     groups: dict[AdaptationFileKind, dict[str, AdaptationAssetLink]] = {
         "locations": metadata.locations,
         "scenes": metadata.scenes,
-        "concept-art": metadata.conceptArt,
     }
     return [
         adaptation_file_from_link(slug=slug, kind=kind, key=key, link=link)
@@ -997,8 +997,6 @@ def create_adaptation_file(slug: str, kind: AdaptationFileKind, payload: Adaptat
     path = adaptation_file_path(slug, kind, payload.key)
     if path.exists():
         raise HTTPException(status_code=409, detail=f"{kind} file already exists: {payload.key}")
-    if kind == "concept-art" and payload.subjectKind not in {"character", "location"}:
-        raise HTTPException(status_code=400, detail="subjectKind is required for concept-art files")
     path.write_text(
         format_adaptation_file(
             kind,
@@ -1033,10 +1031,6 @@ def update_adaptation_file(slug: str, kind: AdaptationFileKind, key: str, payloa
     next_mode = current.mode if payload.mode is None else payload.mode
     next_style_ref = current.styleRef if payload.styleRef is None else payload.styleRef
     subject_kind = ""
-    if kind == "concept-art":
-        metadata = sync_prompt_links(slug, read_metadata(slug))
-        existing_link = metadata.conceptArt.get(key)
-        subject_kind = payload.subjectKind or (existing_link.subjectKind if existing_link else None) or "character"
     if kind == "characters":
         from adaptation_workflow.character_file import format_character_file, parse_character_file
 
@@ -1095,27 +1089,18 @@ def update_adaptation_file(slug: str, kind: AdaptationFileKind, key: str, payloa
             groups: dict[AdaptationFileKind, dict[str, AdaptationAssetLink]] = {
                 "locations": metadata.locations,
                 "scenes": metadata.scenes,
-                "concept-art": metadata.conceptArt,
             }
             existing = groups[kind].pop(key, None)
             if existing is not None:
                 groups[kind][next_key] = existing
                 write_metadata(slug, metadata)
-    if payload.userTags is not None and kind in {"characters", "locations", "concept-art"}:
+    if payload.userTags is not None and kind in {"characters", "locations"}:
         metadata = sync_prompt_links(slug, read_metadata(slug))
         if kind == "characters":
             record = metadata.characters.get(next_key)
             if record is not None:
                 metadata.characters[next_key] = record.model_copy(update={"userTags": list(payload.userTags)})
                 write_metadata(slug, metadata)
-        elif kind == "concept-art":
-            link = metadata.conceptArt.get(next_key)
-            if link is not None:
-                metadata.conceptArt[next_key] = link.model_copy(update={"userTags": list(payload.userTags)})
-                write_metadata(slug, metadata)
-                tag_list = list(dict.fromkeys(["comic-adaptation", "concept-art", *payload.userTags]))
-                for asset_id in link.assetIds:
-                    library.patch_display(slug, asset_id, DisplayPatch(tags=tag_list))
         else:
             link = metadata.locations.get(next_key)
             if link is not None:
@@ -1135,69 +1120,40 @@ def delete_adaptation_file(slug: str, kind: AdaptationFileKind, key: str) -> Ada
     return status(slug)
 
 
-async def import_concept_art_image(slug: str, key: str, upload: UploadFile) -> AdaptationStatus:
-    metadata = sync_prompt_links(slug, read_metadata(slug))
-    link = metadata.conceptArt.get(key)
-    if link is None:
-        raise HTTPException(status_code=404, detail=f"concept-art file not found: {key}")
-    display_key = key.replace("-", " ").title()
-    asset = await library.import_asset(slug, upload, title=f"Concept: {display_key}")
-    library.patch_display(
+async def upload_concept_art(slug: str, upload: UploadFile) -> ConceptNodeResponse:
+    import concept_canvas
+
+    return await concept_canvas.upload_concept_image(slug, upload)
+
+
+def create_concept_node(slug: str, payload: ConceptNodeCreate) -> ConceptNodeResponse:
+    import concept_canvas
+
+    return concept_canvas.create_concept_draft(
         slug,
-        asset.id,
-        DisplayPatch(tags=list(dict.fromkeys(["comic-adaptation", "concept-art", *link.userTags]))),
+        payload.subjectKind,
+        prompt=payload.prompt,
+        display_name=payload.displayName.strip(),
     )
-    next_asset_ids = list(dict.fromkeys([*link.assetIds, asset.id]))
-    metadata.conceptArt[key] = link.model_copy(
-        update={
-            "assetIds": next_asset_ids,
-            "activeAssetId": asset.id,
-            "status": "generated",
-        }
-    )
-    write_metadata(slug, metadata)
-    return status(slug)
 
 
-async def upload_concept_art(slug: str, upload: UploadFile) -> ConceptArtUploadResponse:
-    from adaptation_workflow.concept_art import next_uploaded_concept_key
+def create_image_group(slug: str, payload: ImageGroupNodeCreate) -> ImageGroupNodeResponse:
+    from canvas_nodes import create_image_group_node, next_canvas_position
+    from models import ImageGroupNodeResponse
 
-    root = ensure_adaptation(slug)
-    key = next_uploaded_concept_key(root)
-    path = adaptation_file_path(slug, "concept-art", key)
-    path.write_text(format_prompt_file(key, "", "new-image", "", subject="character"))
-    metadata = sync_prompt_links(slug, read_metadata(slug))
-    write_metadata(slug, metadata)
-    link = metadata.conceptArt.get(key)
-    if link is None:
-        raise HTTPException(status_code=500, detail=f"Failed to register concept-art file: {key}")
-
-    display_key = key.replace("-", " ").title()
-    asset = await library.import_asset(slug, upload, title=f"Concept: {display_key}")
-    library.patch_display(
+    canvas = library.read_stored_canvas(slug)
+    x, y = next_canvas_position(canvas)
+    node_id, saved = create_image_group_node(
         slug,
-        asset.id,
-        DisplayPatch(tags=list(dict.fromkeys(["comic-adaptation", "concept-art", *link.userTags]))),
+        display_name=payload.displayName.strip(),
+        tags=payload.tags,
+        prompt=payload.prompt,
+        refs=list(payload.refs),
+        visual_style_id=payload.visualStyleId,
+        x=x,
+        y=y,
     )
-    metadata = read_metadata(slug)
-    link = metadata.conceptArt.get(key)
-    if link is None:
-        raise HTTPException(status_code=500, detail=f"Failed to register concept-art file: {key}")
-    metadata.conceptArt[key] = link.model_copy(
-        update={
-            "assetIds": [asset.id],
-            "activeAssetId": asset.id,
-            "status": "generated",
-        }
-    )
-    write_metadata(slug, metadata)
-
-    canvas_result = import_artifact_to_canvas(slug, "concept-art", key)
-    return ConceptArtUploadResponse(
-        key=key,
-        canvas=canvas_result.canvas,
-        importedNodeCount=canvas_result.importedNodeCount,
-    )
+    return ImageGroupNodeResponse(nodeId=node_id, canvas=saved)
 
 
 def scene_list_path(slug: str) -> Path:
@@ -1469,6 +1425,19 @@ def concept_character_generate_launcher_log_path(slug: str) -> Path:
 
 def start_generate_concept_character(slug: str) -> AdaptationWorkflowStatus:
     _require_book_session_for_characters(slug)
+    current = generate_concept_character_status(slug)
+    if current.running:
+        raise HTTPException(status_code=409, detail="Process is already running")
+    import agent_sessions
+
+    stage = concept_character_generate_stage_name()
+    session = agent_sessions.create_session(
+        slug,
+        kind="concept-character-suggest",
+        title="Suggest character concept",
+        source={"type": "concept-suggest", "subjectKind": "character", "stage": stage},
+        log_files=workflow_log_files(slug, stage),
+    )
     return start_logged_process(
         slug,
         log_path=concept_character_generate_log_path(slug),
@@ -1477,6 +1446,7 @@ def start_generate_concept_character(slug: str) -> AdaptationWorkflowStatus:
         start_line=f"Starting concept character generation for {slug}",
         script_command=f'cd api && {workflow_python()} -m adaptation_workflow generate-concept-character "$SLUG"',
         validation=False,
+        extra_env={"AGENT_SESSION_ID": session.id},
     )
 
 
@@ -1509,6 +1479,19 @@ def concept_location_generate_launcher_log_path(slug: str) -> Path:
 
 def start_generate_concept_location(slug: str) -> AdaptationWorkflowStatus:
     _require_book_session_for_characters(slug)
+    current = generate_concept_location_status(slug)
+    if current.running:
+        raise HTTPException(status_code=409, detail="Process is already running")
+    import agent_sessions
+
+    stage = concept_location_generate_stage_name()
+    session = agent_sessions.create_session(
+        slug,
+        kind="concept-location-suggest",
+        title="Suggest location concept",
+        source={"type": "concept-suggest", "subjectKind": "location", "stage": stage},
+        log_files=workflow_log_files(slug, stage),
+    )
     return start_logged_process(
         slug,
         log_path=concept_location_generate_log_path(slug),
@@ -1517,6 +1500,7 @@ def start_generate_concept_location(slug: str) -> AdaptationWorkflowStatus:
         start_line=f"Starting concept location generation for {slug}",
         script_command=f'cd api && {workflow_python()} -m adaptation_workflow generate-concept-location "$SLUG"',
         validation=False,
+        extra_env={"AGENT_SESSION_ID": session.id},
     )
 
 
@@ -1933,21 +1917,6 @@ def sync_prompt_links(slug: str, metadata: AdaptationMetadata) -> AdaptationMeta
                 existing=existing,
             )
     metadata.locations = new_locations
-    old_concept_art = metadata.conceptArt
-    new_concept_art: dict[str, AdaptationAssetLink] = {}
-    concept_art_dir = root / "concept-art"
-    if concept_art_dir.is_dir():
-        for prompt_file in sorted(concept_art_dir.glob("*.md")):
-            prompt_path = relpath(root, prompt_file)
-            for key, section in parse_prompt_sections(prompt_file).items():
-                existing = old_concept_art.get(key)
-                new_concept_art[key] = prompt_link(
-                    artifact_kind="concept-art",
-                    prompt_path=prompt_path,
-                    section=section,
-                    existing=existing,
-                )
-    metadata.conceptArt = new_concept_art
     old_scenes = metadata.scenes
     new_scenes: dict[str, AdaptationAssetLink] = {}
     for artifact_file in sorted((root / "scenes" / "artifacts").glob("*.md")):
@@ -1994,6 +1963,8 @@ def sync_prompt_links(slug: str, metadata: AdaptationMetadata) -> AdaptationMeta
 
 
 def status(slug: str) -> AdaptationStatus:
+    import concept_canvas
+
     root = ensure_adaptation(slug)
     metadata = sync_prompt_links(slug, read_metadata(slug))
     metadata, changed = clear_stale_style_ref_assets(slug, metadata)
@@ -2002,6 +1973,8 @@ def status(slug: str) -> AdaptationStatus:
         metadata = write_metadata(slug, metadata)
     statuses = style_ref_statuses(slug, metadata)
     moment_counts = _moment_progress_counts(metadata)
+    import concept_cards
+
     return AdaptationStatus(
         projectSlug=slug,
         settings=metadata.settings,
@@ -2026,7 +1999,7 @@ def status(slug: str) -> AdaptationStatus:
             "sceneListLines": count_nonempty_lines(root / "scenes" / "list.txt"),
             "sceneArtifacts": len(list((root / "scenes" / "artifacts").glob("*.md"))),
             "locationPrompts": len(list((root / "locations" / "prompts").glob("*.md"))),
-            "conceptArt": len(list((root / "concept-art").glob("*.md"))),
+            "conceptArt": len(concept_cards.list_cards(slug)),
             "pagePlans": len(list((root / "pages" / "plans").glob("*.md"))),
             "panelPrompts": len(list((root / "panels" / "prompts").glob("*.md"))),
             "momentSections": _count_moment_sections(root),
@@ -2037,7 +2010,6 @@ def status(slug: str) -> AdaptationStatus:
         defaultVisualStyleId=resolve_default_visual_style_id(styles),
         characters=metadata.characters,
         locations=metadata.locations,
-        conceptArt=metadata.conceptArt,
         scenes=metadata.scenes,
         pages=metadata.pages,
         panels=metadata.panels,
@@ -2216,7 +2188,6 @@ def artifact_entries(metadata: AdaptationMetadata, artifact_kind: ArtifactKind) 
         "scene-artifact": metadata.scenes,
         "page-plan": metadata.pages,
         "panel-prompt": metadata.panels,
-        "concept-art": metadata.conceptArt,
     }
     return groups[artifact_kind]
 
@@ -2367,29 +2338,31 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
     canvas = library.read_stored_canvas(slug)
     canvas_node_id = request.canvasNodeId
     canvas_artifact_key = flat_key if request.artifactKind == "character-sheet" else request.artifactKey
+    canvas_node = canvas.nodes.get(canvas_node_id) if canvas_node_id else None
     if canvas_node_id is None:
-        canvas_node_id = next(
-            (
-                node_id
-                for node_id, node in canvas.nodes.items()
-                if isinstance(node, StoryArtifactCanvasNode)
-                and node.artifactKind == request.artifactKind
-                and node.artifactKey == canvas_artifact_key
-            ),
-            None,
-        )
-    artifact_node = canvas.nodes.get(canvas_node_id) if canvas_node_id else None
-    artifact_params = artifact_node.params if isinstance(artifact_node, StoryArtifactCanvasNode) else None
-    resolved_model = request.model or (artifact_params.model if artifact_params else None) or gemini.default_model()
-    ref_asset_ids = artifact_ref_asset_ids(
+        tag_hint = canvas_artifact_key if request.artifactKind in {"character-sheet", "location-prompt"} else None
+        for node_id, node in canvas.nodes.items():
+            if not isinstance(node, ImageGroupCanvasNode):
+                continue
+            if tag_hint and tag_hint in node.tags:
+                canvas_node_id = node_id
+                canvas_node = node
+                break
+    node_params = canvas_node.params if isinstance(canvas_node, ImageGroupCanvasNode) else None
+    node_refs = canvas_node.refs if isinstance(canvas_node, ImageGroupCanvasNode) else []
+    resolved_model = request.model or (node_params.model if node_params else None) or gemini.default_model()
+    ref_asset_ids = list(dict.fromkeys([*artifact_ref_asset_ids(
         slug, metadata, request.artifactKind, link, model=resolved_model
-    )
-    prompt = f"{link.prompt.strip()}\n"
+    ), *node_refs]))
+    node_prompt = canvas_node.prompt.strip() if isinstance(canvas_node, ImageGroupCanvasNode) and canvas_node.prompt.strip() else ""
+    prompt = f"{(node_prompt or link.prompt.strip())}\n"
     visual_style_id = request.visualStyleId or (
-        artifact_node.visualStyleId if isinstance(artifact_node, StoryArtifactCanvasNode) else None
+        canvas_node.visualStyleId if isinstance(canvas_node, ImageGroupCanvasNode) else None
     )
     if not visual_style_id:
         raise HTTPException(status_code=400, detail="visualStyleId is required to generate a story artifact image")
+    if not canvas_node_id:
+        raise HTTPException(status_code=400, detail="canvasNodeId is required to generate onto the canvas")
     entity_tags = (
         [request.artifactKey]
         if request.artifactKind in {"character-sheet", "location-prompt"}
@@ -2398,10 +2371,10 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
     payload = GenerateRequest(
         prompt=prompt,
         refs=ref_asset_ids,
-        model=request.model or (artifact_params.model if artifact_params else None),
-        aspectRatio=request.aspectRatio or (artifact_params.aspectRatio if artifact_params else None) or "16:9",
-        imageSize=request.imageSize or (artifact_params.imageSize if artifact_params else None) or "1K",
-        seed=request.seed if request.seed is not None else (artifact_params.seed if artifact_params else None),
+        model=request.model or (node_params.model if node_params else None),
+        aspectRatio=request.aspectRatio or (node_params.aspectRatio if node_params else None) or "16:9",
+        imageSize=request.imageSize or (node_params.imageSize if node_params else None) or "1K",
+        seed=request.seed if request.seed is not None else (node_params.seed if node_params else None),
         batchCount=request.batchCount,
         title=f"{link.artifactKind.replace('-', ' ').title()}: {flat_key}",
         tags=list(dict.fromkeys(["comic-adaptation", link.artifactKind, *entity_tags, *link.userTags])),
@@ -2426,13 +2399,6 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
         entries = artifact_entries(metadata, request.artifactKind)
         entries[request.artifactKey] = updated_link
     write_metadata(slug, metadata)
-    attach_artifact_asset_to_canvas(
-        slug,
-        artifact_kind=request.artifactKind,
-        artifact_key=canvas_artifact_key,
-        asset_id=asset.id,
-        canvas_node_id=canvas_node_id,
-    )
     return AdaptationGenerateResponse(
         generated=True,
         kind="artifact",

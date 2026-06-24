@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Callable
@@ -122,6 +123,7 @@ class StepRunner:
         return session
 
     def run_pi_step(self, stage: str, name: str, output: str, prompt: str) -> None:
+        agent_session_id = os.environ.get("AGENT_SESSION_ID")
         session = self.book_session or self.require_book_session()
         self.logger.write_step_header(stage, name, output)
         task = self.logger.begin_task(name)
@@ -143,6 +145,17 @@ class StepRunner:
                 error=str(exc),
                 task_paths=task.rel_paths(self.ctx.book_root_abs),
             )
+            if agent_session_id:
+                import agent_sessions
+
+                agent_sessions.update_session(
+                    self.ctx.project_slug,
+                    agent_session_id,
+                    status="failed",
+                    source={"stage": stage, "taskName": name, "output": output},
+                    error=str(exc),
+                    completed=True,
+                )
             self._notify_progress()
             raise RuntimeError(str(exc)) from exc
         self.logger.record_task(
@@ -153,6 +166,17 @@ class StepRunner:
             stats=result.stats,
             task_paths=task.rel_paths(self.ctx.book_root_abs),
         )
+        if agent_session_id:
+            import agent_sessions
+
+            agent_sessions.update_session(
+                self.ctx.project_slug,
+                agent_session_id,
+                pi_session_id=result.session_id,
+                pi_session_file=result.session_file,
+                source={"stage": stage, "taskName": name, "output": output},
+                stats=result.stats,
+            )
         self._notify_progress()
 
     def step_archetype_prompts(self) -> None:
@@ -396,22 +420,23 @@ class StepRunner:
                 raise RuntimeError(str(exc)) from exc
 
     def step_generate_concept_character(self) -> str:
+        import concept_cards
         from adaptation_workflow.concept_art import (
-            existing_concept_art_slugs,
+            concept_scratch_path,
             next_character_concept_key,
             validate_concept_character_art,
         )
 
         key = next_character_concept_key(self.ctx.book_root_abs)
-        out = self.ctx.book_root_abs / "concept-art" / f"{key}.md"
-        rel_out = f"{self.ctx.book_root}/concept-art/{key}.md"
-        existing_concepts = existing_concept_art_slugs(self.ctx.book_root_abs)
+        out = concept_scratch_path(self.ctx.book_root_abs, key)
+        rel_out = f"{self.ctx.book_root}/.concept-scratch/{key}.md"
+        existing_concepts = concept_cards.existing_concept_summaries(self.ctx.project_slug)
         context_lines = [
             f"/skill:concept-character {self.ctx.book_root_abs} {out}",
             "",
             f"File key: {key}",
             "",
-            "Existing concept-art slugs (do not duplicate these ideas):",
+            "Existing concept ideas on the canvas (do not duplicate these):",
         ]
         if existing_concepts:
             context_lines.extend(existing_concepts)
@@ -428,25 +453,31 @@ class StepRunner:
             validate_concept_character_art(out, key)
         except ValidationError as exc:
             raise RuntimeError(str(exc)) from exc
-        return key
+        return concept_cards.create_concept_card_from_pi_file(
+            self.ctx.project_slug,
+            "character",
+            out,
+            expected_key=key,
+        )
 
     def step_generate_concept_location(self) -> str:
+        import concept_cards
         from adaptation_workflow.concept_art import (
-            existing_concept_art_slugs,
+            concept_scratch_path,
             next_location_concept_key,
             validate_concept_location_art,
         )
 
         key = next_location_concept_key(self.ctx.book_root_abs)
-        out = self.ctx.book_root_abs / "concept-art" / f"{key}.md"
-        rel_out = f"{self.ctx.book_root}/concept-art/{key}.md"
-        existing_concepts = existing_concept_art_slugs(self.ctx.book_root_abs)
+        out = concept_scratch_path(self.ctx.book_root_abs, key)
+        rel_out = f"{self.ctx.book_root}/.concept-scratch/{key}.md"
+        existing_concepts = concept_cards.existing_concept_summaries(self.ctx.project_slug)
         context_lines = [
             f"/skill:concept-location {self.ctx.book_root_abs} {out}",
             "",
             f"File key: {key}",
             "",
-            "Existing concept-art slugs (do not duplicate these ideas):",
+            "Existing concept ideas on the canvas (do not duplicate these):",
         ]
         if existing_concepts:
             context_lines.extend(existing_concepts)
@@ -468,4 +499,9 @@ class StepRunner:
             validate_concept_location_art(out, key)
         except ValidationError as exc:
             raise RuntimeError(str(exc)) from exc
-        return key
+        return concept_cards.create_concept_card_from_pi_file(
+            self.ctx.project_slug,
+            "location",
+            out,
+            expected_key=key,
+        )

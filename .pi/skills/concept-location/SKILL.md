@@ -11,7 +11,7 @@ disable-model-invocation: false
 The full book is already loaded in context. The user provides:
 
 1. A book root path, usually `books/<book-id>`.
-2. An exact output path under `<book-root>/concept-art/<file-key>.md`.
+2. An exact output path under `<book-root>/.concept-scratch/<file-key>.md`.
 3. Runner context with the **File key** (must match the `##` heading and filename stem), plus existing concept slugs and locations already covered.
 
 Invent **one** new location concept that fits the book's world — a minor setting, recurring backdrop, or extrapolated place consistent with the story. Do **not** duplicate any location in the existing location index/prompts or existing concept-art slugs.
@@ -22,7 +22,7 @@ The runner owns the output filename. Use the provided **File key** exactly as th
 
 Use the **`write` tool** to save exactly the provided output path.
 
-Create `<book-root>/concept-art/` if needed.
+Create `<book-root>/.concept-scratch/` if needed.
 
 After writing, reply with exactly `Wrote <output-path>.` and nothing else.
 

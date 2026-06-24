@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { HelpTip, Modal } from '../ui';
+import { HubCardMenu } from './hubCardMenu';
 import type { AdaptationStatus, AdaptationWorkflowStatus, Asset, StyleRefKind, StyleRefStatus, VisualStyleDefinition } from '../types';
 
 export function StyleRefCard({
@@ -111,6 +112,13 @@ Realism:
 Lighting:
 `;
 
+function visualStylePromptPreview(prompt: string) {
+  const trimmed = prompt.trim();
+  if (!trimmed) return 'Empty style snippet';
+  const firstLine = trimmed.split('\n').map((line) => line.trim()).find(Boolean) ?? trimmed;
+  return firstLine.replace(/^Style:\s*/i, '').trim() || trimmed;
+}
+
 export function VisualStyleList({
   projectSlug,
   styles,
@@ -179,49 +187,50 @@ export function VisualStyleList({
   };
 
   return (
-    <section className="story-card visual-style-list-card">
-      <div className="archetype-card-head">
+    <section className="visual-style-panel">
+      <header className="visual-style-panel-head">
         <div className="archetype-card-title">
           <h2>Visual Styles</h2>
           <HelpTip text="Reusable style snippets appended to canvas image prompts when you pick a style on a draft or image." />
         </div>
         <button className="secondary" type="button" onClick={openCreate}>Add style</button>
-      </div>
+      </header>
       {styles.length === 0 ? (
-        <p className="muted">No visual styles yet. Add one to reuse a consistent look across generated images.</p>
+        <p className="muted visual-style-empty">No visual styles yet. Add one to reuse a consistent look across generated images.</p>
       ) : (
-        <div className="visual-style-list">
+        <div className="visual-style-chip-grid">
           {styles.map((style) => (
-            <article key={style.id} className="visual-style-list-item">
-              <div className="visual-style-list-item-head">
-                <strong>
-                  {style.name}
-                  {style.default ? <span className="visual-style-default-badge">Default</span> : null}
-                </strong>
-                <div className="visual-style-list-item-actions">
-                  {!style.default && (
-                    <button
-                      className="secondary"
-                      type="button"
-                      disabled={isSaving}
-                      onClick={async () => {
-                        setIsSaving(true);
-                        try {
-                          await api.updateVisualStyle(projectSlug, style.id, { default: true });
-                          await onReload();
-                        } finally {
-                          setIsSaving(false);
-                        }
-                      }}
-                    >
-                      Set as default
-                    </button>
-                  )}
-                  <button className="secondary" type="button" onClick={() => openEdit(style)}>Edit</button>
-                  <button className="danger" type="button" onClick={() => setPendingDelete(style)}>Delete</button>
-                </div>
+            <article
+              key={style.id}
+              className={`visual-style-chip ${style.default ? 'is-default' : ''}`}
+            >
+              <div className="visual-style-chip-head">
+                <h3 title={style.name}>{style.name}</h3>
+                {style.default ? <span className="visual-style-default-badge">Default</span> : null}
+                <HubCardMenu
+                  disabled={isSaving}
+                  ariaLabel={`${style.name} style actions`}
+                  onEdit={() => openEdit(style)}
+                  onSetDefault={style.default ? undefined : async () => {
+                    setIsSaving(true);
+                    try {
+                      await api.updateVisualStyle(projectSlug, style.id, { default: true });
+                      await onReload();
+                    } finally {
+                      setIsSaving(false);
+                    }
+                  }}
+                  onDelete={() => setPendingDelete(style)}
+                />
               </div>
-              <p className="archetype-prompt-preview">{style.prompt.trim() || 'Empty style snippet.'}</p>
+              <button
+                type="button"
+                className="visual-style-chip-preview"
+                title={style.prompt.trim() || 'Empty style snippet'}
+                onClick={() => openEdit(style)}
+              >
+                {visualStylePromptPreview(style.prompt)}
+              </button>
             </article>
           ))}
         </div>

@@ -451,6 +451,9 @@ def detach_asset_from_project(slug: str, asset_id: str) -> None:
                 if node.activeAssetId == asset_id or node.activeAssetId not in node.assetIds:
                     node.activeAssetId = node.assetIds[0]
                 canvas.nodes[node_id] = node
+            elif node.prompt.strip() or node.refs or node.visualStyleId is not None:
+                node.activeAssetId = None
+                canvas.nodes[node_id] = node
             else:
                 del canvas.nodes[node_id]
             changed = True
@@ -1029,7 +1032,7 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
     existing = canvas.nodes.get(node_id)
     asset_ids = [asset.id for asset in assets]
     active_asset_id = asset_ids[0] if asset_ids else None
-    if existing is not None and canvas_role_type(existing) in {"style-ref-source", "artifact-source"}:
+    if existing is not None and canvas_role_type(existing) == "style-ref-source":
         child_node_id = generated_result_node_id(node_id)
         child = canvas.nodes.get(child_node_id)
         if isinstance(child, ImageGroupCanvasNode):
@@ -1049,6 +1052,13 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
                 assetIds=asset_ids,
                 activeAssetId=active_asset_id,
             )
+        write_canvas(slug, canvas)
+        return
+    if isinstance(existing, ImageGroupCanvasNode):
+        merged = list(dict.fromkeys([*existing.assetIds, *asset_ids]))
+        existing.assetIds = merged
+        existing.activeAssetId = active_asset_id or existing.activeAssetId
+        canvas.nodes[node_id] = existing
         write_canvas(slug, canvas)
         return
     target_node_id = matching_variant_group_node_id(slug, canvas, assets)
@@ -1072,19 +1082,24 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
         y = existing.y if isinstance(existing, DraftCanvasNode) else 120
         width = existing.width if isinstance(existing, DraftCanvasNode) else None
         display_name = existing.displayName if isinstance(existing, DraftCanvasNode) else None
+        refs = existing.refs if isinstance(existing, DraftCanvasNode) else []
+        prompt = existing.prompt if isinstance(existing, DraftCanvasNode) else ""
+        params = existing.params if isinstance(existing, DraftCanvasNode) else GenerationParams()
+        visual_style_id = existing.visualStyleId if isinstance(existing, DraftCanvasNode) else None
+        tags = existing.tags if isinstance(existing, DraftCanvasNode) else []
         canvas.nodes[node_id] = ImageGroupCanvasNode(
             displayName=display_name if display_name is not None else (assets[0].title if assets else ""),
             x=x,
             y=y,
             width=width,
+            tags=tags,
+            refs=refs,
+            prompt=prompt,
+            params=params,
+            visualStyleId=visual_style_id,
             assetIds=asset_ids,
             activeAssetId=active_asset_id,
         )
-    elif isinstance(existing, ImageGroupCanvasNode):
-        merged = list(dict.fromkeys([*existing.assetIds, *asset_ids]))
-        existing.assetIds = merged
-        existing.activeAssetId = active_asset_id or existing.activeAssetId
-        canvas.nodes[node_id] = existing
     write_canvas(slug, canvas)
 
 

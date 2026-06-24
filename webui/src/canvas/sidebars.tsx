@@ -53,7 +53,7 @@ export function NodeSidebar({
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onStoryArtifactChange: (id: string, patch: Partial<StoryArtifactCanvasNode>) => void;
   onImageGroupChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
-  onGenerate: (id: string, draft: DraftNodeData) => void;
+  onGenerate: (id: string, draft: DraftNodeData | ImageGroupNodeData) => void;
   onGenerateArtifact: (id: string, artifact: StoryArtifactNodeData) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams, visualStyleId?: string | null) => void;
   generationError?: string | null;
@@ -105,6 +105,49 @@ export function NodeSidebar({
   }
 
   const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
+  if (!node.data.activeAsset && !node.data.assetIds.length) {
+    const promptNode: Node<DraftNodeData> = {
+      ...node,
+      type: 'draft',
+      data: {
+        kind: 'draft',
+        type: 'draft',
+        nodeId: node.data.nodeId,
+        displayName: node.data.displayName,
+        x: node.data.x,
+        y: node.data.y,
+        width: node.data.width ?? null,
+        tags: node.data.tags,
+        role: node.data.role ?? null,
+        refs: node.data.refs ?? [],
+        prompt: node.data.prompt ?? '',
+        params: node.data.params ?? defaultDraftParams,
+        visualStyleId: node.data.visualStyleId ?? null,
+        onDetails: node.data.onDetails,
+      },
+    };
+    return (
+      <DraftSidebar
+        node={promptNode}
+        assets={assets}
+        visualStyles={adaptation?.visualStyles ?? []}
+        defaultVisualStyleId={adaptation?.defaultVisualStyleId}
+        onDraftChange={(id, patch) => onImageGroupChange(id, {
+          displayName: patch.displayName,
+          tags: patch.tags,
+          role: patch.role,
+          refs: patch.refs,
+          prompt: patch.prompt,
+          params: patch.params,
+          visualStyleId: patch.visualStyleId,
+        })}
+        onGenerate={(id) => onGenerate(id, imageNode.data)}
+        onCreateChildText={() => undefined}
+        onDelete={onDelete}
+        generationError={generationError}
+      />
+    );
+  }
   if (!node.data.activeAsset) {
     return (
       <aside className="details-sidebar">

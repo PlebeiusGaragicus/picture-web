@@ -34,7 +34,7 @@ import type { LayoutEditorNavigation } from './storyPanels/layoutEditorNavigatio
 import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './storyPanels/printLayout';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
-import { SYSTEM_TAGS, artifactKindLabel, assetLabel, adaptationFileKindToArtifactKind, capabilitiesForModel, characterEntityTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, partitionAssetTagIds, storyArtifactKeysOnCanvas, storyArtifactNodeId, userProjectTags, visibleDisplayName } from './canvas/shared';
+import { SYSTEM_TAGS, artifactKindLabel, assetLabel, adaptationFileKindToArtifactKind, capabilitiesForModel, characterEntityTags, conceptSubjectFromTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, isCharacterCanvasNode, isConceptTagged, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, partitionAssetTagIds, storyArtifactKeysOnCanvas, storyArtifactNodeId, userProjectTags, visibleDisplayName } from './canvas/shared';
 import { NodeSidebar } from './canvas/sidebars';
 import { NodeTagButton, TagControlButton } from './canvas/assetTagRow';
 import { nodeTagActionsRef } from './canvas/nodeTagActions';
@@ -44,7 +44,7 @@ import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNod
 import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags, styleRefStatusFromAdaptation } from './styleRefs';
 import { HelpTip, HoverTooltip, Modal } from './ui';
 import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, CharacterRecord, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StoryKind, StyleRefKind, TagDefinition } from './types';
-import { BookChatView } from './adaptation/bookChatView';
+import { AgentSessionsView } from './adaptation/bookChatView';
 import { ConceptArtView } from './adaptation/conceptArtView';
 import { HubCardMenu } from './adaptation/hubCardMenu';
 import { useBookSessionLoad } from './adaptation/useBookSessionLoad';
@@ -125,6 +125,14 @@ function zoomToPercent(zoom: number) {
   return Math.round(Math.min(100, Math.max(0, normalized)));
 }
 
+function finiteCanvasNumber(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function omitUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as Partial<T>;
+}
+
 function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): CanvasDocument {
   return {
     ...canvas,
@@ -136,9 +144,9 @@ function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): Ca
             node.id,
             {
               type: 'draft',
-              displayName: node.data.displayName,
-              x: node.position.x,
-              y: node.position.y,
+              displayName: node.data.displayName ?? existing?.displayName ?? '',
+              x: finiteCanvasNumber(node.position?.x, existing?.x ?? 0),
+              y: finiteCanvasNumber(node.position?.y, existing?.y ?? 0),
               width: existing?.width ?? null,
               tags: node.data.tags ?? [],
               role: node.data.role ?? null,
@@ -153,9 +161,9 @@ function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): Ca
             node.id,
             {
               type: 'storyArtifact',
-              displayName: node.data.displayName,
-              x: node.position.x,
-              y: node.position.y,
+              displayName: node.data.displayName ?? existing?.displayName ?? '',
+              x: finiteCanvasNumber(node.position?.x, existing?.x ?? 0),
+              y: finiteCanvasNumber(node.position?.y, existing?.y ?? 0),
               width: existing?.width ?? node.data.width ?? null,
               tags: node.data.tags ?? [],
               role: node.data.role ?? null,
@@ -173,14 +181,19 @@ function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): Ca
           node.id,
           {
             type: 'imageGroup',
-            displayName: node.data.displayName,
-            x: node.position.x,
-            y: node.position.y,
+            displayName: node.data.displayName ?? existing?.displayName ?? '',
+            x: finiteCanvasNumber(node.position?.x, existing?.x ?? 0),
+            y: finiteCanvasNumber(node.position?.y, existing?.y ?? 0),
             width: existing?.width ?? null,
             tags: node.data.tags ?? [],
             role: node.data.role ?? null,
+            refs: node.data.refs ?? [],
+            prompt: node.data.prompt ?? '',
+            params: node.data.params ?? defaultDraftParams,
+            visualStyleId: node.data.visualStyleId ?? null,
             assetIds: node.data.assetIds,
             activeAssetId: node.data.activeAssetId ?? node.data.assetIds[0] ?? null,
+            sourceConceptCardId: node.data.sourceConceptCardId ?? (existing?.type === 'imageGroup' ? existing.sourceConceptCardId ?? null : null),
           },
         ];
       }),
@@ -230,7 +243,7 @@ function toFlowNodes(
       };
     }
     const groupAssets = canvasNode.assetIds.map((assetId) => assetById.get(assetId)).filter((asset): asset is Asset => Boolean(asset));
-    const activeAsset = assetById.get(canvasNode.activeAssetId ?? '') ?? groupAssets[0] ?? null;
+    const activeAsset = canvasNode.activeAssetId ? assetById.get(canvasNode.activeAssetId) ?? groupAssets[0] ?? null : groupAssets[0] ?? null;
     return {
       id,
       position: { x: canvasNode.x, y: canvasNode.y },
@@ -239,6 +252,10 @@ function toFlowNodes(
         ...canvasNode,
         kind: 'imageGroup',
         nodeId: id,
+        refs: canvasNode.refs ?? [],
+        prompt: canvasNode.prompt ?? '',
+        params: canvasNode.params ?? defaultDraftParams,
+        visualStyleId: canvasNode.visualStyleId ?? null,
         assets: groupAssets,
         activeAsset,
         projectTags,
@@ -536,10 +553,20 @@ function App() {
   const userTagCounts = useMemo(() => countUserTagsOnAssets(assets, projectTags, showArchived), [assets, projectTags, showArchived]);
   const entityTagCounts = useMemo(() => countEntityTagsOnAssets(assets, projectTags, showArchived), [assets, projectTags, showArchived]);
   const tagAssetCounts = useMemo(() => countUserTagAssignments(assets, projectTags), [assets, projectTags]);
+  const phaseScopedNodes = useMemo(() => {
+    if (projectPhase === 'concept-art') {
+      return nodes.filter((node) => isConceptTagged(node.data.tags));
+    }
+    if (projectPhase === 'characters-hub') {
+      return nodes.filter((node) => isCharacterCanvasNode(node.data.tags, projectTags));
+    }
+    return nodes;
+  }, [nodes, projectPhase, projectTags]);
+
   const filteredNodes = useMemo(() => {
     const entityTagFiltered = activeEntityTagFilters.length === 0
-      ? nodes
-      : nodes.filter((node) => {
+      ? phaseScopedNodes
+      : phaseScopedNodes.filter((node) => {
           if (node.data.kind !== 'imageGroup') return true;
           const required = new Set(activeEntityTagFilters);
           return node.data.assets.some((asset) => asset.tags.some((tag) => required.has(tag)));
@@ -554,10 +581,11 @@ function App() {
     if (showArchived) return userTagFiltered;
     return userTagFiltered.filter((node) => {
       if (node.data.kind !== 'imageGroup') return true;
+      if (!node.data.assetIds.length) return true;
       const assetsInNode = node.data.assets.length ? node.data.assets : node.data.activeAsset ? [node.data.activeAsset] : [];
       return assetsInNode.some((asset) => !asset.archivedAt);
     });
-  }, [activeEntityTagFilters, activeUserTagFilters, nodes, showArchived]);
+  }, [activeEntityTagFilters, activeUserTagFilters, phaseScopedNodes, showArchived]);
 
   const edges: Edge[] = useMemo(() => {
     return deriveStoryGraphEdges(filteredNodes);
@@ -587,8 +615,21 @@ function App() {
   const performDeleteNodeById = useCallback((nodeId: string, assetId?: string) => {
     const nodeToDelete = nodes.find((node) => node.id === nodeId);
     if (!canDeleteNode(nodeToDelete)) return;
+    const isConceptCardDraft = nodeToDelete?.data.kind === 'imageGroup' && Boolean(nodeToDelete.data.sourceConceptCardId);
+    if (isConceptCardDraft && !assetId) {
+      setNodes((current) => {
+        const next = current.filter((node) => node.id !== nodeId);
+        void persistNodesRef.current(next);
+        return next;
+      });
+      setSelectedNodeIds((current) => current.filter((id) => id !== nodeId));
+      setPopoverNodeId((current) => (current === nodeId ? null : current));
+      return;
+    }
     const assetIdsToDelete = nodeToDelete?.data.kind === 'imageGroup'
-      ? [assetId ?? nodeToDelete.data.activeAsset?.id ?? nodeToDelete.data.activeAssetId ?? nodeToDelete.data.assetIds[0]].filter((id): id is string => Boolean(id))
+      ? isConceptCardDraft
+        ? []
+        : [assetId ?? nodeToDelete.data.activeAsset?.id ?? nodeToDelete.data.activeAssetId ?? nodeToDelete.data.assetIds[0]].filter((id): id is string => Boolean(id))
       : [];
     if (nodeToDelete?.data.kind === 'imageGroup') {
       void Promise.all(assetIdsToDelete.map((assetId) => api.deleteAsset(openProjectSlug, assetId)))
@@ -603,7 +644,9 @@ function App() {
         ? current
             .map((node) => {
               if (node.id !== nodeId || node.data.kind !== 'imageGroup') return node;
-              const nextAssetIds = node.data.assetIds.filter((id) => !assetIdsToDelete.includes(id));
+              const nextAssetIds = isConceptCardDraft && assetId
+                ? node.data.assetIds.filter((id) => id !== assetId)
+                : node.data.assetIds.filter((id) => !assetIdsToDelete.includes(id));
               if (!nextAssetIds.length) return null;
               const nextActiveAssetId = nextAssetIds.includes(node.data.activeAssetId ?? '') ? node.data.activeAssetId : nextAssetIds[0];
               const nextAssets = node.data.assets.filter((asset) => nextAssetIds.includes(asset.id));
@@ -908,21 +951,22 @@ function App() {
   };
 
   const updateImageGroup = async (id: string, patch: Partial<ImageGroupCanvasNode>) => {
+    const cleanPatch = omitUndefined(patch as Record<string, unknown>) as Partial<ImageGroupCanvasNode>;
     setNodes((current) => {
       const updatedNode = current.find((node) => node.id === id && node.data.kind === 'imageGroup') as Node<ImageGroupNodeData> | undefined;
-      const renamedAssetIds = patch.displayName !== undefined ? updatedNode?.data.assetIds ?? [] : [];
+      const renamedAssetIds = cleanPatch.displayName !== undefined ? updatedNode?.data.assetIds ?? [] : [];
       const nextNodes = current.map((node) => {
         if (node.id === id && node.data.kind === 'imageGroup') {
-          return { ...node, data: { ...node.data, ...patch } };
+          return { ...node, data: { ...node.data, ...cleanPatch } };
         }
-        if (node.data.kind === 'draft' && patch.displayName !== undefined && renamedAssetIds.length) {
+        if (node.data.kind === 'draft' && cleanPatch.displayName !== undefined && renamedAssetIds.length) {
           return {
             ...node,
             data: {
               ...node.data,
               parentDisplayNames: new Map([
                 ...(node.data.parentDisplayNames ?? new Map<string, string>()),
-                ...renamedAssetIds.map((assetId) => [assetId, patch.displayName ?? ''] as [string, string]),
+                ...renamedAssetIds.map((assetId) => [assetId, cleanPatch.displayName ?? ''] as [string, string]),
               ]),
             },
           };
@@ -1118,7 +1162,7 @@ function App() {
     setGenerationError(null);
   };
 
-  const generateDraft = async (id: string, draft: DraftNodeData) => {
+  const generateDraft = async (id: string, draft: DraftNodeData | ImageGroupNodeData) => {
     const styleRefKind = styleRefKindForTags(draft.tags);
     const generatingId = styleRefKind ? styleRefImageNodeId(styleRefKind, adaptation) : id;
     try {
@@ -1153,13 +1197,21 @@ function App() {
           seed: draft.params.seed,
           batchCount: draft.params.batchCount,
           title: visibleDisplayName(draft.displayName) || null,
-          tags: [],
+          tags: draft.tags ?? [],
           canvasNodeId: id,
-          visualStyleId: draft.visualStyleId ?? null,
+          visualStyleId: draft.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null,
         };
+        if (!payload.prompt.trim()) {
+          setError('Add a prompt before generating.');
+          return;
+        }
+        if (!payload.visualStyleId) {
+          setError('Pick a visual style before generating.');
+          return;
+        }
         await api.generate(openProjectSlug, payload);
       }
-      setPopoverNodeId(styleRefKind ? generatedResultNodeId(id) : null);
+      setPopoverNodeId(styleRefKind ? generatedResultNodeId(id) : id);
       await reload();
     } catch (err) {
       reportGenerationFailure(generatingId, err);
@@ -1389,25 +1441,45 @@ function App() {
     setCanvas(result.canvas);
     await loadProject(openProjectSlug);
     setPhaseViewMode('canvas');
-    const matchingId = Object.entries(result.canvas.nodes).find(([, node]) => (
-      node.type === 'storyArtifact' && node.artifactKind === artifactKind && node.artifactKey === artifactKey
-    ))?.[0] ?? storyArtifactNodeId(artifactKind, artifactKey);
+    const matchingId = result.nodeId ?? Object.entries(result.canvas.nodes).find(([, node]) => (
+      node.type === 'imageGroup' && node.tags.includes(artifactKey)
+    ))?.[0];
+    if (!matchingId) return;
     setSelectedNodeIds([matchingId]);
     setPopoverNodeId(matchingId);
     window.setTimeout(() => focusNodeOnCanvas(matchingId), 0);
   }, [focusNodeOnCanvas, loadProject, openProjectSlug]);
 
-  const openUploadedConceptOnCanvas = useCallback((artifactKey: string, canvasDoc: CanvasDocument) => {
+  const handleConceptCanvasUpdate = useCallback((canvasDoc: CanvasDocument, nodeId?: string) => {
     setCanvas(canvasDoc);
+    const callbacks = toFlowNodesCallbacksRef.current;
+    setNodes(toFlowNodes(
+      canvasDoc,
+      assetsRef.current,
+      generatingNodeIdsRef.current,
+      callbacks.projectTags,
+      callbacks.changeVariant,
+      callbacks.openViewer,
+      callbacks.openDetails,
+      callbacks.openAssetInViewer,
+      callbacks.updateImageGroupDisplayName,
+      callbacks.openChatForAsset,
+      callbacks.createProjectTag,
+    ));
     void loadProject(openProjectSlug);
+    if (!nodeId) return;
     setPhaseViewMode('canvas');
-    const matchingId = Object.entries(canvasDoc.nodes).find(([, node]) => (
-      node.type === 'storyArtifact' && node.artifactKind === 'concept-art' && node.artifactKey === artifactKey
-    ))?.[0] ?? storyArtifactNodeId('concept-art', artifactKey);
-    setSelectedNodeIds([matchingId]);
-    setPopoverNodeId(matchingId);
-    window.setTimeout(() => focusNodeOnCanvas(matchingId), 0);
+    setSelectedNodeIds([nodeId]);
+    setPopoverNodeId(nodeId);
+    window.setTimeout(() => focusNodeOnCanvas(nodeId), 0);
   }, [focusNodeOnCanvas, loadProject, openProjectSlug]);
+
+  const focusConceptNode = useCallback((nodeId: string) => {
+    setPhaseViewMode('canvas');
+    setSelectedNodeIds([nodeId]);
+    setPopoverNodeId(nodeId);
+    window.setTimeout(() => focusNodeOnCanvas(nodeId), 0);
+  }, [focusNodeOnCanvas]);
 
   const generateStoryArtifact = async (id: string, artifact: StoryArtifactNodeData) => {
     if (!openProjectSlug) return;
@@ -1508,7 +1580,10 @@ function App() {
       <button
         className="generate-button project-top-bar-read-book"
         type="button"
-        onClick={() => void startReadBook()}
+        onClick={async () => {
+          await startReadBook();
+          setProjectPhase('chat');
+        }}
         disabled={isReadingBook || bookAlreadyRead}
       >
         {isReadingBook ? 'Reading book…' : 'Read book'}
@@ -1772,7 +1847,7 @@ function App() {
           />
         )}
         {isBookChatActive && adaptation && (
-          <BookChatView
+          <AgentSessionsView
             projectSlug={openProjectSlug}
             adaptation={adaptation}
             onReloadAdaptation={loadAdaptation}
@@ -1784,11 +1859,10 @@ function App() {
             adaptation={adaptation}
             assets={assets}
             canvas={canvas}
-            projectTags={projectTags}
             viewMode={phaseViewMode === 'canvas' ? 'canvas' : 'list'}
-            onDraftArtifactToCanvas={(key) => draftArtifactToCanvas('concept-art', key)}
-            onOpenUploadedConceptOnCanvas={openUploadedConceptOnCanvas}
-            onCreateTag={createProjectTag}
+            onConceptCanvasUpdate={handleConceptCanvasUpdate}
+            onFocusNode={focusConceptNode}
+            onDeleteNode={performDeleteNodeById}
             onReloadProject={async () => {
               await loadProject(openProjectSlug);
               await loadAdaptation();
@@ -1805,6 +1879,7 @@ function App() {
             projectTags={projectTags}
             viewMode={phaseViewMode === 'canvas' ? 'canvas' : 'list'}
             onDraftArtifactToCanvas={(key) => draftArtifactToCanvas('character-sheet', key)}
+            onFocusNode={focusConceptNode}
             onOpenChatForAsset={openChatForAsset}
             onViewAsset={openAssetInViewer}
             onCreateTag={createProjectTag}
@@ -2744,7 +2819,7 @@ function StoryPhaseScreen({
               <AdaptationFileEditor
                 projectSlug={projectSlug}
                 kind="characters"
-                links={adaptation.characters}
+                links={adaptation.characters as unknown as Record<string, AdaptationAssetLink>}
                 canvasKeysOnCanvas={storyArtifactKeysOnCanvas(canvas.nodes, 'character-sheet')}
                 onDraftToCanvas={(key) => onDraftArtifactToCanvas('character-sheet', key)}
                 onReloadAdaptation={onReloadAdaptation}
@@ -2837,7 +2912,6 @@ function fileKindLabel(kind: AdaptationFileKind) {
     characters: 'Characters',
     locations: 'Locations',
     scenes: 'Scenes',
-    'concept-art': 'Concept Art',
   };
   return labels[kind];
 }
@@ -2913,6 +2987,30 @@ function sortedVariantKeyList(keys: string[]): string[] {
   });
 }
 
+function characterImageAssetsForSlug(
+  characterSlug: string,
+  canvasEntries: Array<[string, ImageGroupCanvasNode]>,
+  assetsById: Map<string, Asset>,
+) {
+  const assets: Array<{ asset: Asset; nodeId: string }> = [];
+  const seen = new Set<string>();
+  for (const [nodeId, node] of canvasEntries) {
+    if (!node.tags.includes(characterSlug)) continue;
+    const orderedAssetIds = [
+      ...(node.activeAssetId ? [node.activeAssetId] : []),
+      ...node.assetIds,
+    ];
+    for (const assetId of orderedAssetIds) {
+      if (seen.has(assetId)) continue;
+      const asset = assetsById.get(assetId);
+      if (!asset || asset.archivedAt) continue;
+      seen.add(assetId);
+      assets.push({ asset, nodeId });
+    }
+  }
+  return assets;
+}
+
 function CharactersHubView({
   projectSlug,
   adaptation,
@@ -2921,6 +3019,7 @@ function CharactersHubView({
   projectTags,
   viewMode,
   onDraftArtifactToCanvas,
+  onFocusNode,
   onOpenChatForAsset,
   onViewAsset,
   onCreateTag,
@@ -2935,6 +3034,7 @@ function CharactersHubView({
   projectTags: TagDefinition[];
   viewMode: 'list' | 'canvas';
   onDraftArtifactToCanvas: (key: string) => Promise<void>;
+  onFocusNode: (nodeId: string) => void;
   onOpenChatForAsset: (nodeId: string, assetId: string) => void;
   onViewAsset: (assetId: string) => void;
   onCreateTag: (tag: TagDefinition) => void;
@@ -2943,8 +3043,16 @@ function CharactersHubView({
   onReloadProject: () => Promise<void>;
 }) {
   const assetsById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
-  const entries = useMemo(() => Object.entries(adaptation.characters).sort(([left], [right]) => left.localeCompare(right)), [adaptation.characters]);
-  const canvasKeys = useMemo(() => storyArtifactKeysOnCanvas(canvas.nodes, 'character-sheet'), [canvas.nodes]);
+  const characterKeys = useMemo(() => new Set(Object.keys(adaptation.characters)), [adaptation.characters]);
+  const canvasEntries = useMemo(
+    () => Object.entries(canvas.nodes)
+      .filter((entry): entry is [string, ImageGroupCanvasNode] => {
+        const node = entry[1];
+        return node.type === 'imageGroup' && isCharacterCanvasNode(node.tags, projectTags);
+      })
+      .sort(([left], [right]) => left.localeCompare(right)),
+    [canvas.nodes, projectTags],
+  );
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
   const [draftDescription, setDraftDescription] = useState('');
@@ -2957,6 +3065,7 @@ function CharactersHubView({
   const [extractingSlug, setExtractingSlug] = useState<string | null>(null);
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
   const [deletingCharacter, setDeletingCharacter] = useState(false);
+  const [thumbnailIndexes, setThumbnailIndexes] = useState<Record<string, number>>({});
   const editingRecord = editingKey ? adaptation.characters[editingKey] : null;
   const editingLink = editingRecord ? characterBaseLink(editingRecord) : null;
   const editingAsset = editingLink ? latestAssetForLink(editingLink, assetsById) : null;
@@ -3050,7 +3159,7 @@ function CharactersHubView({
   };
 
   const createCharacter = async () => {
-    const existingKeys = entries.map(([key]) => key);
+    const existingKeys = Array.from(characterKeys);
     let index = existingKeys.length + 1;
     let key = `new-character-${index}`;
     while (existingKeys.includes(key)) {
@@ -3066,7 +3175,13 @@ function CharactersHubView({
         mode: 'new-image',
         styleRef: '',
       });
+      const created = await api.createImageGroup(projectSlug, {
+        displayName: characterDisplayName(key),
+        tags: ['comic-adaptation', 'character-sheet', key],
+        prompt: '',
+      });
       await onReloadProject();
+      onFocusNode(created.nodeId);
       setEditingKey(key);
       setDraftName(characterDisplayName(key));
       setDraftDescription('');
@@ -3176,38 +3291,94 @@ function CharactersHubView({
           {error && <p className="error error-banner layout-view-error">{error}</p>}
           <div className="characters-hub-workspace">
             <section className="character-card-grid">
-              {entries.map(([key, record]) => {
-                const link = characterBaseLink(record);
-                const asset = link ? latestAssetForLink(link, assetsById) : null;
-                const onCanvas = canvasKeys.has(key);
-                const busy = busyKey === key || extractingSlug === key;
-                const canExtract = characterHubState(record) === 'Listed';
+              {Object.entries(adaptation.characters).sort(([left], [right]) => left.localeCompare(right)).map(([characterSlug, record]) => {
+                const link = record ? characterBaseLink(record) : null;
+                const taggedImages = characterImageAssetsForSlug(characterSlug, canvasEntries, assetsById);
+                const thumbnailIndex = Math.min(thumbnailIndexes[characterSlug] ?? 0, Math.max(0, taggedImages.length - 1));
+                const thumbnail = taggedImages[thumbnailIndex] ?? null;
+                const asset = thumbnail?.asset ?? null;
+                const busy = busyKey === characterSlug || extractingSlug === characterSlug;
+                const canExtract = record != null && characterHubState(record) === 'Listed';
+                const title = characterSlug
+                  ? characterLabel(characterSlug, projectTags)
+                  : characterDisplayName(characterSlug);
+                const canPlaceOnCanvas = Boolean(characterSlug && link?.prompt.trim());
                 return (
-                  <article key={key} className="story-card character-hub-card">
+                  <article key={characterSlug} className="story-card character-hub-card">
                     <div className={`character-hub-thumb ${asset ? 'has-image' : ''}`} onClick={() => asset && onViewAsset(asset.id)} role={asset ? 'button' : undefined}>
-                      {asset ? <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb`} alt="" /> : <span className="muted">No image</span>}
+                      {asset ? (
+                        <div className="character-hub-thumb-frame">
+                          <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb`} alt="" />
+                          {taggedImages.length > 1 && (
+                            <div className="character-hub-thumb-nav" onClick={(event) => event.stopPropagation()}>
+                              <button
+                                type="button"
+                                className="secondary character-hub-thumb-nav-button"
+                                aria-label="Previous character thumbnail"
+                                onClick={() => {
+                                  setThumbnailIndexes((current) => ({
+                                    ...current,
+                                    [characterSlug]: (thumbnailIndex - 1 + taggedImages.length) % taggedImages.length,
+                                  }));
+                                }}
+                              >
+                                ‹
+                              </button>
+                              <span>{thumbnailIndex + 1}/{taggedImages.length}</span>
+                              <button
+                                type="button"
+                                className="secondary character-hub-thumb-nav-button"
+                                aria-label="Next character thumbnail"
+                                onClick={() => {
+                                  setThumbnailIndexes((current) => ({
+                                    ...current,
+                                    [characterSlug]: (thumbnailIndex + 1) % taggedImages.length,
+                                  }));
+                                }}
+                              >
+                                ›
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="muted">{link?.prompt.trim() ? link.prompt.trim().slice(0, 60) : 'No prompt'}</span>
+                      )}
                     </div>
                     <div className="character-hub-body">
                       <div className="character-hub-card-header">
-                        <h3>{characterLabel(key, projectTags)}</h3>
+                        <h3>{title}</h3>
                         <HubCardMenu
                           disabled={busy || deletingCharacter}
                           ariaLabel="Character actions"
-                          onDelete={() => setPendingDeleteKey(key)}
+                          onDelete={() => setPendingDeleteKey(characterSlug)}
                         />
                       </div>
+                      {!asset && link?.prompt.trim() && (
+                        <p className="muted concept-art-node-preview">{link.prompt.trim().split('\n').slice(0, 2).join(' ')}</p>
+                      )}
                       <div className="character-hub-actions">
-                        {canExtract && (
-                          <button className="secondary" type="button" disabled={busy || !adaptation.hasBookSession} onClick={() => void extractCharacter(key)}>
-                            {extractingSlug === key ? 'Extracting…' : 'Extract'}
+                        {characterSlug && canExtract && (
+                          <button className="secondary" type="button" disabled={busy || !adaptation.hasBookSession} onClick={() => void extractCharacter(characterSlug)}>
+                            {extractingSlug === characterSlug ? 'Extracting…' : 'Extract'}
                           </button>
                         )}
-                        <button className="secondary" type="button" onClick={() => openEdit(key, record)}>Edit</button>
-                        <button className="secondary" type="button" disabled={busy || onCanvas || !link?.prompt} onClick={() => void draftToCanvas(key)}>
-                          {onCanvas ? 'On canvas' : busy ? 'Working...' : 'Draft'}
-                        </button>
+                        {characterSlug && record && (
+                          <button className="secondary" type="button" onClick={() => openEdit(characterSlug, record)}>Edit</button>
+                        )}
+                        {characterSlug && (
+                          <button
+                            className="secondary"
+                            type="button"
+                            disabled={busy || !canPlaceOnCanvas}
+                            title={canPlaceOnCanvas ? 'Create another tagged draft node on the canvas' : 'Add a prompt before drafting to canvas'}
+                            onClick={() => void draftToCanvas(characterSlug)}
+                          >
+                            {busy ? 'Working…' : 'Draft'}
+                          </button>
+                        )}
                         {asset && (
-                          <button className="secondary" type="button" onClick={() => onOpenChatForAsset(storyArtifactNodeId('character-sheet', key), asset.id)}>
+                          <button className="secondary" type="button" onClick={() => onOpenChatForAsset(thumbnail.nodeId, asset.id)}>
                             Refine
                           </button>
                         )}
@@ -3216,7 +3387,7 @@ function CharactersHubView({
                   </article>
                 );
               })}
-              {!entries.length && <p className="muted">Add a character or list characters from the book to create cards.</p>}
+              {!Object.keys(adaptation.characters).length && <p className="muted">Add a character or list characters from the book to see cards here.</p>}
             </section>
           </div>
         </div>
@@ -3335,7 +3506,6 @@ function singularFileKindLabel(kind: AdaptationFileKind) {
     characters: 'character',
     locations: 'location',
     scenes: 'scene',
-    'concept-art': 'concept',
   };
   return labels[kind];
 }
@@ -3780,10 +3950,27 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
     setIsEditingName(false);
   };
   if (!asset) {
+    const promptPreview = data.prompt.trim()
+      ? data.prompt.replace(/\s+/g, ' ').trim()
+      : '';
+    const subject = conceptSubjectFromTags(data.tags);
+    const badge = subject === 'character' ? 'Character concept' : subject === 'location' ? 'Location concept' : data.tags.includes('character-sheet') ? 'Character' : 'Prompt';
     return (
-      <div className="node">
+      <div className={`node draft-node image-group-prompt-node ${data.isGenerating ? 'generating' : ''}`} title={data.prompt || 'Prompt not set'}>
         <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
-        <strong>Missing image</strong>
+        <div className="draft-placeholder" aria-hidden="true">
+          {promptPreview && <p className="draft-prompt-preview">{truncateDraftPreview(promptPreview)}</p>}
+          <span className="node-role-badge">{badge}</span>
+          {data.isGenerating && (
+            <div className="node-generating-overlay">
+              <span className="spinner" aria-hidden="true" />
+              <span>Generating</span>
+            </div>
+          )}
+        </div>
+        <strong className={`node-title ${visibleDisplayName(data.displayName) ? '' : 'placeholder'}`}>
+          {visibleDisplayName(data.displayName) || 'add title (double click)'}
+        </strong>
         <Handle type="source" position={Position.Right} className="output-handle" />
       </div>
     );

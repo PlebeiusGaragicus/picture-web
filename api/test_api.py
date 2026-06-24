@@ -44,6 +44,10 @@ def create_project(client: TestClient) -> None:
     assert response.status_code == 200
 
 
+def visual_style_id_by_name(styles: list[dict], name: str) -> str:
+    return next(style["id"] for style in styles if style["name"] == name)
+
+
 def make_png(path: Path, color: str = "red") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (16, 16), color=color).save(path)
@@ -648,10 +652,13 @@ def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, mon
         return Result()
 
     monkeypatch.setattr(gemini, "generate_image", fake_generate)
-    style_id = client.post(
-        "/api/projects/farm-comic/adaptation/visual-styles",
-        json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
-    ).json()["visualStyles"][0]["id"]
+    style_id = visual_style_id_by_name(
+        client.post(
+            "/api/projects/farm-comic/adaptation/visual-styles",
+            json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
+        ).json()["visualStyles"],
+        "Comic ink",
+    )
     missing_style = client.post(
         "/api/projects/farm-comic/adaptation/generate-artifact",
         json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01"},
@@ -725,10 +732,13 @@ def test_adaptation_panel_generation_blocks_empty_refs(tmp_path, monkeypatch):
         "caption: None.\n\n"
         "Empty refs panel.\n"
     )
-    style_id = client.post(
-        "/api/projects/farm-comic/adaptation/visual-styles",
-        json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
-    ).json()["visualStyles"][0]["id"]
+    style_id = visual_style_id_by_name(
+        client.post(
+            "/api/projects/farm-comic/adaptation/visual-styles",
+            json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
+        ).json()["visualStyles"],
+        "Comic ink",
+    )
     response = client.post(
         "/api/projects/farm-comic/adaptation/generate-artifact",
         json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01", "visualStyleId": style_id},
@@ -776,10 +786,13 @@ def test_adaptation_panel_generation_blocks_untagged_assets(tmp_path, monkeypatc
         "caption: None.\n\n"
         "Untagged panel.\n"
     )
-    style_id = client.post(
-        "/api/projects/farm-comic/adaptation/visual-styles",
-        json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
-    ).json()["visualStyles"][0]["id"]
+    style_id = visual_style_id_by_name(
+        client.post(
+            "/api/projects/farm-comic/adaptation/visual-styles",
+            json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
+        ).json()["visualStyles"],
+        "Comic ink",
+    )
     response = client.post(
         "/api/projects/farm-comic/adaptation/generate-artifact",
         json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01", "visualStyleId": style_id},
@@ -831,10 +844,13 @@ def test_adaptation_panel_generation_blocks_over_reference_limit(tmp_path, monke
         "caption: None.\n\n"
         "Over limit panel.\n"
     )
-    style_id = client.post(
-        "/api/projects/farm-comic/adaptation/visual-styles",
-        json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
-    ).json()["visualStyles"][0]["id"]
+    style_id = visual_style_id_by_name(
+        client.post(
+            "/api/projects/farm-comic/adaptation/visual-styles",
+            json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
+        ).json()["visualStyles"],
+        "Comic ink",
+    )
     response = client.post(
         "/api/projects/farm-comic/adaptation/generate-artifact",
         json={
@@ -953,7 +969,9 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     assert canvas_response.status_code == 200
     nodes = canvas_response.json()["canvas"]["nodes"]
     artifact_kinds = {node["artifactKind"] for node in nodes.values() if node["type"] == "storyArtifact"}
-    assert {"character-sheet", "location-prompt", "scene-artifact"}.issubset(artifact_kinds)
+    assert "scene-artifact" in artifact_kinds
+    assert "character-sheet" not in artifact_kinds
+    assert "location-prompt" not in artifact_kinds
 
     deleted = client.delete("/api/projects/farm-comic/adaptation/files/characters/hero-primary")
     assert deleted.status_code == 200
@@ -1123,28 +1141,28 @@ def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monke
     )
     assert first.status_code == 200
     assert first.json()["importedNodeCount"] == 1
+    first_node_id = first.json()["nodeId"]
     nodes = first.json()["canvas"]["nodes"]
-    character_nodes = [
-        node
-        for node in nodes.values()
-        if node.get("type") == "storyArtifact" and node.get("artifactKind") == "character-sheet"
-    ]
-    assert len(character_nodes) == 1
-    assert character_nodes[0]["artifactKey"] == "hero"
+    first_node = nodes[first_node_id]
+    assert first_node["type"] == "imageGroup"
+    assert "hero" in first_node["tags"]
+    assert first_node["assetIds"] == []
+    assert "Full body character sheet" in first_node["prompt"]
 
     second = client.post(
         "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
         json={"artifactKind": "character-sheet", "artifactKey": "hero"},
     )
     assert second.status_code == 200
-    assert second.json()["importedNodeCount"] == 0
-    nodes_after = second.json()["canvas"]["nodes"]
-    character_nodes_after = [
+    assert second.json()["importedNodeCount"] == 1
+    second_node_id = second.json()["nodeId"]
+    assert second_node_id != first_node_id
+    character_nodes = [
         node
-        for node in nodes_after.values()
-        if node.get("type") == "storyArtifact" and node.get("artifactKind") == "character-sheet"
+        for node in second.json()["canvas"]["nodes"].values()
+        if node.get("type") == "imageGroup" and "hero" in node.get("tags", [])
     ]
-    assert len(character_nodes_after) == 1
+    assert len(character_nodes) == 2
 
     location_import = client.post(
         "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
@@ -1152,13 +1170,11 @@ def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monke
     )
     assert location_import.status_code == 200
     assert location_import.json()["importedNodeCount"] == 1
-    location_nodes = [
-        node
-        for node in location_import.json()["canvas"]["nodes"].values()
-        if node.get("type") == "storyArtifact" and node.get("artifactKind") == "location-prompt"
-    ]
-    assert len(location_nodes) == 1
-    assert location_nodes[0]["artifactKey"] == "barn"
+    location_node_id = location_import.json()["nodeId"]
+    location_node = location_import.json()["canvas"]["nodes"][location_node_id]
+    assert location_node["type"] == "imageGroup"
+    assert "barn" in location_node["tags"]
+    assert location_node["assetIds"] == []
 
 
 def test_scene_list_api(tmp_path, monkeypatch):
@@ -2552,6 +2568,21 @@ def test_style_ref_status_clears_stale_asset_and_repairs_canvas(tmp_path, monkey
     assert "archetype_archetype_character_image" not in nodes
 
 
+def test_new_project_seeds_default_crayons_visual_style(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    status = client.get("/api/projects/farm-comic/adaptation")
+    assert status.status_code == 200
+    styles = status.json()["visualStyles"]
+    assert len(styles) == 1
+    assert styles[0]["id"] == "crayons"
+    assert styles[0]["name"] == "crayons"
+    assert styles[0]["default"] is True
+    assert status.json()["defaultVisualStyleId"] == "crayons"
+    assert "hand-drawn crayon" in styles[0]["prompt"].lower()
+
+
 def test_visual_styles_crud_and_generate_composition(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
@@ -2562,19 +2593,19 @@ def test_visual_styles_crud_and_generate_composition(tmp_path, monkeypatch):
     )
     assert created.status_code == 200
     styles = created.json()["visualStyles"]
-    assert len(styles) == 1
-    style_id = styles[0]["id"]
-    assert styles[0]["name"] == "Watercolor"
-    assert styles[0]["default"] is True
-    assert created.json()["defaultVisualStyleId"] == style_id
+    assert len(styles) == 2
+    style_id = visual_style_id_by_name(styles, "Watercolor")
+    assert styles[0]["name"] == "crayons"
+    assert next(style for style in styles if style["name"] == "Watercolor")["default"] is False
+    assert created.json()["defaultVisualStyleId"] == "crayons"
 
     updated = client.patch(
         f"/api/projects/farm-comic/adaptation/visual-styles/{style_id}",
         json={"name": "Soft Watercolor"},
     )
     assert updated.status_code == 200
-    assert updated.json()["visualStyles"][0]["name"] == "Soft Watercolor"
-    assert updated.json()["defaultVisualStyleId"] == style_id
+    assert visual_style_id_by_name(updated.json()["visualStyles"], "Soft Watercolor") == style_id
+    assert updated.json()["defaultVisualStyleId"] == "crayons"
 
     second = client.post(
         "/api/projects/farm-comic/adaptation/visual-styles",
@@ -2582,7 +2613,7 @@ def test_visual_styles_crud_and_generate_composition(tmp_path, monkeypatch):
     )
     assert second.status_code == 200
     ink_id = next(style["id"] for style in second.json()["visualStyles"] if style["name"] == "Ink")
-    assert second.json()["defaultVisualStyleId"] == style_id
+    assert second.json()["defaultVisualStyleId"] == "crayons"
 
     set_default = client.patch(
         f"/api/projects/farm-comic/adaptation/visual-styles/{ink_id}",
@@ -2624,13 +2655,14 @@ def test_visual_styles_crud_and_generate_composition(tmp_path, monkeypatch):
 
     deleted = client.delete(f"/api/projects/farm-comic/adaptation/visual-styles/{style_id}")
     assert deleted.status_code == 200
-    assert len(deleted.json()["visualStyles"]) == 1
+    assert len(deleted.json()["visualStyles"]) == 2
     assert deleted.json()["defaultVisualStyleId"] == ink_id
 
     deleted_ink = client.delete(f"/api/projects/farm-comic/adaptation/visual-styles/{ink_id}")
     assert deleted_ink.status_code == 200
-    assert deleted_ink.json()["visualStyles"] == []
-    assert deleted_ink.json()["defaultVisualStyleId"] is None
+    assert len(deleted_ink.json()["visualStyles"]) == 1
+    assert deleted_ink.json()["visualStyles"][0]["name"] == "crayons"
+    assert deleted_ink.json()["defaultVisualStyleId"] == "crayons"
 
     missing = client.post(
         "/api/projects/farm-comic/generate",
@@ -2704,7 +2736,7 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
         json={"name": "Ink wash", "prompt": "Style: Ink wash style.\n"},
     )
     assert style_created.status_code == 200
-    style_id = style_created.json()["visualStyles"][0]["id"]
+    style_id = visual_style_id_by_name(style_created.json()["visualStyles"], "Ink wash")
     missing_style = client.post(
         "/api/projects/farm-comic/adaptation/generate-style-ref",
         json={"kind": "archetype-character"},
@@ -2746,10 +2778,13 @@ def test_sync_style_ref_to_canvas_preserves_visual_style_selection(tmp_path, mon
     root = library.project_dir("farm-comic") / "adaptation"
     (root / "style-refs").mkdir(parents=True, exist_ok=True)
     (root / "style-refs" / "archetype-character.md").write_text("Character archetype prompt.\n")
-    style_id = client.post(
-        "/api/projects/farm-comic/adaptation/visual-styles",
-        json={"name": "Crayon", "prompt": "Style: crayon\n"},
-    ).json()["visualStyles"][0]["id"]
+    style_id = visual_style_id_by_name(
+        client.post(
+            "/api/projects/farm-comic/adaptation/visual-styles",
+            json={"name": "Crayon", "prompt": "Style: crayon\n"},
+        ).json()["visualStyles"],
+        "Crayon",
+    )
     synced = client.post(
         "/api/projects/farm-comic/adaptation/sync-style-ref-to-canvas",
         json={"kind": "archetype-character"},
@@ -2768,78 +2803,100 @@ def test_sync_style_ref_to_canvas_preserves_visual_style_selection(tmp_path, mon
     assert resynced.json()["canvas"]["nodes"]["archetype_archetype_character"]["visualStyleId"] == style_id
 
 
-def test_story_artifact_generated_asset_projects_to_child_image_group(tmp_path, monkeypatch):
+def test_generate_attaches_to_same_image_group_node(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
-    asset_id = "01HCHAR"
-    make_png(library.asset_png_path("farm-comic", asset_id), color="green")
+    style_ref_id = "01HARCH"
+    make_png(library.asset_png_path("farm-comic", style_ref_id), color="blue")
     library.write_json(
-        library.asset_json_path("farm-comic", asset_id),
+        library.asset_json_path("farm-comic", style_ref_id),
         {
-            "id": asset_id,
-            "kind": "generated",
-            "title": "Character Sheet: hero",
-            "tags": ["comic-adaptation", "character-sheet"],
+            "id": style_ref_id,
+            "kind": "imported",
+            "title": "Archetype character",
+            "tags": ["archetype", "character-style"],
             "createdAt": "2026-01-01T00:00:00Z",
             "updatedAt": "2026-01-01T00:00:00Z",
-            "prompt": {"text": "hero prompt"},
-            "generation": {
-                "refs": [],
-                "runId": "01HRUN",
-                "runIndex": 0,
-                "model": "gemini-3.1-flash-image",
-                "aspectRatio": "16:9",
-                "imageSize": "1K",
-                "seed": 1,
-            },
-            "provider": {"name": "google-genai", "response": {}},
         },
     )
     metadata = adaptation.read_metadata("farm-comic")
-    metadata.characters["hero"] = CharacterRecord.model_validate(
-        character_record_metadata("hero", prompt="hero prompt", asset_ids=[asset_id])
-    )
+    metadata.styleRefs.archetypeCharacterAssetId = style_ref_id
     adaptation.write_metadata("farm-comic", metadata)
-    write_unified_character_file(library.project_dir("farm-comic") / "adaptation" / "characters" / "hero.md", "hero", prompt="hero prompt")
-    library.apply_entity_tag_to_asset("farm-comic", asset_id, "hero")
-    canvas = {
-        "version": 2,
-        "viewport": {"x": 0, "y": 0, "zoom": 1},
-        "nodes": {
-            "artifact_character_sheet_hero": {
-                "type": "storyArtifact",
-                "displayName": "hero",
-                "x": 80,
-                "y": 320,
-                "width": 240,
-                "tags": ["adaptation", "character-sheet", "generated"],
-                "artifactKind": "character-sheet",
-                "artifactKey": "hero",
-                "promptPath": "characters/hero.md",
-                "prompt": "hero prompt",
-                "refs": [],
-                "generatedAssetIds": [asset_id],
-            },
+
+    character = client.post(
+        "/api/projects/farm-comic/adaptation/files/characters",
+        json={
+            "key": "hero",
+            "mode": "new-image",
+            "styleRef": "",
+            "body": "Full body character sheet for the farm hero.",
         },
-    }
-    assert client.put("/api/projects/farm-comic/canvas", json=canvas).status_code == 200
+    )
+    assert character.status_code == 200
 
-    nodes = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
-    assert "artifact_character_sheet_hero" in nodes
-    assert nodes["artifact_character_sheet_hero"]["type"] == "storyArtifact"
-    assert nodes["artifact_character_sheet_hero"]["role"] == {"type": "artifact-source", "artifactKind": "character-sheet", "artifactKey": "hero"}
-    assert nodes["generated_artifact_character_sheet_hero"]["type"] == "imageGroup"
-    assert nodes["generated_artifact_character_sheet_hero"]["assetIds"] == [asset_id]
-    assert nodes["generated_artifact_character_sheet_hero"]["role"] == {"type": "generated-result", "sourceNodeId": "artifact_character_sheet_hero"}
+    updated = client.put(
+        "/api/projects/farm-comic/adaptation/files/characters/hero",
+        json={
+            "body": "Full body character sheet for the farm hero.",
+            "mode": "new-image",
+            "styleRef": "",
+        },
+    )
+    assert updated.status_code == 200
 
-    delete_child = client.delete(f"/api/projects/farm-comic/assets/{asset_id}")
-    assert delete_child.status_code == 204
+    imported = client.post(
+        "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
+        json={"artifactKind": "character-sheet", "artifactKey": "hero"},
+    )
+    assert imported.status_code == 200
+    node_id = imported.json()["nodeId"]
+    assert imported.json()["canvas"]["nodes"][node_id]["type"] == "imageGroup"
+    assert imported.json()["canvas"]["nodes"][node_id]["assetIds"] == []
+
+    def fake_generate(**kwargs):
+        make_png(kwargs["output_png"], color="green")
+
+        class Result:
+            provider_response = {"imageFile": kwargs["output_png"].name, "response": {"candidates": [{"finishReason": "STOP"}]}}
+
+        return Result()
+
+    monkeypatch.setattr(gemini, "generate_image", fake_generate)
+    style_id = visual_style_id_by_name(
+        client.post(
+            "/api/projects/farm-comic/adaptation/visual-styles",
+            json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
+        ).json()["visualStyles"],
+        "Comic ink",
+    )
+    generated = client.post(
+        "/api/projects/farm-comic/adaptation/generate-artifact",
+        json={
+            "artifactKind": "character-sheet",
+            "artifactKey": "hero",
+            "variantKey": "base",
+            "visualStyleId": style_id,
+            "canvasNodeId": node_id,
+        },
+    )
+    assert generated.status_code == 200
+    asset_id = generated.json()["asset"]["id"]
+    nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert node_id in nodes
+    assert nodes[node_id]["type"] == "imageGroup"
+    assert nodes[node_id]["assetIds"] == [asset_id]
+    assert nodes[node_id]["activeAssetId"] == asset_id
+    assert not any(node_id.startswith("generated_") for node_id in nodes)
+    assert generated.json()["status"]["characters"]["hero"]["variants"]["base"]["assetIds"] == [asset_id]
+
+    delete_asset = client.delete(f"/api/projects/farm-comic/assets/{asset_id}")
+    assert delete_asset.status_code == 204
     status = client.get("/api/projects/farm-comic/adaptation").json()
     assert status["characters"]["hero"]["variants"]["base"]["assetIds"] == []
-    assert status["characters"]["hero"]["variants"]["base"]["prompt"].startswith("hero prompt")
-    repaired = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
-    assert repaired["artifact_character_sheet_hero"]["type"] == "storyArtifact"
-    assert "generated_artifact_character_sheet_hero" not in repaired
+    canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert canvas_nodes[node_id]["type"] == "imageGroup"
+    assert canvas_nodes[node_id]["assetIds"] == []
+    assert f"generated_{node_id}" not in canvas_nodes
 
 
 def test_chat_session_create_list_archive_and_protect_source(tmp_path, monkeypatch):
@@ -3122,6 +3179,87 @@ def test_book_chat_trace_empty_before_first_turn(tmp_path, monkeypatch):
     trace = client.get(f"/api/projects/farm-comic/adaptation/book-chats/{session_id}/trace")
     assert trace.status_code == 200
     assert trace.json()["steps"] == []
+
+
+def test_agent_sessions_empty_without_book(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    response = client.get("/api/projects/farm-comic/agent-sessions")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_agent_sessions_bridge_book_chat_trace_and_archive(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    monkeypatch.setattr(workflow_config, "LIBRARY_ROOT", library.LIBRARY_ROOT)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Once upon a time.\n")
+    pi_session_file = root / "sessions" / "pi" / "agent-chat-trace.jsonl"
+    pi_session_file.parent.mkdir(parents=True, exist_ok=True)
+    pi_session_file.write_text(
+        "\n".join(
+            [
+                '{"type":"session","version":3,"id":"agent-chat-session","timestamp":"2026-03-12T18:59:01.267Z","cwd":"/tmp"}',
+                '{"type":"message","id":"u1","parentId":null,"timestamp":"2026-03-12T19:03:58.674Z","message":{"role":"user","content":[{"type":"text","text":"Who is the fox?"}]}}',
+                '{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-03-12T19:04:05.888Z","message":{"role":"assistant","provider":"openai","model":"gpt-test","usage":{"input":10,"output":5},"content":[{"type":"text","text":"The fox."}]}}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    library.write_json(
+        root / "sessions" / "book-session.json",
+        {
+            "sessionFile": str(pi_session_file),
+            "sessionId": "root-session",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "bookPath": str(root / "book.txt"),
+        },
+    )
+
+    created = client.post("/api/projects/farm-comic/adaptation/book-chats", json={"title": "Ask the book"})
+    assert created.status_code == 200
+    session_id = created.json()["id"]
+    chat_session_path = root / "sessions" / "book-chats" / session_id / "session.json"
+    library.write_json(
+        chat_session_path,
+        {
+            **library.read_json(chat_session_path),
+            "piSessionId": "agent-chat-session",
+            "piSessionFile": str(pi_session_file.resolve()),
+            "turns": [
+                {
+                    "id": "turn-user",
+                    "role": "user",
+                    "createdAt": "2026-03-12T19:03:58.674Z",
+                    "text": "Who is the fox?",
+                    "events": [],
+                }
+            ],
+        },
+    )
+
+    sessions = client.get("/api/projects/farm-comic/agent-sessions")
+    assert sessions.status_code == 200
+    session = sessions.json()[0]
+    assert session["id"] == session_id
+    assert session["kind"] == "book-chat"
+    assert session["piSessionId"] == "agent-chat-session"
+    assert session["source"]["bookChatSessionId"] == session_id
+
+    trace = client.get(f"/api/projects/farm-comic/agent-sessions/{session_id}/trace")
+    assert trace.status_code == 200
+    assert trace.json()["sessionId"] == "agent-chat-session"
+    assert trace.json()["steps"][1]["text"] == "The fox."
+
+    archived = client.patch(f"/api/projects/farm-comic/agent-sessions/{session_id}", json={"archived": True})
+    assert archived.status_code == 200
+    assert archived.json()["status"] == "archived"
+    assert client.get("/api/projects/farm-comic/adaptation/book-chats").json() == []
 
 
 def test_asset_archive_hides_from_default_lists_and_canvas(tmp_path, monkeypatch):
@@ -3670,128 +3808,76 @@ def test_create_generated_assets_surfaces_image_generation_error(tmp_path, monke
     assert "content safety filters" in response.json()["detail"]
 
 
-def test_concept_art_file_crud_generate_and_canvas_import(tmp_path, monkeypatch):
+def test_concept_cards_draft_to_canvas(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
-    root = library.project_dir("farm-comic")
-
-    missing_subject = client.post(
-        "/api/projects/farm-comic/adaptation/files/concept-art",
-        json={"key": "bad", "body": "Prompt", "mode": "new-image", "styleRef": ""},
-    )
-    assert missing_subject.status_code == 400
 
     character = client.post(
-        "/api/projects/farm-comic/adaptation/files/concept-art",
-        json={
-            "key": "farm-hero",
-            "subjectKind": "character",
-            "body": "A friendly farm hero in soft watercolor style.",
-            "mode": "new-image",
-            "styleRef": "",
-        },
+        "/api/projects/farm-comic/concept-cards",
+        json={"subjectKind": "character", "prompt": "A friendly farm hero in soft watercolor style."},
     )
     assert character.status_code == 200
+    character_payload = character.json()
+    character_id = character_payload["id"]
+    assert character_payload["subjectKind"] == "character"
+    assert "A friendly farm hero" in character_payload["prompt"]
+    canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert not [node for node in canvas_nodes.values() if "concept" in node.get("tags", [])]
+
+    updated = client.patch(
+        f"/api/projects/farm-comic/concept-cards/{character_id}",
+        json={"displayName": "Farm Hero", "prompt": "Updated character prompt"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["displayName"] == "Farm Hero"
+    assert updated.json()["prompt"] == "Updated character prompt"
+
+    draft = client.post(f"/api/projects/farm-comic/concept-cards/{character_id}/draft")
+    assert draft.status_code == 200
+    draft_payload = draft.json()
+    character_node = draft_payload["canvas"]["nodes"][draft_payload["nodeId"]]
+    assert character_node["type"] == "imageGroup"
+    assert character_node["assetIds"] == []
+    assert "concept" in character_node["tags"]
+    assert "concept-character" in character_node["tags"]
+    assert character_node["displayName"] == "Farm Hero"
+    assert character_node["prompt"] == "Updated character prompt"
+    assert character_node["sourceConceptCardId"] == character_id
+
+    node_deleted_canvas = draft_payload["canvas"]
+    node_deleted_canvas["nodes"].pop(draft_payload["nodeId"])
+    assert client.put("/api/projects/farm-comic/canvas", json=node_deleted_canvas).status_code == 200
+    cards_after_node_delete = client.get("/api/projects/farm-comic/concept-cards").json()
+    assert any(card["id"] == character_id for card in cards_after_node_delete)
+
+    redraft = client.post(f"/api/projects/farm-comic/concept-cards/{character_id}/draft")
+    assert redraft.status_code == 200
+    redraft_node_id = redraft.json()["nodeId"]
+    assert client.delete(f"/api/projects/farm-comic/concept-cards/{character_id}").status_code == 204
+    cards_after_card_delete = client.get("/api/projects/farm-comic/concept-cards").json()
+    assert not any(card["id"] == character_id for card in cards_after_card_delete)
+    canvas_after_card_delete = client.get("/api/projects/farm-comic/canvas").json()
+    assert redraft_node_id in canvas_after_card_delete["nodes"]
+    assert canvas_after_card_delete["nodes"][redraft_node_id]["sourceConceptCardId"] == character_id
 
     location = client.post(
-        "/api/projects/farm-comic/adaptation/files/concept-art",
-        json={
-            "key": "sunny-barn",
-            "subjectKind": "location",
-            "body": "A sunny red barn on rolling hills.",
-            "mode": "new-image",
-            "styleRef": "",
-        },
+        "/api/projects/farm-comic/concept-cards",
+        json={"subjectKind": "location", "prompt": "A sunny red barn on rolling hills."},
     )
     assert location.status_code == 200
+    location_draft = client.post(f"/api/projects/farm-comic/concept-cards/{location.json()['id']}/draft")
+    location_node = location_draft.json()["canvas"]["nodes"][location_draft.json()["nodeId"]]
+    assert "concept-location" in location_node["tags"]
+
+    blank_character = client.post(
+        "/api/projects/farm-comic/concept-cards",
+        json={"subjectKind": "character"},
+    )
+    assert blank_character.status_code == 200
+    assert "Character reference sheet" in blank_character.json()["prompt"]
 
     status = client.get("/api/projects/farm-comic/adaptation").json()
     assert status["counts"]["conceptArt"] == 2
-    assert set(status["conceptArt"]) == {"farm-hero", "sunny-barn"}
-    assert status["conceptArt"]["farm-hero"]["subjectKind"] == "character"
-    assert status["conceptArt"]["sunny-barn"]["subjectKind"] == "location"
-
-    character_file = (root / "adaptation" / "concept-art" / "farm-hero.md").read_text()
-    assert "subject: character" in character_file
-    assert "A friendly farm hero" in character_file
-
-    blank_character = client.post(
-        "/api/projects/farm-comic/adaptation/files/concept-art",
-        json={
-            "key": "blank-hero",
-            "subjectKind": "character",
-            "body": "",
-            "mode": "new-image",
-            "styleRef": "",
-        },
-    )
-    assert blank_character.status_code == 200
-    blank_file = (root / "adaptation" / "concept-art" / "blank-hero.md").read_text()
-    assert "Character reference sheet" in blank_file
-    assert "[describe essential visual traits here]" in blank_file
-    assert "Layout: top row — front full-body" in blank_file
-    assert "Expressions: [list expressions here]" in blank_file
-
-    updated = client.put(
-        "/api/projects/farm-comic/adaptation/files/concept-art/farm-hero",
-        json={"body": "Updated farm hero concept prompt."},
-    )
-    assert updated.status_code == 200
-    assert "Updated farm hero" in updated.json()["body"]
-
-    captured_refs = []
-    captured_prompt = {}
-
-    def fake_generate(**kwargs):
-        captured_refs[:] = [path.stem for path in kwargs["parent_png_paths"]]
-        captured_prompt["text"] = kwargs["prompt_text"]
-        make_png(kwargs["output_png"], color="blue")
-
-        class Result:
-            provider_response = {"imageFile": kwargs["output_png"].name, "response": {"candidates": [{"finishReason": "STOP"}]}}
-
-        return Result()
-
-    monkeypatch.setattr(gemini, "generate_image", fake_generate)
-    style_id = client.post(
-        "/api/projects/farm-comic/adaptation/visual-styles",
-        json={"name": "Watercolor", "prompt": "Style: soft watercolor wash\n"},
-    ).json()["visualStyles"][0]["id"]
-
-    generated = client.post(
-        "/api/projects/farm-comic/adaptation/generate-artifact",
-        json={"artifactKind": "concept-art", "artifactKey": "farm-hero", "visualStyleId": style_id},
-    )
-    assert generated.status_code == 200
-    assert captured_refs == []
-    assert "soft watercolor" in captured_prompt["text"].lower()
-
-    link = client.get("/api/projects/farm-comic/adaptation").json()["conceptArt"]["farm-hero"]
-    assert link["assetIds"] == [generated.json()["asset"]["id"]]
-
-    imported = client.post(
-        "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
-        json={"artifactKind": "concept-art", "artifactKey": "farm-hero"},
-    )
-    assert imported.status_code == 200
-    assert imported.json()["importedNodeCount"] == 1
-    concept_nodes = [
-        node
-        for node in imported.json()["canvas"]["nodes"].values()
-        if node.get("type") == "storyArtifact" and node.get("artifactKind") == "concept-art"
-    ]
-    assert len(concept_nodes) == 1
-    assert concept_nodes[0]["artifactKey"] == "farm-hero"
-
-    imported_image = client.post(
-        "/api/projects/farm-comic/adaptation/concept-art/sunny-barn/import-image",
-        files={"file": ("barn.png", png_bytes("green"), "image/png")},
-    )
-    assert imported_image.status_code == 200
-    sunny_link = imported_image.json()["conceptArt"]["sunny-barn"]
-    assert sunny_link["status"] == "generated"
-    assert len(sunny_link["assetIds"]) == 1
-    assert sunny_link["activeAssetId"] == sunny_link["assetIds"][0]
 
     uploaded = client.post(
         "/api/projects/farm-comic/adaptation/concept-art/upload",
@@ -3799,24 +3885,12 @@ def test_concept_art_file_crud_generate_and_canvas_import(tmp_path, monkeypatch)
     )
     assert uploaded.status_code == 200
     upload_payload = uploaded.json()
-    upload_key = upload_payload["key"]
-    assert upload_key.startswith("uploaded-concept-")
-    assert upload_payload["importedNodeCount"] == 1
-    upload_file = (root / "adaptation" / "concept-art" / f"{upload_key}.md").read_text()
-    assert "Character reference sheet" not in upload_file
-    upload_link = client.get("/api/projects/farm-comic/adaptation").json()["conceptArt"][upload_key]
-    assert upload_link["status"] == "generated"
-    assert len(upload_link["assetIds"]) == 1
-    concept_nodes = [
-        node
-        for node in upload_payload["canvas"]["nodes"].values()
-        if node.get("type") == "storyArtifact" and node.get("artifactKind") == "concept-art"
-    ]
-    assert any(node["artifactKey"] == upload_key for node in concept_nodes)
+    assert len(upload_payload["assetIds"]) == 1
+    upload_draft = client.post(f"/api/projects/farm-comic/concept-cards/{upload_payload['id']}/draft")
+    upload_node = upload_draft.json()["canvas"]["nodes"][upload_draft.json()["nodeId"]]
+    assert upload_node["type"] == "imageGroup"
+    assert "concept" in upload_node["tags"]
+    assert len(upload_node["assetIds"]) == 1
 
-    tagged = client.put(
-        f"/api/projects/farm-comic/adaptation/files/concept-art/{upload_key}",
-        json={"userTags": ["hero-tag"]},
-    )
-    assert tagged.status_code == 200
+    assert client.get("/api/projects/farm-comic/adaptation").json()["counts"]["conceptArt"] == 3
 

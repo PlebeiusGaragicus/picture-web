@@ -71,14 +71,16 @@ def parse_variant_section(body: str) -> dict[str, str]:
     style_ref = ""
     prompt_lines: list[str] = []
     in_prompt = False
+    saw_style_ref = False
     for raw_line in body.splitlines():
         if raw_line.startswith("mode:"):
             mode = raw_line.split(":", 1)[1].strip()
             continue
         if raw_line.startswith("style_ref:"):
             style_ref = raw_line.split(":", 1)[1].strip()
+            saw_style_ref = True
             continue
-        if raw_line == "" and style_ref:
+        if raw_line == "" and saw_style_ref and not in_prompt:
             in_prompt = True
             continue
         if in_prompt:

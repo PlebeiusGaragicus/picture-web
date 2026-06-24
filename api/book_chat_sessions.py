@@ -89,7 +89,19 @@ def create_session(slug: str, payload: BookChatSessionCreate) -> BookChatSession
         forkRootSessionId=root_session.session_id,
         piSessionId=None,
     )
-    return write_session(slug, session)
+    saved = write_session(slug, session)
+    import agent_sessions
+
+    agent_sessions.create_session(
+        slug,
+        kind="book-chat",
+        title=saved.title,
+        session_id=saved.id,
+        status="succeeded",
+        parent_session_id=saved.forkRootSessionId,
+        source={"type": "book-chat", "bookChatSessionId": saved.id},
+    )
+    return saved
 
 
 def _validate_pi_session_file(ctx: AdaptationContext, session_file: str | None) -> str | None:
@@ -129,7 +141,17 @@ def patch_session(slug: str, session_id: str, payload: BookChatSessionPatch) -> 
         session.archivedAt = now if payload.archived else None
         session.status = "archived" if payload.archived else "active"
     session.updatedAt = utc_now()
-    return write_session(slug, session)
+    saved = write_session(slug, session)
+    import agent_sessions
+
+    agent_sessions.update_session(
+        slug,
+        saved.id,
+        title=saved.title,
+        status="archived" if saved.archivedAt is not None else "succeeded",
+        completed=saved.archivedAt is not None,
+    )
+    return saved
 
 
 def _assistant_text(events: list[dict]) -> str:
@@ -156,6 +178,15 @@ def append_turn(slug: str, session_id: str, payload: BookChatTurnRequest) -> Boo
     session.turns.append(user_turn)
     session.updatedAt = now
     session = write_session(slug, session)
+    import agent_sessions
+
+    agent_sessions.update_session(
+        slug,
+        session.id,
+        status="running",
+        title=session.title,
+        source={"type": "book-chat", "bookChatSessionId": session.id},
+    )
 
     events: list[dict] = []
 
@@ -186,6 +217,13 @@ def append_turn(slug: str, session_id: str, payload: BookChatTurnRequest) -> Boo
         session.turns.append(assistant_turn)
         session.updatedAt = assistant_turn.createdAt
         write_session(slug, session)
+        agent_sessions.update_session(
+            slug,
+            session.id,
+            status="failed",
+            error=str(exc),
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     assistant_turn = BookChatTurn(
@@ -202,7 +240,19 @@ def append_turn(slug: str, session_id: str, payload: BookChatTurnRequest) -> Boo
         session.title = clip_user_title(payload.text)
     session.turns.append(assistant_turn)
     session.updatedAt = assistant_turn.createdAt
-    return write_session(slug, session)
+    saved = write_session(slug, session)
+    agent_sessions.update_session(
+        slug,
+        saved.id,
+        status="succeeded",
+        title=saved.title,
+        pi_session_id=saved.piSessionId,
+        pi_session_file=saved.piSessionFile,
+        parent_session_id=saved.forkRootSessionId,
+        source={"type": "book-chat", "bookChatSessionId": saved.id},
+        completed=True,
+    )
+    return saved
 
 
 def clip_user_title(text: str, limit: int = 72) -> str:
