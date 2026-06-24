@@ -5,7 +5,7 @@ import type { AdaptationStatus, ArtifactKind, Asset, DraftCanvasNode, Generation
 import { VisualStyleSelect } from '../adaptation/visualStyleSelect';
 import { TagControlButton } from './assetTagRow';
 import { canDeleteNode } from './roles';
-import { artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, uniqueOptions, visibleDisplayName } from './shared';
+import { artifactKindLabel, assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, uniqueOptions, visibleDisplayName, visibleVariants } from './shared';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './types';
 
 function GenerationErrorNotice({ message }: { message: string | null | undefined }) {
@@ -44,6 +44,7 @@ export function NodeSidebar({
   onPartitionedAssetTagsChange,
   onCreateTag,
   onRefineChat,
+  archivedOnly = false,
 }: {
   node: Node<PhotoNodeData>;
   assets: Asset[];
@@ -70,6 +71,7 @@ export function NodeSidebar({
   onPartitionedAssetTagsChange: (nodeId: string, assetId: string, userTags: string[], characterTags: string[], locationTags: string[]) => void;
   onCreateTag: (tag: TagDefinition) => void;
   onRefineChat: (nodeId: string, assetId: string) => void;
+  archivedOnly?: boolean;
 }) {
   if (node.data.kind === 'draft') {
     const draftNode: Node<DraftNodeData> = { ...node, data: node.data };
@@ -178,6 +180,7 @@ export function NodeSidebar({
       onSetProjectCover={onSetProjectCover}
       onFindOnCanvas={onFindOnCanvas}
       onRefineChat={onRefineChat}
+      archivedOnly={archivedOnly}
     />
   );
 }
@@ -541,6 +544,7 @@ function ImageSidebar({
   onSetProjectCover,
   onFindOnCanvas,
   onRefineChat,
+  archivedOnly = false,
 }: {
   node: Node<ImageGroupNodeData>;
   asset: Asset;
@@ -562,6 +566,7 @@ function ImageSidebar({
   onSetProjectCover: (assetId: string) => void;
   onFindOnCanvas: (nodeId: string) => void;
   onRefineChat: (nodeId: string, assetId: string) => void;
+  archivedOnly?: boolean;
 }) {
   const [isVariantPanelOpen, setIsVariantPanelOpen] = useState(false);
   const [variantParams, setVariantParams] = useState(defaultDraftParams);
@@ -569,9 +574,9 @@ function ImageSidebar({
   const prompt = asset.prompt?.text ?? '';
   const refs = asset.generation?.refs ?? [];
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
-  const visibleVariants = nonArchivedVariants(assets, node.data.assetIds);
-  const activeVariantIndex = Math.max(0, visibleVariants.findIndex((variant) => variant.id === asset.id));
-  const hasMultipleVariants = visibleVariants.length > 1;
+  const visibleVariantsList = visibleVariants(assets, node.data.assetIds, archivedOnly);
+  const activeVariantIndex = Math.max(0, visibleVariantsList.findIndex((variant) => variant.id === asset.id));
+  const hasMultipleVariants = visibleVariantsList.length > 1;
   const isGeneratedResult = node.data.role?.type === 'generated-result';
   const styleRefKind = styleRefKindForTags(node.data.tags);
   const isCharacterArchetype = adaptation?.styleRefStatuses?.['archetype-character']?.assetId === asset.id;
@@ -609,7 +614,7 @@ function ImageSidebar({
           <button className="secondary" onClick={() => onArchiveImage(node.id, asset.id)}>Archive</button>
         )}
       </div>
-      {isArchived && <p className="muted">This variant is archived and hidden unless Show archived is enabled.</p>}
+      {isArchived && <p className="muted">This variant is archived. Use Tags → Show archived to browse archived items, then unarchive here.</p>}
       {(isCharacterArchetype || isSceneArchetype || styleRefKind) && (
         <div className="canvas-role-badge">
           {isCharacterArchetype ? 'Chosen character archetype' : isSceneArchetype ? 'Chosen scene archetype' : 'Style reference candidate'}
@@ -645,7 +650,7 @@ function ImageSidebar({
       )}
       <div className="sidebar-variant-preview" onClick={changeSidebarVariantByClickSide}>
         {asset.thumbnailUrl && <img src={asset.thumbnailUrl} alt="" />}
-        <span>{activeVariantIndex + 1} / {visibleVariants.length}</span>
+        <span>{activeVariantIndex + 1} / {visibleVariantsList.length}</span>
         <button
           className="sidebar-preview-eye"
           onClick={(event) => {

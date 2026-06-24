@@ -3819,6 +3819,7 @@ def test_concept_cards_draft_to_canvas(tmp_path, monkeypatch):
     assert character.status_code == 200
     character_payload = character.json()
     character_id = character_payload["id"]
+    character_tag = f"concept-card-{character_id.lower()}"
     assert character_payload["subjectKind"] == "character"
     assert "A friendly farm hero" in character_payload["prompt"]
     canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
@@ -3840,6 +3841,7 @@ def test_concept_cards_draft_to_canvas(tmp_path, monkeypatch):
     assert character_node["assetIds"] == []
     assert "concept" in character_node["tags"]
     assert "concept-character" in character_node["tags"]
+    assert character_tag in character_node["tags"]
     assert character_node["displayName"] == "Farm Hero"
     assert character_node["prompt"] == "Updated character prompt"
     assert character_node["sourceConceptCardId"] == character_id
@@ -3885,11 +3887,15 @@ def test_concept_cards_draft_to_canvas(tmp_path, monkeypatch):
     )
     assert uploaded.status_code == 200
     upload_payload = uploaded.json()
+    upload_tag = f"concept-card-{upload_payload['id'].lower()}"
     assert len(upload_payload["assetIds"]) == 1
+    upload_asset = client.get(f"/api/projects/farm-comic/assets/{upload_payload['assetIds'][0]}").json()
+    assert upload_tag in upload_asset["tags"]
     upload_draft = client.post(f"/api/projects/farm-comic/concept-cards/{upload_payload['id']}/draft")
     upload_node = upload_draft.json()["canvas"]["nodes"][upload_draft.json()["nodeId"]]
     assert upload_node["type"] == "imageGroup"
     assert "concept" in upload_node["tags"]
+    assert upload_tag in upload_node["tags"]
     assert len(upload_node["assetIds"]) == 1
 
     assert client.get("/api/projects/farm-comic/adaptation").json()["counts"]["conceptArt"] == 3

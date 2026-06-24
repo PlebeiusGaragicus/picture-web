@@ -20,6 +20,7 @@ export interface ImageGroupNodeData extends ImageGroupCanvasNode {
   onCreateTag: (tag: TagDefinition) => void;
   projectTags: TagDefinition[];
   isGenerating?: boolean;
+  archivedOnlyView?: boolean;
 }
 
 export interface StoryArtifactNodeData extends StoryArtifactCanvasNode {

@@ -34,7 +34,7 @@ import type { LayoutEditorNavigation } from './storyPanels/layoutEditorNavigatio
 import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './storyPanels/printLayout';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
-import { SYSTEM_TAGS, artifactKindLabel, assetLabel, adaptationFileKindToArtifactKind, capabilitiesForModel, characterEntityTags, conceptSubjectFromTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, isCharacterCanvasNode, isConceptTagged, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, nonArchivedVariants, normalizedParamsForModel, partitionAssetTagIds, storyArtifactKeysOnCanvas, storyArtifactNodeId, userProjectTags, visibleDisplayName } from './canvas/shared';
+import { SYSTEM_TAGS, artifactKindLabel, assetLabel, adaptationFileKindToArtifactKind, archivedVariants, capabilitiesForModel, characterEntityTags, conceptSubjectFromTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, isCharacterCanvasNode, isConceptTagged, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, normalizedParamsForModel, partitionAssetTagIds, storyArtifactKeysOnCanvas, storyArtifactNodeId, userProjectTags, visibleDisplayName, visibleVariants } from './canvas/shared';
 import { NodeSidebar } from './canvas/sidebars';
 import { NodeTagButton, TagControlButton } from './canvas/assetTagRow';
 import { nodeTagActionsRef } from './canvas/nodeTagActions';
@@ -198,6 +198,27 @@ function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): Ca
         ];
       }),
     ),
+  };
+}
+
+function imageGroupAssetsInNode(node: ImageGroupNodeData): Asset[] {
+  return node.assets.length ? node.assets : node.activeAsset ? [node.activeAsset] : [];
+}
+
+function withArchivedOnlyAsset(node: Node<PhotoNodeData>): Node<PhotoNodeData> {
+  if (node.data.kind !== 'imageGroup') return node;
+  const variants = archivedVariants(node.data.assets, node.data.assetIds);
+  if (!variants.length) return node;
+  const currentId = node.data.activeAsset?.id ?? node.data.activeAssetId ?? '';
+  const activeAsset = variants.find((variant) => variant.id === currentId) ?? variants[0];
+  return {
+    ...node,
+    data: {
+      ...node.data,
+      archivedOnlyView: true,
+      activeAsset,
+      activeAssetId: activeAsset.id,
+    },
   };
 }
 
@@ -390,19 +411,19 @@ function App() {
     setNodes((current) => {
       const next = current.map((node) => {
         if (node.id !== nodeId || node.data.kind !== 'imageGroup') return node;
-        const visibleVariants = nonArchivedVariants(node.data.assets, node.data.assetIds);
-        if (visibleVariants.length < 2) return node;
+        const variants = visibleVariants(node.data.assets, node.data.assetIds, showArchived);
+        if (variants.length < 2) return node;
         const currentId = node.data.activeAsset?.id ?? node.data.activeAssetId ?? '';
-        let currentIndex = visibleVariants.findIndex((variant) => variant.id === currentId);
+        let currentIndex = variants.findIndex((variant) => variant.id === currentId);
         if (currentIndex < 0) currentIndex = 0;
-        const nextIndex = (currentIndex + direction + visibleVariants.length) % visibleVariants.length;
-        const activeAsset = visibleVariants[nextIndex];
+        const nextIndex = (currentIndex + direction + variants.length) % variants.length;
+        const activeAsset = variants[nextIndex];
         return { ...node, data: { ...node.data, activeAssetId: activeAsset.id, activeAsset } };
       });
       void persistNodesRef.current(next);
       return next;
     });
-  }, []);
+  }, [showArchived]);
 
   const openViewer = useCallback((nodeId: string) => {
     setViewerNodeId(nodeId);
@@ -578,12 +599,19 @@ function App() {
           const required = new Set(activeUserTagFilters);
           return node.data.assets.some((asset) => asset.tags.some((tag) => required.has(tag)));
         });
-    if (showArchived) return userTagFiltered;
+    if (showArchived) {
+      return userTagFiltered
+        .filter((node) => {
+          if (node.data.kind !== 'imageGroup') return false;
+          if (!node.data.assetIds.length) return false;
+          return imageGroupAssetsInNode(node.data).some((asset) => asset.archivedAt);
+        })
+        .map((node) => withArchivedOnlyAsset(node));
+    }
     return userTagFiltered.filter((node) => {
       if (node.data.kind !== 'imageGroup') return true;
       if (!node.data.assetIds.length) return true;
-      const assetsInNode = node.data.assets.length ? node.data.assets : node.data.activeAsset ? [node.data.activeAsset] : [];
-      return assetsInNode.some((asset) => !asset.archivedAt);
+      return imageGroupAssetsInNode(node.data).some((asset) => !asset.archivedAt);
     });
   }, [activeEntityTagFilters, activeUserTagFilters, phaseScopedNodes, showArchived]);
 
@@ -591,7 +619,11 @@ function App() {
     return deriveStoryGraphEdges(filteredNodes);
   }, [filteredNodes]);
 
-  const selectedNode = useMemo(() => nodes.find((node) => node.id === popoverNodeId) ?? null, [nodes, popoverNodeId]);
+  const selectedNode = useMemo(() => {
+    const node = nodes.find((item) => item.id === popoverNodeId) ?? null;
+    if (!node || !showArchived) return node;
+    return withArchivedOnlyAsset(node);
+  }, [nodes, popoverNodeId, showArchived]);
   const activeChatSession = useMemo(
     () => chatSessions.find((session) => session.id === activeChatSessionId) ?? null,
     [activeChatSessionId, chatSessions],
@@ -1251,7 +1283,7 @@ function App() {
         seed: params.seed,
         batchCount: params.batchCount,
         title: visibleDisplayName(group.displayName) || null,
-        tags: [],
+        tags: group.tags ?? [],
         canvasNodeId: id,
         visualStyleId: visualStyleId ?? null,
       };
@@ -2061,6 +2093,7 @@ function App() {
           onPartitionedAssetTagsChange={updatePartitionedAssetTags}
           onCreateTag={createProjectTag}
           onRefineChat={openChatForAsset}
+          archivedOnly={showArchived}
         />
       )}
       {isCanvasActive && activeChatSession && (
@@ -2076,7 +2109,14 @@ function App() {
       )}
       {isCanvasActive && (viewerNodeId || viewerAssetId) && (
         <ImageViewer
-          node={nodes.find((node) => node.id === viewerNodeId && node.data.kind === 'imageGroup') as Node<ImageGroupNodeData> | undefined}
+          node={(() => {
+            const match = nodes.find((item) => item.id === viewerNodeId && item.data.kind === 'imageGroup');
+            if (!match || match.data.kind !== 'imageGroup') return undefined;
+            const imageNode = match as Node<ImageGroupNodeData>;
+            if (!showArchived) return imageNode;
+            const patched = withArchivedOnlyAsset(imageNode);
+            return patched.data.kind === 'imageGroup' ? patched as Node<ImageGroupNodeData> : imageNode;
+          })()}
           fallbackAsset={assets.find((asset) => asset.id === viewerAssetId)}
           assets={assets}
           projectSlug={openProjectSlug}
@@ -2094,13 +2134,14 @@ function App() {
           onPartitionedAssetTagsChange={updatePartitionedAssetTags}
           onCreateTag={createProjectTag}
           onSetProjectCover={setProjectCover}
+          archivedOnly={showArchived}
         />
       )}
       {isCanvasActive && pendingArchive && (
         <div className="confirm-backdrop" onClick={() => setPendingArchive(null)}>
           <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
             <h2>Confirm archive</h2>
-            <p>Archive this variant? It will be hidden from the canvas until you enable Show archived.</p>
+            <p>Archive this variant? Open Tags and choose Show archived to find and restore it.</p>
             <div className="row">
               <button
                 className="secondary"
@@ -2719,7 +2760,7 @@ function FloatingTagsMenu({
               className={showArchived ? 'active' : ''}
               onClick={() => onShowArchivedChange(!showArchived)}
             >
-              {showArchived ? 'Hide archived' : 'Show archived'}
+              {showArchived ? 'Show active' : 'Show archived'}
             </button>
           )}
         />
@@ -3975,9 +4016,9 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
       </div>
     );
   }
-  const visibleVariants = nonArchivedVariants(data.assets, data.assetIds);
-  const currentVisibleIndex = visibleVariants.findIndex((variant) => variant.id === asset.id);
-  const hasMultipleVariants = visibleVariants.length > 1;
+  const visibleVariantsList = visibleVariants(data.assets, data.assetIds, data.archivedOnlyView ?? false);
+  const currentVisibleIndex = visibleVariantsList.findIndex((variant) => variant.id === asset.id);
+  const hasMultipleVariants = visibleVariantsList.length > 1;
   const params = asset.generation;
   const styleRefKind = styleRefKindForTags(data.tags);
   const styleRole = styleRefKind === 'archetype-character' ? 'Character archetype' : styleRefKind === 'archetype-scene' ? 'Scene archetype' : null;
@@ -3985,7 +4026,7 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
     asset.prompt?.text,
     params ? `model: ${params.model}` : null,
     params ? `ratio: ${params.aspectRatio}, size: ${params.imageSize}, seed: ${params.seed ?? 'auto'}` : null,
-    hasMultipleVariants && currentVisibleIndex >= 0 ? `variants: ${currentVisibleIndex + 1}/${visibleVariants.length}` : null,
+    hasMultipleVariants && currentVisibleIndex >= 0 ? `variants: ${currentVisibleIndex + 1}/${visibleVariantsList.length}` : null,
   ]
     .filter(Boolean)
     .join('\n');
@@ -4028,7 +4069,7 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
           />
         )}
         {hasMultipleVariants && currentVisibleIndex >= 0 && (
-          <small className="variant-indicator">{currentVisibleIndex + 1} / {visibleVariants.length}</small>
+          <small className="variant-indicator">{currentVisibleIndex + 1} / {visibleVariantsList.length}</small>
         )}
         {hasMultipleVariants && (
           <div className="variant-controls">
@@ -4200,6 +4241,7 @@ function ImageViewer({
   onPartitionedAssetTagsChange,
   onCreateTag,
   onSetProjectCover,
+  archivedOnly = false,
 }: {
   node?: Node<ImageGroupNodeData>;
   fallbackAsset?: Asset;
@@ -4216,25 +4258,26 @@ function ImageViewer({
   onPartitionedAssetTagsChange: (nodeId: string, assetId: string, userTags: string[], characterTags: string[], locationTags: string[]) => void;
   onCreateTag: (tag: TagDefinition) => void;
   onSetProjectCover: (assetId: string) => void;
+  archivedOnly?: boolean;
 }) {
   const [isSavingImage, setIsSavingImage] = useState(false);
+  const viewerVariants = node ? visibleVariants(node.data.assets, node.data.assetIds, archivedOnly) : [];
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
-      if (event.key === 'ArrowLeft' && node && nonArchivedVariants(node.data.assets, node.data.assetIds).length > 1) onVariant(node.id, -1);
-      if (event.key === 'ArrowRight' && node && nonArchivedVariants(node.data.assets, node.data.assetIds).length > 1) onVariant(node.id, 1);
+      if (event.key === 'ArrowLeft' && node && viewerVariants.length > 1) onVariant(node.id, -1);
+      if (event.key === 'ArrowRight' && node && viewerVariants.length > 1) onVariant(node.id, 1);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [node, onClose, onVariant]);
+  }, [node, onClose, onVariant, viewerVariants.length]);
 
   const asset = node?.data.activeAsset ?? fallbackAsset;
   if (!asset) return null;
   const isArchived = Boolean(asset.archivedAt);
   const isProjectCover = coverAssetId === asset.id;
-  const visibleVariants = node ? nonArchivedVariants(node.data.assets, node.data.assetIds) : [];
-  const currentVisibleIndex = node ? visibleVariants.findIndex((variant) => variant.id === asset.id) : -1;
-  const hasMultipleVariants = visibleVariants.length > 1;
+  const currentVisibleIndex = node ? viewerVariants.findIndex((variant) => variant.id === asset.id) : -1;
+  const hasMultipleVariants = viewerVariants.length > 1;
   const imageUrl = `/api/projects/${projectSlug}/assets/${asset.id}/image`;
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
   const parentAssets = (asset.generation?.refs ?? []).map((ref) => assetById.get(ref)).filter((asset): asset is Asset => Boolean(asset));
@@ -4282,7 +4325,7 @@ function ImageViewer({
               </button>
             )}
             {node && hasMultipleVariants && currentVisibleIndex >= 0 && (
-              <span>{currentVisibleIndex + 1} / {visibleVariants.length}</span>
+              <span>{currentVisibleIndex + 1} / {viewerVariants.length}</span>
             )}
             {asset.hasPixels && (
               <button

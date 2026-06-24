@@ -1461,12 +1461,55 @@ button {
   border-bottom: 1px solid #334155;
 }
 
+.concept-art-screen .character-hub-thumb:not(.has-image) {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 12px;
+}
+
+.concept-art-screen .character-hub-thumb-prompt {
+  flex: 1 1 auto;
+  align-self: stretch;
+  width: 100%;
+  margin: 0;
+  overflow: auto;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .character-hub-thumb.has-image {
   cursor: pointer;
 }
 
 .concept-art-screen .character-hub-thumb.has-image {
   cursor: default;
+}
+
+.concept-art-screen .character-hub-card {
+  min-height: 0;
+}
+
+.concept-art-screen .character-hub-thumb {
+  flex: 0 0 auto;
+  height: 240px;
+  min-height: 0;
+  aspect-ratio: auto;
+  overflow: hidden;
+}
+
+.concept-art-screen .character-hub-thumb-frame {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.concept-art-screen .character-hub-thumb img {
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .character-hub-thumb-frame {
@@ -4641,6 +4684,16 @@ button {
 .help-tip-wrap.is-below .help-tip-bubble {
   top: calc(100% + 8px);
   bottom: auto;
+}
+
+.help-tip-bubble.is-portaled {
+  position: fixed;
+  z-index: 250;
+  bottom: auto;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: none;
+  transform: none;
 }
 
 .hover-tooltip-wrap {

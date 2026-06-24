@@ -25,6 +25,10 @@ from models import (
 CONCEPT_TAG = "concept"
 
 
+def concept_card_tag(card_id: str) -> str:
+    return f"concept-card-{card_id.lower()}"
+
+
 def concept_tags(subject_kind: ConceptArtSubjectKind) -> list[str]:
     return library.node_tags(CONCEPT_TAG, f"concept-{subject_kind}")
 
@@ -159,14 +163,15 @@ def delete_card(slug: str, card_id: str) -> None:
 async def upload_card_image(slug: str, upload: UploadFile) -> ConceptCardDocument:
     title = upload.filename or "Concept upload"
     asset = await library.import_asset(slug, upload, title=title)
+    card_id = new_ulid()
     library.patch_display(
         slug,
         asset.id,
-        DisplayPatch(tags=list(dict.fromkeys(["comic-adaptation", CONCEPT_TAG]))),
+        DisplayPatch(tags=list(dict.fromkeys(["comic-adaptation", CONCEPT_TAG, concept_card_tag(card_id)]))),
     )
     now = utc_now()
     card = ConceptCardDocument(
-        id=new_ulid(),
+        id=card_id,
         projectSlug=slug,
         subjectKind="character",
         displayName=title,
@@ -188,7 +193,7 @@ def draft_card_to_canvas(slug: str, card_id: str) -> ConceptNodeResponse:
     node_id, saved = create_image_group_node(
         slug,
         display_name=card.displayName,
-        tags=concept_tags(card.subjectKind),
+        tags=library.node_tags(*concept_tags(card.subjectKind), concept_card_tag(card.id)),
         prompt=card.prompt,
         refs=[],
         params=GenerationParams(),

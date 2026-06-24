@@ -6,6 +6,10 @@ import { VisualStyleList } from './cards';
 import { HubCardMenu } from './hubCardMenu';
 import type { Asset, AdaptationStatus, CanvasDocument, ConceptArtSubjectKind, ConceptCard } from '../types';
 
+function conceptCardTag(cardId: string) {
+  return `concept-card-${cardId.toLowerCase()}`;
+}
+
 function conceptCardTitle(card: ConceptCard) {
   if (card.displayName.trim()) return card.displayName.trim();
   const firstLine = card.prompt.trim().split('\n').find(Boolean);
@@ -17,15 +21,31 @@ function subjectLabel(subjectKind: ConceptArtSubjectKind | null) {
   return subjectKind === 'location' ? 'Location' : subjectKind === 'character' ? 'Character' : 'Concept';
 }
 
-function latestAssetForCard(card: ConceptCard, assetsById: Map<string, Asset>) {
-  const assetId = card.activeAssetId ?? card.assetIds[card.assetIds.length - 1];
-  return assetId ? assetsById.get(assetId) ?? null : null;
+function latestAssetForCard(card: ConceptCard, assets: Asset[], assetsById: Map<string, Asset>, canvas: CanvasDocument) {
+  const cardTag = conceptCardTag(card.id);
+  const orderedIds: string[] = [];
+  const addId = (assetId: string | null | undefined) => {
+    if (assetId && !orderedIds.includes(assetId)) orderedIds.push(assetId);
+  };
+
+  Object.values(canvas.nodes).forEach((node) => {
+    if (node.type !== 'imageGroup') return;
+    if (node.sourceConceptCardId !== card.id && !node.tags.includes(cardTag)) return;
+    addId(node.activeAssetId);
+    node.assetIds.forEach(addId);
+  });
+  assets.filter((asset) => asset.tags.includes(cardTag)).forEach((asset) => addId(asset.id));
+  addId(card.activeAssetId);
+  card.assetIds.forEach(addId);
+
+  return orderedIds.map((assetId) => assetsById.get(assetId) ?? null).find((asset): asset is Asset => Boolean(asset)) ?? null;
 }
 
 export function ConceptArtView({
   projectSlug,
   adaptation,
   assets,
+  canvas,
   viewMode,
   onConceptCanvasUpdate,
   onReloadProject,
@@ -291,7 +311,7 @@ export function ConceptArtView({
           <div className="characters-hub-workspace">
             <section className="character-card-grid">
               {conceptCards.map((card) => {
-                const asset = latestAssetForCard(card, assetsById);
+                const asset = latestAssetForCard(card, assets, assetsById, canvas);
                 const busy = busyKey === card.id;
                 const title = conceptCardTitle(card);
                 return (
@@ -311,7 +331,7 @@ export function ConceptArtView({
                           </button>
                         </div>
                       ) : (
-                        <span className="muted">{card.prompt.trim() ? card.prompt.trim().slice(0, 60) : 'No prompt'}</span>
+                        <p className="muted character-hub-thumb-prompt">{card.prompt.trim() || 'No prompt'}</p>
                       )}
                     </div>
                     <div className="character-hub-body">
@@ -327,9 +347,6 @@ export function ConceptArtView({
                           />
                         </div>
                       </div>
-                      {!asset && card.prompt.trim() && (
-                        <p className="muted concept-art-node-preview">{card.prompt.trim().split('\n').slice(0, 2).join(' ')}</p>
-                      )}
                       <div className="character-hub-actions">
                         <button
                           className="secondary"
@@ -344,9 +361,6 @@ export function ConceptArtView({
                   </article>
                 );
               })}
-              {!conceptCards.length && (
-                <p className="muted">Create or suggest a concept card, then use Draft to place it on the canvas.</p>
-              )}
             </section>
           </div>
         </div>

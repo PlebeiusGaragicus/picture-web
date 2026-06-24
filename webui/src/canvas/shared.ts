@@ -93,11 +93,19 @@ export function partitionAssetTagIds(tagIds: string[], projectTags: TagDefinitio
   return { user, character, location, entity: [...character, ...location] };
 }
 
-export function nonArchivedVariants(assets: Asset[], assetIds: string[]): Asset[] {
+export function visibleVariants(assets: Asset[], assetIds: string[], archivedOnly = false): Asset[] {
   const byId = new Map(assets.map((asset) => [asset.id, asset]));
   return assetIds
     .map((assetId) => byId.get(assetId))
-    .filter((asset): asset is Asset => asset != null && !asset.archivedAt);
+    .filter((asset): asset is Asset => asset != null && Boolean(asset.archivedAt) === archivedOnly);
+}
+
+export function nonArchivedVariants(assets: Asset[], assetIds: string[]): Asset[] {
+  return visibleVariants(assets, assetIds, false);
+}
+
+export function archivedVariants(assets: Asset[], assetIds: string[]): Asset[] {
+  return visibleVariants(assets, assetIds, true);
 }
 
 export function mergeAvailableUserTagsOnly(projectTags: TagDefinition[], assets: Asset[]): TagDefinition[] {
@@ -115,11 +123,11 @@ export function mergeAvailableUserTagsOnly(projectTags: TagDefinition[], assets:
   return Array.from(byId.values()).sort((first, second) => first.name.localeCompare(second.name));
 }
 
-export function countUserTagsOnAssets(assets: Asset[], projectTags: TagDefinition[], showArchived: boolean): Record<string, number> {
+export function countUserTagsOnAssets(assets: Asset[], projectTags: TagDefinition[], archivedOnly = false): Record<string, number> {
   const lockedIds = lockedEntityTagIds(projectTags);
   const counts: Record<string, number> = {};
   assets.forEach((asset) => {
-    if (asset.archivedAt && !showArchived) return;
+    if (Boolean(asset.archivedAt) !== archivedOnly) return;
     asset.tags.forEach((tagId) => {
       if (SYSTEM_TAGS.has(tagId) || lockedIds.has(tagId)) return;
       counts[tagId] = (counts[tagId] ?? 0) + 1;
@@ -128,11 +136,11 @@ export function countUserTagsOnAssets(assets: Asset[], projectTags: TagDefinitio
   return counts;
 }
 
-export function countEntityTagsOnAssets(assets: Asset[], projectTags: TagDefinition[], showArchived: boolean): Record<string, number> {
+export function countEntityTagsOnAssets(assets: Asset[], projectTags: TagDefinition[], archivedOnly = false): Record<string, number> {
   const lockedIds = lockedEntityTagIds(projectTags);
   const counts: Record<string, number> = {};
   assets.forEach((asset) => {
-    if (asset.archivedAt && !showArchived) return;
+    if (Boolean(asset.archivedAt) !== archivedOnly) return;
     asset.tags.forEach((tagId) => {
       if (!lockedIds.has(tagId)) return;
       counts[tagId] = (counts[tagId] ?? 0) + 1;
