@@ -443,6 +443,12 @@ export interface AdaptationCanvasImportResponse {
   importedNodeCount: number;
 }
 
+export interface ConceptArtUploadResponse {
+  key: string;
+  canvas: CanvasDocument;
+  importedNodeCount: number;
+}
+
 export interface AdaptationFileDocument {
   kind: AdaptationFileKind;
   key: string;

@@ -1397,6 +1397,18 @@ function App() {
     window.setTimeout(() => focusNodeOnCanvas(matchingId), 0);
   }, [focusNodeOnCanvas, loadProject, openProjectSlug]);
 
+  const openUploadedConceptOnCanvas = useCallback((artifactKey: string, canvasDoc: CanvasDocument) => {
+    setCanvas(canvasDoc);
+    void loadProject(openProjectSlug);
+    setPhaseViewMode('canvas');
+    const matchingId = Object.entries(canvasDoc.nodes).find(([, node]) => (
+      node.type === 'storyArtifact' && node.artifactKind === 'concept-art' && node.artifactKey === artifactKey
+    ))?.[0] ?? storyArtifactNodeId('concept-art', artifactKey);
+    setSelectedNodeIds([matchingId]);
+    setPopoverNodeId(matchingId);
+    window.setTimeout(() => focusNodeOnCanvas(matchingId), 0);
+  }, [focusNodeOnCanvas, loadProject, openProjectSlug]);
+
   const generateStoryArtifact = async (id: string, artifact: StoryArtifactNodeData) => {
     if (!openProjectSlug) return;
     const visualStyleId = artifact.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null;
@@ -1772,10 +1784,11 @@ function App() {
             adaptation={adaptation}
             assets={assets}
             canvas={canvas}
+            projectTags={projectTags}
             viewMode={phaseViewMode === 'canvas' ? 'canvas' : 'list'}
             onDraftArtifactToCanvas={(key) => draftArtifactToCanvas('concept-art', key)}
-            onOpenChatForAsset={openChatForAsset}
-            onViewAsset={openAssetInViewer}
+            onOpenUploadedConceptOnCanvas={openUploadedConceptOnCanvas}
+            onCreateTag={createProjectTag}
             onReloadProject={async () => {
               await loadProject(openProjectSlug);
               await loadAdaptation();

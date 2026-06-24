@@ -321,6 +321,168 @@ def run_list_characters(project_slug: str) -> int:
     return return_code
 
 
+def concept_character_generate_stage() -> str:
+    return "concept-character-generate"
+
+
+def run_generate_concept_character(project_slug: str) -> int:
+    stage = concept_character_generate_stage()
+    try:
+        ctx = AdaptationContext.for_slug(project_slug)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    diagnostics = RunDiagnostics.create(ctx.book_root_abs, stage, validation=False)
+    logger = WorkflowLogger(diagnostics)
+
+    try:
+        node_path, node_ver = ensure_node_runtime()
+    except RuntimeError as exc:
+        logger.write_line(f"error: {exc}")
+        logger.close()
+        write_summary(
+            diagnostics,
+            stage=stage,
+            return_code=1,
+            tasks=[],
+            pi_binary="missing",
+            error=str(exc),
+            running=False,
+        )
+        diagnostics.write_manifest(ctx.book_root_abs, extra={"project": ctx.project_slug, "error": str(exc)})
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    pi_binary = find_pi_binary()
+
+    def flush_progress(*, error: str | None = None, return_code: int = 0, running: bool = True) -> None:
+        write_summary(
+            diagnostics,
+            stage=stage,
+            return_code=return_code,
+            tasks=logger.task_records,
+            pi_binary=pi_binary,
+            error=error,
+            running=running,
+        )
+        diagnostics.write_manifest(
+            ctx.book_root_abs,
+            extra={"project": ctx.project_slug, "returnCode": return_code, "running": running, "error": error},
+        )
+
+    logger.write_line(f"[start] pi: {pi_binary} ({pi_version(pi_binary)})")
+    logger.write_line(f"[start] node: {node_ver} ({node_path})")
+    logger.write_line(f"[start] project: {ctx.project_slug}")
+    logger.write_line(f"[start] log: {diagnostics.rel(diagnostics.ui_log_path, ctx.book_root_abs)}")
+    flush_progress(running=True)
+
+    return_code = 0
+    error: str | None = None
+    created_key = ""
+    try:
+        import adaptation as adaptation_module
+
+        steps = StepRunner(ctx, logger, on_progress=lambda: flush_progress(running=True))
+        steps.require_book_session()
+        created_key = steps.step_generate_concept_character()
+        metadata = adaptation_module.sync_prompt_links(project_slug, adaptation_module.read_metadata(project_slug))
+        adaptation_module.write_metadata(project_slug, metadata)
+        logger.write_line()
+        logger.write_line(f"[concept-art] Done. Wrote {ctx.book_root}/concept-art/{created_key}.md")
+    except Exception as exc:
+        return_code = 1
+        error = str(exc)
+        logger.write_line(f"error: {error}")
+        print(f"error: {error}", file=sys.stderr)
+    finally:
+        logger.close()
+        flush_progress(error=error, return_code=return_code, running=False)
+
+    return return_code
+
+
+def concept_location_generate_stage() -> str:
+    return "concept-location-generate"
+
+
+def run_generate_concept_location(project_slug: str) -> int:
+    stage = concept_location_generate_stage()
+    try:
+        ctx = AdaptationContext.for_slug(project_slug)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    diagnostics = RunDiagnostics.create(ctx.book_root_abs, stage, validation=False)
+    logger = WorkflowLogger(diagnostics)
+
+    try:
+        node_path, node_ver = ensure_node_runtime()
+    except RuntimeError as exc:
+        logger.write_line(f"error: {exc}")
+        logger.close()
+        write_summary(
+            diagnostics,
+            stage=stage,
+            return_code=1,
+            tasks=[],
+            pi_binary="missing",
+            error=str(exc),
+            running=False,
+        )
+        diagnostics.write_manifest(ctx.book_root_abs, extra={"project": ctx.project_slug, "error": str(exc)})
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    pi_binary = find_pi_binary()
+
+    def flush_progress(*, error: str | None = None, return_code: int = 0, running: bool = True) -> None:
+        write_summary(
+            diagnostics,
+            stage=stage,
+            return_code=return_code,
+            tasks=logger.task_records,
+            pi_binary=pi_binary,
+            error=error,
+            running=running,
+        )
+        diagnostics.write_manifest(
+            ctx.book_root_abs,
+            extra={"project": ctx.project_slug, "returnCode": return_code, "running": running, "error": error},
+        )
+
+    logger.write_line(f"[start] pi: {pi_binary} ({pi_version(pi_binary)})")
+    logger.write_line(f"[start] node: {node_ver} ({node_path})")
+    logger.write_line(f"[start] project: {ctx.project_slug}")
+    logger.write_line(f"[start] log: {diagnostics.rel(diagnostics.ui_log_path, ctx.book_root_abs)}")
+    flush_progress(running=True)
+
+    return_code = 0
+    error: str | None = None
+    created_key = ""
+    try:
+        import adaptation as adaptation_module
+
+        steps = StepRunner(ctx, logger, on_progress=lambda: flush_progress(running=True))
+        steps.require_book_session()
+        created_key = steps.step_generate_concept_location()
+        metadata = adaptation_module.sync_prompt_links(project_slug, adaptation_module.read_metadata(project_slug))
+        adaptation_module.write_metadata(project_slug, metadata)
+        logger.write_line()
+        logger.write_line(f"[concept-art] Done. Wrote {ctx.book_root}/concept-art/{created_key}.md")
+    except Exception as exc:
+        return_code = 1
+        error = str(exc)
+        logger.write_line(f"error: {error}")
+        print(f"error: {error}", file=sys.stderr)
+    finally:
+        logger.close()
+        flush_progress(error=error, return_code=return_code, running=False)
+
+    return return_code
+
+
 def run_extract_character(project_slug: str, character_slug: str, *, force: bool = False) -> int:
     stage = character_extract_stage(character_slug)
     try:

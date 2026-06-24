@@ -116,6 +116,123 @@ def test_step_character_file_uses_list_line(tmp_path: Path) -> None:
     assert "Gilda: A yellow filly." in captured["prompt"]
 
 
+def test_step_generate_concept_character_writes_file(tmp_path: Path) -> None:
+    from adaptation_workflow.character_file import CHARACTER_SHEET_LAYOUT_BLOCK
+    from adaptation_workflow.config import AdaptationContext, REPO_ROOT, SKILLS_DIR
+    from adaptation_workflow.steps import StepRunner
+
+    book_root = tmp_path / "proj" / "adaptation"
+    concept_dir = book_root / "concept-art"
+    concept_dir.mkdir(parents=True)
+    (book_root / "characters" / "list.txt").parent.mkdir(parents=True, exist_ok=True)
+    (book_root / "characters" / "list.txt").write_text("Pinkie Pie: Party pony.\n")
+
+    ctx = AdaptationContext(
+        repo_root=REPO_ROOT,
+        project_slug="proj",
+        book_root=Path("photo-library/projects/proj/adaptation"),
+        book_root_abs=book_root,
+        pi_workspace=book_root / "sessions" / "pi-workspace",
+        pi_session_dir=book_root / "sessions" / "pi",
+        skills_dir=SKILLS_DIR,
+        book_session_path=book_root / "sessions" / "book-session.json",
+        book_path=book_root / "book.txt",
+    )
+
+    captured: dict[str, str] = {}
+
+    class FakeLogger:
+        def write_line(self, *_args, **_kwargs) -> None:
+            return None
+
+        def write_skip(self, *_args, **_kwargs) -> None:
+            return None
+
+        def record_task(self, **_kwargs) -> None:
+            return None
+
+    steps = StepRunner(ctx, FakeLogger())  # type: ignore[arg-type]
+
+    def fake_run_pi_step(_stage: str, _name: str, _rel_out: str, prompt: str) -> None:
+        captured["prompt"] = prompt
+        out = concept_dir / "character-concept-1.md"
+        out.write_text(
+            "## character-concept-1\n"
+            "subject: character\n"
+            "mode: new-image\n"
+            "style_ref:\n\n"
+            "Character reference sheet\n"
+            "A weathered night watch pony with a brass lantern and navy cloak.\n"
+            f"{CHARACTER_SHEET_LAYOUT_BLOCK}\n"
+            "Expressions: alert, tired, stern, amused.\n"
+        )
+
+    steps.run_pi_step = fake_run_pi_step  # type: ignore[method-assign]
+    key = steps.step_generate_concept_character()
+    assert key == "character-concept-1"
+    assert "/skill:concept-character" in captured["prompt"]
+    assert "Pinkie Pie: Party pony." in captured["prompt"]
+    assert "File key: character-concept-1" in captured["prompt"]
+
+
+def test_step_generate_concept_location_writes_file(tmp_path: Path) -> None:
+    from adaptation_workflow.config import AdaptationContext, REPO_ROOT, SKILLS_DIR
+    from adaptation_workflow.steps import StepRunner
+
+    book_root = tmp_path / "proj" / "adaptation"
+    concept_dir = book_root / "concept-art"
+    concept_dir.mkdir(parents=True)
+    locations_dir = book_root / "locations"
+    locations_dir.mkdir(parents=True)
+    (locations_dir / "index.md").write_text("## sunny-barn\nName: Sunny Barn\n")
+
+    ctx = AdaptationContext(
+        repo_root=REPO_ROOT,
+        project_slug="proj",
+        book_root=Path("photo-library/projects/proj/adaptation"),
+        book_root_abs=book_root,
+        pi_workspace=book_root / "sessions" / "pi-workspace",
+        pi_session_dir=book_root / "sessions" / "pi",
+        skills_dir=SKILLS_DIR,
+        book_session_path=book_root / "sessions" / "book-session.json",
+        book_path=book_root / "book.txt",
+    )
+
+    captured: dict[str, str] = {}
+
+    class FakeLogger:
+        def write_line(self, *_args, **_kwargs) -> None:
+            return None
+
+        def write_skip(self, *_args, **_kwargs) -> None:
+            return None
+
+        def record_task(self, **_kwargs) -> None:
+            return None
+
+    steps = StepRunner(ctx, FakeLogger())  # type: ignore[arg-type]
+
+    def fake_run_pi_step(_stage: str, _name: str, _rel_out: str, prompt: str) -> None:
+        captured["prompt"] = prompt
+        out = concept_dir / "location-concept-1.md"
+        out.write_text(
+            "## location-concept-1\n"
+            "subject: location\n"
+            "mode: new-image\n"
+            "style_ref:\n\n"
+            "A weathered hillside stone bridge over a shallow creek at dusk, with mossy railings "
+            "and distant farm roofs visible through mist. Match the reference image's environmental "
+            "rendering, palette, lighting, and detail level. No characters, no text, no labels, no watermarks.\n"
+        )
+
+    steps.run_pi_step = fake_run_pi_step  # type: ignore[method-assign]
+    key = steps.step_generate_concept_location()
+    assert key == "location-concept-1"
+    assert "/skill:concept-location" in captured["prompt"]
+    assert "sunny-barn" in captured["prompt"]
+    assert "File key: location-concept-1" in captured["prompt"]
+
+
 def test_validate_character_file_stub_and_full(tmp_path: Path) -> None:
     from adaptation_workflow.character_file import format_character_stub
     from adaptation_workflow.validate import (

@@ -16,10 +16,13 @@ import gemini
 import library
 from models import (
     AdaptationCanvasImportResponse,
+    ConceptArtUploadResponse,
+    AdaptationImportArtifactRequest,
     AdaptationFileCreate,
     AdaptationFileDocument,
     AdaptationFileKind,
     AdaptationFileUpdate,
+    DisplayPatch,
     AdaptationGenerateStyleRefRequest,
     AdaptationGenerateArtifactRequest,
     AdaptationAssetLink,
@@ -1098,13 +1101,21 @@ def update_adaptation_file(slug: str, kind: AdaptationFileKind, key: str, payloa
             if existing is not None:
                 groups[kind][next_key] = existing
                 write_metadata(slug, metadata)
-    if payload.userTags is not None and kind in {"characters", "locations"}:
+    if payload.userTags is not None and kind in {"characters", "locations", "concept-art"}:
         metadata = sync_prompt_links(slug, read_metadata(slug))
         if kind == "characters":
             record = metadata.characters.get(next_key)
             if record is not None:
                 metadata.characters[next_key] = record.model_copy(update={"userTags": list(payload.userTags)})
                 write_metadata(slug, metadata)
+        elif kind == "concept-art":
+            link = metadata.conceptArt.get(next_key)
+            if link is not None:
+                metadata.conceptArt[next_key] = link.model_copy(update={"userTags": list(payload.userTags)})
+                write_metadata(slug, metadata)
+                tag_list = list(dict.fromkeys(["comic-adaptation", "concept-art", *payload.userTags]))
+                for asset_id in link.assetIds:
+                    library.patch_display(slug, asset_id, DisplayPatch(tags=tag_list))
         else:
             link = metadata.locations.get(next_key)
             if link is not None:
@@ -1122,6 +1133,71 @@ def delete_adaptation_file(slug: str, kind: AdaptationFileKind, key: str) -> Ada
     metadata = sync_prompt_links(slug, read_metadata(slug))
     write_metadata(slug, metadata)
     return status(slug)
+
+
+async def import_concept_art_image(slug: str, key: str, upload: UploadFile) -> AdaptationStatus:
+    metadata = sync_prompt_links(slug, read_metadata(slug))
+    link = metadata.conceptArt.get(key)
+    if link is None:
+        raise HTTPException(status_code=404, detail=f"concept-art file not found: {key}")
+    display_key = key.replace("-", " ").title()
+    asset = await library.import_asset(slug, upload, title=f"Concept: {display_key}")
+    library.patch_display(
+        slug,
+        asset.id,
+        DisplayPatch(tags=list(dict.fromkeys(["comic-adaptation", "concept-art", *link.userTags]))),
+    )
+    next_asset_ids = list(dict.fromkeys([*link.assetIds, asset.id]))
+    metadata.conceptArt[key] = link.model_copy(
+        update={
+            "assetIds": next_asset_ids,
+            "activeAssetId": asset.id,
+            "status": "generated",
+        }
+    )
+    write_metadata(slug, metadata)
+    return status(slug)
+
+
+async def upload_concept_art(slug: str, upload: UploadFile) -> ConceptArtUploadResponse:
+    from adaptation_workflow.concept_art import next_uploaded_concept_key
+
+    root = ensure_adaptation(slug)
+    key = next_uploaded_concept_key(root)
+    path = adaptation_file_path(slug, "concept-art", key)
+    path.write_text(format_prompt_file(key, "", "new-image", "", subject="character"))
+    metadata = sync_prompt_links(slug, read_metadata(slug))
+    write_metadata(slug, metadata)
+    link = metadata.conceptArt.get(key)
+    if link is None:
+        raise HTTPException(status_code=500, detail=f"Failed to register concept-art file: {key}")
+
+    display_key = key.replace("-", " ").title()
+    asset = await library.import_asset(slug, upload, title=f"Concept: {display_key}")
+    library.patch_display(
+        slug,
+        asset.id,
+        DisplayPatch(tags=list(dict.fromkeys(["comic-adaptation", "concept-art", *link.userTags]))),
+    )
+    metadata = read_metadata(slug)
+    link = metadata.conceptArt.get(key)
+    if link is None:
+        raise HTTPException(status_code=500, detail=f"Failed to register concept-art file: {key}")
+    metadata.conceptArt[key] = link.model_copy(
+        update={
+            "assetIds": [asset.id],
+            "activeAssetId": asset.id,
+            "status": "generated",
+        }
+    )
+    write_metadata(slug, metadata)
+
+    canvas_result = import_artifact_to_canvas(slug, "concept-art", key)
+    return ConceptArtUploadResponse(
+        key=key,
+        canvas=canvas_result.canvas,
+        importedNodeCount=canvas_result.importedNodeCount,
+    )
 
 
 def scene_list_path(slug: str) -> Path:
@@ -1369,6 +1445,86 @@ def character_extract_status(slug: str, character_slug: str) -> AdaptationWorkfl
         slug,
         character_extract_status_path(slug, character_slug),
         character_extract_log_path(slug, character_slug),
+        validation=False,
+    )
+
+
+def concept_character_generate_stage_name() -> str:
+    from adaptation_workflow.runner import concept_character_generate_stage
+
+    return concept_character_generate_stage()
+
+
+def concept_character_generate_status_path(slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{concept_character_generate_stage_name()}-status.json"
+
+
+def concept_character_generate_log_path(slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{concept_character_generate_stage_name()}.log"
+
+
+def concept_character_generate_launcher_log_path(slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{concept_character_generate_stage_name()}-launcher.log"
+
+
+def start_generate_concept_character(slug: str) -> AdaptationWorkflowStatus:
+    _require_book_session_for_characters(slug)
+    return start_logged_process(
+        slug,
+        log_path=concept_character_generate_log_path(slug),
+        launcher_log_path=concept_character_generate_launcher_log_path(slug),
+        status_path=concept_character_generate_status_path(slug),
+        start_line=f"Starting concept character generation for {slug}",
+        script_command=f'cd api && {workflow_python()} -m adaptation_workflow generate-concept-character "$SLUG"',
+        validation=False,
+    )
+
+
+def generate_concept_character_status(slug: str) -> AdaptationWorkflowStatus:
+    return process_status(
+        slug,
+        concept_character_generate_status_path(slug),
+        concept_character_generate_log_path(slug),
+        validation=False,
+    )
+
+
+def concept_location_generate_stage_name() -> str:
+    from adaptation_workflow.runner import concept_location_generate_stage
+
+    return concept_location_generate_stage()
+
+
+def concept_location_generate_status_path(slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{concept_location_generate_stage_name()}-status.json"
+
+
+def concept_location_generate_log_path(slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{concept_location_generate_stage_name()}.log"
+
+
+def concept_location_generate_launcher_log_path(slug: str) -> Path:
+    return adaptation_dir(slug) / "sessions" / f"run-{concept_location_generate_stage_name()}-launcher.log"
+
+
+def start_generate_concept_location(slug: str) -> AdaptationWorkflowStatus:
+    _require_book_session_for_characters(slug)
+    return start_logged_process(
+        slug,
+        log_path=concept_location_generate_log_path(slug),
+        launcher_log_path=concept_location_generate_launcher_log_path(slug),
+        status_path=concept_location_generate_status_path(slug),
+        start_line=f"Starting concept location generation for {slug}",
+        script_command=f'cd api && {workflow_python()} -m adaptation_workflow generate-concept-location "$SLUG"',
+        validation=False,
+    )
+
+
+def generate_concept_location_status(slug: str) -> AdaptationWorkflowStatus:
+    return process_status(
+        slug,
+        concept_location_generate_status_path(slug),
+        concept_location_generate_log_path(slug),
         validation=False,
     )
 

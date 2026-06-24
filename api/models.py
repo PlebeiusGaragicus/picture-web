@@ -375,6 +375,12 @@ class AdaptationCanvasImportResponse(BaseModel):
     importedNodeCount: int
 
 
+class ConceptArtUploadResponse(BaseModel):
+    key: str
+    canvas: CanvasDocument
+    importedNodeCount: int
+
+
 class AdaptationImportArtifactRequest(BaseModel):
     artifactKind: ArtifactKind
     artifactKey: str = Field(pattern=SLUG_RE)

@@ -8,6 +8,8 @@ from adaptation_workflow.runner import (
     run_extract_character,
     run_extract_characters,
     run_extract_scene,
+    run_generate_concept_character,
+    run_generate_concept_location,
     run_list_characters,
     run_plan_scene,
     run_validate,
@@ -25,6 +27,8 @@ def usage() -> None:
   python -m adaptation_workflow extract-characters <project-slug>
   python -m adaptation_workflow extract-scene <project-slug> <scene-slug> [--force]
   python -m adaptation_workflow plan-scene <project-slug> <scene-slug>
+  python -m adaptation_workflow generate-concept-character <project-slug>
+  python -m adaptation_workflow generate-concept-location <project-slug>
 
 Run stages:
   ingest       Phase 0: read-book session + visual style.
@@ -78,6 +82,16 @@ def main(argv: list[str] | None = None) -> int:
             usage()
             return 2
         return run_plan_scene(args[1], args[2])
+    if command == "generate-concept-character":
+        if len(args) != 2:
+            usage()
+            return 2
+        return run_generate_concept_character(args[1])
+    if command == "generate-concept-location":
+        if len(args) != 2:
+            usage()
+            return 2
+        return run_generate_concept_location(args[1])
     if len(args) < 2 or len(args) > 3:
         usage()
         return 2

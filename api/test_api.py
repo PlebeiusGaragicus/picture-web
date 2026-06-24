@@ -3727,10 +3727,10 @@ def test_concept_art_file_crud_generate_and_canvas_import(tmp_path, monkeypatch)
     )
     assert blank_character.status_code == 200
     blank_file = (root / "adaptation" / "concept-art" / "blank-hero.md").read_text()
-    assert "Character reference sheet for Blank Hero," in blank_file
-    assert "Match the reference image's rendering, palette, line weight, shadows, and sheet layout exactly." in blank_file
+    assert "Character reference sheet" in blank_file
+    assert "[describe essential visual traits here]" in blank_file
     assert "Layout: top row — front full-body" in blank_file
-    assert "Expressions: neutral, happy, sad, angry." in blank_file
+    assert "Expressions: [list expressions here]" in blank_file
 
     updated = client.put(
         "/api/projects/farm-comic/adaptation/files/concept-art/farm-hero",
@@ -3782,4 +3782,41 @@ def test_concept_art_file_crud_generate_and_canvas_import(tmp_path, monkeypatch)
     ]
     assert len(concept_nodes) == 1
     assert concept_nodes[0]["artifactKey"] == "farm-hero"
+
+    imported_image = client.post(
+        "/api/projects/farm-comic/adaptation/concept-art/sunny-barn/import-image",
+        files={"file": ("barn.png", png_bytes("green"), "image/png")},
+    )
+    assert imported_image.status_code == 200
+    sunny_link = imported_image.json()["conceptArt"]["sunny-barn"]
+    assert sunny_link["status"] == "generated"
+    assert len(sunny_link["assetIds"]) == 1
+    assert sunny_link["activeAssetId"] == sunny_link["assetIds"][0]
+
+    uploaded = client.post(
+        "/api/projects/farm-comic/adaptation/concept-art/upload",
+        files={"file": ("upload.png", png_bytes("purple"), "image/png")},
+    )
+    assert uploaded.status_code == 200
+    upload_payload = uploaded.json()
+    upload_key = upload_payload["key"]
+    assert upload_key.startswith("uploaded-concept-")
+    assert upload_payload["importedNodeCount"] == 1
+    upload_file = (root / "adaptation" / "concept-art" / f"{upload_key}.md").read_text()
+    assert "Character reference sheet" not in upload_file
+    upload_link = client.get("/api/projects/farm-comic/adaptation").json()["conceptArt"][upload_key]
+    assert upload_link["status"] == "generated"
+    assert len(upload_link["assetIds"]) == 1
+    concept_nodes = [
+        node
+        for node in upload_payload["canvas"]["nodes"].values()
+        if node.get("type") == "storyArtifact" and node.get("artifactKind") == "concept-art"
+    ]
+    assert any(node["artifactKey"] == upload_key for node in concept_nodes)
+
+    tagged = client.put(
+        f"/api/projects/farm-comic/adaptation/files/concept-art/{upload_key}",
+        json={"userTags": ["hero-tag"]},
+    )
+    assert tagged.status_code == 200
 

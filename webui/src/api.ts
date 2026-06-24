@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, BookChatSession, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, MomentLayoutSection, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, PiTraceDocument, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelDraftCreatePayload, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, BookChatSession, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtUploadResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, MomentLayoutSection, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, PiTraceDocument, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelDraftCreatePayload, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = true;
 
@@ -169,6 +169,30 @@ export const api = {
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/${characterKey}/extract`, { method: 'POST' }),
   getCharacterExtract: (slug: string, characterKey: string) =>
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/${characterKey}/extract`),
+  startGenerateConceptCharacter: (slug: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/concept-art/generate-character`, { method: 'POST' }),
+  getGenerateConceptCharacter: (slug: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/concept-art/generate-character`),
+  startGenerateConceptLocation: (slug: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/concept-art/generate-location`, { method: 'POST' }),
+  getGenerateConceptLocation: (slug: string) =>
+    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/concept-art/generate-location`),
+  importConceptArtImage: (slug: string, key: string, file: File) => {
+    const data = new FormData();
+    data.append('file', file);
+    return request<AdaptationStatus>(`/api/projects/${slug}/adaptation/concept-art/${key}/import-image`, {
+      method: 'POST',
+      body: data,
+    });
+  },
+  uploadConceptArt: (slug: string, file: File) => {
+    const data = new FormData();
+    data.append('file', file);
+    return request<ConceptArtUploadResponse>(`/api/projects/${slug}/adaptation/concept-art/upload`, {
+      method: 'POST',
+      body: data,
+    });
+  },
   resetCharacterData: (slug: string) =>
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/characters/reset`, {
       method: 'POST',

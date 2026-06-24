@@ -4,10 +4,12 @@ import { createPortal } from 'react-dom';
 export function HubCardMenu({
   disabled,
   ariaLabel = 'Card actions',
+  onUploadImage,
   onDelete,
 }: {
   disabled?: boolean;
   ariaLabel?: string;
+  onUploadImage?: () => void;
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -70,6 +72,22 @@ export function HubCardMenu({
         visibility: isPositioned ? 'visible' : 'hidden',
       }}
     >
+      {onUploadImage && (
+        <button
+          type="button"
+          role="menuitem"
+          className="story-panels-chunk-menu-item"
+          disabled={disabled}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen(false);
+            window.setTimeout(() => onUploadImage(), 0);
+          }}
+        >
+          Upload image
+        </button>
+      )}
       <button
         type="button"
         role="menuitem"

@@ -20,6 +20,7 @@ import story_panels_print
 from models import (
     ArchivePatch,
     AdaptationCanvasImportResponse,
+    ConceptArtUploadResponse,
     AdaptationImportArtifactRequest,
     AdaptationFileCreate,
     AdaptationFileDocument,
@@ -228,6 +229,16 @@ def delete_adaptation_file(slug: str, kind: AdaptationFileKind, key: str) -> Ada
     return adaptation.delete_adaptation_file(slug, kind, key)
 
 
+@app.post("/api/projects/{slug}/adaptation/concept-art/{key}/import-image", response_model=AdaptationStatus)
+async def import_concept_art_image(slug: str, key: str, file: UploadFile = File(...)) -> AdaptationStatus:
+    return await adaptation.import_concept_art_image(slug, key, file)
+
+
+@app.post("/api/projects/{slug}/adaptation/concept-art/upload", response_model=ConceptArtUploadResponse)
+async def upload_concept_art(slug: str, file: UploadFile = File(...)) -> ConceptArtUploadResponse:
+    return await adaptation.upload_concept_art(slug, file)
+
+
 @app.get("/api/projects/{slug}/adaptation/scenes/list", response_model=SceneListDocument)
 def get_scene_list(slug: str) -> SceneListDocument:
     return adaptation.scene_list_document(slug)
@@ -276,6 +287,26 @@ def start_character_extract(slug: str, key: str, force: bool = False) -> Adaptat
 @app.get("/api/projects/{slug}/adaptation/characters/{key}/extract", response_model=AdaptationWorkflowStatus)
 def get_character_extract(slug: str, key: str) -> AdaptationWorkflowStatus:
     return adaptation.character_extract_status(slug, key)
+
+
+@app.post("/api/projects/{slug}/adaptation/concept-art/generate-character", response_model=AdaptationWorkflowStatus)
+def start_generate_concept_character(slug: str) -> AdaptationWorkflowStatus:
+    return adaptation.start_generate_concept_character(slug)
+
+
+@app.get("/api/projects/{slug}/adaptation/concept-art/generate-character", response_model=AdaptationWorkflowStatus)
+def get_generate_concept_character(slug: str) -> AdaptationWorkflowStatus:
+    return adaptation.generate_concept_character_status(slug)
+
+
+@app.post("/api/projects/{slug}/adaptation/concept-art/generate-location", response_model=AdaptationWorkflowStatus)
+def start_generate_concept_location(slug: str) -> AdaptationWorkflowStatus:
+    return adaptation.start_generate_concept_location(slug)
+
+
+@app.get("/api/projects/{slug}/adaptation/concept-art/generate-location", response_model=AdaptationWorkflowStatus)
+def get_generate_concept_location(slug: str) -> AdaptationWorkflowStatus:
+    return adaptation.generate_concept_location_status(slug)
 
 
 @app.post("/api/projects/{slug}/adaptation/characters/reset", response_model=AdaptationStatus)

@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api';
-import { storyArtifactKeysOnCanvas, storyArtifactNodeId } from '../canvas/shared';
-import { formatRequestError } from '../formatError';
+import { TagControlButton } from '../canvas/assetTagRow';
+import { storyArtifactKeysOnCanvas } from '../canvas/shared';
+import { formatRequestError, formatWorkflowStatusError } from '../formatError';
 import { Modal } from '../ui';
 import { VisualStyleList } from './cards';
 import { HubCardMenu } from './hubCardMenu';
-import type { AdaptationAssetLink, AdaptationStatus, Asset, CanvasDocument, ConceptArtSubjectKind } from '../types';
+import type { AdaptationAssetLink, AdaptationStatus, Asset, CanvasDocument, ConceptArtSubjectKind, TagDefinition } from '../types';
 
 function slugifyFileKey(value: string) {
   return value
@@ -39,10 +40,11 @@ export function ConceptArtView({
   adaptation,
   assets,
   canvas,
+  projectTags,
   viewMode,
   onDraftArtifactToCanvas,
-  onOpenChatForAsset,
-  onViewAsset,
+  onOpenUploadedConceptOnCanvas,
+  onCreateTag,
   onReloadProject,
   onReloadAdaptation,
 }: {
@@ -50,10 +52,11 @@ export function ConceptArtView({
   adaptation: AdaptationStatus;
   assets: Asset[];
   canvas: CanvasDocument;
+  projectTags: TagDefinition[];
   viewMode: 'list' | 'canvas';
   onDraftArtifactToCanvas: (artifactKey: string) => Promise<void>;
-  onOpenChatForAsset: (nodeId: string, assetId: string) => void;
-  onViewAsset: (assetId: string) => void;
+  onOpenUploadedConceptOnCanvas: (artifactKey: string, canvasDoc: CanvasDocument) => void;
+  onCreateTag: (tag: TagDefinition) => void;
   onReloadProject: () => Promise<void>;
   onReloadAdaptation: () => Promise<void>;
 }) {
@@ -80,17 +83,22 @@ export function ConceptArtView({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
   const [draftPrompt, setDraftPrompt] = useState('');
+  const [draftTagIds, setDraftTagIds] = useState<string[]>([]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
   const [deletingConcept, setDeletingConcept] = useState(false);
+  const [suggestJob, setSuggestJob] = useState<'character' | 'location' | null>(null);
+  const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
+  const [uploadingConcept, setUploadingConcept] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const editingLink = editingKey ? conceptArt[editingKey] : null;
-  const hasVisualStyle = Boolean(adaptation.defaultVisualStyleId);
 
   const openEdit = (key: string, link: AdaptationAssetLink) => {
     setEditingKey(key);
     setDraftName(conceptDisplayName(key));
     setDraftPrompt(link.prompt);
+    setDraftTagIds(link.userTags ?? []);
   };
 
   const saveEdit = async () => {
@@ -107,27 +115,11 @@ export function ConceptArtView({
         mode: editingLink.mode,
         styleRef: editingLink.styleRef,
         subjectKind: editingLink.subjectKind ?? 'character',
+        userTags: draftTagIds,
       });
       await onReloadProject();
       await refreshConceptArt();
       setEditingKey(null);
-    } catch (err) {
-      setError(formatRequestError(err));
-    } finally {
-      setBusyKey(null);
-    }
-  };
-
-  const generateConcept = async (key: string) => {
-    setBusyKey(key);
-    setError(null);
-    try {
-      await api.generateAdaptationArtifact(projectSlug, {
-        artifactKind: 'concept-art',
-        artifactKey: key,
-        visualStyleId: adaptation.defaultVisualStyleId ?? null,
-      });
-      await onReloadProject();
     } catch (err) {
       setError(formatRequestError(err));
     } finally {
@@ -168,7 +160,7 @@ export function ConceptArtView({
   };
 
   const createConcept = async (subjectKind: ConceptArtSubjectKind) => {
-    const existingKeys = entries.map(([key]) => key);
+    const existingKeys = entries.map(([entryKey]) => entryKey);
     const base = subjectKind === 'location' ? 'location-concept' : 'character-concept';
     let index = existingKeys.length + 1;
     let key = `${base}-${index}`;
@@ -196,8 +188,77 @@ export function ConceptArtView({
     }
   };
 
+  const suggestConceptCharacter = async () => {
+    setError(null);
+    setSuggestJob('character');
+    try {
+      await api.startGenerateConceptCharacter(projectSlug);
+    } catch (err) {
+      setSuggestJob(null);
+      setError(formatRequestError(err));
+    }
+  };
+
+  const uploadConceptImage = async (file: File) => {
+    setUploadingConcept(true);
+    setError(null);
+    try {
+      const result = await api.uploadConceptArt(projectSlug, file);
+      await onReloadProject();
+      await refreshConceptArt();
+      onOpenUploadedConceptOnCanvas(result.key, result.canvas);
+    } catch (err) {
+      setError(formatRequestError(err));
+    } finally {
+      setUploadingConcept(false);
+    }
+  };
+
+  const suggestConceptLocation = async () => {
+    setError(null);
+    setSuggestJob('location');
+    try {
+      await api.startGenerateConceptLocation(projectSlug);
+    } catch (err) {
+      setSuggestJob(null);
+      setError(formatRequestError(err));
+    }
+  };
+
+  useEffect(() => {
+    if (!suggestJob) return;
+    const timer = window.setInterval(async () => {
+      const status = suggestJob === 'character'
+        ? await api.getGenerateConceptCharacter(projectSlug)
+        : await api.getGenerateConceptLocation(projectSlug);
+      if (!status.running) {
+        setSuggestJob(null);
+        const workflowError = formatWorkflowStatusError(status);
+        if (workflowError) setError(workflowError);
+        await onReloadAdaptation();
+        await refreshConceptArt();
+      }
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [onReloadAdaptation, projectSlug, refreshConceptArt, suggestJob]);
+
+  const conceptWorkflowBusy = suggestJob !== null;
+
   return (
     <>
+      <input
+        ref={uploadInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.currentTarget.value = '';
+          if (file) {
+            void uploadConceptImage(file);
+          }
+        }}
+      />
       {viewMode === 'list' && (
         <div className="story-adaptation-screen story-panels-screen concept-art-screen">
           <div className="concept-art-styles-panel">
@@ -207,24 +268,63 @@ export function ConceptArtView({
               onReload={onReloadProject}
             />
           </div>
-          <header className="layout-view-toolbar characters-hub-toolbar">
-            <div className="layout-view-toolbar-primary">
-              <button
-                className="secondary"
-                type="button"
-                onClick={() => void createConcept('character')}
-                disabled={busyKey === '__create-character__'}
-              >
-                {busyKey === '__create-character__' ? 'Creating…' : '+ character concept'}
-              </button>
-              <button
-                className="secondary"
-                type="button"
-                onClick={() => void createConcept('location')}
-                disabled={busyKey === '__create-location__'}
-              >
-                {busyKey === '__create-location__' ? 'Creating…' : '+ location concept'}
-              </button>
+          <header className="layout-view-toolbar concept-art-toolbar">
+            <div className="concept-art-toolbar-groups">
+              <div className="concept-art-toolbar-group">
+                <span className="concept-art-toolbar-label">Character</span>
+                <div className="concept-art-toolbar-actions">
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => void createConcept('character')}
+                    disabled={busyKey === '__create-character__' || conceptWorkflowBusy || uploadingConcept}
+                  >
+                    {busyKey === '__create-character__' ? 'Creating…' : 'New'}
+                  </button>
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => void suggestConceptCharacter()}
+                    disabled={!adaptation.hasBookSession || conceptWorkflowBusy || uploadingConcept}
+                  >
+                    {suggestJob === 'character' ? 'Suggesting…' : 'Suggest'}
+                  </button>
+                </div>
+              </div>
+              <div className="concept-art-toolbar-group">
+                <span className="concept-art-toolbar-label">Location</span>
+                <div className="concept-art-toolbar-actions">
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => void createConcept('location')}
+                    disabled={busyKey === '__create-location__' || conceptWorkflowBusy || uploadingConcept}
+                  >
+                    {busyKey === '__create-location__' ? 'Creating…' : 'New'}
+                  </button>
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => void suggestConceptLocation()}
+                    disabled={!adaptation.hasBookSession || conceptWorkflowBusy || uploadingConcept}
+                  >
+                    {suggestJob === 'location' ? 'Suggesting…' : 'Suggest'}
+                  </button>
+                </div>
+              </div>
+              <div className="concept-art-toolbar-group">
+                <span className="concept-art-toolbar-label">Import</span>
+                <div className="concept-art-toolbar-actions">
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => uploadInputRef.current?.click()}
+                    disabled={conceptWorkflowBusy || uploadingConcept}
+                  >
+                    {uploadingConcept ? 'Uploading…' : 'Upload image'}
+                  </button>
+                </div>
+              </div>
             </div>
           </header>
           {error && <p className="error error-banner layout-view-error">{error}</p>}
@@ -236,13 +336,20 @@ export function ConceptArtView({
                     const busy = busyKey === key;
                     return (
                       <article key={key} className="story-card character-hub-card">
-                        <div
-                          className={`character-hub-thumb ${asset ? 'has-image' : ''}`}
-                          onClick={() => asset && onViewAsset(asset.id)}
-                          role={asset ? 'button' : undefined}
-                        >
+                        <div className={`character-hub-thumb ${asset ? 'has-image' : ''}`}>
                           {asset ? (
-                            <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb`} alt="" />
+                            <div className="character-hub-thumb-frame">
+                              <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb`} alt="" />
+                              <button
+                                type="button"
+                                className="character-hub-preview-eye"
+                                onClick={() => setPreviewAssetId(asset.id)}
+                                title="View full screen"
+                                aria-label={`View ${conceptDisplayName(key)} full screen`}
+                              >
+                                👁️
+                              </button>
+                            </div>
                           ) : (
                             <span className="muted">No image</span>
                           )}
@@ -267,23 +374,6 @@ export function ConceptArtView({
                             <button className="secondary" type="button" disabled={busy || onCanvas} onClick={() => void draftToCanvas(key)}>
                               {onCanvas ? 'On canvas' : busy ? 'Working...' : 'Draft'}
                             </button>
-                            <button
-                              className="generate-button"
-                              type="button"
-                              disabled={busy || !hasVisualStyle}
-                              onClick={() => void generateConcept(key)}
-                            >
-                              {busy ? 'Generating...' : asset ? 'Regenerate' : 'Generate'}
-                            </button>
-                            {asset && (
-                              <button
-                                className="secondary"
-                                type="button"
-                                onClick={() => onOpenChatForAsset(storyArtifactNodeId('concept-art', key), asset.id)}
-                              >
-                                Refine
-                              </button>
-                            )}
                           </div>
                         </div>
                       </article>
@@ -315,6 +405,16 @@ export function ConceptArtView({
               Image prompt
               <textarea className="modal-textarea" rows={10} value={draftPrompt} onChange={(event) => setDraftPrompt(event.target.value)} />
             </label>
+            <div className="field-label">
+              Tags
+              <TagControlButton
+                tagIds={draftTagIds}
+                projectTags={projectTags}
+                onPartitionedTagsChange={(userTags) => setDraftTagIds(userTags)}
+                onCreateTag={onCreateTag}
+                portaled
+              />
+            </div>
           </div>
           <div className="modal-actions">
             <button className="secondary" onClick={() => setEditingKey(null)} disabled={busyKey === editingKey}>Cancel</button>
@@ -352,6 +452,30 @@ export function ConceptArtView({
               <button className="secondary" disabled={deletingConcept} onClick={() => setPendingDeleteKey(null)}>Cancel</button>
             </div>
           </div>
+        </div>,
+        document.body,
+      )}
+      {previewAssetId && createPortal(
+        <div
+          className="archetype-lightbox"
+          onClick={() => setPreviewAssetId(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Concept art preview"
+        >
+          <img
+            src={`/api/projects/${projectSlug}/assets/${previewAssetId}/image`}
+            alt=""
+            onClick={(event) => event.stopPropagation()}
+          />
+          <button
+            type="button"
+            className="archetype-lightbox-close"
+            onClick={() => setPreviewAssetId(null)}
+            aria-label="Close"
+          >
+            ×
+          </button>
         </div>,
         document.body,
       )}

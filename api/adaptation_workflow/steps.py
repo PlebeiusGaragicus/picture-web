@@ -394,3 +394,78 @@ class StepRunner:
                 validate_moment_file(output_path)
             except ValidationError as exc:
                 raise RuntimeError(str(exc)) from exc
+
+    def step_generate_concept_character(self) -> str:
+        from adaptation_workflow.concept_art import (
+            existing_concept_art_slugs,
+            next_character_concept_key,
+            validate_concept_character_art,
+        )
+
+        key = next_character_concept_key(self.ctx.book_root_abs)
+        out = self.ctx.book_root_abs / "concept-art" / f"{key}.md"
+        rel_out = f"{self.ctx.book_root}/concept-art/{key}.md"
+        existing_concepts = existing_concept_art_slugs(self.ctx.book_root_abs)
+        context_lines = [
+            f"/skill:concept-character {self.ctx.book_root_abs} {out}",
+            "",
+            f"File key: {key}",
+            "",
+            "Existing concept-art slugs (do not duplicate these ideas):",
+        ]
+        if existing_concepts:
+            context_lines.extend(existing_concepts)
+        else:
+            context_lines.append("(none)")
+        list_path = self.ctx.book_root_abs / "characters" / "list.txt"
+        if list_path.is_file() and list_path.read_text().strip():
+            context_lines.extend(["", "Main cast already covered in characters/list.txt:", list_path.read_text().rstrip()])
+        prompt = "\n".join(context_lines).rstrip() + "\n"
+        self.run_pi_step("concept-art", f"concept character {key}", rel_out, prompt)
+        if not out.is_file():
+            raise RuntimeError(f"Missing {out}")
+        try:
+            validate_concept_character_art(out, key)
+        except ValidationError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return key
+
+    def step_generate_concept_location(self) -> str:
+        from adaptation_workflow.concept_art import (
+            existing_concept_art_slugs,
+            next_location_concept_key,
+            validate_concept_location_art,
+        )
+
+        key = next_location_concept_key(self.ctx.book_root_abs)
+        out = self.ctx.book_root_abs / "concept-art" / f"{key}.md"
+        rel_out = f"{self.ctx.book_root}/concept-art/{key}.md"
+        existing_concepts = existing_concept_art_slugs(self.ctx.book_root_abs)
+        context_lines = [
+            f"/skill:concept-location {self.ctx.book_root_abs} {out}",
+            "",
+            f"File key: {key}",
+            "",
+            "Existing concept-art slugs (do not duplicate these ideas):",
+        ]
+        if existing_concepts:
+            context_lines.extend(existing_concepts)
+        else:
+            context_lines.append("(none)")
+        locations_index = self.ctx.book_root_abs / "locations" / "index.md"
+        if locations_index.is_file() and locations_index.read_text().strip():
+            context_lines.extend(["", "Locations already covered in locations/index.md:", locations_index.read_text().rstrip()])
+        prompts_dir = self.ctx.book_root_abs / "locations" / "prompts"
+        if prompts_dir.is_dir():
+            prompt_slugs = sorted(path.stem for path in prompts_dir.glob("*.md"))
+            if prompt_slugs:
+                context_lines.extend(["", "Existing location prompt slugs:", ", ".join(prompt_slugs)])
+        prompt = "\n".join(context_lines).rstrip() + "\n"
+        self.run_pi_step("concept-art", f"concept location {key}", rel_out, prompt)
+        if not out.is_file():
+            raise RuntimeError(f"Missing {out}")
+        try:
+            validate_concept_location_art(out, key)
+        except ValidationError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return key
