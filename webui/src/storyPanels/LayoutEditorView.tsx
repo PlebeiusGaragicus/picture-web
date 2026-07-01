@@ -13,7 +13,7 @@ import { useStoryPanelDocument } from './useStoryPanelDocument';
 import { formatRequestError } from '../formatError';
 import { HoverTooltip } from '../ui';
 import { api } from '../api';
-import type { StoryPanelRect } from '../types';
+import type { StoryPanelPatchPayload, StoryPanelRect } from '../types';
 import { isPanel, isUnplaced } from './panelModel';
 
 const SPREAD_PANEL_INFO_KEY = 'story-panels-spread-panel-info';
@@ -93,6 +93,11 @@ export function LayoutEditorView({
       writeSpreadPanelInfoEnabled(next);
       return next;
     });
+  };
+
+  const setSpreadPanelInfoVisible = (enabled: boolean) => {
+    writeSpreadPanelInfoEnabled(enabled);
+    setSpreadPanelInfoEnabled(enabled);
   };
 
   useEffect(() => {
@@ -180,6 +185,11 @@ export function LayoutEditorView({
 
   const editPanelNote = async (panelId: string, noteText: string) => {
     const next = await api.patchStoryPanel(projectSlug, panelId, { customText: noteText });
+    setDocument(next);
+  };
+
+  const savePanelEdit = async (panelId: string, patch: StoryPanelPatchPayload) => {
+    const next = await api.patchStoryPanel(projectSlug, panelId, patch);
     setDocument(next);
   };
 
@@ -277,6 +287,7 @@ export function LayoutEditorView({
       onDeletePanel={handleDeletePanel}
       onInsertDraft={insertDraft}
       onEditPanelNote={bookText.length > 0 ? editPanelNote : undefined}
+      onSavePanelEdit={savePanelEdit}
       isSaving={isSaving || isPlacingPanel}
     />
   );
@@ -358,6 +369,8 @@ export function LayoutEditorView({
           isSaving={isSaving}
           sidePanel={panelChunks}
           onLayoutModeChange={setLayoutMode}
+          onSingleSidePanelChange={selectSingleSidePanel}
+          onSpreadPanelInfoEnabledChange={setSpreadPanelInfoVisible}
           onHistoryControlsChange={setHistoryControls}
           onPageControlsChange={setPageControls}
           spreadPanelInfoEnabled={spreadPanelInfoEnabled}

@@ -1,6 +1,6 @@
 import type { StoryPanel, StoryPanelDocument, StoryPanelRect } from '../types';
 import { LAYOUT_PAGE_ROWS } from './printLayout';
-import { isCaption } from './panelModel';
+import { captionAsPanel, isCaption } from './panelModel';
 
 export const CAPTION_GRID_SNAP = 12;
 const CAPTION_GRID_COLUMNS = 12;
@@ -12,7 +12,9 @@ export function sortCaptionPanels(panels: StoryPanel[]) {
 }
 
 export function captionPanelsFor(document: StoryPanelDocument, parentPanelId: string) {
-  return sortCaptionPanels(document.panels.filter((panel) => panel.parentPanelId === parentPanelId));
+  const parent = document.panels.find((panel) => panel.id === parentPanelId);
+  if (!parent) return [];
+  return sortCaptionPanels((parent.captions ?? []).map((caption) => captionAsPanel(parent, caption)));
 }
 
 function roundCaptionStep(value: number) {
@@ -55,11 +57,7 @@ export function imageInfoHostFor(document: StoryPanelDocument, panel: StoryPanel
   if (!panel) return null;
   if (isCaption(panel)) {
     const linkedParent = parentPanelFor(document, panel);
-    if (linkedParent) return linkedParent;
-    return document.panels.find((candidate) =>
-      candidate.panelKind === 'image'
-      && captionPanelsFor(document, candidate.id).some((caption) => caption.id === panel.id),
-    ) ?? null;
+    return linkedParent;
   }
   if (panel.panelKind === 'image') return panel;
   return null;
@@ -74,10 +72,7 @@ export function panelKindHostFor(document: StoryPanelDocument, panel: StoryPanel
 }
 
 export function removePanelAndCaptionChildren(document: StoryPanelDocument, panelId: string) {
-  const childIds = new Set(
-    document.panels.filter((panel) => panel.parentPanelId === panelId).map((panel) => panel.id),
-  );
-  return document.panels.filter((panel) => panel.id !== panelId && !childIds.has(panel.id));
+  return document.panels.filter((panel) => panel.id !== panelId);
 }
 
 export function captionSnapScaleFor(panel: Pick<StoryPanel, 'sourceKind' | 'parentPanelId'>) {

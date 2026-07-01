@@ -688,6 +688,15 @@ class StoryPanelImageCrop(BaseModel):
     scale: float = Field(default=1, ge=1, le=4)
 
 
+class StoryPanelCaption(BaseModel):
+    id: str = Field(pattern=TAG_RE)
+    customText: str = ""
+    richText: str = ""
+    textStyle: StoryPanelTextStyle = Field(default_factory=StoryPanelTextStyle)
+    rect: StoryPanelRect
+    layer: int = Field(default=0, ge=0)
+
+
 class StoryPanel(BaseModel):
     id: str = Field(pattern=TAG_RE)
     order: int = Field(ge=0)
@@ -711,6 +720,7 @@ class StoryPanel(BaseModel):
     aspectRatio: str | None = None
     aspectRatioLocked: bool = False
     imageCrop: StoryPanelImageCrop | None = None
+    captions: list[StoryPanelCaption] = Field(default_factory=list)
     finalized: bool = False
 
     @model_validator(mode="after")
@@ -731,12 +741,7 @@ class StoryPanel(BaseModel):
             if self.pageId is not None:
                 raise ValueError("Bookmark items must not be placed on the layout")
         elif self.parentPanelId is not None:
-            if self.panelKind != "text":
-                raise ValueError("Caption panels must be text panels")
-            if self.startOffset is not None or self.endOffset is not None:
-                raise ValueError("Caption panels must not have book offsets")
-            if self.pageId is None:
-                raise ValueError("Caption panels must be placed on the layout")
+            raise ValueError("Captions must be stored on their parent panel")
         if self.activeAssetId is not None and self.activeAssetId not in self.assetIds:
             raise ValueError("activeAssetId must be attached to the panel")
         return self
@@ -757,6 +762,12 @@ class StoryPanelDocument(BaseModel):
         panel_ids = [panel.id for panel in self.panels]
         if len(panel_ids) != len(set(panel_ids)):
             raise ValueError("Duplicate panel ids")
+        caption_ids = [caption.id for panel in self.panels for caption in panel.captions]
+        if len(caption_ids) != len(set(caption_ids)):
+            raise ValueError("Duplicate caption ids")
+        overlap_ids = set(panel_ids).intersection(caption_ids)
+        if overlap_ids:
+            raise ValueError(f"Caption id duplicates panel id: {sorted(overlap_ids)[0]}")
         page_id_set = set(page_ids)
         for panel in self.panels:
             if panel.pageId is not None and panel.pageId not in page_id_set:
@@ -828,6 +839,7 @@ class StoryPanelPatch(BaseModel):
     aspectRatio: str | None = None
     aspectRatioLocked: bool | None = None
     imageCrop: StoryPanelImageCrop | None = None
+    captions: list[StoryPanelCaption] | None = None
     finalized: bool | None = None
 
 

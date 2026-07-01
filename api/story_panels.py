@@ -17,6 +17,7 @@ from models import (
     LAYOUT_PAGE_ROWS,
     StoryPanel,
     StoryPanelBookmarkCreate,
+    StoryPanelCaption,
     StoryPanelCreate,
     StoryPanelDocument,
     StoryPanelPage,
@@ -170,11 +171,38 @@ def read_document(slug: str) -> StoryPanelDocument:
     if not path.is_file():
         return empty_document()
     raw = library.read_json(path)
+    _normalize_raw_document(raw)
+    document = StoryPanelDocument.model_validate(raw)
+    return _validate_against_book(slug, _normalize_document_pages(document))
+
+
+def _normalize_raw_document(raw: dict) -> None:
     for panel in raw.get("panels", []):
         if panel.get("sourceKind") == "note":
             panel["sourceKind"] = "panel"
-    document = StoryPanelDocument.model_validate(raw)
-    return _validate_against_book(slug, _normalize_document_pages(document))
+    caption_records = [panel for panel in raw.get("panels", []) if panel.get("parentPanelId")]
+    if not caption_records:
+        return
+    parent_by_id = {
+        panel.get("id"): panel
+        for panel in raw.get("panels", [])
+        if panel.get("id") and not panel.get("parentPanelId")
+    }
+    for caption in caption_records:
+        parent = parent_by_id.get(caption.get("parentPanelId"))
+        if parent is None:
+            continue
+        parent.setdefault("captions", []).append(
+            StoryPanelCaption(
+                id=caption["id"],
+                customText=caption.get("customText", ""),
+                richText=caption.get("richText", ""),
+                textStyle=caption.get("textStyle", {}),
+                rect=caption.get("rect", {}),
+                layer=caption.get("layer", 0),
+            ).model_dump(mode="json")
+        )
+    raw["panels"] = [panel for panel in raw.get("panels", []) if not panel.get("parentPanelId")]
 
 
 def _write_document(slug: str, document: StoryPanelDocument) -> StoryPanelDocument:
@@ -206,6 +234,7 @@ def _slugify(value: str) -> str:
 
 def _next_panel_id(document: StoryPanelDocument) -> str:
     existing = {panel.id for panel in document.panels}
+    existing.update(caption.id for panel in document.panels for caption in panel.captions)
     index = len(existing) + 1
     while True:
         candidate = f"panel-{index:03d}"
@@ -549,9 +578,7 @@ def _read_document_lenient(slug: str) -> StoryPanelDocument | None:
     if not path.is_file():
         return empty_document()
     raw = library.read_json(path)
-    for panel in raw.get("panels", []):
-        if panel.get("sourceKind") == "note":
-            panel["sourceKind"] = "panel"
+    _normalize_raw_document(raw)
     try:
         document = StoryPanelDocument.model_validate(raw)
     except ValidationError:

@@ -11,6 +11,7 @@ import { sortedPanels, withSelectedText } from './storyPanelUtils';
 import { autoPlaceDraftPanel } from './autoPlace';
 import { useStoryPanelDocument } from './useStoryPanelDocument';
 import { isBookLinked, isPanel } from './panelModel';
+import type { StoryPanelPatchPayload } from '../types';
 
 export function BookTextView({
   projectSlug,
@@ -194,6 +195,16 @@ export function BookTextView({
 
   const editPanelText = editPanelNote;
 
+  const savePanelEdit = async (panelId: string, patch: StoryPanelPatchPayload) => {
+    setError(null);
+    try {
+      const next = await api.patchStoryPanel(projectSlug, panelId, patch);
+      setDocument(next);
+    } catch (err) {
+      setError(formatRequestError(err));
+    }
+  };
+
   const adjustPanelRange = async (panelId: string, startOffset: number, endOffset: number) => {
     if (!document) return;
     const ordered = sortedPanels(document.panels).filter((panel) => isPanel(panel) && isBookLinked(panel));
@@ -253,6 +264,7 @@ export function BookTextView({
       onInsertDraft={hasBookText ? undefined : insertDraft}
       onEditPanelNote={hasBookText ? editPanelNote : undefined}
       onEditPanelText={hasBookText ? undefined : editPanelText}
+      onSavePanelEdit={savePanelEdit}
       isSaving={isSaving || isPlacingPanel}
     />
   );

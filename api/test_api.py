@@ -1590,51 +1590,38 @@ def test_story_panels_caption_panel_assignment(tmp_path, monkeypatch):
     assert patched.status_code == 200
 
     document = patched.json()
-    document["panels"].append(
-        {
-            "id": "panel-caption-001",
-            "order": len(document["panels"]) + 1,
-            "sourceKind": "panel",
-            "startOffset": None,
-            "endOffset": None,
-            "selectedText": "",
-            "customText": "Ponyville was busy.",
-            "richText": "",
-            "textStyle": {"fontFamily": "serif", "fontSize": 7, "align": "center"},
-            "pageId": parent["pageId"],
-            "panelKind": "text",
-            "rect": {"x": parent["rect"]["x"], "y": parent["rect"]["y"] + parent["rect"]["h"] + 0.25, "w": parent["rect"]["w"], "h": 1},
-            "layer": 1,
-            "parentPanelId": parent["id"],
-            "assetIds": [],
-            "activeAssetId": None,
-            "aspectRatio": None,
-            "aspectRatioLocked": False,
-            "finalized": False,
-        }
-    )
+    for panel in document["panels"]:
+        if panel["id"] == parent["id"]:
+            panel["captions"] = [
+                {
+                    "id": "panel-caption-001",
+                    "customText": "Ponyville was busy.",
+                    "richText": "",
+                    "textStyle": {"fontFamily": "serif", "fontSize": 7, "align": "center"},
+                    "rect": {"x": parent["rect"]["x"], "y": parent["rect"]["y"] + parent["rect"]["h"] + 0.25, "w": parent["rect"]["w"], "h": 1},
+                    "layer": 1,
+                }
+            ]
     saved = client.put("/api/projects/farm-comic/story-panels", json=document)
     assert saved.status_code == 200
-    caption = next(panel for panel in saved.json()["panels"] if panel["parentPanelId"] == parent["id"])
-    assert caption["parentPanelId"] == parent["id"]
+    saved_body = saved.json()
+    saved_parent = next(panel for panel in saved_body["panels"] if panel["id"] == parent["id"])
+    caption = saved_parent["captions"][0]
     assert caption["customText"] == "Ponyville was busy."
 
-    styled = client.patch(
-        f"/api/projects/farm-comic/story-panels/panels/{caption['id']}",
-        json={
-            "textStyle": {
-                "fontFamily": "sans",
-                "fontSize": 9,
-                "align": "left",
-                "speechKind": "narration",
-                "background": "transparent",
-                "color": "#1e40af",
-                "outlineColor": "#eab308",
-            },
-        },
-    )
+    saved_parent["captions"][0]["textStyle"] = {
+        "fontFamily": "sans",
+        "fontSize": 9,
+        "align": "left",
+        "speechKind": "narration",
+        "background": "transparent",
+        "color": "#1e40af",
+        "outlineColor": "#eab308",
+    }
+    styled = client.put("/api/projects/farm-comic/story-panels", json=saved_body)
     assert styled.status_code == 200
-    updated = next(panel for panel in styled.json()["panels"] if panel["id"] == caption["id"])["textStyle"]
+    updated_parent = next(panel for panel in styled.json()["panels"] if panel["id"] == parent["id"])
+    updated = updated_parent["captions"][0]["textStyle"]
     assert updated["speechKind"] == "narration"
     assert updated["background"] == "transparent"
     assert updated["color"] == "#1e40af"

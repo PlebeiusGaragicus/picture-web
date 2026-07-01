@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { StoryPanel, StoryPanelPage } from '../types';
+import type { StoryPanel, StoryPanelCaption, StoryPanelPage, StoryPanelPatchPayload } from '../types';
+import { defaultCaptionTextStyle } from './captionPanelStyle';
 import { panelIsPlacedOnLayout } from './panelPlacement';
 import { storyPagePlacementLabel } from './pageNumbers';
 import {
@@ -20,6 +21,62 @@ function compactText(value: string, maxLength = 180) {
   const normalized = value.replace(/\s+/g, ' ').trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 1)}...`;
+}
+
+function panelPreviewText(panel: StoryPanel, primaryText: string) {
+  if (panel.sourceKind !== 'panel') return primaryText;
+  const preview = (panel.selectedText.trim() || panel.customText.trim()).trim();
+  if (!preview || ['Image panel', 'Text panel', 'Text block'].includes(preview)) return '';
+  return preview;
+}
+
+function captionPreviewTexts(panel: StoryPanel) {
+  return (panel.captions ?? [])
+    .map((caption) => caption.customText.trim())
+    .filter(Boolean);
+}
+
+function usefulPanelText(panel: StoryPanel) {
+  const text = (panel.customText.trim() || (!isBookLinked(panel) ? panel.selectedText.trim() : '')).trim();
+  return ['Image panel', 'Text panel', 'Text block'].includes(text) ? '' : text;
+}
+
+function plainTextToRichText(value: string) {
+  const doc = document.implementation.createHTMLDocument('');
+  const container = doc.createElement('div');
+  value.split(/\n/).forEach((line, index) => {
+    if (index > 0) container.appendChild(doc.createElement('br'));
+    container.appendChild(doc.createTextNode(line));
+  });
+  return container.innerHTML;
+}
+
+function nextCaptionId(panels: StoryPanel[]) {
+  const ids = new Set(panels.flatMap((panel) => [panel.id, ...(panel.captions ?? []).map((caption) => caption.id)]));
+  let index = ids.size + 1;
+  while (ids.has(`panel-${String(index).padStart(3, '0')}`)) index += 1;
+  return `panel-${String(index).padStart(3, '0')}`;
+}
+
+function newCaptionForPanel(panel: StoryPanel, panels: StoryPanel[]): StoryPanelCaption {
+  const captions = panel.captions ?? [];
+  const gap = 1 / 12;
+  const bottom = captions.length
+    ? Math.max(...captions.map((caption) => caption.rect.y + caption.rect.h))
+    : panel.rect.y + panel.rect.h;
+  return {
+    id: nextCaptionId(panels),
+    customText: '',
+    richText: plainTextToRichText(''),
+    textStyle: { ...defaultCaptionTextStyle },
+    rect: {
+      x: panel.rect.x,
+      y: Math.min(12.5, bottom + gap),
+      w: panel.rect.w,
+      h: 0.5,
+    },
+    layer: panel.layer + 1 + captions.length,
+  };
 }
 
 function itemTitle(panel: StoryPanel, panels: StoryPanel[], manualMode: boolean) {
@@ -256,6 +313,7 @@ export function PanelChunkList({
   onInsertDraft,
   onEditPanelNote,
   onEditPanelText,
+  onSavePanelEdit,
   isSaving,
   variant = 'card',
 }: {
@@ -271,6 +329,7 @@ export function PanelChunkList({
   onInsertDraft?: (payload: InsertDraftPayload) => Promise<void>;
   onEditPanelNote?: (panelId: string, noteText: string) => Promise<void>;
   onEditPanelText?: (panelId: string, text: string) => Promise<void>;
+  onSavePanelEdit?: (panelId: string, patch: StoryPanelPatchPayload) => Promise<void>;
   isSaving: boolean;
   variant?: 'card' | 'plain';
 }) {
@@ -290,6 +349,10 @@ export function PanelChunkList({
   const [showEditTextDialog, setShowEditTextDialog] = useState(false);
   const [editTextPanelId, setEditTextPanelId] = useState<string | null>(null);
   const [editTextValue, setEditTextValue] = useState('');
+  const [panelEditorPanelId, setPanelEditorPanelId] = useState<string | null>(null);
+  const [panelEditorTitle, setPanelEditorTitle] = useState('');
+  const [panelEditorText, setPanelEditorText] = useState('');
+  const [captionDrafts, setCaptionDrafts] = useState<StoryPanelCaption[]>([]);
   const hasBookText = bookLength > 0;
   const manualMode = !hasBookText;
   const allItems = sortSidebarItems(panels);
@@ -306,6 +369,9 @@ export function PanelChunkList({
   const canInsertDraft = Boolean(onInsertDraft);
   const pendingDeletePanel = pendingDeletePanelId
     ? panels.find((panel) => panel.id === pendingDeletePanelId) ?? null
+    : null;
+  const panelEditorPanel = panelEditorPanelId
+    ? panels.find((panel) => panel.id === panelEditorPanelId) ?? null
     : null;
 
   useEffect(() => {
@@ -347,6 +413,56 @@ export function PanelChunkList({
     setEditTextValue(panel ? sidebarItemPrimaryText(panel) : '');
     setOpenMenuId(null);
     setShowEditTextDialog(true);
+  };
+
+  const openPanelEditor = (panel: StoryPanel) => {
+    if (!isPanel(panel)) return;
+    onSelectPanel(panel.id);
+    setPanelEditorPanelId(panel.id);
+    setPanelEditorTitle(panel.title.trim());
+    setPanelEditorText(usefulPanelText(panel));
+    setCaptionDrafts((panel.captions ?? []).map((caption) => ({ ...caption, textStyle: { ...caption.textStyle }, rect: { ...caption.rect } })));
+    setOpenMenuId(null);
+  };
+
+  const addCaptionDraft = () => {
+    if (!panelEditorPanel) return;
+    setCaptionDrafts((current) => [...current, newCaptionForPanel({ ...panelEditorPanel, captions: current }, panels)]);
+  };
+
+  const updateCaptionDraftText = (captionId: string, text: string) => {
+    setCaptionDrafts((current) => current.map((caption) => (
+      caption.id === captionId
+        ? { ...caption, customText: text, richText: plainTextToRichText(text) }
+        : caption
+    )));
+  };
+
+  const deleteCaptionDraft = (captionId: string) => {
+    setCaptionDrafts((current) => current.filter((caption) => caption.id !== captionId));
+  };
+
+  const closePanelEditor = () => {
+    setPanelEditorPanelId(null);
+    setPanelEditorTitle('');
+    setPanelEditorText('');
+    setCaptionDrafts([]);
+  };
+
+  const submitPanelEditor = async () => {
+    if (!panelEditorPanelId || !onSavePanelEdit) return;
+    setIsCreating(true);
+    try {
+      await onSavePanelEdit(panelEditorPanelId, {
+        title: panelEditorTitle.trim(),
+        customText: panelEditorText.trim(),
+        richText: plainTextToRichText(panelEditorText.trim()),
+        captions: captionDrafts,
+      });
+      closePanelEditor();
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const submitEditText = async () => {
@@ -481,6 +597,8 @@ export function PanelChunkList({
           </div>
         ) : sortedPanels.map((panel) => {
           const primaryText = sidebarItemPrimaryText(panel);
+          const previewText = panelPreviewText(panel, primaryText);
+          const captionPreviews = captionPreviewTexts(panel);
           const secondaryText = sidebarItemSecondaryText(panel);
           const showPlacement = isPanel(panel);
           const isPlaced = showPlacement && panelIsPlacedOnLayout(pages, panel);
@@ -492,6 +610,12 @@ export function PanelChunkList({
             }}
             className={`story-panels-chunk story-panels-chunk--${panel.sourceKind} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${openMenuId === panel.id ? 'is-menu-open' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''}`}
             onClick={() => onSelectPanel(panel.id)}
+            onDoubleClick={(event) => {
+              if (!isPanel(panel) || !onSavePanelEdit) return;
+              event.preventDefault();
+              event.stopPropagation();
+              openPanelEditor(panel);
+            }}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
@@ -504,6 +628,29 @@ export function PanelChunkList({
             <div className="story-panels-chunk-main">
               <div className="story-panels-chunk-title-row">
                 <strong>{itemTitle(panel, panels, manualMode)}</strong>
+                {!manualMode && isPanel(panel) && isBookLinked(panel) ? (
+                  <span className="story-panels-chunk-range">{panel.startOffset}-{panel.endOffset}</span>
+                ) : !manualMode && panel.startOffset !== null && panel.endOffset !== null ? (
+                  <span className="story-panels-chunk-range">{panel.startOffset}-{panel.endOffset}</span>
+                ) : null}
+                {showPlacement && (
+                  isPlaced ? (
+                    <button
+                      type="button"
+                      className="story-panels-placement-badge is-placed"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenPanelPlacement?.(panel.id);
+                      }}
+                    >
+                      {storyPagePlacementLabel(pages, panel.pageId)}
+                    </button>
+                  ) : (
+                    <span className="story-panels-placement-badge is-unplaced">
+                      {storyPagePlacementLabel(pages, panel.pageId)}
+                    </span>
+                  )
+                )}
                 <ChunkActionsMenu
                   isOpen={openMenuId === panel.id}
                   onToggle={() => setOpenMenuId((current) => (current === panel.id ? null : panel.id))}
@@ -519,31 +666,15 @@ export function PanelChunkList({
                   showPlaceOnLayout={Boolean(!isPlaced && onPlacePanelOnLayout && showPlacement)}
                   isSaving={isSaving || isCreating}
                 />
-                {!manualMode && isPanel(panel) && isBookLinked(panel) ? (
-                  <span className="story-panels-chunk-range">{panel.startOffset}-{panel.endOffset}</span>
-                ) : !manualMode && panel.startOffset !== null && panel.endOffset !== null ? (
-                  <span className="story-panels-chunk-range">{panel.startOffset}-{panel.endOffset}</span>
-                ) : null}
               </div>
-              {showPlacement && (
-                isPlaced ? (
-                  <button
-                    type="button"
-                    className="story-panels-placement-badge is-placed"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onOpenPanelPlacement?.(panel.id);
-                    }}
-                  >
-                    {storyPagePlacementLabel(pages, panel.pageId)}
-                  </button>
-                ) : (
-                  <span className="story-panels-placement-badge is-unplaced">
-                    {storyPagePlacementLabel(pages, panel.pageId)}
-                  </span>
-                )
+              {previewText && <p>{compactText(previewText)}</p>}
+              {captionPreviews.length > 0 && (
+                <ul className="story-panels-chunk-caption-preview-list">
+                  {captionPreviews.map((caption, index) => (
+                    <li key={`${panel.id}-caption-preview-${index}`}>{compactText(caption, 90)}</li>
+                  ))}
+                </ul>
               )}
-              <p>{compactText(primaryText)}</p>
               {secondaryText && <p className="story-panels-chunk-excerpt muted">{compactText(secondaryText, 120)}</p>}
             </div>
           </article>
@@ -602,6 +733,99 @@ export function PanelChunkList({
               <button type="button" className="secondary" disabled={isCreating} onClick={() => setShowEditTextDialog(false)}>Cancel</button>
               <button type="button" disabled={isCreating || !editTextValue.trim()} onClick={() => void submitEditText()}>
                 {isCreating ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {panelEditorPanel && onSavePanelEdit && (
+        <div className="confirm-backdrop" onClick={() => !isCreating && closePanelEditor()}>
+          <div className="confirm-dialog story-panels-panel-editor-popover" role="dialog" aria-modal="true" aria-labelledby="panel-caption-editor-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="panel-caption-editor-title">Panel editor</h2>
+            <div className="story-panels-panel-editor-meta-row">
+              <div className="story-panels-info-control story-panels-panel-editor-id">
+                <span>Panel ID</span>
+                <code>{panelEditorPanel.id}</code>
+              </div>
+              <div className="story-panels-info-control story-panels-panel-editor-placement">
+                <span>Placement</span>
+                {panelIsPlacedOnLayout(pages, panelEditorPanel) ? (
+                  <button
+                    type="button"
+                    className="story-panels-placement-badge is-placed"
+                    disabled={isCreating}
+                    onClick={() => {
+                      closePanelEditor();
+                      onOpenPanelPlacement?.(panelEditorPanel.id);
+                    }}
+                  >
+                    {storyPagePlacementLabel(pages, panelEditorPanel.pageId)}
+                  </button>
+                ) : (
+                  <span className="story-panels-placement-badge is-unplaced">
+                    {storyPagePlacementLabel(pages, panelEditorPanel.pageId)}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="story-panels-panel-editor-grid">
+              <label>
+                Panel name
+                <input
+                  value={panelEditorTitle}
+                  disabled={isCreating}
+                  placeholder={itemTitle(panelEditorPanel, panels, manualMode)}
+                  onChange={(event) => setPanelEditorTitle(event.target.value)}
+                  onKeyDown={(event) => event.stopPropagation()}
+                />
+              </label>
+            </div>
+            {isBookLinked(panelEditorPanel) && (
+              <label className="story-panels-panel-editor-field">
+                Story text
+                <textarea value={panelEditorPanel.selectedText} rows={3} disabled readOnly />
+              </label>
+            )}
+            <label className="story-panels-panel-editor-field">
+              Panel text
+              <textarea
+                value={panelEditorText}
+                rows={4}
+                disabled={isCreating}
+                placeholder={isBookLinked(panelEditorPanel) ? 'Adaptation notes or panel-specific text...' : 'Panel text...'}
+                onChange={(event) => setPanelEditorText(event.target.value)}
+                onKeyDown={(event) => event.stopPropagation()}
+              />
+            </label>
+            <div className="story-panels-panel-caption-editor-group">
+              <div className="story-panels-panel-editor-section-head">
+                <strong>Captions</strong>
+                <button type="button" className="secondary" disabled={isCreating} onClick={addCaptionDraft}>Add caption</button>
+              </div>
+              <div className="story-panels-panel-caption-editor-list">
+                {captionDrafts.length === 0 ? (
+                  <p className="muted">No captions yet.</p>
+                ) : captionDrafts.map((caption, index) => (
+                  <label key={caption.id}>
+                    <span>
+                      Caption {index + 1}
+                      <button type="button" className="danger subtle" disabled={isCreating} onClick={() => deleteCaptionDraft(caption.id)}>Delete</button>
+                    </span>
+                    <textarea
+                      value={caption.customText}
+                      rows={3}
+                      disabled={isCreating}
+                      onChange={(event) => updateCaptionDraftText(caption.id, event.target.value)}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="secondary" disabled={isCreating} onClick={closePanelEditor}>Cancel</button>
+              <button type="button" disabled={isCreating} onClick={() => void submitPanelEditor()}>
+                {isCreating ? 'Saving...' : 'Save panel'}
               </button>
             </div>
           </div>

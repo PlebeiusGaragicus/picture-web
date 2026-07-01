@@ -17,7 +17,7 @@ from typing import Literal
 
 import library
 import story_panels
-from models import StoryPanel, StoryPanelDocument, StoryPanelImageCrop, StoryPanelPage, LAYOUT_PAGE_ROWS
+from models import StoryPanel, StoryPanelCaption, StoryPanelDocument, StoryPanelImageCrop, StoryPanelPage, LAYOUT_PAGE_ROWS
 
 SHEET_WIDTH, SHEET_HEIGHT = landscape(letter)
 HALF_WIDTH = SHEET_WIDTH / 2
@@ -29,8 +29,8 @@ INNER_GUTTER = 18
 GRID_COLUMNS = 12
 
 
-def _is_caption_panel(panel: StoryPanel) -> bool:
-    return panel.sourceKind == "panel" and panel.parentPanelId is not None
+def _is_caption_panel(panel: StoryPanel | StoryPanelCaption) -> bool:
+    return isinstance(panel, StoryPanelCaption)
 
 
 @dataclass(frozen=True)
@@ -223,6 +223,8 @@ def _draw_comic_page(
     page_rows = float(LAYOUT_PAGE_ROWS)
     for panel in page_panels:
         _draw_panel(pdf, panel, print_page.number, page_x, page_y, page_w, page_h, page_rows, slug=slug)
+        for caption in sorted(panel.captions, key=lambda item: (item.layer, item.rect.y, item.rect.x, item.id)):
+            _draw_caption(pdf, caption, page_x, page_y, page_w, page_h, page_rows)
     if print_page.number is not None:
         pdf.setFillColor(HexColor("#475569"))
         pdf.setFont("Helvetica", 7)
@@ -257,6 +259,22 @@ def _draw_panel(
     _draw_image_panel(pdf, panel, page_number, x, y, w, h, slug=slug)
 
 
+def _draw_caption(
+    pdf: canvas.Canvas,
+    caption: StoryPanelCaption,
+    page_x: float,
+    page_y: float,
+    page_w: float,
+    page_h: float,
+    page_rows: float,
+) -> None:
+    x = page_x + (caption.rect.x / GRID_COLUMNS) * page_w
+    w = (caption.rect.w / GRID_COLUMNS) * page_w
+    h = (caption.rect.h / page_rows) * page_h
+    y = page_y + page_h - ((caption.rect.y / page_rows) * page_h) - h
+    _draw_text_panel(pdf, caption, x, y, w, h)
+
+
 def _caption_outline_offsets() -> tuple[tuple[float, float], ...]:
     # CSS uses a fixed 1px text-shadow halo; 1 CSS px is 0.75pt in print.
     offset = 0.75
@@ -272,7 +290,7 @@ def _caption_outline_offsets() -> tuple[tuple[float, float], ...]:
     )
 
 
-def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel, x: float, y: float, w: float, h: float) -> None:
+def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel | StoryPanelCaption, x: float, y: float, w: float, h: float) -> None:
     style = panel.textStyle
     is_caption = _is_caption_panel(panel)
     transparent = is_caption and style.background == "transparent"
@@ -287,7 +305,8 @@ def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel, x: float, y: float, 
         pdf.roundRect(x, y, w, h, radius, stroke=0 if transparent else 1, fill=0 if transparent else 1)
     else:
         pdf.rect(x, y, w, h, stroke=0 if transparent else 1, fill=0 if transparent else 1)
-    rich_text = panel.richText or _plain_text_to_rich_text(panel.customText or panel.selectedText)
+    selected_text = panel.selectedText if isinstance(panel, StoryPanel) else ""
+    rich_text = panel.richText or _plain_text_to_rich_text(panel.customText or selected_text)
     text_color = HexColor(style.color) if is_caption else black
     text_x = x + 5
     text_y = y + h - 8

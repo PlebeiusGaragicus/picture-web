@@ -1,5 +1,5 @@
 import type { StoryPanel, StoryPanelDocument } from '../types';
-import { isCaption } from './panelModel';
+import { captionAsPanel, isCaption } from './panelModel';
 
 export type StoryPanelHistoryEntry = {
   document: StoryPanelDocument;
@@ -8,6 +8,10 @@ export type StoryPanelHistoryEntry = {
 
 function panelSnapshot(panel: StoryPanel) {
   return JSON.stringify(panel);
+}
+
+function panelsAndCaptions(document: StoryPanelDocument) {
+  return document.panels.flatMap((panel) => [panel, ...(panel.captions ?? []).map((caption) => captionAsPanel(panel, caption))]);
 }
 
 export function inferDocumentChangeLabel(before: StoryPanelDocument, after: StoryPanelDocument): string {
@@ -21,10 +25,12 @@ export function inferDocumentChangeLabel(before: StoryPanelDocument, after: Stor
   const afterPageOrder = after.pages.map((page) => page.id).join('\0');
   if (beforePageOrder !== afterPageOrder) return 'Reorder pages';
 
-  const beforePanels = new Map(before.panels.map((panel) => [panel.id, panel]));
-  const afterPanels = new Map(after.panels.map((panel) => [panel.id, panel]));
-  const added = after.panels.filter((panel) => !beforePanels.has(panel.id));
-  const removed = before.panels.filter((panel) => !afterPanels.has(panel.id));
+  const beforeItems = panelsAndCaptions(before);
+  const afterItems = panelsAndCaptions(after);
+  const beforePanels = new Map(beforeItems.map((panel) => [panel.id, panel]));
+  const afterPanels = new Map(afterItems.map((panel) => [panel.id, panel]));
+  const added = afterItems.filter((panel) => !beforePanels.has(panel.id));
+  const removed = beforeItems.filter((panel) => !afterPanels.has(panel.id));
 
   if (removed.length === 1 && added.length === 0) {
     const panel = removed[0];
@@ -39,7 +45,7 @@ export function inferDocumentChangeLabel(before: StoryPanelDocument, after: Stor
     return 'Add panel';
   }
 
-  const changed = after.panels.filter((panel) => {
+  const changed = afterItems.filter((panel) => {
     const previous = beforePanels.get(panel.id);
     return previous && panelSnapshot(previous) !== panelSnapshot(panel);
   });

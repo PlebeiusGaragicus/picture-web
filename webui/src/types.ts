@@ -351,6 +351,15 @@ export interface StoryPanelTextStyle {
   outlineColor?: string;
 }
 
+export interface StoryPanelCaption {
+  id: string;
+  customText: string;
+  richText: string;
+  textStyle: StoryPanelTextStyle;
+  rect: StoryPanelRect;
+  layer: number;
+}
+
 export interface StoryPanel {
   id: string;
   order: number;
@@ -372,6 +381,7 @@ export interface StoryPanel {
   aspectRatio?: string | null;
   aspectRatioLocked?: boolean;
   imageCrop?: StoryPanelImageCrop | null;
+  captions: StoryPanelCaption[];
   finalized: boolean;
 }
 
@@ -406,7 +416,7 @@ export interface StoryPanelBookmarkCreatePayload {
 }
 
 export type StoryPanelPatchPayload = Partial<
-  Pick<StoryPanel, 'order' | 'title' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'customText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'finalized'>
+  Pick<StoryPanel, 'order' | 'title' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'customText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'captions' | 'finalized'>
 >;
 
 export interface SceneListLine {
