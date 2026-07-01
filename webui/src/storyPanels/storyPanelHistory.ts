@@ -1,4 +1,5 @@
 import type { StoryPanel, StoryPanelDocument } from '../types';
+import { isCaption } from './panelModel';
 
 export type StoryPanelHistoryEntry = {
   document: StoryPanelDocument;
@@ -27,16 +28,14 @@ export function inferDocumentChangeLabel(before: StoryPanelDocument, after: Stor
 
   if (removed.length === 1 && added.length === 0) {
     const panel = removed[0];
-    if (panel.sourceKind === 'caption') return 'Delete caption';
-    if (panel.sourceKind === 'story') return 'Remove panel from layout';
+    if (isCaption(panel)) return 'Delete caption';
+    if (panel.sourceKind === 'panel') return 'Remove panel from layout';
     return 'Delete panel';
   }
 
   if (added.length === 1 && removed.length === 0) {
     const panel = added[0];
-    if (panel.sourceKind === 'caption') return 'Add caption';
-    if (panel.sourceKind === 'free-text') return 'Add text block';
-    if (panel.sourceKind === 'free-image') return 'Add image block';
+    if (isCaption(panel)) return 'Add caption';
     return 'Add panel';
   }
 

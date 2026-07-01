@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StoryPanel } from '../types';
 import { bookAnchorPanels } from './storyPanelSidebar';
+import { isBookLinked, isPanel } from './panelModel';
 
 export type TextSelectionRange = {
   startOffset: number;
@@ -42,7 +43,7 @@ function buildTextPieces(bookText: string, panels: StoryPanel[], selection: Text
     const end = points[index + 1];
     if (start >= end) continue;
     const covering = anchors.filter((panel) => panel.startOffset! <= start && panel.endOffset! >= end);
-    const story = covering.find((panel) => panel.sourceKind === 'story');
+    const story = covering.find((panel) => isPanel(panel));
     const bookmark = covering.find((panel) => panel.sourceKind === 'bookmark');
     const isSelection = Boolean(selection && selection.startOffset <= start && selection.endOffset >= end);
     pieces.push({
@@ -93,7 +94,7 @@ export function BookTextSelector({
   const [pendingDeletePanelId, setPendingDeletePanelId] = useState<string | null>(null);
   const [isDeletingPanel, setIsDeletingPanel] = useState(false);
   const storyPanels = useMemo(
-    () => panels.filter((panel) => panel.sourceKind === 'story' && panel.startOffset !== null && panel.endOffset !== null),
+    () => panels.filter((panel) => isPanel(panel) && isBookLinked(panel)),
     [panels],
   );
   const pieces = useMemo(() => buildTextPieces(bookText, panels, selection), [bookText, panels, selection]);
@@ -387,7 +388,7 @@ export function BookTextSelector({
         <div className="confirm-backdrop" onClick={() => !isDeletingPanel && setPendingDeletePanelId(null)}>
           <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-book-anchor-title" onClick={(event) => event.stopPropagation()}>
             <h2 id="delete-book-anchor-title">
-              {pendingDeletePanel.sourceKind === 'bookmark' ? 'Delete bookmark?' : 'Delete panel chunk?'}
+              {pendingDeletePanel.sourceKind === 'bookmark' ? 'Delete bookmark?' : 'Delete panel?'}
             </h2>
             <p>
               {pendingDeletePanel.sourceKind === 'bookmark'

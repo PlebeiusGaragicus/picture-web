@@ -3,6 +3,7 @@ import { formatRequestError } from '../formatError';
 import { api } from '../api';
 import type { Asset, CanvasDocument, StoryPanelDocument, TagDefinition } from '../types';
 import { sortedPanels } from './storyPanelUtils';
+import { topLevelPanels } from './panelModel';
 
 const emptyCanvas: CanvasDocument = { version: 2, viewport: { x: 0, y: 0, zoom: 1 }, nodes: {} };
 
@@ -51,15 +52,11 @@ export function useStoryPanelDocument(projectSlug: string, options?: { withCanva
 
   const panels = useMemo(() => sortedPanels(document?.panels ?? []), [document]);
   const storyPanels = useMemo(
-    () => panels.filter((panel) => panel.sourceKind === 'story' || panel.sourceKind === 'draft'),
+    () => topLevelPanels(panels),
     [panels],
   );
   const sidebarPanels = useMemo(
-    () => panels.filter(
-      (panel) => panel.sourceKind === 'story'
-        || panel.sourceKind === 'draft'
-        || panel.sourceKind === 'bookmark',
-    ),
+    () => panels.filter((panel) => panel.sourceKind === 'bookmark' || (panel.sourceKind === 'panel' && panel.parentPanelId == null)),
     [panels],
   );
 

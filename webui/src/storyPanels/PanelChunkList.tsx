@@ -14,6 +14,7 @@ import {
   type InsertDraftPayload,
   type SidebarFilter,
 } from './storyPanelSidebar';
+import { isBookLinked, isPanel } from './panelModel';
 
 function compactText(value: string, maxLength = 180) {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -22,11 +23,11 @@ function compactText(value: string, maxLength = 180) {
 }
 
 function itemTitle(panel: StoryPanel, panels: StoryPanel[], manualMode: boolean) {
-  if (manualMode && panel.sourceKind === 'draft') {
+  if (panel.sourceKind === 'panel') {
     const number = manualPanelNumber(panels, panel.id);
     return number > 0 ? `Panel ${number}` : 'Panel';
   }
-  return sidebarItemLabel(panel.sourceKind as 'story' | 'draft' | 'bookmark');
+  return sidebarItemLabel(panel.sourceKind);
 }
 
 function deletePanelConfirmCopy(panel: StoryPanel, manualMode: boolean): { title: string; body: string } {
@@ -36,16 +37,8 @@ function deletePanelConfirmCopy(panel: StoryPanel, manualMode: boolean): { title
       body: 'This removes the bookmark from the reading list.',
     };
   }
-  if (panel.sourceKind === 'draft') {
-    return {
-      title: manualMode ? 'Delete panel?' : 'Delete draft?',
-      body: manualMode
-        ? 'This removes the panel from your story and layout.'
-        : 'This removes the draft from the reading list.',
-    };
-  }
   return {
-    title: 'Delete panel chunk?',
+    title: 'Delete panel?',
     body: 'This removes the panel from the reading list and layout.',
   };
 }
@@ -302,16 +295,15 @@ export function PanelChunkList({
   const allItems = sortSidebarItems(panels);
   const sortedPanels = filterSidebarItems(panels, sidebarFilter);
   const coveredChars = allItems
-    .filter((panel) => panel.sourceKind === 'story' && panel.startOffset !== null && panel.endOffset !== null)
+    .filter((panel) => isPanel(panel) && isBookLinked(panel))
     .reduce((total, panel) => total + (panel.endOffset! - panel.startOffset!), 0);
   const counts = {
     all: allItems.length,
-    story: allItems.filter((panel) => panel.sourceKind === 'story').length,
+    panel: allItems.filter((panel) => panel.sourceKind === 'panel').length,
     bookmark: allItems.filter((panel) => panel.sourceKind === 'bookmark').length,
-    draft: allItems.filter((panel) => panel.sourceKind === 'draft').length,
   };
   const coverage = bookLength > 0 ? Math.round((coveredChars / bookLength) * 100) : 0;
-  const canInsertDraft = Boolean(onInsertDraft) && !hasBookText;
+  const canInsertDraft = Boolean(onInsertDraft);
   const pendingDeletePanel = pendingDeletePanelId
     ? panels.find((panel) => panel.id === pendingDeletePanelId) ?? null
     : null;
@@ -437,7 +429,7 @@ export function PanelChunkList({
             <h2>Reading</h2>
             <p className="muted">
               {bookLength > 0
-                ? `${counts.story} panels cover ${coverage}% of the book text.`
+                ? `${counts.panel} panels cover ${coverage}% of the book text.`
                 : `${counts.all} item${counts.all === 1 ? '' : 's'}.`}
             </p>
           </div>
@@ -448,7 +440,7 @@ export function PanelChunkList({
           <p className="story-panels-chunks-meta muted">
             {manualMode
               ? `${counts.all} panel${counts.all === 1 ? '' : 's'}`
-              : `${counts.all} item${counts.all === 1 ? '' : 's'}${bookLength > 0 ? ` · ${counts.story} panels · ${coverage}% covered` : ''}`}
+              : `${counts.all} item${counts.all === 1 ? '' : 's'}${bookLength > 0 ? ` · ${counts.panel} panels · ${coverage}% covered` : ''}`}
           </p>
           {canInsertDraft && (
             <button type="button" className="secondary story-panels-add-panel-button" disabled={isSaving || isCreating} onClick={() => openInsertDialog(null)}>
@@ -465,7 +457,7 @@ export function PanelChunkList({
               {canInsertDraft
                 ? manualMode
                   ? 'No panels yet. Add one here or continue writing in the story pane.'
-                  : 'No items yet. Open the menu to insert a draft, or select a passage in Story.'
+                  : 'No items yet. Add a panel here, or select a passage in Story.'
                 : 'No items yet. Select a passage in the book text to begin.'}
             </p>
             {canInsertDraft && (
@@ -490,7 +482,7 @@ export function PanelChunkList({
         ) : sortedPanels.map((panel) => {
           const primaryText = sidebarItemPrimaryText(panel);
           const secondaryText = sidebarItemSecondaryText(panel);
-          const showPlacement = panel.sourceKind === 'story' || panel.sourceKind === 'draft';
+          const showPlacement = isPanel(panel);
           const isPlaced = showPlacement && panelIsPlacedOnLayout(pages, panel);
           return (
           <article
@@ -518,19 +510,17 @@ export function PanelChunkList({
                   onClose={() => setOpenMenuId(null)}
                   onDelete={() => setPendingDeletePanelId(panel.id)}
                   onInsertAfter={canInsertDraft ? () => openInsertDialog(panel.id) : undefined}
-                  onEditNote={onEditPanelNote && panel.sourceKind === 'story' ? () => openNoteDialog(panel.id) : undefined}
-                  onEditText={onEditPanelText && panel.sourceKind === 'draft' && manualMode ? () => openEditTextDialog(panel.id) : undefined}
+                  onEditNote={onEditPanelNote && isPanel(panel) && isBookLinked(panel) ? () => openNoteDialog(panel.id) : undefined}
+                  onEditText={onEditPanelText && isPanel(panel) && !isBookLinked(panel) && manualMode ? () => openEditTextDialog(panel.id) : undefined}
                   onPlaceOnLayout={!isPlaced && onPlacePanelOnLayout ? () => void onPlacePanelOnLayout(panel.id) : undefined}
                   showInsert={canInsertDraft}
-                  showEditNote={Boolean(onEditPanelNote && panel.sourceKind === 'story')}
-                  showEditText={Boolean(onEditPanelText && panel.sourceKind === 'draft' && manualMode)}
+                  showEditNote={Boolean(onEditPanelNote && isPanel(panel) && isBookLinked(panel))}
+                  showEditText={Boolean(onEditPanelText && isPanel(panel) && !isBookLinked(panel) && manualMode)}
                   showPlaceOnLayout={Boolean(!isPlaced && onPlacePanelOnLayout && showPlacement)}
                   isSaving={isSaving || isCreating}
                 />
-                {!manualMode && panel.sourceKind === 'story' && panel.startOffset !== null && panel.endOffset !== null ? (
+                {!manualMode && isPanel(panel) && isBookLinked(panel) ? (
                   <span className="story-panels-chunk-range">{panel.startOffset}-{panel.endOffset}</span>
-                ) : !manualMode && panel.sourceKind === 'draft' ? (
-                  <span className="story-panels-chunk-kind">Draft</span>
                 ) : !manualMode && panel.startOffset !== null && panel.endOffset !== null ? (
                   <span className="story-panels-chunk-range">{panel.startOffset}-{panel.endOffset}</span>
                 ) : null}
@@ -567,10 +557,10 @@ export function PanelChunkList({
             <p className="muted">
               {manualMode
                 ? 'Write the scene, dialogue, or narration for this panel.'
-                : 'Write the passage, caption, or scene text for this draft chunk.'}
+                : 'Write the passage, caption, or scene text for this panel.'}
             </p>
             <label>
-              {manualMode ? 'Panel text' : 'Draft text'}
+              Panel text
               <textarea
                 value={draftText}
                 rows={6}
@@ -587,7 +577,7 @@ export function PanelChunkList({
                 setInsertAfterPanelId(null);
               }}>Cancel</button>
               <button type="button" disabled={isCreating || !draftText.trim()} onClick={() => void submitInsertDraft()}>
-                {isCreating ? 'Adding…' : manualMode ? 'Add panel' : 'Insert draft'}
+                {isCreating ? 'Adding…' : 'Add panel'}
               </button>
             </div>
           </div>

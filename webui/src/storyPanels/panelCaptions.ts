@@ -1,5 +1,6 @@
 import type { StoryPanel, StoryPanelDocument, StoryPanelRect } from '../types';
 import { LAYOUT_PAGE_ROWS } from './printLayout';
+import { isCaption } from './panelModel';
 
 export const CAPTION_GRID_SNAP = 12;
 const CAPTION_GRID_COLUMNS = 12;
@@ -52,7 +53,7 @@ export function parentPanelFor(document: StoryPanelDocument, panel: StoryPanel) 
 
 export function imageInfoHostFor(document: StoryPanelDocument, panel: StoryPanel | null) {
   if (!panel) return null;
-  if (panel.sourceKind === 'caption') {
+  if (isCaption(panel)) {
     const linkedParent = parentPanelFor(document, panel);
     if (linkedParent) return linkedParent;
     return document.panels.find((candidate) =>
@@ -66,7 +67,7 @@ export function imageInfoHostFor(document: StoryPanelDocument, panel: StoryPanel
 
 export function panelKindHostFor(document: StoryPanelDocument, panel: StoryPanel | null) {
   if (!panel) return null;
-  if (panel.sourceKind === 'caption') {
+  if (isCaption(panel)) {
     return imageInfoHostFor(document, panel);
   }
   return panel;
@@ -79,6 +80,6 @@ export function removePanelAndCaptionChildren(document: StoryPanelDocument, pane
   return document.panels.filter((panel) => panel.id !== panelId && !childIds.has(panel.id));
 }
 
-export function captionSnapScaleFor(panel: Pick<StoryPanel, 'sourceKind'>) {
-  return panel.sourceKind === 'caption' ? CAPTION_GRID_SNAP : null;
+export function captionSnapScaleFor(panel: Pick<StoryPanel, 'sourceKind' | 'parentPanelId'>) {
+  return panel.sourceKind === 'panel' && panel.parentPanelId ? CAPTION_GRID_SNAP : null;
 }

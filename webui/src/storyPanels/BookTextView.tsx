@@ -10,6 +10,7 @@ import type { InsertDraftPayload } from './storyPanelSidebar';
 import { sortedPanels, withSelectedText } from './storyPanelUtils';
 import { autoPlaceDraftPanel } from './autoPlace';
 import { useStoryPanelDocument } from './useStoryPanelDocument';
+import { isBookLinked, isPanel } from './panelModel';
 
 export function BookTextView({
   projectSlug,
@@ -121,7 +122,7 @@ export function BookTextView({
       setSelection(null);
       setSelectedPanelId(
         sortedPanels(next.panels).find(
-          (panel) => panel.sourceKind === 'story' && panel.startOffset === selection.startOffset && panel.endOffset === selection.endOffset,
+          (panel) => panel.sourceKind === 'panel' && panel.startOffset === selection.startOffset && panel.endOffset === selection.endOffset,
         )?.id ?? null,
       );
       window.getSelection()?.removeAllRanges();
@@ -136,7 +137,7 @@ export function BookTextView({
     const next = await deletePanel(panelId);
     if (next) {
       setSelectedPanelId(sortedPanels(next.panels).find((panel) => (
-        panel.sourceKind === 'story' || panel.sourceKind === 'draft' || panel.sourceKind === 'bookmark'
+        (isPanel(panel) && panel.parentPanelId == null) || panel.sourceKind === 'bookmark'
       ))?.id ?? null);
     }
   };
@@ -167,7 +168,7 @@ export function BookTextView({
   const insertDraft = async ({ customText, insertAfterPanelId }: InsertDraftPayload) => {
     if (!document) return;
     const beforeIds = new Set(document.panels.map((panel) => panel.id));
-    const next = await api.createDraftStoryPanel(projectSlug, {
+    const next = await api.createStoryPanel(projectSlug, {
       customText,
       insertAfterPanelId,
       autoPlace: autoPlaceDraftPanel(sidebarPanels.length, autoPlaceEnabled),
@@ -195,7 +196,7 @@ export function BookTextView({
 
   const adjustPanelRange = async (panelId: string, startOffset: number, endOffset: number) => {
     if (!document) return;
-    const ordered = sortedPanels(document.panels).filter((panel) => panel.sourceKind === 'story');
+    const ordered = sortedPanels(document.panels).filter((panel) => isPanel(panel) && isBookLinked(panel));
     const targetIndex = ordered.findIndex((panel) => panel.id === panelId);
     if (targetIndex < 0) return;
     const target = ordered[targetIndex];
@@ -282,7 +283,7 @@ export function BookTextView({
           {hasBookText ? (
             <BookTextSelector
               bookText={bookText}
-              panels={sidebarPanels.filter((panel) => panel.sourceKind === 'story' || panel.sourceKind === 'bookmark')}
+              panels={sidebarPanels.filter((panel) => (isPanel(panel) && isBookLinked(panel)) || panel.sourceKind === 'bookmark')}
               selection={selection}
               focusedPanelId={focusedBookPanelId}
               onSelectionChange={setSelection}

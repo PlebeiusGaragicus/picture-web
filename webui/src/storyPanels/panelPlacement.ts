@@ -1,13 +1,10 @@
 import type { StoryPanel, StoryPanelDocument, StoryPanelPage } from '../types';
 import { panelKindHostFor } from './panelCaptions';
-import { storyPageNumberById } from './pageNumbers';
+import { isBookmark, isPanel } from './panelModel';
 
 export function panelIsPlacedOnLayout(pages: StoryPanelPage[], panel: Pick<StoryPanel, 'pageId' | 'sourceKind'>): boolean {
   if (!panel.pageId) return false;
-  if (panel.sourceKind === 'story' || panel.sourceKind === 'draft') {
-    return storyPageNumberById(pages).has(panel.pageId);
-  }
-  return pages.some((page) => page.id === panel.pageId);
+  return panel.sourceKind === 'panel' && pages.some((page) => page.id === panel.pageId);
 }
 
 export function removeStoryPanelFromLayout(document: StoryPanelDocument, panelId: string): StoryPanelDocument {
@@ -27,7 +24,7 @@ export function removeStoryPanelFromLayout(document: StoryPanelDocument, panelId
 }
 
 export function isPanelChunkSourceKind(sourceKind: StoryPanel['sourceKind']): boolean {
-  return sourceKind === 'story' || sourceKind === 'draft' || sourceKind === 'bookmark';
+  return sourceKind === 'panel';
 }
 
 /** Reading-list chunk whose layout placement should be cleared, not deleted. */
@@ -36,6 +33,6 @@ export function readingChunkPanelForLayoutAction(
   selectedPanel: StoryPanel | null,
 ): StoryPanel | null {
   const host = panelKindHostFor(document, selectedPanel);
-  if (!host || !isPanelChunkSourceKind(host.sourceKind)) return null;
+  if (!host || !isPanel(host) || isBookmark(host)) return null;
   return host;
 }

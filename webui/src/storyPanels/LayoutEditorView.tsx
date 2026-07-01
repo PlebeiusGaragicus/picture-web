@@ -13,6 +13,8 @@ import { useStoryPanelDocument } from './useStoryPanelDocument';
 import { formatRequestError } from '../formatError';
 import { HoverTooltip } from '../ui';
 import { api } from '../api';
+import type { StoryPanelRect } from '../types';
+import { isPanel, isUnplaced } from './panelModel';
 
 const SPREAD_PANEL_INFO_KEY = 'story-panels-spread-panel-info';
 
@@ -101,7 +103,7 @@ export function LayoutEditorView({
     setFocusedChunkPanelId(null);
     window.setTimeout(() => setFocusedChunkPanelId(initialNavigation.panelId), 0);
     const panel = document.panels.find((candidate) => candidate.id === initialNavigation.panelId);
-    if (panel?.pageId && document.pages.some((page) => page.id === panel.pageId && page.pageKind === 'story')) {
+    if (panel?.pageId && document.pages.some((page) => page.id === panel.pageId)) {
       setNavigateToPanelId(initialNavigation.panelId);
     }
     onNavigationComplete();
@@ -119,7 +121,7 @@ export function LayoutEditorView({
       setFocusedChunkPanelId(null);
       return;
     }
-    if (!document?.panels.some((panel) => panel.id === panelId && (panel.sourceKind === 'story' || panel.sourceKind === 'draft'))) return;
+    if (!document?.panels.some((panel) => panel.id === panelId && isPanel(panel))) return;
     setFocusedChunkPanelId(null);
     window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
   };
@@ -133,7 +135,7 @@ export function LayoutEditorView({
     setSelectedPanelId(panelId);
     setFocusedChunkPanelId(null);
     window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
-    if (panel.pageId && document.pages.some((page) => page.id === panel.pageId && page.pageKind === 'story')) {
+    if (panel.pageId && document.pages.some((page) => page.id === panel.pageId)) {
       setNavigateToPanelId(panelId);
     }
   };
@@ -156,13 +158,13 @@ export function LayoutEditorView({
   const handleDeletePanel = async (panelId: string) => {
     const next = await deletePanel(panelId);
     if (next) {
-      setSelectedPanelId(sortedPanels(next.panels).find((panel) => panel.sourceKind === 'story' || panel.sourceKind === 'draft')?.id ?? null);
+      setSelectedPanelId(sortedPanels(next.panels).find((panel) => isPanel(panel) && panel.parentPanelId == null)?.id ?? null);
     }
   };
 
   const insertDraft = async ({ customText, insertAfterPanelId }: InsertDraftPayload) => {
     const beforeIds = new Set(document?.panels.map((panel) => panel.id) ?? []);
-    const next = await api.createDraftStoryPanel(projectSlug, {
+    const next = await api.createStoryPanel(projectSlug, {
       customText,
       insertAfterPanelId,
       autoPlace: autoPlaceDraftPanel(sidebarPanels.length, readAutoPlaceEnabled()),
@@ -179,6 +181,33 @@ export function LayoutEditorView({
   const editPanelNote = async (panelId: string, noteText: string) => {
     const next = await api.patchStoryPanel(projectSlug, panelId, { customText: noteText });
     setDocument(next);
+  };
+
+  const createPanelAt = async ({ pageId, rect, panelKind }: { pageId: string; rect: StoryPanelRect; panelKind: 'image' | 'text' }) => {
+    const beforeIds = new Set(document?.panels.map((panel) => panel.id) ?? []);
+    const next = await api.createStoryPanel(projectSlug, {
+      title: panelKind === 'text' ? 'Text panel' : 'Image panel',
+      customText: panelKind === 'text' ? 'Text block' : '',
+      panelKind,
+      pageId,
+      rect,
+      autoPlace: false,
+    });
+    setDocument(next);
+    const created = next.panels.find((panel) => !beforeIds.has(panel.id));
+    if (created) {
+      setSelectedPanelId(created.id);
+      setFocusedChunkPanelId(null);
+      return created.id;
+    }
+    return null;
+  };
+
+  const placePanelAt = async ({ panelId, pageId, rect }: { panelId: string; pageId: string; rect: StoryPanelRect }) => {
+    const next = await api.patchStoryPanel(projectSlug, panelId, { pageId, rect });
+    setDocument(next);
+    setSelectedPanelId(panelId);
+    setFocusedChunkPanelId(null);
   };
 
   useEffect(() => {
@@ -233,6 +262,8 @@ export function LayoutEditorView({
     );
   }
 
+  const unplacedPanels = sidebarPanels.filter(isUnplaced);
+
   const panelChunks = (
     <PanelChunkList
       bookLength={bookText.length}
@@ -244,7 +275,7 @@ export function LayoutEditorView({
       onOpenPanelPlacement={openPanelPlacement}
       onPlacePanelOnLayout={placePanelOnLayout}
       onDeletePanel={handleDeletePanel}
-      onInsertDraft={bookText.length === 0 ? insertDraft : undefined}
+      onInsertDraft={insertDraft}
       onEditPanelNote={bookText.length > 0 ? editPanelNote : undefined}
       isSaving={isSaving || isPlacingPanel}
     />
@@ -330,6 +361,9 @@ export function LayoutEditorView({
           onHistoryControlsChange={setHistoryControls}
           onPageControlsChange={setPageControls}
           spreadPanelInfoEnabled={spreadPanelInfoEnabled}
+          unplacedPanels={unplacedPanels}
+          onCreatePanelAt={createPanelAt}
+          onPlacePanelAt={placePanelAt}
           assets={assets}
           projectTags={projectTags}
           canvas={canvas}

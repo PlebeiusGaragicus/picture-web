@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { StoryPanel, StoryPanelTextStyle } from '../types';
+import { isCaption } from './panelModel';
 
 export type CaptionSpeechKind = 'dialogue' | 'narration';
 
@@ -79,7 +80,7 @@ export function captionTextOutlineShadow(outlineColor: string): string {
 }
 
 export function captionPanelClassName(panel: StoryPanel): string {
-  if (panel.sourceKind !== 'caption') return '';
+  if (!isCaption(panel)) return '';
   const style = captionStyleForPanel(panel);
   const classes = [
     style.background === 'transparent' ? 'is-caption-bg-transparent' : '',
@@ -137,4 +138,54 @@ export function fitCaptionHeightRows(
   const rowHeightPx = bounds.height / pageRows;
   const rows = Math.round(((contentHeight + paddingPx) / rowHeightPx) * snapScale) / snapScale;
   return Math.max(0.25, rows);
+}
+
+function measureCaptionTextHeight(
+  caption: StoryPanel,
+  text: string,
+  gridElement: HTMLElement,
+  fontSize: number,
+): { contentHeight: number; paddingPx: number } | null {
+  const bounds = gridElement.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0) return null;
+  const style = { ...captionStyleForPanel(caption), fontSize };
+  const panelWidthPx = (caption.rect.w / 12) * bounds.width;
+  const fontSizePx = (style.fontSize / 360) * bounds.width;
+  const paddingPx = (1.388889 / 100) * bounds.width * 2;
+  const measure = document.createElement('div');
+  measure.style.position = 'absolute';
+  measure.style.visibility = 'hidden';
+  measure.style.pointerEvents = 'none';
+  measure.style.left = '0';
+  measure.style.top = '0';
+  measure.style.width = `${Math.max(1, panelWidthPx - paddingPx)}px`;
+  measure.style.fontFamily = textFontFamilies[style.fontFamily];
+  measure.style.fontSize = `${fontSizePx}px`;
+  measure.style.lineHeight = '1.2';
+  measure.style.whiteSpace = 'pre-wrap';
+  measure.style.wordBreak = 'break-word';
+  measure.textContent = text.trim() || ' ';
+  gridElement.appendChild(measure);
+  const contentHeight = measure.scrollHeight;
+  gridElement.removeChild(measure);
+  return { contentHeight, paddingPx };
+}
+
+export function fitCaptionFontSize(
+  caption: StoryPanel,
+  text: string,
+  gridElement: HTMLElement,
+  pageRows: number,
+): number {
+  const bounds = gridElement.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0 || pageRows <= 0) return captionStyleForPanel(caption).fontSize;
+  const targetHeight = (caption.rect.h / pageRows) * bounds.height;
+  let bestSize = 6;
+  for (let size = 6; size <= 48; size += 1) {
+    const measured = measureCaptionTextHeight(caption, text, gridElement, size);
+    if (!measured) return captionStyleForPanel(caption).fontSize;
+    if (measured.contentHeight + measured.paddingPx > targetHeight) break;
+    bestSize = size;
+  }
+  return bestSize;
 }

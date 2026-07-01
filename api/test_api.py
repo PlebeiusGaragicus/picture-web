@@ -1306,9 +1306,9 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
         (panel["pageId"], panel["sourceKind"], panel["panelKind"], panel["customText"])
         for panel in empty.json()["panels"]
     ] == [
-        ("cover", "free-text", "text", "Title goes here"),
-        ("inside-front-cover", "free-text", "text", "Copyright information goes here."),
-        ("inside-back-cover", "free-text", "text", "About this comic, acknowledgements, or bonus notes go here."),
+        ("cover", "panel", "text", "Title goes here"),
+        ("inside-front-cover", "panel", "text", "Copyright information goes here."),
+        ("inside-back-cover", "panel", "text", "About this comic, acknowledgements, or bonus notes go here."),
     ]
 
     book = client.get("/api/projects/farm-comic/story-panels/book")
@@ -1320,8 +1320,8 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
         json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
     )
     assert created.status_code == 200
-    panel = next(panel for panel in created.json()["panels"] if panel["sourceKind"] == "story")
-    assert panel["sourceKind"] == "story"
+    panel = next(panel for panel in created.json()["panels"] if panel["sourceKind"] == "panel" and panel["selectedText"] == "Alpha opens the door.")
+    assert panel["sourceKind"] == "panel"
     assert panel["selectedText"] == "Alpha opens the door."
     assert panel["rect"] == {"x": 0, "y": 0, "w": DEFAULT_AUTO_PLACE_W, "h": DEFAULT_AUTO_PLACE_H}
     alpha_panel_id = panel["id"]
@@ -1368,6 +1368,34 @@ def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
     assert any(panel["selectedText"] == "Beta crosses the room." for panel in deleted.json()["panels"])
 
 
+def test_story_panels_delete_default_fixed_page_text_persists(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    loaded = client.get("/api/projects/farm-comic/story-panels")
+    assert loaded.status_code == 200
+    copyright_panel_id = next(
+        panel["id"]
+        for panel in loaded.json()["panels"]
+        if panel["pageId"] == "inside-front-cover" and panel["sourceKind"] == "panel"
+    )
+
+    deleted = client.delete(f"/api/projects/farm-comic/story-panels/panels/{copyright_panel_id}")
+    assert deleted.status_code == 200
+    assert not any(panel["id"] == copyright_panel_id for panel in deleted.json()["panels"])
+    assert not any(
+        panel["pageId"] == "inside-front-cover" and panel["sourceKind"] == "panel"
+        for panel in deleted.json()["panels"]
+    )
+
+    reloaded = client.get("/api/projects/farm-comic/story-panels")
+    assert reloaded.status_code == 200
+    assert not any(
+        panel["pageId"] == "inside-front-cover" and panel["sourceKind"] == "panel"
+        for panel in reloaded.json()["panels"]
+    )
+
+
 def test_story_panels_reset_layout_keeps_chunks(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
@@ -1380,7 +1408,7 @@ def test_story_panels_reset_layout_keeps_chunks(tmp_path, monkeypatch):
         json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
     )
     assert created.status_code == 200
-    alpha_panel_id = next(panel for panel in created.json()["panels"] if panel["sourceKind"] == "story")["id"]
+    alpha_panel_id = next(panel for panel in created.json()["panels"] if panel["sourceKind"] == "panel" and panel["selectedText"] == "Alpha opens the door.")["id"]
 
     client.patch(
         f"/api/projects/farm-comic/story-panels/panels/{alpha_panel_id}",
@@ -1396,7 +1424,7 @@ def test_story_panels_reset_layout_keeps_chunks(tmp_path, monkeypatch):
     assert alpha["rect"] == {"x": 0, "y": 0, "w": DEFAULT_AUTO_PLACE_W, "h": DEFAULT_AUTO_PLACE_H}
     assert alpha["layer"] == 0
     assert alpha["finalized"] is False
-    assert any(panel["sourceKind"] == "free-text" and panel["pageId"] == "cover" for panel in body["panels"])
+    assert any(panel["sourceKind"] == "panel" and panel["pageId"] == "cover" for panel in body["panels"])
 
 
 def test_story_panels_reset_chunks_clears_story_panels(tmp_path, monkeypatch):
@@ -1411,13 +1439,13 @@ def test_story_panels_reset_chunks_clears_story_panels(tmp_path, monkeypatch):
         json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
     )
     assert created.status_code == 200
-    assert any(panel["sourceKind"] == "story" for panel in created.json()["panels"])
+    assert any(panel["sourceKind"] == "panel" and panel["selectedText"] == "Alpha opens the door." for panel in created.json()["panels"])
 
     reset = client.post("/api/projects/farm-comic/story-panels/reset-chunks")
     assert reset.status_code == 200
     body = reset.json()
-    assert not any(panel["sourceKind"] in {"story", "draft", "bookmark"} for panel in body["panels"])
-    assert any(panel["sourceKind"] == "free-text" for panel in body["panels"])
+    assert not any(panel["sourceKind"] == "bookmark" for panel in body["panels"])
+    assert any(panel["sourceKind"] == "panel" and panel["panelKind"] == "text" for panel in body["panels"])
     assert (library.project_dir("farm-comic") / "canvas.json").is_file()
     assert (root / "book.txt").is_file()
 
@@ -1427,7 +1455,7 @@ def test_story_panels_reset_recovers_invalid_document(tmp_path, monkeypatch):
     create_project(client)
     panels_path = library.project_dir("farm-comic") / "story-panels" / "panels.json"
     panels_path.parent.mkdir(parents=True, exist_ok=True)
-    panels_path.write_text('{"version": 1, "panels": [{"id": "bad", "sourceKind": "story"}]}')
+    panels_path.write_text('{"version": 1, "panels": [{"id": "bad", "sourceKind": "bad-kind"}]}')
 
     reset_layout = client.post("/api/projects/farm-comic/story-panels/reset-layout")
     assert reset_layout.status_code == 200
@@ -1435,7 +1463,7 @@ def test_story_panels_reset_recovers_invalid_document(tmp_path, monkeypatch):
     assert recovered.status_code == 200
     assert not any(panel["id"] == "bad" for panel in recovered.json()["panels"])
 
-    panels_path.write_text('{"version": 1, "panels": [{"id": "bad", "sourceKind": "story"}]}')
+    panels_path.write_text('{"version": 1, "panels": [{"id": "bad", "sourceKind": "bad-kind"}]}')
 
     reset_chunks = client.post("/api/projects/farm-comic/story-panels/reset-chunks")
     assert reset_chunks.status_code == 200
@@ -1454,7 +1482,7 @@ def test_story_panels_panel_image_assignment(tmp_path, monkeypatch):
         json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
     )
     assert created.status_code == 200
-    panel = next(candidate for candidate in created.json()["panels"] if candidate["sourceKind"] == "story")
+    panel = next(candidate for candidate in created.json()["panels"] if candidate["sourceKind"] == "panel" and candidate["selectedText"] == "Alpha opens the door.")
 
     asset_id = "01HPANELIMG"
     make_png(library.asset_png_path("farm-comic", asset_id), color="blue")
@@ -1512,7 +1540,7 @@ def test_story_panels_unplace_story_panel(tmp_path, monkeypatch):
         json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
     )
     assert created.status_code == 200
-    panel = next(candidate for candidate in created.json()["panels"] if candidate["sourceKind"] == "story")
+    panel = next(candidate for candidate in created.json()["panels"] if candidate["sourceKind"] == "panel" and candidate["selectedText"] == "Alpha opens the door.")
     assert panel["pageId"] is not None
 
     unplaced = client.patch(
@@ -1523,11 +1551,11 @@ def test_story_panels_unplace_story_panel(tmp_path, monkeypatch):
     updated = next(candidate for candidate in unplaced.json()["panels"] if candidate["id"] == panel["id"])
     assert updated["pageId"] is None
 
-    with pytest.raises(ValidationError, match="Only story, draft, and bookmark panels may be unplaced"):
+    with pytest.raises(ValidationError):
         StoryPanel.model_validate({
             "id": "free-image-block",
             "order": 0,
-            "sourceKind": "free-image",
+            "sourceKind": "bad-kind",
             "startOffset": None,
             "endOffset": None,
             "pageId": None,
@@ -1550,7 +1578,7 @@ def test_story_panels_caption_panel_assignment(tmp_path, monkeypatch):
         json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
     )
     assert created.status_code == 200
-    parent = next(panel for panel in created.json()["panels"] if panel["sourceKind"] == "story")
+    parent = next(panel for panel in created.json()["panels"] if panel["sourceKind"] == "panel" and panel["selectedText"] == "Alpha opens the door.")
 
     patched = client.patch(
         f"/api/projects/farm-comic/story-panels/panels/{parent['id']}",
@@ -1566,7 +1594,7 @@ def test_story_panels_caption_panel_assignment(tmp_path, monkeypatch):
         {
             "id": "panel-caption-001",
             "order": len(document["panels"]) + 1,
-            "sourceKind": "caption",
+            "sourceKind": "panel",
             "startOffset": None,
             "endOffset": None,
             "selectedText": "",
@@ -1587,7 +1615,7 @@ def test_story_panels_caption_panel_assignment(tmp_path, monkeypatch):
     )
     saved = client.put("/api/projects/farm-comic/story-panels", json=document)
     assert saved.status_code == 200
-    caption = next(panel for panel in saved.json()["panels"] if panel["sourceKind"] == "caption")
+    caption = next(panel for panel in saved.json()["panels"] if panel["parentPanelId"] == parent["id"])
     assert caption["parentPanelId"] == parent["id"]
     assert caption["customText"] == "Ponyville was busy."
 
@@ -1631,10 +1659,10 @@ def test_story_panels_missing_book(tmp_path, monkeypatch):
     assert create.status_code == 404
 
     draft = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "A brave pony stepped into the sun."},
     ).json()
-    assert draft["panels"][-1]["sourceKind"] == "draft"
+    assert draft["panels"][-1]["sourceKind"] == "panel"
     assert draft["panels"][-1]["customText"] == "A brave pony stepped into the sun."
 
     saved = client.put("/api/projects/farm-comic/story-panels", json=draft)
@@ -1646,25 +1674,25 @@ def test_story_panels_draft_insert_after_panel(tmp_path, monkeypatch):
     create_project(client)
 
     first = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "First panel."},
     ).json()
-    first_panel = next(panel for panel in first["panels"] if panel["sourceKind"] == "draft")
+    first_panel = next(panel for panel in first["panels"] if panel["sourceKind"] == "panel" and panel["customText"] == "First panel.")
 
     second = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Second panel."},
     ).json()
     second_panel = next(panel for panel in second["panels"] if panel["customText"] == "Second panel.")
 
     inserted = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Between.", "insertAfterPanelId": first_panel["id"]},
     ).json()
     inserted_panel = next(panel for panel in inserted["panels"] if panel["customText"] == "Between.")
 
     ordered = sorted(
-        [panel for panel in inserted["panels"] if panel["sourceKind"] == "draft"],
+        [panel for panel in inserted["panels"] if panel["sourceKind"] == "panel" and panel["customText"] in {"First panel.", "Between.", "Second panel."}],
         key=lambda panel: panel["order"],
     )
     assert [panel["customText"] for panel in ordered] == ["First panel.", "Between.", "Second panel."]
@@ -1677,7 +1705,7 @@ def test_story_panels_draft_auto_place(tmp_path, monkeypatch):
     create_project(client)
 
     unplaced = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "First panel.", "autoPlace": False},
     )
     assert unplaced.status_code == 200
@@ -1685,7 +1713,7 @@ def test_story_panels_draft_auto_place(tmp_path, monkeypatch):
     assert first["pageId"] is None
 
     placed = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Second panel.", "autoPlace": True},
     )
     assert placed.status_code == 200
@@ -1694,7 +1722,7 @@ def test_story_panels_draft_auto_place(tmp_path, monkeypatch):
     assert second["rect"] == {"x": 0, "y": 0, "w": DEFAULT_AUTO_PLACE_W, "h": DEFAULT_AUTO_PLACE_H}
 
     stacked = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Third panel.", "autoPlace": True},
     )
     assert stacked.status_code == 200
@@ -1703,7 +1731,7 @@ def test_story_panels_draft_auto_place(tmp_path, monkeypatch):
     assert third["rect"] == {"x": DEFAULT_AUTO_PLACE_W, "y": 0, "w": DEFAULT_AUTO_PLACE_W, "h": DEFAULT_AUTO_PLACE_H}
 
     fourth = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Fourth panel.", "autoPlace": True},
     )
     assert fourth.status_code == 200
@@ -1711,7 +1739,7 @@ def test_story_panels_draft_auto_place(tmp_path, monkeypatch):
     assert fourth_panel["rect"] == {"x": DEFAULT_AUTO_PLACE_W * 2, "y": 0, "w": DEFAULT_AUTO_PLACE_W, "h": DEFAULT_AUTO_PLACE_H}
 
     fifth = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Fifth panel.", "autoPlace": True},
     )
     assert fifth.status_code == 200
@@ -1719,7 +1747,7 @@ def test_story_panels_draft_auto_place(tmp_path, monkeypatch):
     assert fifth_panel["rect"] == {"x": 0, "y": DEFAULT_AUTO_PLACE_H, "w": DEFAULT_AUTO_PLACE_W, "h": DEFAULT_AUTO_PLACE_H}
 
     sixth = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Sixth panel.", "autoPlace": True},
     )
     assert sixth.status_code == 200
@@ -1727,13 +1755,13 @@ def test_story_panels_draft_auto_place(tmp_path, monkeypatch):
     assert sixth_panel["rect"]["y"] == pytest.approx(DEFAULT_AUTO_PLACE_H)
 
     seventh = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Seventh panel.", "autoPlace": True},
     )
     assert seventh.status_code == 200
 
     eighth = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Eighth panel.", "autoPlace": True},
     )
     assert eighth.status_code == 200
@@ -1742,7 +1770,7 @@ def test_story_panels_draft_auto_place(tmp_path, monkeypatch):
     assert eighth_panel["rect"]["y"] + eighth_panel["rect"]["h"] == pytest.approx(LAYOUT_PAGE_ROWS)
 
     ninth = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Ninth panel.", "autoPlace": True},
     )
     assert ninth.status_code == 200
@@ -1752,7 +1780,7 @@ def test_story_panels_draft_auto_place(tmp_path, monkeypatch):
     assert ninth_panel["rect"]["y"] == pytest.approx(DEFAULT_AUTO_PLACE_H * 2)
 
     tenth = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Tenth panel.", "autoPlace": True},
     )
     assert tenth.status_code == 200
@@ -1763,7 +1791,7 @@ def test_story_panels_draft_auto_place(tmp_path, monkeypatch):
     assert tenth_panel["rect"]["y"] + tenth_panel["rect"]["h"] == pytest.approx(LAYOUT_PAGE_ROWS)
 
     eleventh = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Eleventh panel.", "autoPlace": True},
     )
     assert eleventh.status_code == 200
@@ -1777,7 +1805,7 @@ def test_story_panels_auto_place_existing_panel(tmp_path, monkeypatch):
     create_project(client)
 
     first = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "First panel.", "autoPlace": True},
     )
     assert first.status_code == 200
@@ -1785,7 +1813,7 @@ def test_story_panels_auto_place_existing_panel(tmp_path, monkeypatch):
     assert first_panel["pageId"] == "page-001"
 
     second = client.post(
-        "/api/projects/farm-comic/story-panels/panels/draft",
+        "/api/projects/farm-comic/story-panels/panels",
         json={"customText": "Second panel.", "autoPlace": False},
     )
     assert second.status_code == 200
@@ -1825,7 +1853,7 @@ def test_story_panels_create_panel_note_and_bookmark(tmp_path, monkeypatch):
         },
     )
     assert panel.status_code == 200
-    story_panel = next(item for item in panel.json()["panels"] if item["sourceKind"] == "story" and item["customText"] == "Nice opening line.")
+    story_panel = next(item for item in panel.json()["panels"] if item["sourceKind"] == "panel" and item["customText"] == "Nice opening line.")
     assert story_panel["selectedText"] == "The air was warm."
 
     overlap = client.post(
@@ -1880,7 +1908,7 @@ def test_story_panels_legacy_note_loads_as_story(tmp_path, monkeypatch):
     library.write_json(panels_path, document)
     loaded = client.get("/api/projects/farm-comic/story-panels").json()
     legacy = next(panel for panel in loaded["panels"] if panel["id"] == "panel-legacy-note")
-    assert legacy["sourceKind"] == "story"
+    assert legacy["sourceKind"] == "panel"
     assert legacy["customText"] == "Legacy note."
 
 
@@ -1895,13 +1923,13 @@ def test_story_panels_insert_after_reorders_items(tmp_path, monkeypatch):
         "/api/projects/farm-comic/story-panels/panels",
         json={"startOffset": 0, "endOffset": 6, "selectedText": "Alpha."},
     ).json()
-    first_panel = next(panel for panel in first["panels"] if panel["sourceKind"] == "story")
+    first_panel = next(panel for panel in first["panels"] if panel["sourceKind"] == "panel" and panel["selectedText"] == "Alpha.")
 
     second = client.post(
         "/api/projects/farm-comic/story-panels/panels",
         json={"startOffset": 7, "endOffset": 12, "selectedText": "Beta."},
     ).json()
-    second_panel = next(panel for panel in second["panels"] if panel["sourceKind"] == "story" and panel["id"] != first_panel["id"])
+    second_panel = next(panel for panel in second["panels"] if panel["sourceKind"] == "panel" and panel["id"] != first_panel["id"] and panel["selectedText"] == "Beta.")
 
     inserted = client.post(
         "/api/projects/farm-comic/story-panels/panels/bookmark",
@@ -1930,7 +1958,7 @@ def test_story_panels_create_uses_story_neighbor_page(tmp_path, monkeypatch):
         json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door."},
     ).json()
     document = first
-    story_panel = next(panel for panel in document["panels"] if panel["sourceKind"] == "story")
+    story_panel = next(panel for panel in document["panels"] if panel["sourceKind"] == "panel" and panel["selectedText"] == "Alpha opens the door.")
     story_panel["pageId"] = "page-002"
     story_panel["rect"] = {"x": 0, "y": 4, "w": 6, "h": 3}
     saved = client.put("/api/projects/farm-comic/story-panels", json=document)
@@ -1951,7 +1979,7 @@ def test_story_panels_create_uses_story_neighbor_page(tmp_path, monkeypatch):
     }
 
 
-def test_story_panels_reject_story_chunks_on_front_matter(tmp_path, monkeypatch):
+def test_story_panels_allow_book_linked_panels_on_front_matter(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
     root = library.project_dir("farm-comic") / "adaptation"
@@ -1962,8 +1990,9 @@ def test_story_panels_reject_story_chunks_on_front_matter(tmp_path, monkeypatch)
         "/api/projects/farm-comic/story-panels/panels",
         json={"startOffset": 0, "endOffset": 21, "selectedText": "Alpha opens the door.", "pageId": "cover"},
     )
-    assert response.status_code == 400
-    assert "story pages" in response.json()["detail"]
+    assert response.status_code == 200
+    panel = next(candidate for candidate in response.json()["panels"] if candidate["selectedText"] == "Alpha opens the door.")
+    assert panel["pageId"] == "cover"
 
 
 def test_story_panel_rect_rejects_layout_past_page_height():
@@ -2064,7 +2093,7 @@ def test_story_panels_booklet_pdf_endpoint(tmp_path, monkeypatch):
     )
     assert created.status_code == 200
     document = created.json()
-    story_panel = next(panel for panel in document["panels"] if panel["sourceKind"] == "story")
+    story_panel = next(panel for panel in document["panels"] if panel["sourceKind"] == "panel" and panel["selectedText"] == "Alpha opens the door.")
     story_panel["panelKind"] = "text"
     story_panel["customText"] = "Custom caption text."
     story_panel["richText"] = "<strong>Custom</strong> <em>caption</em> <u>text.</u>"

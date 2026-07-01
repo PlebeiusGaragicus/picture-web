@@ -2446,12 +2446,53 @@ function ProjectPhaseSidebar({
   onPhaseChange: (phase: ProjectPhase) => void;
 }) {
   const [pendingDelete, setPendingDelete] = useState(false);
-  const [deleteAction, setDeleteAction] = useState<'layout' | 'chunks' | 'characters' | 'project' | null>(null);
+  type DeleteAction = 'layout' | 'chunks' | 'characters' | 'project';
+  const [deleteAction, setDeleteAction] = useState<DeleteAction | null>(null);
+  const [pendingDeleteAction, setPendingDeleteAction] = useState<DeleteAction | null>(null);
   const deleting = deleteAction !== null;
   const [exportingAssets, setExportingAssets] = useState(false);
   const [organizingTags, setOrganizingTags] = useState(false);
   const [pendingTagDelete, setPendingTagDelete] = useState<TagDefinition | null>(null);
   const [deletingTag, setDeletingTag] = useState(false);
+  const deleteActionCopy: Record<DeleteAction, { title: string; body: string; confirm: string; busy: string }> = {
+    characters: {
+      title: 'Delete character data?',
+      body: 'This wipes character list files, character sheets, and entity tags so you can re-run List and Extract.',
+      confirm: 'Delete character data',
+      busy: 'Deleting character data...',
+    },
+    layout: {
+      title: 'Delete layout?',
+      body: 'This clears placed panels and layout state. Reading panels remain available to place again.',
+      confirm: 'Delete layout',
+      busy: 'Resetting layout...',
+    },
+    chunks: {
+      title: 'Delete all chunks?',
+      body: 'This clears all story panels and layout data. Canvas assets, tags, and adaptation files are kept.',
+      confirm: 'Delete all chunks',
+      busy: 'Clearing chunks...',
+    },
+    project: {
+      title: 'Delete entire project?',
+      body: 'This permanently deletes the project and returns you to the project list.',
+      confirm: 'Delete entire project',
+      busy: 'Deleting...',
+    },
+  };
+  const runDeleteAction = async (action: DeleteAction) => {
+    setDeleteAction(action);
+    try {
+      if (action === 'characters') await onResetCharacterData();
+      if (action === 'layout') await onResetStoryPanelLayout();
+      if (action === 'chunks') await onResetStoryPanelChunks();
+      if (action === 'project') await onDeleteProject();
+      setPendingDeleteAction(null);
+      setPendingDelete(false);
+    } finally {
+      setDeleteAction(null);
+    }
+  };
   if (isCollapsed) {
     return null;
   }
@@ -2598,64 +2639,51 @@ function ProjectPhaseSidebar({
               <button
                 className="danger"
                 disabled={deleting}
-                onClick={async () => {
-                  setDeleteAction('characters');
-                  try {
-                    await onResetCharacterData();
-                    setPendingDelete(false);
-                  } finally {
-                    setDeleteAction(null);
-                  }
-                }}
+                onClick={() => setPendingDeleteAction('characters')}
               >
                 {deleteAction === 'characters' ? 'Deleting character data...' : 'Delete character data'}
               </button>
               <button
                 className="danger"
                 disabled={deleting}
-                onClick={async () => {
-                  setDeleteAction('layout');
-                  try {
-                    await onResetStoryPanelLayout();
-                    setPendingDelete(false);
-                  } finally {
-                    setDeleteAction(null);
-                  }
-                }}
+                onClick={() => setPendingDeleteAction('layout')}
               >
                 {deleteAction === 'layout' ? 'Resetting layout...' : 'Delete layout'}
               </button>
               <button
                 className="danger"
                 disabled={deleting}
-                onClick={async () => {
-                  setDeleteAction('chunks');
-                  try {
-                    await onResetStoryPanelChunks();
-                    setPendingDelete(false);
-                  } finally {
-                    setDeleteAction(null);
-                  }
-                }}
+                onClick={() => setPendingDeleteAction('chunks')}
               >
                 {deleteAction === 'chunks' ? 'Clearing chunks...' : 'Delete all chunks'}
               </button>
               <button
                 className="danger"
                 disabled={deleting}
-                onClick={async () => {
-                  setDeleteAction('project');
-                  try {
-                    await onDeleteProject();
-                    setPendingDelete(false);
-                  } finally {
-                    setDeleteAction(null);
-                  }
-                }}
+                onClick={() => setPendingDeleteAction('project')}
               >
                 {deleteAction === 'project' ? 'Deleting...' : 'Delete entire project'}
               </button>
               <button className="secondary" disabled={deleting} onClick={() => setPendingDelete(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {pendingDeleteAction && (
+        <div className="confirm-backdrop" onClick={() => !deleting && setPendingDeleteAction(null)}>
+          <div className="confirm-dialog project-delete-dialog" onClick={(event) => event.stopPropagation()}>
+            <h2>{deleteActionCopy[pendingDeleteAction].title}</h2>
+            <p>{deleteActionCopy[pendingDeleteAction].body}</p>
+            <p className="muted">This action cannot be undone automatically.</p>
+            <div className="row">
+              <button
+                className="danger"
+                disabled={deleting}
+                onClick={() => void runDeleteAction(pendingDeleteAction)}
+              >
+                {deleteAction === pendingDeleteAction ? deleteActionCopy[pendingDeleteAction].busy : deleteActionCopy[pendingDeleteAction].confirm}
+              </button>
+              <button className="secondary" disabled={deleting} onClick={() => setPendingDeleteAction(null)}>Cancel</button>
             </div>
           </div>
         </div>

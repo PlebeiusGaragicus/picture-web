@@ -354,7 +354,8 @@ export interface StoryPanelTextStyle {
 export interface StoryPanel {
   id: string;
   order: number;
-  sourceKind: 'story' | 'draft' | 'bookmark' | 'free-text' | 'free-image' | 'caption';
+  title: string;
+  sourceKind: 'panel' | 'bookmark';
   startOffset: number | null;
   endOffset: number | null;
   selectedText: string;
@@ -383,13 +384,15 @@ export interface StoryPanelDocument {
 }
 
 export interface StoryPanelCreatePayload {
-  startOffset: number;
-  endOffset: number;
+  startOffset?: number | null;
+  endOffset?: number | null;
   selectedText?: string;
+  title?: string;
   customText?: string;
   insertAfterPanelId?: string | null;
   autoPlace?: boolean;
   pageId?: string | null;
+  panelKind?: 'image' | 'text';
   rect?: StoryPanelRect | null;
   layer?: number;
 }
@@ -402,17 +405,8 @@ export interface StoryPanelBookmarkCreatePayload {
   insertAfterPanelId?: string | null;
 }
 
-export interface StoryPanelDraftCreatePayload {
-  customText: string;
-  insertAfterPanelId?: string | null;
-  autoPlace?: boolean;
-  pageId?: string | null;
-  rect?: StoryPanelRect | null;
-  layer?: number;
-}
-
 export type StoryPanelPatchPayload = Partial<
-  Pick<StoryPanel, 'order' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'customText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'finalized'>
+  Pick<StoryPanel, 'order' | 'title' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'customText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'finalized'>
 >;
 
 export interface SceneListLine {

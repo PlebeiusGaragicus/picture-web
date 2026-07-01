@@ -691,7 +691,8 @@ class StoryPanelImageCrop(BaseModel):
 class StoryPanel(BaseModel):
     id: str = Field(pattern=TAG_RE)
     order: int = Field(ge=0)
-    sourceKind: Literal["story", "draft", "bookmark", "free-text", "free-image", "caption"] = "story"
+    title: str = Field(default="", max_length=120)
+    sourceKind: Literal["panel", "bookmark"] = "panel"
     startOffset: int | None = Field(default=None, ge=0)
     endOffset: int | None = Field(default=None, ge=0)
     selectedText: str = ""
@@ -714,38 +715,28 @@ class StoryPanel(BaseModel):
 
     @model_validator(mode="after")
     def validate_offsets_and_active_asset(self) -> "StoryPanel":
-        if self.sourceKind == "story":
-            if self.startOffset is None or self.endOffset is None:
-                raise ValueError("Story panels must have book offsets")
+        has_start = self.startOffset is not None
+        has_end = self.endOffset is not None
+        if has_start != has_end:
+            raise ValueError("Panel book offsets must be set together")
+        if has_start and has_end:
+            assert self.startOffset is not None and self.endOffset is not None
             if self.endOffset <= self.startOffset:
                 raise ValueError("Panel endOffset must be greater than startOffset")
-            if self.parentPanelId is not None:
-                raise ValueError("Story panels must not have parentPanelId")
-        elif self.sourceKind == "draft":
-            if self.startOffset is not None or self.endOffset is not None:
-                raise ValueError("Draft panels must not have book offsets")
-            if self.parentPanelId is not None:
-                raise ValueError("Draft panels must not have parentPanelId")
-        elif self.sourceKind == "bookmark":
+        if self.sourceKind == "bookmark":
             if self.startOffset is None or self.endOffset is None:
                 raise ValueError("Bookmark items must have book offsets")
-            if self.endOffset <= self.startOffset:
-                raise ValueError("Panel endOffset must be greater than startOffset")
             if self.parentPanelId is not None:
                 raise ValueError("Bookmark items must not have parentPanelId")
-        elif self.sourceKind == "caption":
-            if not self.parentPanelId:
-                raise ValueError("Caption panels must have parentPanelId")
+            if self.pageId is not None:
+                raise ValueError("Bookmark items must not be placed on the layout")
+        elif self.parentPanelId is not None:
             if self.panelKind != "text":
                 raise ValueError("Caption panels must be text panels")
             if self.startOffset is not None or self.endOffset is not None:
                 raise ValueError("Caption panels must not have book offsets")
-        elif self.startOffset is not None or self.endOffset is not None:
-            raise ValueError("Free layout items must not have book offsets")
-        elif self.parentPanelId is not None:
-            raise ValueError("Only caption panels may have parentPanelId")
-        if self.pageId is None and self.sourceKind not in {"story", "draft", "bookmark"}:
-            raise ValueError("Only story, draft, and bookmark panels may be unplaced")
+            if self.pageId is None:
+                raise ValueError("Caption panels must be placed on the layout")
         if self.activeAssetId is not None and self.activeAssetId not in self.assetIds:
             raise ValueError("activeAssetId must be attached to the panel")
         return self
@@ -770,7 +761,11 @@ class StoryPanelDocument(BaseModel):
         for panel in self.panels:
             if panel.pageId is not None and panel.pageId not in page_id_set:
                 raise ValueError(f"Panel references unknown page: {panel.pageId}")
-        ranges = sorted((panel.startOffset, panel.endOffset, panel.id) for panel in self.panels if panel.sourceKind == "story")
+        ranges = sorted(
+            (panel.startOffset, panel.endOffset, panel.id)
+            for panel in self.panels
+            if panel.sourceKind == "panel" and panel.startOffset is not None and panel.endOffset is not None
+        )
         for previous, current in zip(ranges, ranges[1:]):
             if previous[1] > current[0]:
                 raise ValueError(f"Panel text ranges overlap: {previous[2]} and {current[2]}")
@@ -778,19 +773,23 @@ class StoryPanelDocument(BaseModel):
 
 
 class StoryPanelCreate(BaseModel):
-    startOffset: int = Field(ge=0)
-    endOffset: int = Field(ge=0)
+    startOffset: int | None = Field(default=None, ge=0)
+    endOffset: int | None = Field(default=None, ge=0)
     selectedText: str = ""
+    title: str = Field(default="", max_length=120)
     customText: str = ""
     insertAfterPanelId: str | None = Field(default=None, pattern=TAG_RE)
     autoPlace: bool = True
     pageId: str | None = Field(default=None, pattern=TAG_RE)
+    panelKind: Literal["image", "text"] = "image"
     rect: StoryPanelRect | None = None
     layer: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def validate_offsets(self) -> "StoryPanelCreate":
-        if self.endOffset <= self.startOffset:
+        if (self.startOffset is None) != (self.endOffset is None):
+            raise ValueError("Panel book offsets must be set together")
+        if self.startOffset is not None and self.endOffset is not None and self.endOffset <= self.startOffset:
             raise ValueError("Panel endOffset must be greater than startOffset")
         return self
 
@@ -809,18 +808,10 @@ class StoryPanelBookmarkCreate(BaseModel):
         return self
 
 
-class StoryPanelDraftCreate(BaseModel):
-    customText: str = Field(min_length=1)
-    insertAfterPanelId: str | None = Field(default=None, pattern=TAG_RE)
-    autoPlace: bool = True
-    pageId: str | None = Field(default=None, pattern=TAG_RE)
-    rect: StoryPanelRect | None = None
-    layer: int = Field(default=0, ge=0)
-
-
 class StoryPanelPatch(BaseModel):
     order: int | None = Field(default=None, ge=0)
-    sourceKind: Literal["story", "draft", "bookmark", "free-text", "free-image", "caption"] | None = None
+    title: str | None = Field(default=None, max_length=120)
+    sourceKind: Literal["panel", "bookmark"] | None = None
     startOffset: int | None = Field(default=None, ge=0)
     endOffset: int | None = Field(default=None, ge=0)
     selectedText: str | None = None

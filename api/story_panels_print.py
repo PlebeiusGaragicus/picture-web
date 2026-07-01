@@ -29,6 +29,10 @@ INNER_GUTTER = 18
 GRID_COLUMNS = 12
 
 
+def _is_caption_panel(panel: StoryPanel) -> bool:
+    return panel.sourceKind == "panel" and panel.parentPanelId is not None
+
+
 @dataclass(frozen=True)
 class PrintPage:
     page: StoryPanelPage | None
@@ -270,25 +274,26 @@ def _caption_outline_offsets() -> tuple[tuple[float, float], ...]:
 
 def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel, x: float, y: float, w: float, h: float) -> None:
     style = panel.textStyle
-    transparent = panel.sourceKind == "caption" and style.background == "transparent"
+    is_caption = _is_caption_panel(panel)
+    transparent = is_caption and style.background == "transparent"
     if transparent:
         pdf.setFillColor(white)
         pdf.setStrokeColor(white)
     else:
         pdf.setFillColor(white)
         pdf.setStrokeColor(HexColor("#cbd5e1"))
-    radius = min(w, h) / 2 if panel.sourceKind == "caption" and style.speechKind == "dialogue" else 0
+    radius = min(w, h) / 2 if is_caption and style.speechKind == "dialogue" else 0
     if radius > 0:
         pdf.roundRect(x, y, w, h, radius, stroke=0 if transparent else 1, fill=0 if transparent else 1)
     else:
         pdf.rect(x, y, w, h, stroke=0 if transparent else 1, fill=0 if transparent else 1)
     rich_text = panel.richText or _plain_text_to_rich_text(panel.customText or panel.selectedText)
-    text_color = HexColor(style.color) if panel.sourceKind == "caption" else black
+    text_color = HexColor(style.color) if is_caption else black
     text_x = x + 5
     text_y = y + h - 8
     text_w = w - 10
     text_h = h - 10
-    outline_color = HexColor(style.outlineColor) if transparent and panel.sourceKind == "caption" else None
+    outline_color = HexColor(style.outlineColor) if transparent and is_caption else None
     _draw_rich_text(
         pdf,
         rich_text,
@@ -323,7 +328,7 @@ def _draw_image_panel(
         pdf.setFillColor(HexColor("#dbeafe"))
         pdf.setStrokeColor(HexColor("#2563eb"))
         pdf.rect(x, y, w, h, stroke=1, fill=1)
-        label = "Image block" if panel.sourceKind == "free-image" else f"Page {page_number or '?'} Panel"
+        label = f"Page {page_number or '?'} Panel"
         body = panel.selectedText.strip() or panel.customText.strip()
         _draw_wrapped_text(pdf, f"{label}\n{body}", x + 5, y + h - 12, w - 10, h - 10, size=7)
         return
