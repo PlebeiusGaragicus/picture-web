@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { StoryPanel } from '../types';
 import {
-  sidebarItemPrimaryText,
   sortSidebarItems,
   type InsertDraftPayload,
 } from './storyPanelSidebar';
+
+function manualSegmentStoryText(panel: StoryPanel) {
+  return (panel.storyText || panel.selectedText).trim();
+}
 
 export function ManualStoryReader({
   panels,
@@ -12,6 +15,7 @@ export function ManualStoryReader({
   focusedPanelId,
   onSelectPanel,
   onFocusPanelChunk,
+  onOpenPanelEditor,
   onInsertDraft,
   onEditPanelText,
   isSaving,
@@ -21,6 +25,7 @@ export function ManualStoryReader({
   focusedPanelId: string | null;
   onSelectPanel: (panelId: string) => void;
   onFocusPanelChunk: (panelId: string) => void;
+  onOpenPanelEditor: (panelId: string) => void;
   onInsertDraft: (payload: InsertDraftPayload) => Promise<void>;
   onEditPanelText: (panelId: string, text: string) => Promise<void>;
   isSaving: boolean;
@@ -53,7 +58,7 @@ export function ManualStoryReader({
 
   const beginEdit = (panel: StoryPanel) => {
     setEditingPanelId(panel.id);
-    setEditDraft(sidebarItemPrimaryText(panel));
+    setEditDraft(manualSegmentStoryText(panel));
   };
 
   const cancelEdit = () => {
@@ -79,7 +84,7 @@ export function ManualStoryReader({
     if (!text) return;
     setIsCreating(true);
     try {
-      await onInsertDraft({ customText: text, insertAfterPanelId: null });
+      await onInsertDraft({ storyText: text, insertAfterPanelId: null });
       setComposerText('');
     } finally {
       setIsCreating(false);
@@ -98,14 +103,14 @@ export function ManualStoryReader({
           <div className="story-panels-manual-empty">
             <p>No panels yet.</p>
             <p className="muted">
-              Write your story one panel at a time. Add your first panel below, or use Add panel in Reading.
+              Write your story one panel at a time. Add your first panel below, or use Add panel in Panels.
             </p>
             <p className="muted story-panels-manual-empty-hint">
               Have source text? Upload book.txt in Story &amp; Style to highlight passages instead.
             </p>
           </div>
         ) : (
-          orderedPanels.map((panel, index) => {
+          orderedPanels.map((panel) => {
             const isSelected = selectedPanelId === panel.id;
             const isEditing = editingPanelId === panel.id;
             return (
@@ -126,10 +131,10 @@ export function ManualStoryReader({
                 }}
                 onDoubleClick={(event) => {
                   event.preventDefault();
-                  beginEdit(panel);
+                  onOpenPanelEditor(panel.id);
                 }}
               >
-                <span className="story-panels-manual-segment-label">Panel {index + 1}</span>
+                <span className="story-panels-manual-segment-label">{panel.id}</span>
                 {isEditing ? (
                   <div className="story-panels-manual-segment-editor" onClick={(event) => event.stopPropagation()}>
                     <textarea
@@ -160,7 +165,7 @@ export function ManualStoryReader({
                     </div>
                   </div>
                 ) : (
-                  <p className="story-panels-manual-segment-text">{sidebarItemPrimaryText(panel) || 'Empty panel'}</p>
+                  <p className="story-panels-manual-segment-text">{manualSegmentStoryText(panel) || 'Empty panel'}</p>
                 )}
               </section>
             );

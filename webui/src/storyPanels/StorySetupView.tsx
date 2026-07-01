@@ -20,7 +20,7 @@ export function StorySetupView({
     if (!text) return;
     setIsCreating(true);
     try {
-      await onAddPanel({ customText: text, insertAfterPanelId: null });
+      await onAddPanel({ storyText: text, insertAfterPanelId: null });
       setPanelText('');
     } finally {
       setIsCreating(false);
@@ -72,7 +72,7 @@ export function StorySetupView({
         </section>
         <section className="story-setup-card">
           <h3>Upload book.txt</h3>
-          <p className="muted">Import your manuscript, then select passages in Story to turn them into panel chunks.</p>
+          <p className="muted">Import your manuscript, then select passages in Story to turn them into panels.</p>
           <input
             ref={fileInputRef}
             type="file"

@@ -27,11 +27,11 @@ export function PanelChunksToggleButton({
       type="button"
       className={`project-top-bar-toggle ${isCollapse ? 'is-icon-only' : ''} ${className}`.trim()}
       onClick={onClick}
-      title={isCollapse ? 'Hide panel chunks' : 'Show panel chunks'}
-      aria-label={isCollapse ? 'Hide panel chunks' : 'Show panel chunks'}
+      title={isCollapse ? 'Hide panels' : 'Show panels'}
+      aria-label={isCollapse ? 'Hide panels' : 'Show panels'}
     >
       <PanelChunksToggleIcon variant={variant} />
-      {!isCollapse && <span>Chunks</span>}
+      {!isCollapse && <span>Panels</span>}
     </button>
   );
 }

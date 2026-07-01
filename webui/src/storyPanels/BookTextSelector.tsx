@@ -74,7 +74,7 @@ export function BookTextSelector({
   selection: TextSelectionRange | null;
   focusedPanelId: string | null;
   onSelectionChange: (selection: TextSelectionRange | null) => void;
-  onCreatePanel: (panelNote?: string) => Promise<void>;
+  onCreatePanel: () => Promise<void>;
   onCreateBookmark: () => Promise<void>;
   onDeletePanel: (panelId: string) => void | Promise<void>;
   onAdjustPanelRange: (panelId: string, startOffset: number, endOffset: number) => void;
@@ -88,9 +88,6 @@ export function BookTextSelector({
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [boundaryDrag, setBoundaryDrag] = useState<BoundaryDrag | null>(null);
-  const [showPanelDialog, setShowPanelDialog] = useState(false);
-  const [panelNoteText, setPanelNoteText] = useState('');
-  const [isSavingPanel, setIsSavingPanel] = useState(false);
   const [pendingDeletePanelId, setPendingDeletePanelId] = useState<string | null>(null);
   const [isDeletingPanel, setIsDeletingPanel] = useState(false);
   const storyPanels = useMemo(
@@ -167,7 +164,7 @@ export function BookTextSelector({
       (panel) => panel.startOffset !== null && panel.endOffset !== null && startOffset < panel.endOffset && endOffset > panel.startOffset,
     );
     if (overlapsStory) {
-      setSelectionError('That passage overlaps an existing panel chunk.');
+      setSelectionError('That passage overlaps an existing panel.');
       onSelectionChange(null);
       return;
     }
@@ -219,20 +216,6 @@ export function BookTextSelector({
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     onFocusPanelChunk(panelId);
     setMenu({ kind: 'anchor', panelId, x: rect.left + rect.width / 2, y: rect.top });
-  };
-
-  const submitPanel = async () => {
-    setIsSavingPanel(true);
-    try {
-      await onCreatePanel(panelNoteText.trim() || undefined);
-      setPanelNoteText('');
-      setShowPanelDialog(false);
-      setMenu(null);
-      onSelectionChange(null);
-      window.getSelection()?.removeAllRanges();
-    } finally {
-      setIsSavingPanel(false);
-    }
   };
 
   const confirmDeletePanel = async () => {
@@ -317,17 +300,7 @@ export function BookTextSelector({
                   });
                 }}
               >
-                + panel
-              </button>
-              <button
-                type="button"
-                disabled={!selection || isCreating}
-                onClick={() => {
-                  setMenu(null);
-                  setShowPanelDialog(true);
-                }}
-              >
-                + note…
+                + panel…
               </button>
               <button
                 type="button"
@@ -357,33 +330,6 @@ export function BookTextSelector({
           )}
         </div>
       )}
-      {showPanelDialog && (
-        <div className="confirm-backdrop" onClick={() => !isSavingPanel && setShowPanelDialog(false)}>
-          <div className="confirm-dialog story-panels-insert-dialog" role="dialog" aria-modal="true" aria-labelledby="book-panel-title" onClick={(event) => event.stopPropagation()}>
-            <h2 id="book-panel-title">Panel note</h2>
-            <p className="muted">Create a layout panel from the selected passage and add an optional note.</p>
-            {selection && <blockquote className="story-panels-note-quote">{selection.selectedText.trim()}</blockquote>}
-            <label>
-              Note <span className="muted">(optional)</span>
-              <textarea
-                value={panelNoteText}
-                rows={4}
-                autoFocus
-                disabled={isSavingPanel || isCreating}
-                placeholder="Adaptation notes, tone reminders..."
-                onChange={(event) => setPanelNoteText(event.target.value)}
-                onKeyDown={(event) => event.stopPropagation()}
-              />
-            </label>
-            <div className="modal-actions">
-              <button type="button" className="secondary" disabled={isSavingPanel || isCreating} onClick={() => setShowPanelDialog(false)}>Cancel</button>
-              <button type="button" disabled={isSavingPanel || isCreating || !selection} onClick={() => void submitPanel()}>
-                {isSavingPanel || isCreating ? 'Creating…' : 'Create panel'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       {pendingDeletePanel && (
         <div className="confirm-backdrop" onClick={() => !isDeletingPanel && setPendingDeletePanelId(null)}>
           <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-book-anchor-title" onClick={(event) => event.stopPropagation()}>
@@ -392,8 +338,8 @@ export function BookTextSelector({
             </h2>
             <p>
               {pendingDeletePanel.sourceKind === 'bookmark'
-                ? 'This removes the bookmark from the reading list.'
-                : 'This removes the panel from the reading list and layout.'}
+                ? 'This removes the bookmark from the panel list.'
+                : 'This deletes the panel and removes it from the layout.'}
             </p>
             <div className="modal-actions">
               <button type="button" className="secondary" disabled={isDeletingPanel} onClick={() => setPendingDeletePanelId(null)}>Cancel</button>

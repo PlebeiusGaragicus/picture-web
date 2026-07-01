@@ -353,11 +353,16 @@ export interface StoryPanelTextStyle {
 
 export interface StoryPanelCaption {
   id: string;
-  customText: string;
+  visibleText: string;
   richText: string;
   textStyle: StoryPanelTextStyle;
   rect: StoryPanelRect;
   layer: number;
+}
+
+export interface StoryPanelImagePrompt {
+  id: string;
+  text: string;
 }
 
 export interface StoryPanel {
@@ -368,7 +373,8 @@ export interface StoryPanel {
   startOffset: number | null;
   endOffset: number | null;
   selectedText: string;
-  customText: string;
+  storyText: string;
+  visibleText: string;
   richText: string;
   textStyle: StoryPanelTextStyle;
   pageId: string | null;
@@ -382,6 +388,7 @@ export interface StoryPanel {
   aspectRatioLocked?: boolean;
   imageCrop?: StoryPanelImageCrop | null;
   captions: StoryPanelCaption[];
+  imagePrompts: StoryPanelImagePrompt[];
   finalized: boolean;
 }
 
@@ -398,7 +405,9 @@ export interface StoryPanelCreatePayload {
   endOffset?: number | null;
   selectedText?: string;
   title?: string;
-  customText?: string;
+  storyText?: string;
+  visibleText?: string;
+  imagePrompts?: StoryPanelImagePrompt[];
   insertAfterPanelId?: string | null;
   autoPlace?: boolean;
   pageId?: string | null;
@@ -411,12 +420,12 @@ export interface StoryPanelBookmarkCreatePayload {
   startOffset: number;
   endOffset: number;
   selectedText?: string;
-  customText?: string;
+  title?: string;
   insertAfterPanelId?: string | null;
 }
 
 export type StoryPanelPatchPayload = Partial<
-  Pick<StoryPanel, 'order' | 'title' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'customText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'captions' | 'finalized'>
+  Pick<StoryPanel, 'order' | 'title' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'storyText' | 'visibleText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'captions' | 'imagePrompts' | 'finalized'>
 >;
 
 export interface SceneListLine {

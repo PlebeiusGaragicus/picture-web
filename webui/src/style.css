@@ -2219,14 +2219,25 @@ button {
 
 .story-panels-new-panel-dialog textarea,
 .story-panels-insert-dialog textarea,
-.story-panels-panel-editor-popover textarea {
+.story-panels-panel-editor-field textarea {
   min-height: 140px;
+  resize: vertical;
+}
+
+.story-panels-caption-draft-textarea {
+  min-height: 34px;
   resize: vertical;
 }
 
 .story-panels-insert-dialog,
 .story-panels-panel-editor-popover {
   width: min(420px, calc(100vw - 32px));
+}
+
+.story-panels-panel-editor-popover {
+  width: min(860px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
 }
 
 .story-panels-panel-caption-editor-list {
@@ -2251,6 +2262,21 @@ button {
   gap: 10px;
 }
 
+.story-panels-panel-editor-text-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+.story-panels-panel-editor-text-grid .story-panels-panel-editor-field {
+  min-width: 0;
+}
+
+.story-panels-panel-editor-text-grid .story-panels-panel-editor-field textarea {
+  height: 100%;
+}
+
 .story-panels-panel-editor-meta-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -2263,6 +2289,7 @@ button {
 }
 
 .story-panels-panel-editor-grid label,
+.story-panels-panel-editor-text-grid label,
 .story-panels-panel-editor-field,
 .story-panels-panel-caption-editor-list label {
   display: grid;
@@ -2270,6 +2297,16 @@ button {
   color: #cbd5e1;
   font-size: 13px;
   font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .story-panels-panel-editor-popover {
+    width: min(520px, calc(100vw - 32px));
+  }
+
+  .story-panels-panel-editor-text-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .story-panels-panel-editor-grid input,
@@ -2804,6 +2841,17 @@ button {
   content: "- ";
   color: #cbd5e1;
   font-weight: 700;
+}
+
+.story-panels-caption-count-pill {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  color: #c4b5fd;
+  font-size: 11px;
+  font-weight: 800;
+  background: rgb(124 58 237 / 0.16);
+  border: 1px solid rgb(196 181 253 / 0.24);
+  border-radius: 999px;
 }
 
 .story-panels-placement-badge {
@@ -6293,6 +6341,12 @@ pre {
   border: 1px solid #475569;
   border-radius: 16px;
   box-shadow: 0 24px 80px rgb(0 0 0 / 0.5);
+}
+
+.confirm-dialog.story-panels-panel-editor-popover {
+  width: min(860px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
 }
 
 .confirm-dialog h2,

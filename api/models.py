@@ -690,11 +690,16 @@ class StoryPanelImageCrop(BaseModel):
 
 class StoryPanelCaption(BaseModel):
     id: str = Field(pattern=TAG_RE)
-    customText: str = ""
+    visibleText: str = ""
     richText: str = ""
     textStyle: StoryPanelTextStyle = Field(default_factory=StoryPanelTextStyle)
     rect: StoryPanelRect
     layer: int = Field(default=0, ge=0)
+
+
+class StoryPanelImagePrompt(BaseModel):
+    id: str = Field(pattern=TAG_RE)
+    text: str = ""
 
 
 class StoryPanel(BaseModel):
@@ -705,7 +710,8 @@ class StoryPanel(BaseModel):
     startOffset: int | None = Field(default=None, ge=0)
     endOffset: int | None = Field(default=None, ge=0)
     selectedText: str = ""
-    customText: str = ""
+    storyText: str = ""
+    visibleText: str = ""
     richText: str = ""
     textStyle: StoryPanelTextStyle = Field(default_factory=StoryPanelTextStyle)
     pageId: str | None = None
@@ -721,6 +727,7 @@ class StoryPanel(BaseModel):
     aspectRatioLocked: bool = False
     imageCrop: StoryPanelImageCrop | None = None
     captions: list[StoryPanelCaption] = Field(default_factory=list)
+    imagePrompts: list[StoryPanelImagePrompt] = Field(default_factory=list)
     finalized: bool = False
 
     @model_validator(mode="after")
@@ -788,7 +795,9 @@ class StoryPanelCreate(BaseModel):
     endOffset: int | None = Field(default=None, ge=0)
     selectedText: str = ""
     title: str = Field(default="", max_length=120)
-    customText: str = ""
+    storyText: str = ""
+    visibleText: str = ""
+    imagePrompts: list[StoryPanelImagePrompt] = Field(default_factory=list)
     insertAfterPanelId: str | None = Field(default=None, pattern=TAG_RE)
     autoPlace: bool = True
     pageId: str | None = Field(default=None, pattern=TAG_RE)
@@ -809,7 +818,7 @@ class StoryPanelBookmarkCreate(BaseModel):
     startOffset: int = Field(ge=0)
     endOffset: int = Field(ge=0)
     selectedText: str = ""
-    customText: str = ""
+    title: str = Field(default="", max_length=120)
     insertAfterPanelId: str | None = Field(default=None, pattern=TAG_RE)
 
     @model_validator(mode="after")
@@ -826,7 +835,8 @@ class StoryPanelPatch(BaseModel):
     startOffset: int | None = Field(default=None, ge=0)
     endOffset: int | None = Field(default=None, ge=0)
     selectedText: str | None = None
-    customText: str | None = None
+    storyText: str | None = None
+    visibleText: str | None = None
     richText: str | None = None
     textStyle: StoryPanelTextStyle | None = None
     pageId: str | None = Field(default=None, pattern=TAG_RE)
@@ -840,6 +850,7 @@ class StoryPanelPatch(BaseModel):
     aspectRatioLocked: bool | None = None
     imageCrop: StoryPanelImageCrop | None = None
     captions: list[StoryPanelCaption] | None = None
+    imagePrompts: list[StoryPanelImagePrompt] | None = None
     finalized: bool | None = None
 
 

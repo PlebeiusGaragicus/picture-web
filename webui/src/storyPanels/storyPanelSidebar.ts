@@ -42,10 +42,10 @@ export function filterSidebarItems(panels: StoryPanel[], filter: SidebarFilter) 
 }
 
 export function sidebarItemPrimaryText(panel: StoryPanel) {
-  if (panel.sourceKind === 'bookmark') return panel.customText.trim() || panel.selectedText.trim();
+  if (panel.sourceKind === 'bookmark') return panel.title.trim() || panel.selectedText.trim();
   if (panel.title.trim()) return panel.title.trim();
-  if (isBookLinked(panel)) return panel.selectedText.trim();
-  return panel.customText || panel.selectedText;
+  if (isBookLinked(panel)) return panel.storyText.trim() || panel.selectedText.trim();
+  return panel.storyText || panel.selectedText;
 }
 
 export function manualPanelNumber(panels: StoryPanel[], panelId: string) {
@@ -54,10 +54,10 @@ export function manualPanelNumber(panels: StoryPanel[], panelId: string) {
 }
 
 export function sidebarItemSecondaryText(panel: StoryPanel) {
-  if (panel.sourceKind === 'panel' && isBookLinked(panel) && panel.customText.trim()) {
-    return panel.customText.trim();
+  if (panel.sourceKind === 'panel' && panel.visibleText.trim()) {
+    return panel.visibleText.trim();
   }
-  if (panel.sourceKind === 'bookmark' && panel.customText.trim() && panel.selectedText.trim() !== panel.customText.trim()) {
+  if (panel.sourceKind === 'bookmark' && panel.title.trim() && panel.selectedText.trim() !== panel.title.trim()) {
     return panel.selectedText.trim();
   }
   return '';
@@ -70,6 +70,6 @@ export function bookAnchorPanels(panels: StoryPanel[]) {
 }
 
 export type InsertDraftPayload = {
-  customText: string;
+  storyText: string;
   insertAfterPanelId: string | null;
 };

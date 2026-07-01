@@ -226,7 +226,7 @@ function richTextToPlainText(value: string) {
 function richTextForPanel(panel: StoryPanel, draft: string | null = null) {
   if (draft !== null) return draft;
   if (panel.richText) return panel.richText;
-  return plainTextToRichText(panel.customText || panel.selectedText);
+  return plainTextToRichText(panel.visibleText || panel.selectedText);
 }
 
 function textStyleForPanel(panel: StoryPanel): StoryPanelTextStyle {
@@ -301,7 +301,7 @@ function findPanelOrCaption(document: StoryPanelDocument, panelId: string | null
 
 function captionPatchFromPanelPatch(patch: Partial<StoryPanel>): Partial<StoryPanelCaption> {
   const captionPatch: Partial<StoryPanelCaption> = {};
-  if (patch.customText !== undefined) captionPatch.customText = patch.customText;
+  if (patch.visibleText !== undefined) captionPatch.visibleText = patch.visibleText;
   if (patch.richText !== undefined) captionPatch.richText = patch.richText;
   if (patch.textStyle !== undefined) captionPatch.textStyle = patch.textStyle;
   if (patch.rect !== undefined) captionPatch.rect = patch.rect;
@@ -481,7 +481,7 @@ export function PageLayoutEditor({
   const previousPageIndexRef = useRef(0);
   const previousLayoutModeRef = useRef<StoryPanelLayoutMode>(layoutMode);
   const richTextEditorRef = useRef<HTMLDivElement | null>(null);
-  const customTextDraftRef = useRef<string | null>(null);
+  const visibleTextDraftRef = useRef<string | null>(null);
   const displayDocumentRef = useRef<StoryPanelDocument>(document);
   const draftDocumentRef = useRef<StoryPanelDocument | null>(null);
   const richTextEditingPanelIdRef = useRef<string | null>(null);
@@ -503,7 +503,7 @@ export function PageLayoutEditor({
   const [pendingCaptionDeleteId, setPendingCaptionDeleteId] = useState<string | null>(null);
   const [undoStack, setUndoStack] = useState<StoryPanelHistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<StoryPanelHistoryEntry[]>([]);
-  const [customTextDraft, setCustomTextDraft] = useState<string | null>(null);
+  const [visibleTextDraft, setVisibleTextDraft] = useState<string | null>(null);
   const [fontSizeInput, setFontSizeInput] = useState<string | null>(null);
   const [sidePanelHeight, setSidePanelHeight] = useState<number | null>(null);
   const [flashingPanelId, setFlashingPanelId] = useState<string | null>(null);
@@ -519,7 +519,7 @@ export function PageLayoutEditor({
   const displayDocument = draftDocument ?? document;
   displayDocumentRef.current = displayDocument;
   draftDocumentRef.current = draftDocument;
-  customTextDraftRef.current = customTextDraft;
+  visibleTextDraftRef.current = visibleTextDraft;
   const pages = sortedPages(displayDocument);
   const clampedPageIndex = Math.min(Math.max(currentPageIndex, 0), Math.max(0, pages.length - 1));
   const coverPage = pages.find((page) => page.pageKind === 'cover') ?? null;
@@ -566,11 +566,7 @@ export function PageLayoutEditor({
   const imageInfoHost = imageInfoHostFor(displayDocument, visibleSelectedPanel);
   const captionHostPanel = imageInfoHost;
   const childCaptions = captionHostPanel ? captionPanelsFor(displayDocument, captionHostPanel.id) : [];
-  const infoStoryPanel = imageInfoHost && isBookLinked(imageInfoHost)
-    ? imageInfoHost
-    : visibleSelectedPanel && isBookLinked(visibleSelectedPanel)
-    ? visibleSelectedPanel
-    : null;
+  const infoStoryPanel = imageInfoHost ?? visibleSelectedPanel ?? null;
   const selectedPage = selectedPageId ? pages.find((page) => page.id === selectedPageId) ?? null : null;
   const selectedPageCanChangeOrder = isStoryPage(selectedPage);
   const storyPages = sortedStoryPages(pages);
@@ -606,13 +602,13 @@ export function PageLayoutEditor({
     const panel = doc.panels.find((candidate) => candidate.id === panelId);
     if (!panel || panel.panelKind !== 'text') return;
     const nextRichText = sanitizeRichText(draftHtml);
-    const currentRichText = panel.richText || plainTextToRichText(panel.customText || panel.selectedText);
+    const currentRichText = panel.richText || plainTextToRichText(panel.visibleText || panel.selectedText);
     if (nextRichText === currentRichText) return;
     const nextDocument = {
       ...doc,
       panels: doc.panels.map((candidate) => (
         candidate.id === panelId
-          ? { ...candidate, richText: nextRichText, customText: richTextToPlainText(nextRichText) }
+          ? { ...candidate, richText: nextRichText, visibleText: richTextToPlainText(nextRichText) }
           : candidate
       )),
     };
@@ -720,19 +716,19 @@ export function PageLayoutEditor({
     if (previousPanelId && previousPanelId !== activePanelId) {
       persistPanelTextDraft(
         previousPanelId,
-        customTextDraftRef.current ?? richTextEditorRef.current?.innerHTML,
+        visibleTextDraftRef.current ?? richTextEditorRef.current?.innerHTML,
       );
     }
 
     if (!showsSelectedPanelInfo || !visibleSelectedPanel || visibleSelectedPanel.panelKind !== 'text' || isCaption(visibleSelectedPanel)) {
       if (!visibleSelectedPanel || visibleSelectedPanel.panelKind !== 'text' || isCaption(visibleSelectedPanel)) {
-        setCustomTextDraft(null);
+    setVisibleTextDraft(null);
       }
       richTextEditingPanelIdRef.current = activePanelId;
       return;
     }
     const nextDraft = richTextForPanel(visibleSelectedPanel);
-    setCustomTextDraft(nextDraft);
+    setVisibleTextDraft(nextDraft);
     richTextEditingPanelIdRef.current = activePanelId;
     const editor = richTextEditorRef.current;
     if (!editor || window.document.activeElement === editor) return;
@@ -745,27 +741,27 @@ export function PageLayoutEditor({
     visibleSelectedPanel?.id,
     visibleSelectedPanel?.panelKind,
     visibleSelectedPanel?.richText,
-    visibleSelectedPanel?.customText,
+    visibleSelectedPanel?.visibleText,
   ]);
   useEffect(() => {
     if (!showsSelectedPanelInfo || !visibleSelectedPanel || visibleSelectedPanel.panelKind !== 'text') return;
-    if (customTextDraft === null) return;
+    if (visibleTextDraft === null) return;
     const panelId = visibleSelectedPanel.id;
     const timer = window.setTimeout(() => {
       persistPanelTextDraftRef.current(
         panelId,
-        customTextDraftRef.current ?? richTextEditorRef.current?.innerHTML,
+        visibleTextDraftRef.current ?? richTextEditorRef.current?.innerHTML,
       );
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [customTextDraft, showsSelectedPanelInfo, visibleSelectedPanel?.id, visibleSelectedPanel?.panelKind]);
+  }, [visibleTextDraft, showsSelectedPanelInfo, visibleSelectedPanel?.id, visibleSelectedPanel?.panelKind]);
   useEffect(() => {
     return () => {
       const panelId = richTextEditingPanelIdRef.current;
       if (!panelId) return;
       persistPanelTextDraftRef.current(
         panelId,
-        customTextDraftRef.current ?? richTextEditorRef.current?.innerHTML,
+        visibleTextDraftRef.current ?? richTextEditorRef.current?.innerHTML,
       );
     };
   }, []);
@@ -1110,7 +1106,7 @@ export function PageLayoutEditor({
     const grid = pageRefs.current[caption.pageId];
     if (!grid) return;
     const pageRows = LAYOUT_PAGE_ROWS;
-    const text = captionTextDrafts[captionId] ?? caption.customText;
+    const text = captionTextDrafts[captionId] ?? caption.visibleText;
     const nextHeight = fitCaptionHeightRows(caption, text, grid, pageRows, CAPTION_GRID_SNAP);
     updatePanelById(captionId, { rect: clampCaptionRect({ ...caption.rect, h: nextHeight }) });
   };
@@ -1119,7 +1115,7 @@ export function PageLayoutEditor({
     if (!caption?.pageId) return;
     const grid = pageRefs.current[caption.pageId];
     if (!grid) return;
-    const text = captionTextDrafts[captionId] ?? caption.customText;
+    const text = captionTextDrafts[captionId] ?? caption.visibleText;
     const nextSize = fitCaptionFontSize(caption, text, grid, LAYOUT_PAGE_ROWS);
     updateCaptionStyle(captionId, { fontSize: nextSize });
     setCaptionFontSizeDraft(null);
@@ -1153,7 +1149,7 @@ export function PageLayoutEditor({
     if (panel.sourceKind === 'bookmark') return 'Bookmark';
     return `Panel ${storyPanelNumberById.get(panel.id) ?? ''}`;
   };
-  const sidebarPanelPreview = (panel: StoryPanel) => (panel.selectedText || panel.customText)
+  const sidebarPanelPreview = (panel: StoryPanel) => (panel.storyText || panel.selectedText || panel.visibleText)
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 40);
@@ -1161,7 +1157,7 @@ export function PageLayoutEditor({
     const captions = captionPanelsFor(displayDocument, parent.id);
     const nextCaption: StoryPanelCaption = {
       id: nextPanelId(displayDocument),
-      customText: '',
+      visibleText: '',
       richText: plainTextToRichText(''),
       textStyle: { ...defaultCaptionTextStyle },
       rect: clampCaptionRect(defaultCaptionRect(parent, captions)),
@@ -1207,7 +1203,7 @@ export function PageLayoutEditor({
     const caption = findPanelOrCaption(displayDocument, captionId);
     if (!caption || !isCaption(caption)) return;
     const nextRichText = plainTextToRichText(draft);
-    if (caption.customText === draft && (caption.richText || plainTextToRichText(caption.customText)) === nextRichText) {
+    if (caption.visibleText === draft && (caption.richText || plainTextToRichText(caption.visibleText)) === nextRichText) {
       setCaptionTextDrafts((current) => {
         const next = { ...current };
         delete next[captionId];
@@ -1215,7 +1211,7 @@ export function PageLayoutEditor({
       });
       return;
     }
-    updatePanelById(captionId, { customText: draft, richText: nextRichText });
+    updatePanelById(captionId, { visibleText: draft, richText: nextRichText });
     setCaptionTextDrafts((current) => {
       const next = { ...current };
       delete next[captionId];
@@ -1340,7 +1336,7 @@ export function PageLayoutEditor({
   };
   const renderImagePanelBody = (panel: StoryPanel, cropModeActive = false) => {
     const activeAsset = panel.activeAssetId ? assetById.get(panel.activeAssetId) ?? null : null;
-    const passage = (panel.selectedText || panel.customText || '').replace(/\s+/g, ' ').trim();
+    const passage = (panel.storyText || panel.selectedText || panel.visibleText || '').replace(/\s+/g, ' ').trim();
     if (activeAsset) {
       const crop = imageCropForPanel(panel);
       if (cropModeActive) {
@@ -1475,10 +1471,10 @@ export function PageLayoutEditor({
     setPendingPanelDeleteId(null);
     onSelectPanel(null);
   };
-  const selectedPanelRemoveLabel = layoutReadingChunkPanel ? 'Remove' : 'Delete';
+  const selectedPanelRemoveLabel = layoutReadingChunkPanel ? 'Remove from layout' : 'Delete';
   const commitCustomTextDraft = () => {
     if (!selectedPanel) return;
-    persistPanelTextDraft(selectedPanel.id, richTextEditorRef.current?.innerHTML ?? customTextDraft);
+    persistPanelTextDraft(selectedPanel.id, richTextEditorRef.current?.innerHTML ?? visibleTextDraft);
   };
   const jumpToPage = (value: number) => {
     if (!Number.isFinite(value)) return;
@@ -1689,7 +1685,7 @@ export function PageLayoutEditor({
     if (editingPanelId) {
       persistPanelTextDraft(
         editingPanelId,
-        customTextDraftRef.current ?? richTextEditorRef.current?.innerHTML,
+        visibleTextDraftRef.current ?? richTextEditorRef.current?.innerHTML,
       );
     }
     onSelectPanel(null);
@@ -1766,7 +1762,7 @@ export function PageLayoutEditor({
     window.document.execCommand(command);
     const active = window.document.activeElement;
     if (active instanceof HTMLElement && active.classList.contains('story-panels-rich-text-editor')) {
-      setCustomTextDraft(sanitizeRichText(active.innerHTML));
+      setVisibleTextDraft(sanitizeRichText(active.innerHTML));
     }
   };
   useEffect(() => {
@@ -1938,7 +1934,7 @@ export function PageLayoutEditor({
                           {panel.panelKind === 'text' ? (
                             <span
                               className="story-panels-page-panel-rich-text"
-                              dangerouslySetInnerHTML={{ __html: sanitizeRichText(richTextForPanel(panel, panel.id === selectedPanelId ? customTextDraft : null)) }}
+                              dangerouslySetInnerHTML={{ __html: sanitizeRichText(richTextForPanel(panel, panel.id === selectedPanelId ? visibleTextDraft : null)) }}
                             />
                           ) : renderImagePanelBody(panel, cropModePanelId === panel.id)}
                           {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
@@ -2047,7 +2043,7 @@ export function PageLayoutEditor({
                           {panel.panelKind === 'text' ? (
                             <span
                               className="story-panels-page-panel-rich-text"
-                              dangerouslySetInnerHTML={{ __html: sanitizeRichText(richTextForPanel(panel, panel.id === selectedPanelId ? customTextDraft : null)) }}
+                              dangerouslySetInnerHTML={{ __html: sanitizeRichText(richTextForPanel(panel, panel.id === selectedPanelId ? visibleTextDraft : null)) }}
                             />
                           ) : renderImagePanelBody(panel, cropModePanelId === panel.id)}
                           {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
@@ -2090,7 +2086,7 @@ export function PageLayoutEditor({
                     className="danger"
                     disabled={isSaving}
                     aria-label={selectedPanelRemoveLabel}
-                    title={layoutReadingChunkPanel ? 'Remove from layout (keeps panel in Reading)' : undefined}
+                    title={layoutReadingChunkPanel ? 'Remove from layout (keeps panel in Panels)' : undefined}
                     onClick={requestDeleteSelectedPanel}
                   >
                     {selectedPanelRemoveLabel}
@@ -2117,11 +2113,17 @@ export function PageLayoutEditor({
                 </div>
                 {infoStoryPanel && (
                   <label>
-                    {`Story text (${infoStoryPanel.startOffset} to ${infoStoryPanel.endOffset})`}
+                    {isBookLinked(infoStoryPanel)
+                      ? `Story text (${infoStoryPanel.startOffset} to ${infoStoryPanel.endOffset})`
+                      : 'Story text'}
                     <textarea
-                      value={infoStoryPanel.selectedText}
+                      value={isBookLinked(infoStoryPanel) ? infoStoryPanel.selectedText : infoStoryPanel.storyText}
                       rows={5}
-                      readOnly
+                      disabled={isSaving || isBookLinked(infoStoryPanel)}
+                      readOnly={isBookLinked(infoStoryPanel)}
+                      onChange={(event) => {
+                        if (!isBookLinked(infoStoryPanel)) updatePanelById(infoStoryPanel.id, { storyText: event.target.value });
+                      }}
                     />
                   </label>
                 )}
@@ -2341,7 +2343,7 @@ export function PageLayoutEditor({
                           >
                             <textarea
                               aria-label={captionLabel(index)}
-                              value={captionTextDrafts[caption.id] ?? caption.customText}
+                              value={captionTextDrafts[caption.id] ?? caption.visibleText}
                               rows={3}
                               disabled={isSaving}
                               onChange={(event) => {
@@ -2589,7 +2591,7 @@ export function PageLayoutEditor({
                         'editor',
                       )}
                       onKeyDown={(event) => event.stopPropagation()}
-                      onInput={(event) => setCustomTextDraft(sanitizeRichText(event.currentTarget.innerHTML))}
+                      onInput={(event) => setVisibleTextDraft(sanitizeRichText(event.currentTarget.innerHTML))}
                       onBlur={commitCustomTextDraft}
                     />
                   </div>
@@ -2707,7 +2709,7 @@ export function PageLayoutEditor({
                     setPageMenu(null);
                   }}
                 >
-                  Remove
+                  Remove from layout
                 </button>
               </>
             );
@@ -2718,7 +2720,7 @@ export function PageLayoutEditor({
         <div className="confirm-backdrop" onClick={() => setPlacementPickerTarget(null)}>
           <div className="confirm-dialog story-panels-placement-picker" role="dialog" aria-modal="true" aria-labelledby="story-panels-placement-picker-title" onClick={(event) => event.stopPropagation()}>
             <h2 id="story-panels-placement-picker-title">Place panel here</h2>
-            <p>Choose a panel chunk to place at the clicked location.</p>
+            <p>Choose a panel to place at the clicked location.</p>
             <div className="story-panels-placement-picker-list">
               {placeablePanels.map((panel) => (
                 <button key={panel.id} type="button" disabled={isSaving || !onPlacePanelAt} onClick={() => void placePanelFromPicker(panel.id)}>
@@ -2755,7 +2757,7 @@ export function PageLayoutEditor({
             </h2>
             <p>
               {isPanel(pendingPanelDelete) && !isCaption(pendingPanelDelete)
-                ? 'This removes the panel from the page layout. The panel stays in Reading and can be placed again.'
+                ? 'This removes the panel from the page layout. The panel stays in Panels and can be placed again.'
                 : 'This will remove the layout item from the page.'}
             </p>
             <div className="modal-actions">

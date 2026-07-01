@@ -94,17 +94,17 @@ def _ensure_default_fixed_page_panels(document: StoryPanelDocument) -> None:
     defaults = {
         "cover": {
             "title": "Title",
-            "customText": "Title goes here",
+            "visibleText": "Title goes here",
             "rect": StoryPanelRect(x=1.5, y=1.25, w=9, h=1.25),
         },
         "inside-front-cover": {
             "title": "Copyright",
-            "customText": "Copyright information goes here.",
+            "visibleText": "Copyright information goes here.",
             "rect": StoryPanelRect(x=1, y=1, w=10, h=2),
         },
         "inside-back-cover": {
             "title": "About",
-            "customText": "About this comic, acknowledgements, or bonus notes go here.",
+            "visibleText": "About this comic, acknowledgements, or bonus notes go here.",
             "rect": StoryPanelRect(x=1, y=1, w=10, h=2),
         },
     }
@@ -123,7 +123,8 @@ def _ensure_default_fixed_page_panels(document: StoryPanelDocument) -> None:
                 startOffset=None,
                 endOffset=None,
                 selectedText="",
-                customText=default["customText"],
+                storyText="",
+                visibleText=default["visibleText"],
                 pageId=page_id,
                 panelKind="text",
                 rect=default["rect"],
@@ -163,6 +164,8 @@ def _validate_against_book(slug: str, document: StoryPanelDocument) -> StoryPane
         if panel.selectedText and panel.selectedText != selected:
             raise HTTPException(status_code=400, detail=f"Panel selectedText does not match book range: {panel.id}")
         panel.selectedText = selected
+        if panel.sourceKind == "panel":
+            panel.storyText = selected
     return document
 
 
@@ -180,6 +183,28 @@ def _normalize_raw_document(raw: dict) -> None:
     for panel in raw.get("panels", []):
         if panel.get("sourceKind") == "note":
             panel["sourceKind"] = "panel"
+        legacy_custom_text = panel.pop("customText", "")
+        is_fixed_page_text_block = (
+            panel.get("sourceKind") == "panel"
+            and panel.get("panelKind") == "text"
+            and panel.get("startOffset") is None
+            and panel.get("pageId") in {"cover", "inside-front-cover", "inside-back-cover"}
+        )
+        if panel.get("sourceKind") == "bookmark" and not panel.get("title"):
+            panel["title"] = legacy_custom_text
+        if "storyText" not in panel:
+            panel["storyText"] = "" if is_fixed_page_text_block else (
+                panel.get("selectedText", "") if panel.get("startOffset") is not None else legacy_custom_text
+            )
+        elif is_fixed_page_text_block and panel.get("storyText") == panel.get("visibleText", legacy_custom_text):
+            panel["storyText"] = ""
+        if "visibleText" not in panel:
+            panel["visibleText"] = legacy_custom_text
+        panel.setdefault("imagePrompts", [])
+        for caption in panel.get("captions", []):
+            legacy_caption_text = caption.pop("customText", "")
+            if "visibleText" not in caption:
+                caption["visibleText"] = legacy_caption_text
     caption_records = [panel for panel in raw.get("panels", []) if panel.get("parentPanelId")]
     if not caption_records:
         return
@@ -195,7 +220,7 @@ def _normalize_raw_document(raw: dict) -> None:
         parent.setdefault("captions", []).append(
             StoryPanelCaption(
                 id=caption["id"],
-                customText=caption.get("customText", ""),
+                visibleText=caption.get("visibleText", ""),
                 richText=caption.get("richText", ""),
                 textStyle=caption.get("textStyle", {}),
                 rect=caption.get("rect", {}),
@@ -442,7 +467,8 @@ def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
         else:
             rect = rect or StoryPanelRect(x=0, y=0, w=DEFAULT_AUTO_PLACE_W, h=DEFAULT_AUTO_PLACE_H)
     selected = payload.selectedText.strip()
-    custom_text = payload.customText.strip()
+    story_text = payload.storyText.strip()
+    visible_text = payload.visibleText.strip()
     if has_book_offsets:
         assert payload.startOffset is not None and payload.endOffset is not None
         book = read_book(slug)
@@ -451,10 +477,9 @@ def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
         selected = book[payload.startOffset:payload.endOffset]
         if payload.selectedText and payload.selectedText != selected:
             raise HTTPException(status_code=400, detail="Panel selectedText does not match book range")
-    elif custom_text and not selected:
-        selected = custom_text
-    elif selected and not custom_text:
-        custom_text = selected
+        story_text = selected
+    elif selected and not story_text:
+        story_text = story_text or selected
     next_order = _order_for_insert_after(document, payload.insertAfterPanelId)
     panel = StoryPanel(
         id=_next_panel_id(document),
@@ -464,7 +489,9 @@ def create_panel(slug: str, payload: StoryPanelCreate) -> StoryPanelDocument:
         startOffset=payload.startOffset,
         endOffset=payload.endOffset,
         selectedText=selected,
-        customText=custom_text,
+        storyText=story_text,
+        visibleText=visible_text,
+        imagePrompts=payload.imagePrompts,
         pageId=page_id,
         panelKind=payload.panelKind,
         rect=rect,
@@ -499,9 +526,7 @@ def create_bookmark(slug: str, payload: StoryPanelBookmarkCreate) -> StoryPanelD
     selected = book[payload.startOffset:payload.endOffset]
     if payload.selectedText and payload.selectedText != selected:
         raise HTTPException(status_code=400, detail="Bookmark selectedText does not match book range")
-    custom_text = payload.customText.strip()
-    if not custom_text:
-        custom_text = selected.replace("\n", " ").strip()[:120]
+    title = payload.title.strip() or selected.replace("\n", " ").strip()[:120]
     next_order = _order_for_insert_after(document, payload.insertAfterPanelId)
     panel = StoryPanel(
         id=_next_panel_id(document),
@@ -510,7 +535,7 @@ def create_bookmark(slug: str, payload: StoryPanelBookmarkCreate) -> StoryPanelD
         startOffset=payload.startOffset,
         endOffset=payload.endOffset,
         selectedText=selected,
-        customText=custom_text,
+        title=title,
         pageId=None,
         panelKind="text",
         rect=StoryPanelRect(x=0, y=0, w=DEFAULT_AUTO_PLACE_W, h=DEFAULT_AUTO_PLACE_H),

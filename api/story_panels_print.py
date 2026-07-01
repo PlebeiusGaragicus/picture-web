@@ -306,7 +306,8 @@ def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel | StoryPanelCaption, 
     else:
         pdf.rect(x, y, w, h, stroke=0 if transparent else 1, fill=0 if transparent else 1)
     selected_text = panel.selectedText if isinstance(panel, StoryPanel) else ""
-    rich_text = panel.richText or _plain_text_to_rich_text(panel.customText or selected_text)
+    visible_text = panel.visibleText or selected_text
+    rich_text = panel.richText or _plain_text_to_rich_text(visible_text)
     text_color = HexColor(style.color) if is_caption else black
     text_x = x + 5
     text_y = y + h - 8
@@ -348,7 +349,7 @@ def _draw_image_panel(
         pdf.setStrokeColor(HexColor("#2563eb"))
         pdf.rect(x, y, w, h, stroke=1, fill=1)
         label = f"Page {page_number or '?'} Panel"
-        body = panel.selectedText.strip() or panel.customText.strip()
+        body = (panel.storyText or panel.selectedText).strip()
         _draw_wrapped_text(pdf, f"{label}\n{body}", x + 5, y + h - 12, w - 10, h - 10, size=7)
         return
     pdf.setStrokeColor(HexColor("#0f172a"))

@@ -167,10 +167,10 @@ export function LayoutEditorView({
     }
   };
 
-  const insertDraft = async ({ customText, insertAfterPanelId }: InsertDraftPayload) => {
+  const insertDraft = async ({ storyText, insertAfterPanelId }: InsertDraftPayload) => {
     const beforeIds = new Set(document?.panels.map((panel) => panel.id) ?? []);
     const next = await api.createStoryPanel(projectSlug, {
-      customText,
+      storyText,
       insertAfterPanelId,
       autoPlace: autoPlaceDraftPanel(sidebarPanels.length, readAutoPlaceEnabled()),
     });
@@ -183,11 +183,6 @@ export function LayoutEditorView({
     }
   };
 
-  const editPanelNote = async (panelId: string, noteText: string) => {
-    const next = await api.patchStoryPanel(projectSlug, panelId, { customText: noteText });
-    setDocument(next);
-  };
-
   const savePanelEdit = async (panelId: string, patch: StoryPanelPatchPayload) => {
     const next = await api.patchStoryPanel(projectSlug, panelId, patch);
     setDocument(next);
@@ -197,7 +192,8 @@ export function LayoutEditorView({
     const beforeIds = new Set(document?.panels.map((panel) => panel.id) ?? []);
     const next = await api.createStoryPanel(projectSlug, {
       title: panelKind === 'text' ? 'Text panel' : 'Image panel',
-      customText: panelKind === 'text' ? 'Text block' : '',
+      storyText: '',
+      visibleText: panelKind === 'text' ? 'Text block' : '',
       panelKind,
       pageId,
       rect,
@@ -286,7 +282,6 @@ export function LayoutEditorView({
       onPlacePanelOnLayout={placePanelOnLayout}
       onDeletePanel={handleDeletePanel}
       onInsertDraft={insertDraft}
-      onEditPanelNote={bookText.length > 0 ? editPanelNote : undefined}
       onSavePanelEdit={savePanelEdit}
       isSaving={isSaving || isPlacingPanel}
     />
@@ -347,7 +342,7 @@ export function LayoutEditorView({
                 aria-pressed={singleSidePanel === 'chunks'}
                 onClick={() => selectSingleSidePanel('chunks')}
               >
-                Chunks
+                Panels
               </button>
             </div>
           )}

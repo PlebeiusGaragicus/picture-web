@@ -63,7 +63,10 @@ export function inferDocumentChangeLabel(before: StoryPanelDocument, after: Stor
     if (previous.panelKind !== next.panelKind) {
       return next.panelKind === 'text' ? 'Change to text panel' : 'Change to image panel';
     }
-    if (previous.customText !== next.customText || previous.richText !== next.richText) return 'Edit text';
+    if (previous.storyText !== next.storyText) return 'Edit story text';
+    if (previous.visibleText !== next.visibleText || previous.richText !== next.richText) return 'Edit visible text';
+    if (JSON.stringify(previous.captions) !== JSON.stringify(next.captions)) return 'Edit captions';
+    if (JSON.stringify(previous.imagePrompts) !== JSON.stringify(next.imagePrompts)) return 'Edit image prompts';
     if (JSON.stringify(previous.textStyle) !== JSON.stringify(next.textStyle)) return 'Edit text style';
     if (JSON.stringify(previous.imageCrop) !== JSON.stringify(next.imageCrop)) return 'Adjust image crop';
     if (previous.aspectRatio !== next.aspectRatio || previous.aspectRatioLocked !== next.aspectRatioLocked) {

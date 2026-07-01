@@ -47,6 +47,7 @@ export function BookTextView({
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [focusedBookPanelId, setFocusedBookPanelId] = useState<string | null>(null);
   const [focusedChunkPanelId, setFocusedChunkPanelId] = useState<string | null>(null);
+  const [editorPanelRequestId, setEditorPanelRequestId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isPlacingPanel, setIsPlacingPanel] = useState(false);
 
@@ -86,6 +87,14 @@ export function BookTextView({
     window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
   };
 
+  const openPanelEditor = (panelId: string) => {
+    setSelectedPanelId(panelId);
+    onPanelChunksOpenChange(true);
+    setFocusedChunkPanelId(null);
+    window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
+    setEditorPanelRequestId(panelId);
+  };
+
   const openPanelPlacement = (panelId: string) => {
     if (!document) return;
     const panel = document.panels.find((candidate) => candidate.id === panelId);
@@ -109,23 +118,24 @@ export function BookTextView({
     }
   };
 
-  const createPanel = async (panelNote?: string) => {
+  const createPanel = async () => {
     if (!selection) return;
     setIsCreating(true);
     setError(null);
     try {
       const next = await api.createStoryPanel(projectSlug, {
         ...selection,
-        customText: panelNote ?? '',
+        storyText: selection.selectedText,
+        visibleText: '',
         autoPlace: autoPlaceEnabled,
       });
       setDocument(next);
       setSelection(null);
-      setSelectedPanelId(
-        sortedPanels(next.panels).find(
-          (panel) => panel.sourceKind === 'panel' && panel.startOffset === selection.startOffset && panel.endOffset === selection.endOffset,
-        )?.id ?? null,
+      const createdPanel = sortedPanels(next.panels).find(
+        (panel) => panel.sourceKind === 'panel' && panel.startOffset === selection.startOffset && panel.endOffset === selection.endOffset,
       );
+      setSelectedPanelId(createdPanel?.id ?? null);
+      if (createdPanel) openPanelEditor(createdPanel.id);
       window.getSelection()?.removeAllRanges();
     } catch (err) {
       setError(formatRequestError(err));
@@ -166,11 +176,11 @@ export function BookTextView({
     }
   };
 
-  const insertDraft = async ({ customText, insertAfterPanelId }: InsertDraftPayload) => {
+  const insertDraft = async ({ storyText, insertAfterPanelId }: InsertDraftPayload) => {
     if (!document) return;
     const beforeIds = new Set(document.panels.map((panel) => panel.id));
     const next = await api.createStoryPanel(projectSlug, {
-      customText,
+      storyText,
       insertAfterPanelId,
       autoPlace: autoPlaceDraftPanel(sidebarPanels.length, autoPlaceEnabled),
     });
@@ -183,17 +193,15 @@ export function BookTextView({
     }
   };
 
-  const editPanelNote = async (panelId: string, noteText: string) => {
+  const editPanelText = async (panelId: string, storyText: string) => {
     setError(null);
     try {
-      const next = await api.patchStoryPanel(projectSlug, panelId, { customText: noteText });
+      const next = await api.patchStoryPanel(projectSlug, panelId, { storyText });
       setDocument(next);
     } catch (err) {
       setError(formatRequestError(err));
     }
   };
-
-  const editPanelText = editPanelNote;
 
   const savePanelEdit = async (panelId: string, patch: StoryPanelPatchPayload) => {
     setError(null);
@@ -244,7 +252,7 @@ export function BookTextView({
     return (
       <div className="story-adaptation-screen story-view-screen story-view-screen--empty">
         <h1 className="story-view-title">Story</h1>
-        <p className="error">{error ?? 'Unable to load panel chunks.'}</p>
+        <p className="error">{error ?? 'Unable to load panels.'}</p>
       </div>
     );
   }
@@ -257,12 +265,13 @@ export function BookTextView({
       pages={document.pages}
       selectedPanelId={selectedPanelId}
       focusedPanelId={focusedChunkPanelId}
+      openEditorPanelId={editorPanelRequestId}
       onSelectPanel={selectPanelChunk}
+      onOpenEditorPanelComplete={() => setEditorPanelRequestId(null)}
       onOpenPanelPlacement={openPanelPlacement}
       onPlacePanelOnLayout={placePanelOnLayout}
       onDeletePanel={handleDeletePanel}
       onInsertDraft={hasBookText ? undefined : insertDraft}
-      onEditPanelNote={hasBookText ? editPanelNote : undefined}
       onEditPanelText={hasBookText ? undefined : editPanelText}
       onSavePanelEdit={savePanelEdit}
       isSaving={isSaving || isPlacingPanel}
@@ -313,6 +322,7 @@ export function BookTextView({
               focusedPanelId={focusedBookPanelId}
               onSelectPanel={selectPanelChunk}
               onFocusPanelChunk={focusPanelChunk}
+              onOpenPanelEditor={openPanelEditor}
               onInsertDraft={insertDraft}
               onEditPanelText={editPanelText}
               isSaving={isSaving || isCreating}
@@ -323,7 +333,7 @@ export function BookTextView({
         {panelChunksOpen && (
           <aside className="story-view-chunks-pane">
             <div className="story-view-chunks-pane-head">
-              <h2 className="story-view-chunks-title">Reading</h2>
+              <h2 className="story-view-chunks-title">Panels</h2>
             </div>
             {panelChunks}
           </aside>

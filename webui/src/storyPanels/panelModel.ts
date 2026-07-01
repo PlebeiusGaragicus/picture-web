@@ -21,7 +21,8 @@ export function captionAsPanel(parent: StoryPanel, caption: StoryPanelCaption): 
     startOffset: null,
     endOffset: null,
     selectedText: '',
-    customText: caption.customText,
+    storyText: '',
+    visibleText: caption.visibleText,
     richText: caption.richText,
     textStyle: caption.textStyle,
     pageId: parent.pageId,
@@ -35,6 +36,7 @@ export function captionAsPanel(parent: StoryPanel, caption: StoryPanelCaption): 
     aspectRatioLocked: false,
     imageCrop: null,
     captions: [],
+    imagePrompts: [],
     finalized: false,
   };
 }
