@@ -118,7 +118,7 @@ export function BookTextView({
     }
   };
 
-  const createPanel = async () => {
+  const createPanel = async (options: { openEditor?: boolean } = {}) => {
     if (!selection) return;
     setIsCreating(true);
     setError(null);
@@ -135,7 +135,7 @@ export function BookTextView({
         (panel) => panel.sourceKind === 'panel' && panel.startOffset === selection.startOffset && panel.endOffset === selection.endOffset,
       );
       setSelectedPanelId(createdPanel?.id ?? null);
-      if (createdPanel) openPanelEditor(createdPanel.id);
+      if (options.openEditor && createdPanel) openPanelEditor(createdPanel.id);
       window.getSelection()?.removeAllRanges();
     } catch (err) {
       setError(formatRequestError(err));

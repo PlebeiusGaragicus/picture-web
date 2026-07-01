@@ -74,7 +74,7 @@ export function BookTextSelector({
   selection: TextSelectionRange | null;
   focusedPanelId: string | null;
   onSelectionChange: (selection: TextSelectionRange | null) => void;
-  onCreatePanel: () => Promise<void>;
+  onCreatePanel: (options?: { openEditor?: boolean }) => Promise<void>;
   onCreateBookmark: () => Promise<void>;
   onDeletePanel: (panelId: string) => void | Promise<void>;
   onAdjustPanelRange: (panelId: string, startOffset: number, endOffset: number) => void;
@@ -294,6 +294,19 @@ export function BookTextSelector({
                 disabled={!selection || isCreating}
                 onClick={() => {
                   void onCreatePanel().then(() => {
+                    setMenu(null);
+                    onSelectionChange(null);
+                    window.getSelection()?.removeAllRanges();
+                  });
+                }}
+              >
+                + panel
+              </button>
+              <button
+                type="button"
+                disabled={!selection || isCreating}
+                onClick={() => {
+                  void onCreatePanel({ openEditor: true }).then(() => {
                     setMenu(null);
                     onSelectionChange(null);
                     window.getSelection()?.removeAllRanges();
