@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Node } from 'reactflow';
 import { isCanonicalStyleRefAsset, styleRefKindForTags } from '../styleRefs';
 import type { AdaptationStatus, Asset, DraftCanvasNode, GenerationParams, ImageGroupCanvasNode, StyleRefKind, TagDefinition, VisualStyleDefinition } from '../types';
-import { VisualStyleSelect } from '../adaptation/visualStyleSelect';
+import { VisualStyleSelect } from '../visualStyles/VisualStyleSelect';
 import { TagControlButton } from './assetTagRow';
 import { canDeleteNode } from './roles';
 import { assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, uniqueOptions, visibleDisplayName, visibleVariants } from './shared';

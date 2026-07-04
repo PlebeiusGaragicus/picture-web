@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { HelpTip, Modal } from '../ui';
-import { HubCardMenu } from './hubCardMenu';
+import { HubCardMenu } from '../conceptArt/HubCardMenu';
 import type { VisualStyleDefinition } from '../types';
 
 export const DEFAULT_VISUAL_STYLE_TEMPLATE = `Style:

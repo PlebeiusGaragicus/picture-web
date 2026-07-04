@@ -3,7 +3,7 @@ import { api } from '../api';
 import { formatRequestError } from '../formatError';
 import type { AdaptationStatus, AgentSession, AgentSessionKind, AgentSessionStatus, BookChatSession, PiTraceDocument } from '../types';
 import { useBookSessionLoad } from './useBookSessionLoad';
-import { cleanSessionPreview, formatSessionSubtitle, PiTraceTimeline, summarizeTrace } from './piTraceView';
+import { cleanSessionPreview, formatSessionSubtitle, PiTraceTimeline, summarizeTrace } from './PiTraceView';
 
 const emptyTrace: PiTraceDocument = {
   steps: [],

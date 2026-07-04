@@ -7,7 +7,7 @@ import type {
   PiTraceToolCall,
   PiTraceUserStep,
 } from '../types';
-import { MarkdownContent, TraceMessageContent } from './markdownContent';
+import { MarkdownContent, TraceMessageContent } from './MarkdownContent';
 
 function formatTimestamp(value: string | null | undefined) {
   if (!value) return '';

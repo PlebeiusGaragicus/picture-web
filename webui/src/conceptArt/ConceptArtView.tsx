@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api';
 import { formatRequestError, formatWorkflowStatusError } from '../formatError';
-import { VisualStyleList } from './cards';
-import { HubCardMenu } from './hubCardMenu';
+import { VisualStyleList } from '../visualStyles/VisualStyleList';
+import { HubCardMenu } from './HubCardMenu';
 import type { Asset, AdaptationStatus, CanvasDocument, ConceptArtSubjectKind, ConceptCard } from '../types';
 
 function conceptCardTag(cardId: string) {
