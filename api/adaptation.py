@@ -30,24 +30,10 @@ from models import (
     AdaptationGenerateResponse,
     CharacterRecord,
     AdaptationMetadata,
-    AdaptationSettingsPatch,
     AdaptationStatus,
     AdaptationStylePromptPatch,
     AdaptationStyleRefAssetRequest,
     AdaptationWorkflowStatus,
-    SceneListDocument,
-    SceneListLine,
-    SceneListLineCreate,
-    SceneListReplace,
-    SceneMomentsDocument,
-    SceneMomentsUpdate,
-    MomentLayoutSection,
-    MomentRefInput,
-    MomentLayoutSection,
-    MomentSequenceEntry,
-    MomentSequenceDocument,
-    MomentSequenceCounts,
-    MomentPatch,
     ArtifactKind,
     AssetSummary,
     DraftCanvasNode,
@@ -223,8 +209,6 @@ def metadata_path(slug: str) -> Path:
     return adaptation_dir(slug) / "adaptation.json"
 
 
-WORKFLOW_STAGES = ("ingest", "characters", "scene-list", "scenes", "locations", "moments", "all")
-RUN_WORKFLOW_STAGES = ("ingest", "characters", "scene-list", "all")
 STYLE_REF_KINDS: tuple[StyleRefKind, StyleRefKind] = ("archetype-character", "archetype-scene")
 
 
@@ -317,7 +301,7 @@ def _clear_stale_link_group(slug: str, group: dict[str, AdaptationAssetLink]) ->
 
 
 def artifact_link_groups(metadata: AdaptationMetadata) -> tuple[dict[str, AdaptationAssetLink], ...]:
-    return (metadata.locations, metadata.scenes, metadata.pages, metadata.panels)
+    return (metadata.locations,)
 
 
 def character_entries_from_records(characters: dict[str, CharacterRecord]) -> dict[str, AdaptationAssetLink]:
@@ -412,18 +396,6 @@ def style_ref_statuses(slug: str, metadata: AdaptationMetadata) -> dict[StyleRef
     return {kind: style_ref_status(slug, kind, metadata) for kind in STYLE_REF_KINDS}
 
 
-def require_stage(stage: str) -> str:
-    if stage not in WORKFLOW_STAGES:
-        raise HTTPException(status_code=400, detail=f"Unknown workflow stage: {stage}")
-    return stage
-
-
-def require_run_stage(stage: str) -> str:
-    if stage not in RUN_WORKFLOW_STAGES:
-        raise HTTPException(status_code=400, detail=f"Unknown workflow stage: {stage}")
-    return stage
-
-
 def workflow_status_path(slug: str, stage: str) -> Path:
     return adaptation_dir(slug) / "sessions" / f"run-{stage}-status.json"
 
@@ -436,22 +408,6 @@ def workflow_launcher_log_path(slug: str, stage: str) -> Path:
     return adaptation_dir(slug) / "sessions" / f"run-{stage}-launcher.log"
 
 
-def workflow_manifest_path(slug: str, stage: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / f"run-{stage}-manifest.json"
-
-
-def validation_status_path(slug: str, stage: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / f"validate-{stage}-status.json"
-
-
-def validation_log_path(slug: str, stage: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / f"validate-{stage}.log"
-
-
-def validation_launcher_log_path(slug: str, stage: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / f"validate-{stage}-launcher.log"
-
-
 def workflow_python() -> str:
     venv_python = library.REPO_ROOT / ".venv" / "bin" / "python"
     if venv_python.is_file():
@@ -459,9 +415,9 @@ def workflow_python() -> str:
     return "python3"
 
 
-def workflow_log_files(slug: str, stage: str, *, validation: bool = False) -> dict[str, str]:
+def workflow_log_files(slug: str, stage: str) -> dict[str, str]:
     root = adaptation_dir(slug)
-    prefix = "validate" if validation else "run"
+    prefix = "run"
     sessions = root / "sessions"
     files = {
         "log": (sessions / f"{prefix}-{stage}.log").relative_to(root).as_posix(),
@@ -489,15 +445,7 @@ def ensure_adaptation(slug: str) -> Path:
         root / "sessions",
         root / "style-refs",
         root / "characters",
-        root / "characters" / "artifacts",
-        root / "characters" / "sheets",
-        root / "acts",
-        root / "scenes",
-        root / "scenes" / "artifacts",
         root / "locations",
-        root / "locations" / "staging",
-        root / "pages" / "plans",
-        root / "panels" / "prompts",
         root / "locations" / "prompts",
     ]:
         path.mkdir(parents=True, exist_ok=True)
@@ -509,7 +457,7 @@ def ensure_adaptation(slug: str) -> Path:
     return root
 
 
-def process_status(slug: str, status_path: Path, log_path: Path, *, validation: bool = False) -> AdaptationWorkflowStatus:
+def process_status(slug: str, status_path: Path, log_path: Path) -> AdaptationWorkflowStatus:
     ensure_adaptation(slug)
     data: dict[str, Any] = {}
     if status_path.is_file():
@@ -531,29 +479,15 @@ def process_status(slug: str, status_path: Path, log_path: Path, *, validation: 
         data["completedAt"] = data.get("completedAt") or utc_now()
         data["returnCode"] = data.get("returnCode")
         library.write_json(status_path, data)
-    stage_name = log_path.name
-    if stage_name.startswith("validate-"):
-        stage_name = stage_name.removeprefix("validate-").removesuffix(".log")
-    else:
-        stage_name = stage_name.removeprefix("run-").removesuffix(".log")
+    stage_name = log_path.name.removeprefix("run-").removesuffix(".log")
     return AdaptationWorkflowStatus(
         running=running,
         returnCode=data.get("returnCode"),
         startedAt=data.get("startedAt"),
         completedAt=data.get("completedAt"),
         log=log,
-        logFiles=workflow_log_files(slug, stage_name, validation=validation),
+        logFiles=workflow_log_files(slug, stage_name),
     )
-
-
-def workflow_status(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
-    require_stage(stage)
-    return process_status(slug, workflow_status_path(slug, stage), workflow_log_path(slug, stage), validation=False)
-
-
-def validation_status(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
-    require_stage(stage)
-    return process_status(slug, validation_status_path(slug, stage), validation_log_path(slug, stage), validation=True)
 
 
 def process_is_running(pid: int) -> bool:
@@ -574,11 +508,10 @@ def start_logged_process(
     status_path: Path,
     start_line: str,
     script_command: str,
-    validation: bool = False,
     extra_env: dict[str, str] | None = None,
 ) -> AdaptationWorkflowStatus:
     root = ensure_adaptation(slug)
-    current = process_status(slug, status_path, log_path, validation=validation)
+    current = process_status(slug, status_path, log_path)
     if current.running:
         raise HTTPException(status_code=409, detail="Process is already running")
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -635,60 +568,7 @@ def start_logged_process(
         },
     )
     launcher_file.close()
-    return process_status(slug, status_path, log_path, validation=validation)
-
-
-def start_workflow(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
-    root = ensure_adaptation(slug)
-    require_run_stage(stage)
-    if not (root / "book.txt").is_file():
-        raise HTTPException(status_code=400, detail="Upload book.txt before running adaptation")
-    # stage is validated against WORKFLOW_STAGES above, so it is safe to interpolate.
-    return start_logged_process(
-        slug,
-        log_path=workflow_log_path(slug, stage),
-        launcher_log_path=workflow_launcher_log_path(slug, stage),
-        status_path=workflow_status_path(slug, stage),
-        start_line=f"Starting adaptation workflow ({stage}) for {slug}",
-        script_command=f"cd api && {workflow_python()} -m adaptation_workflow run \"$SLUG\" \"{stage}\"",
-        validation=False,
-    )
-
-
-def start_validation(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
-    ensure_adaptation(slug)
-    require_stage(stage)
-    return start_logged_process(
-        slug,
-        log_path=validation_log_path(slug, stage),
-        launcher_log_path=validation_launcher_log_path(slug, stage),
-        status_path=validation_status_path(slug, stage),
-        start_line=f"Starting adaptation validation ({stage}) for {slug}",
-        script_command=f"cd api && {workflow_python()} -m adaptation_workflow validate \"$SLUG\" \"{stage}\"",
-        validation=True,
-    )
-
-
-def sync_style_ref_to_canvas(slug: str, kind: str) -> AdaptationCanvasImportResponse:
-    ref_kind = require_style_ref_kind(kind)
-    before = library.read_stored_canvas(slug)
-    after = library.sync_style_ref_canvas_nodes(slug, before, ref_kind)
-    saved = library.write_canvas(slug, after)
-    return AdaptationCanvasImportResponse(canvas=saved, importedNodeCount=0)
-
-
-def import_drafts_to_canvas(slug: str) -> AdaptationCanvasImportResponse:
-    metadata = sync_prompt_links(slug, read_metadata(slug))
-    library.sync_entity_tags(
-        slug,
-        character_keys=list(metadata.characters.keys()),
-        location_keys=list(metadata.locations.keys()),
-    )
-    before = library.read_stored_canvas(slug)
-    after = library.default_canvas_for_story_artifacts(slug, before)
-    imported_count = max(0, len(after.nodes) - len(before.nodes))
-    saved = library.write_canvas(slug, after)
-    return AdaptationCanvasImportResponse(canvas=saved, importedNodeCount=imported_count)
+    return process_status(slug, status_path, log_path)
 
 
 def import_artifact_to_canvas(slug: str, artifact_kind: str, artifact_key: str) -> AdaptationCanvasImportResponse:
@@ -720,97 +600,9 @@ def import_artifact_to_canvas(slug: str, artifact_kind: str, artifact_key: str) 
     return AdaptationCanvasImportResponse(canvas=saved, importedNodeCount=1, nodeId=node_id)
 
 
-def migrate_legacy_canonical(slug: str, metadata: AdaptationMetadata) -> AdaptationMetadata:
-    path = metadata_path(slug)
-    if not path.is_file():
-        return metadata
-    raw = library.read_json(path)
-    if not isinstance(raw, dict):
-        return metadata
-    changed = False
-    for group_name in ("locations",):
-        links = metadata.locations if group_name == "locations" else {}
-        raw_group = raw.get(group_name, {})
-        if not isinstance(raw_group, dict):
-            continue
-        for key, link_raw in raw_group.items():
-            if not isinstance(link_raw, dict):
-                continue
-            canonical = link_raw.pop("canonicalAssetId", None)
-            if not canonical:
-                continue
-            changed = True
-            link = links.get(key)
-            if link is None:
-                continue
-            asset_ids = list(link.assetIds)
-            if asset_exists(slug, canonical) and canonical not in asset_ids:
-                asset_ids.append(canonical)
-            links[key] = link.model_copy(
-                update={
-                    "assetIds": asset_ids,
-                    "status": "generated" if asset_ids else link.status,
-                }
-            )
-            if asset_exists(slug, canonical):
-                library.apply_entity_tag_to_asset(slug, canonical, key)
-    raw_characters = raw.get("characters", {})
-    if isinstance(raw_characters, dict):
-        for slug_key, entry_raw in raw_characters.items():
-            if not isinstance(entry_raw, dict):
-                continue
-            variants_raw = entry_raw.get("variants")
-            if isinstance(variants_raw, dict):
-                for variant_key, link_raw in variants_raw.items():
-                    if not isinstance(link_raw, dict):
-                        continue
-                    canonical = link_raw.pop("canonicalAssetId", None)
-                    if not canonical:
-                        continue
-                    changed = True
-                    record = metadata.characters.get(slug_key)
-                    if record is None:
-                        continue
-                    link = record.variants.get(variant_key)
-                    if link is None:
-                        continue
-                    asset_ids = list(link.assetIds)
-                    if asset_exists(slug, canonical) and canonical not in asset_ids:
-                        asset_ids.append(canonical)
-                    update_character_variant_link(
-                        metadata,
-                        slug_key,
-                        variant_key,
-                        link.model_copy(
-                            update={
-                                "assetIds": asset_ids,
-                                "status": "generated" if asset_ids else link.status,
-                            }
-                        ),
-                    )
-                    if asset_exists(slug, canonical):
-                        library.apply_entity_tag_to_asset(slug, canonical, slug_key)
-            elif "canonicalAssetId" in entry_raw:
-                canonical = entry_raw.pop("canonicalAssetId", None)
-                if canonical:
-                    changed = True
-    for group_name in ("characters", "locations", "scenes", "pages", "panels"):
-        raw_group = raw.get(group_name, {})
-        if not isinstance(raw_group, dict):
-            continue
-        for link_raw in raw_group.values():
-            if isinstance(link_raw, dict):
-                link_raw.pop("canonicalAssetId", None)
-    if changed:
-        library.write_json(path, raw)
-        metadata = AdaptationMetadata.model_validate(raw)
-    return metadata
-
-
 def read_metadata(slug: str) -> AdaptationMetadata:
     ensure_adaptation(slug)
-    metadata = AdaptationMetadata.model_validate(library.read_json(metadata_path(slug)))
-    return migrate_legacy_canonical(slug, metadata)
+    return AdaptationMetadata.model_validate(library.read_json(metadata_path(slug)))
 
 
 def write_metadata(slug: str, metadata: AdaptationMetadata) -> AdaptationMetadata:
@@ -887,23 +679,11 @@ def parse_prompt_sections(path: Path) -> dict[str, dict[str, str]]:
     return sections
 
 
-def parse_scene_artifact(path: Path) -> dict[str, str]:
-    text = read_text(path).strip()
-    if not text:
-        return {}
-    return {
-        "mode": "story-only",
-        "style_ref": "",
-        "prompt": text,
-    }
-
-
 def file_kind_config(kind: AdaptationFileKind) -> tuple[ArtifactKind, Path]:
     root = Path()
     configs: dict[AdaptationFileKind, tuple[ArtifactKind, Path]] = {
         "characters": ("character-sheet", root / "characters"),
         "locations": ("location-prompt", root / "locations" / "prompts"),
-        "scenes": ("scene-artifact", root / "scenes" / "artifacts"),
     }
     return configs[kind]
 
@@ -934,8 +714,6 @@ def format_adaptation_file(
         name = key.replace("-", " ").title()
         summary = body.strip() or "New character."
         return format_character_stub(key, f"{name}: {summary}")
-    if kind == "scenes":
-        return (body.strip() or f"# {key}") + "\n"
     return format_prompt_file(key, body, mode or "new-image", style_ref)
 
 
@@ -970,7 +748,6 @@ def list_adaptation_files(slug: str, kind: AdaptationFileKind) -> list[Adaptatio
         ]
     groups: dict[AdaptationFileKind, dict[str, AdaptationAssetLink]] = {
         "locations": metadata.locations,
-        "scenes": metadata.scenes,
     }
     return [
         adaptation_file_from_link(slug=slug, kind=kind, key=key, link=link)
@@ -1088,7 +865,6 @@ def update_adaptation_file(slug: str, kind: AdaptationFileKind, key: str, payloa
         else:
             groups: dict[AdaptationFileKind, dict[str, AdaptationAssetLink]] = {
                 "locations": metadata.locations,
-                "scenes": metadata.scenes,
             }
             existing = groups[kind].pop(key, None)
             if existing is not None:
@@ -1120,23 +896,6 @@ def delete_adaptation_file(slug: str, kind: AdaptationFileKind, key: str) -> Ada
     return status(slug)
 
 
-async def upload_concept_art(slug: str, upload: UploadFile) -> ConceptNodeResponse:
-    import concept_canvas
-
-    return await concept_canvas.upload_concept_image(slug, upload)
-
-
-def create_concept_node(slug: str, payload: ConceptNodeCreate) -> ConceptNodeResponse:
-    import concept_canvas
-
-    return concept_canvas.create_concept_draft(
-        slug,
-        payload.subjectKind,
-        prompt=payload.prompt,
-        display_name=payload.displayName.strip(),
-    )
-
-
 def create_image_group(slug: str, payload: ImageGroupNodeCreate) -> ImageGroupNodeResponse:
     from canvas_nodes import create_image_group_node, next_canvas_position
     from models import ImageGroupNodeResponse
@@ -1154,119 +913,6 @@ def create_image_group(slug: str, payload: ImageGroupNodeCreate) -> ImageGroupNo
         y=y,
     )
     return ImageGroupNodeResponse(nodeId=node_id, canvas=saved)
-
-
-def scene_list_path(slug: str) -> Path:
-    return ensure_adaptation(slug) / "scenes" / "list.txt"
-
-
-def scene_list_document(slug: str) -> SceneListDocument:
-    from adaptation_workflow.scene_list import parse_scene_list
-
-    entries = parse_scene_list(scene_list_path(slug))
-    return SceneListDocument(lines=[SceneListLine(slug=entry.slug, description=entry.description) for entry in entries])
-
-
-def replace_scene_list(slug: str, payload: SceneListReplace) -> SceneListDocument:
-    from adaptation_workflow.scene_list import SceneListEntry, write_scene_list
-
-    write_scene_list(
-        scene_list_path(slug),
-        [SceneListEntry(slug=line.slug, description=line.description, line_no=index) for index, line in enumerate(payload.lines, start=1)],
-    )
-    return scene_list_document(slug)
-
-
-def add_scene_list_line(slug: str, payload: SceneListLineCreate) -> SceneListDocument:
-    from adaptation_workflow.scene_list import SceneListEntry, parse_scene_list, write_scene_list
-
-    path = scene_list_path(slug)
-    entries = parse_scene_list(path)
-    if any(entry.slug == payload.slug for entry in entries):
-        raise HTTPException(status_code=409, detail=f"Scene already in list: {payload.slug}")
-    entries.append(SceneListEntry(slug=payload.slug, description=payload.description, line_no=len(entries) + 1))
-    write_scene_list(path, entries)
-    return scene_list_document(slug)
-
-
-def delete_scene_list_line(slug: str, key: str) -> SceneListDocument:
-    from adaptation_workflow.scene_list import parse_scene_list, write_scene_list
-
-    path = scene_list_path(slug)
-    entries = parse_scene_list(path)
-    target = key.strip().lower()
-    if not any(entry.slug == target for entry in entries):
-        raise HTTPException(status_code=404, detail=f"Scene not in list: {key}")
-    artifact = ensure_adaptation(slug) / "scenes" / "artifacts" / f"{target}.md"
-    if artifact.is_file():
-        raise HTTPException(status_code=409, detail=f"Remove or keep scene artifact before deleting list entry: {key}")
-    write_scene_list(path, [entry for entry in entries if entry.slug != target])
-    return scene_list_document(slug)
-
-
-def scene_extract_stage_name(scene_slug: str) -> str:
-    from adaptation_workflow.runner import scene_extract_stage
-
-    return scene_extract_stage(scene_slug)
-
-
-def scene_extract_status_path(slug: str, scene_slug: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / f"run-{scene_extract_stage_name(scene_slug)}-status.json"
-
-
-def scene_extract_log_path(slug: str, scene_slug: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / f"run-{scene_extract_stage_name(scene_slug)}.log"
-
-
-def scene_extract_launcher_log_path(slug: str, scene_slug: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / f"run-{scene_extract_stage_name(scene_slug)}-launcher.log"
-
-
-def _require_character_registry(slug: str) -> None:
-    from adaptation_workflow.entity_registry import (
-        CharacterRegistryNotReadyError,
-        assert_character_registry_ready,
-        read_metadata_entity_keys,
-    )
-
-    root = ensure_adaptation(slug)
-    metadata_characters, _metadata_locations = read_metadata_entity_keys(root)
-    try:
-        assert_character_registry_ready(root, metadata_characters)
-    except CharacterRegistryNotReadyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-def start_scene_extract(slug: str, scene_slug: str, *, force: bool = False) -> AdaptationWorkflowStatus:
-    root = ensure_adaptation(slug)
-    if not (root / "book.txt").is_file():
-        raise HTTPException(status_code=400, detail="Upload book.txt before extracting scenes")
-    from adaptation_workflow.scene_list import find_scene_list_line
-
-    if find_scene_list_line(scene_list_path(slug), scene_slug) is None:
-        raise HTTPException(status_code=404, detail=f"Scene not in list: {scene_slug}")
-    _require_character_registry(slug)
-    force_flag = " --force" if force else ""
-    return start_logged_process(
-        slug,
-        log_path=scene_extract_log_path(slug, scene_slug),
-        launcher_log_path=scene_extract_launcher_log_path(slug, scene_slug),
-        status_path=scene_extract_status_path(slug, scene_slug),
-        start_line=f"Starting scene extract for {scene_slug} in {slug}",
-        script_command=(
-            f'cd api && {workflow_python()} -m adaptation_workflow extract-scene "$SLUG" "{scene_slug}"{force_flag}'
-        ),
-        validation=False,
-    )
-
-
-def scene_extract_status(slug: str, scene_slug: str) -> AdaptationWorkflowStatus:
-    return process_status(
-        slug,
-        scene_extract_status_path(slug, scene_slug),
-        scene_extract_log_path(slug, scene_slug),
-        validation=False,
-    )
 
 
 def character_list_stage_name() -> str:
@@ -1334,7 +980,6 @@ def start_character_list(slug: str) -> AdaptationWorkflowStatus:
         status_path=character_list_status_path(slug),
         start_line=f"Starting character list for {slug}",
         script_command=f'cd api && {workflow_python()} -m adaptation_workflow list-characters "$SLUG"',
-        validation=False,
     )
 
 
@@ -1343,7 +988,6 @@ def character_list_status(slug: str) -> AdaptationWorkflowStatus:
         slug,
         character_list_status_path(slug),
         character_list_log_path(slug),
-        validation=False,
     )
 
 
@@ -1359,7 +1003,6 @@ def start_character_extract_all(slug: str) -> AdaptationWorkflowStatus:
         status_path=character_extract_all_status_path(slug),
         start_line=f"Starting character extract-all for {slug}",
         script_command=f'cd api && {workflow_python()} -m adaptation_workflow extract-characters "$SLUG"',
-        validation=False,
     )
 
 
@@ -1368,7 +1011,6 @@ def character_extract_all_status(slug: str) -> AdaptationWorkflowStatus:
         slug,
         character_extract_all_status_path(slug),
         character_extract_all_log_path(slug),
-        validation=False,
     )
 
 
@@ -1392,7 +1034,6 @@ def start_character_extract(slug: str, character_slug: str, *, force: bool = Fal
         script_command=(
             f'cd api && {workflow_python()} -m adaptation_workflow extract-character "$SLUG" "{character_slug}"{force_flag}'
         ),
-        validation=False,
     )
 
 
@@ -1401,7 +1042,6 @@ def character_extract_status(slug: str, character_slug: str) -> AdaptationWorkfl
         slug,
         character_extract_status_path(slug, character_slug),
         character_extract_log_path(slug, character_slug),
-        validation=False,
     )
 
 
@@ -1445,7 +1085,6 @@ def start_generate_concept_character(slug: str) -> AdaptationWorkflowStatus:
         status_path=concept_character_generate_status_path(slug),
         start_line=f"Starting concept character generation for {slug}",
         script_command=f'cd api && {workflow_python()} -m adaptation_workflow generate-concept-character "$SLUG"',
-        validation=False,
         extra_env={"AGENT_SESSION_ID": session.id},
     )
 
@@ -1455,7 +1094,6 @@ def generate_concept_character_status(slug: str) -> AdaptationWorkflowStatus:
         slug,
         concept_character_generate_status_path(slug),
         concept_character_generate_log_path(slug),
-        validation=False,
     )
 
 
@@ -1499,7 +1137,6 @@ def start_generate_concept_location(slug: str) -> AdaptationWorkflowStatus:
         status_path=concept_location_generate_status_path(slug),
         start_line=f"Starting concept location generation for {slug}",
         script_command=f'cd api && {workflow_python()} -m adaptation_workflow generate-concept-location "$SLUG"',
-        validation=False,
         extra_env={"AGENT_SESSION_ID": session.id},
     )
 
@@ -1509,7 +1146,6 @@ def generate_concept_location_status(slug: str) -> AdaptationWorkflowStatus:
         slug,
         concept_location_generate_status_path(slug),
         concept_location_generate_log_path(slug),
-        validation=False,
     )
 
 
@@ -1535,303 +1171,6 @@ def reset_character_data(slug: str) -> AdaptationStatus:
         location_keys=list(metadata.locations.keys()),
     )
     return status(slug)
-
-
-def scene_plan_stage_name(scene_slug: str) -> str:
-    from adaptation_workflow.runner import scene_plan_stage
-
-    return scene_plan_stage(scene_slug)
-
-
-def scene_plan_status_path(slug: str, scene_slug: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / f"run-{scene_plan_stage_name(scene_slug)}-status.json"
-
-
-def scene_plan_log_path(slug: str, scene_slug: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / f"run-{scene_plan_stage_name(scene_slug)}.log"
-
-
-def scene_plan_launcher_log_path(slug: str, scene_slug: str) -> Path:
-    return adaptation_dir(slug) / "sessions" / f"run-{scene_plan_stage_name(scene_slug)}-launcher.log"
-
-
-def _require_scene_list_line(slug: str, scene_slug: str) -> str:
-    from adaptation_workflow.scene_list import find_scene_list_line
-
-    scene_line = find_scene_list_line(scene_list_path(slug), scene_slug)
-    if scene_line is None:
-        raise HTTPException(status_code=404, detail=f"Scene not in list: {scene_slug}")
-    return scene_line
-
-
-def _require_scene_artifact(slug: str, scene_slug: str) -> Path:
-    artifact = ensure_adaptation(slug) / "scenes" / "artifacts" / f"{scene_slug}.md"
-    if not artifact.is_file():
-        raise HTTPException(status_code=409, detail=f"Extract scene before planning moments: {scene_slug}")
-    return artifact
-
-
-def _layout_section_model(
-    slug: str,
-    key: str,
-    section: dict[str, str],
-    metadata: AdaptationMetadata,
-) -> MomentLayoutSection:
-    from moment_refs import moment_ref_inputs
-
-    refs = section.get("style_ref", "")
-    ref_inputs, count, limit, limit_exceeded, can_generate = moment_ref_inputs(slug, metadata, refs)
-    return MomentLayoutSection(
-        key=key,
-        refs=refs,
-        narration=section.get("narration", ""),
-        dialogue=section.get("dialogue", ""),
-        caption=section.get("caption", ""),
-        prompt=section.get("prompt", ""),
-        refInputs=ref_inputs,
-        canGenerate=can_generate,
-        referenceImageCount=count,
-        referenceImageLimit=limit,
-        referenceLimitExceeded=limit_exceeded,
-    )
-
-
-def scene_moments_document(slug: str, scene_slug: str) -> SceneMomentsDocument:
-    from adaptation_workflow.moments import moment_output_path, moment_section_count, ordered_layout_sections, read_story_kind
-
-    target = scene_slug.strip().lower()
-    _require_scene_list_line(slug, target)
-    root = ensure_adaptation(slug)
-    story_kind = read_story_kind(root)
-    moment_path = moment_output_path(root, story_kind, target)
-    body = read_text(moment_path)
-    metadata = read_metadata(slug)
-    sections = [
-        _layout_section_model(slug, key, section, metadata)
-        for key, section in ordered_layout_sections(moment_path)
-    ]
-    return SceneMomentsDocument(
-        sceneSlug=target,
-        path=relpath(root, moment_path),
-        body=body,
-        sections=sections,
-        sectionCount=moment_section_count(moment_path),
-        storyKind=story_kind,  # type: ignore[arg-type]
-        exists=moment_path.is_file(),
-    )
-
-
-def put_scene_moments(slug: str, scene_slug: str, payload: SceneMomentsUpdate) -> SceneMomentsDocument:
-    from adaptation_workflow.moments import layout_section_dict, moment_output_path, read_story_kind, write_ordered_layout_sections
-    from adaptation_workflow.validate import ValidationError, validate_moment_file
-
-    has_body = payload.body is not None
-    has_sections = payload.sections is not None
-    if has_body == has_sections:
-        raise HTTPException(status_code=400, detail="Provide exactly one of body or sections")
-
-    target = scene_slug.strip().lower()
-    _require_scene_list_line(slug, target)
-    _require_scene_artifact(slug, target)
-    root = ensure_adaptation(slug)
-    story_kind = read_story_kind(root)
-    moment_path = moment_output_path(root, story_kind, target)
-    moment_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if has_sections:
-        assert payload.sections is not None
-        keys = [section.key for section in payload.sections]
-        if len(keys) != len(set(keys)):
-            raise HTTPException(status_code=400, detail="Duplicate section keys in payload")
-        items = [
-            (
-                section.key,
-                layout_section_dict(
-                    refs=section.refs,
-                    narration=section.narration,
-                    dialogue=section.dialogue,
-                    caption=section.caption,
-                    prompt=section.prompt,
-                ),
-            )
-            for section in payload.sections
-        ]
-        write_ordered_layout_sections(moment_path, items)
-    else:
-        body = payload.body or ""
-        moment_path.write_text(body.rstrip() + ("\n" if body.strip() else ""))
-
-    if moment_path.is_file() and moment_path.stat().st_size > 0:
-        try:
-            validate_moment_file(moment_path)
-        except ValidationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    sync_prompt_links(slug, read_metadata(slug))
-    return scene_moments_document(slug, target)
-
-
-def start_scene_plan(slug: str, scene_slug: str) -> AdaptationWorkflowStatus:
-    target = scene_slug.strip().lower()
-    root = ensure_adaptation(slug)
-    if not (root / "book.txt").is_file():
-        raise HTTPException(status_code=400, detail="Upload book.txt before planning moments")
-    _require_scene_list_line(slug, target)
-    _require_scene_artifact(slug, target)
-    _require_character_registry(slug)
-    return start_logged_process(
-        slug,
-        log_path=scene_plan_log_path(slug, target),
-        launcher_log_path=scene_plan_launcher_log_path(slug, target),
-        status_path=scene_plan_status_path(slug, target),
-        start_line=f"Starting scene plan for {target} in {slug}",
-        script_command=f'cd api && {workflow_python()} -m adaptation_workflow plan-scene "$SLUG" "{target}"',
-        validation=False,
-    )
-
-
-def scene_plan_status(slug: str, scene_slug: str) -> AdaptationWorkflowStatus:
-    target = scene_slug.strip().lower()
-    return process_status(
-        slug,
-        scene_plan_status_path(slug, target),
-        scene_plan_log_path(slug, target),
-        validation=False,
-    )
-
-
-def _find_moment_link(metadata: AdaptationMetadata, moment_key: str) -> tuple[ArtifactKind, AdaptationAssetLink] | None:
-    if moment_key in metadata.pages:
-        return "page-plan", metadata.pages[moment_key]
-    if moment_key in metadata.panels:
-        return "panel-prompt", metadata.panels[moment_key]
-    return None
-
-
-def _moment_link_to_entry(
-    slug: str,
-    scene_slug: str,
-    moment_key: str,
-    artifact_kind: ArtifactKind,
-    link: AdaptationAssetLink,
-    metadata: AdaptationMetadata,
-    *,
-    model: str | None = None,
-) -> MomentSequenceEntry:
-    from moment_refs import moment_ref_inputs
-
-    illustrated = bool(link.activeAssetId or link.assetIds)
-    status_value: Literal["missing", "ready", "generated"] = "generated" if illustrated else "ready"
-    ref_inputs, count, limit, limit_exceeded, can_generate = moment_ref_inputs(
-        slug, metadata, link.styleRef, model=model
-    )
-    return MomentSequenceEntry(
-        momentKey=moment_key,
-        sceneSlug=scene_slug,
-        artifactKind=artifact_kind,
-        promptPath=link.promptPath,
-        prompt=link.prompt,
-        narration=link.narration,
-        dialogue=link.dialogue,
-        caption=link.caption,
-        refs=link.styleRef,
-        assetIds=list(link.assetIds),
-        activeAssetId=link.activeAssetId,
-        finalized=link.finalized,
-        status=status_value,
-        refInputs=ref_inputs,
-        canGenerate=can_generate,
-        referenceImageCount=count,
-        referenceImageLimit=limit,
-        referenceLimitExceeded=limit_exceeded,
-    )
-
-
-def _moment_progress_counts(metadata: AdaptationMetadata) -> MomentSequenceCounts:
-    total = 0
-    illustrated = 0
-    finalized = 0
-    for group in (metadata.pages, metadata.panels):
-        for link in group.values():
-            total += 1
-            if link.activeAssetId or link.assetIds:
-                illustrated += 1
-            if link.finalized:
-                finalized += 1
-    return MomentSequenceCounts(total=total, illustrated=illustrated, finalized=finalized)
-
-
-def moment_sequence_document(slug: str) -> MomentSequenceDocument:
-    from adaptation_workflow.moments import ordered_moment_sequence
-
-    root = ensure_adaptation(slug)
-    metadata = sync_prompt_links(slug, read_metadata(slug))
-    moments: list[MomentSequenceEntry] = []
-    for item in ordered_moment_sequence(root):
-        found = _find_moment_link(metadata, item.moment_key)
-        if found is None:
-            continue
-        artifact_kind, link = found
-        moments.append(
-            _moment_link_to_entry(slug, item.scene_slug, item.moment_key, artifact_kind, link, metadata)
-        )
-    return MomentSequenceDocument(moments=moments, counts=_moment_progress_counts(metadata))
-
-
-def patch_moment(slug: str, moment_key: str, payload: MomentPatch) -> MomentSequenceEntry:
-    from adaptation_workflow.moments import ordered_moment_sequence, update_layout_section
-
-    target = moment_key.strip()
-    metadata = read_metadata(slug)
-    found = _find_moment_link(metadata, target)
-    if found is None:
-        raise HTTPException(status_code=404, detail=f"Moment not found: {target}")
-    artifact_kind, link = found
-    root = ensure_adaptation(slug)
-    moment_path = root / link.promptPath
-    scene_slug = next((item.scene_slug for item in ordered_moment_sequence(root) if item.moment_key == target), "")
-
-    file_updates: dict[str, str] = {}
-    if payload.narration is not None:
-        file_updates["narration"] = payload.narration
-    if payload.dialogue is not None:
-        file_updates["dialogue"] = payload.dialogue
-    if payload.caption is not None:
-        file_updates["caption"] = payload.caption
-    if file_updates:
-        if not moment_path.is_file():
-            raise HTTPException(status_code=404, detail=f"Moment file missing: {link.promptPath}")
-        update_layout_section(moment_path, target, file_updates)
-
-    meta_updates: dict[str, object] = {}
-    if payload.activeAssetId is not None:
-        if payload.activeAssetId and payload.activeAssetId not in link.assetIds:
-            raise HTTPException(status_code=400, detail=f"Asset not attached to moment: {payload.activeAssetId}")
-        meta_updates["activeAssetId"] = payload.activeAssetId
-    if payload.finalized is not None:
-        meta_updates["finalized"] = payload.finalized
-    if meta_updates:
-        updated = link.model_copy(update=meta_updates)
-        if artifact_kind == "page-plan":
-            metadata.pages[target] = updated
-        else:
-            metadata.panels[target] = updated
-        write_metadata(slug, metadata)
-
-    metadata = sync_prompt_links(slug, read_metadata(slug))
-    found = _find_moment_link(metadata, target)
-    if found is None:
-        raise HTTPException(status_code=404, detail=f"Moment not found after update: {target}")
-    artifact_kind, link = found
-    if not scene_slug:
-        scene_slug = next((item.scene_slug for item in ordered_moment_sequence(root) if item.moment_key == target), "")
-    return _moment_link_to_entry(slug, scene_slug, target, artifact_kind, link, metadata)
-
-
-def parse_layout_sections(path: Path) -> dict[str, dict[str, str]]:
-    from adaptation_workflow.moments import parse_layout_sections as workflow_parse_layout_sections
-
-    return workflow_parse_layout_sections(path)
 
 
 def prompt_link(
@@ -1917,53 +1256,11 @@ def sync_prompt_links(slug: str, metadata: AdaptationMetadata) -> AdaptationMeta
                 existing=existing,
             )
     metadata.locations = new_locations
-    old_scenes = metadata.scenes
-    new_scenes: dict[str, AdaptationAssetLink] = {}
-    for artifact_file in sorted((root / "scenes" / "artifacts").glob("*.md")):
-        prompt_path = relpath(root, artifact_file)
-        key = artifact_file.stem
-        section = parse_scene_artifact(artifact_file)
-        if not section:
-            continue
-        existing = old_scenes.get(key)
-        new_scenes[key] = prompt_link(
-            artifact_kind="scene-artifact",
-            prompt_path=prompt_path,
-            section=section,
-            existing=existing,
-        )
-    metadata.scenes = new_scenes
-    old_pages = metadata.pages
-    new_pages: dict[str, AdaptationAssetLink] = {}
-    for plan_file in sorted((root / "pages" / "plans").glob("*.md")):
-        prompt_path = relpath(root, plan_file)
-        for key, section in parse_layout_sections(plan_file).items():
-            existing = old_pages.get(key)
-            new_pages[key] = prompt_link(
-                artifact_kind="page-plan",
-                prompt_path=prompt_path,
-                section=section,
-                existing=existing,
-            )
-    metadata.pages = new_pages
-    old_panels = metadata.panels
-    new_panels: dict[str, AdaptationAssetLink] = {}
-    for prompt_file in sorted((root / "panels" / "prompts").glob("*.md")):
-        prompt_path = relpath(root, prompt_file)
-        for key, section in parse_layout_sections(prompt_file).items():
-            existing = old_panels.get(key)
-            new_panels[key] = prompt_link(
-                artifact_kind="panel-prompt",
-                prompt_path=prompt_path,
-                section=section,
-                existing=existing,
-            )
-    metadata.panels = new_panels
     return write_metadata(slug, metadata)
 
 
 def status(slug: str) -> AdaptationStatus:
-    import concept_canvas
+    import concept_cards
 
     root = ensure_adaptation(slug)
     metadata = sync_prompt_links(slug, read_metadata(slug))
@@ -1972,12 +1269,9 @@ def status(slug: str) -> AdaptationStatus:
     if changed or artifact_changed:
         metadata = write_metadata(slug, metadata)
     statuses = style_ref_statuses(slug, metadata)
-    moment_counts = _moment_progress_counts(metadata)
-    import concept_cards
 
     return AdaptationStatus(
         projectSlug=slug,
-        settings=metadata.settings,
         hasBook=(root / "book.txt").is_file(),
         hasBookSession=_has_book_session(root),
         styleRefs={
@@ -1996,40 +1290,18 @@ def status(slug: str) -> AdaptationStatus:
         counts={
             "characterListLines": count_nonempty_lines(root / "characters" / "list.txt"),
             "characterFiles": len(list((root / "characters").glob("*.md"))),
-            "sceneListLines": count_nonempty_lines(root / "scenes" / "list.txt"),
-            "sceneArtifacts": len(list((root / "scenes" / "artifacts").glob("*.md"))),
             "locationPrompts": len(list((root / "locations" / "prompts").glob("*.md"))),
             "conceptArt": len(concept_cards.list_cards(slug)),
-            "pagePlans": len(list((root / "pages" / "plans").glob("*.md"))),
-            "panelPrompts": len(list((root / "panels" / "prompts").glob("*.md"))),
-            "momentSections": _count_moment_sections(root),
-            "illustratedMoments": moment_counts.illustrated,
-            "finalizedMoments": moment_counts.finalized,
         },
         visualStyles=(styles := read_visual_styles(root)),
         defaultVisualStyleId=resolve_default_visual_style_id(styles),
         characters=metadata.characters,
         locations=metadata.locations,
-        scenes=metadata.scenes,
-        pages=metadata.pages,
-        panels=metadata.panels,
     )
 
 
 def count_nonempty_lines(path: Path) -> int:
     return sum(1 for line in read_text(path).splitlines() if line.strip())
-
-
-def _count_moment_sections(root: Path) -> int:
-    from adaptation_workflow.moments import moment_section_count
-
-    total = 0
-    for directory in (root / "pages" / "plans", root / "panels" / "prompts"):
-        if not directory.is_dir():
-            continue
-        for moment_file in directory.glob("*.md"):
-            total += moment_section_count(moment_file)
-    return total
 
 
 def write_style_ref_prompt(slug: str, request: AdaptationStylePromptPatch) -> AdaptationStatus:
@@ -2048,33 +1320,12 @@ def read_book(slug: str) -> str:
     return read_text(book)
 
 
-def write_settings(slug: str, patch: AdaptationSettingsPatch) -> AdaptationStatus:
-    metadata = read_metadata(slug)
-    metadata.settings.storyKind = patch.storyKind
-    write_metadata(slug, metadata)
-    return status(slug)
-
-
 async def import_book(slug: str, upload: UploadFile) -> AdaptationStatus:
     root = ensure_adaptation(slug)
     if upload.content_type not in {None, "text/plain", "application/octet-stream"}:
         raise HTTPException(status_code=400, detail="Book import expects a text file")
     with (root / "book.txt").open("wb") as fh:
         shutil.copyfileobj(upload.file, fh)
-    return status(slug)
-
-
-async def import_style_ref(slug: str, kind: str, upload: UploadFile) -> AdaptationStatus:
-    ref_kind = require_style_ref_kind(kind)
-    root = ensure_adaptation(slug)
-    target = style_ref_legacy_png_path(root, ref_kind)
-    with target.open("wb") as fh:
-        shutil.copyfileobj(upload.file, fh)
-    summary = library.import_asset_file(slug, target, title=f"Comic adaptation {ref_kind}")
-    metadata = read_metadata(slug)
-    set_style_ref_asset_id(metadata, ref_kind, summary.id)
-    write_metadata(slug, metadata)
-    library.write_canvas(slug, library.sync_style_ref_canvas_nodes(slug, library.read_stored_canvas(slug), ref_kind))
     return status(slug)
 
 
@@ -2085,26 +1336,6 @@ def set_style_ref_asset(slug: str, request: AdaptationStyleRefAssetRequest) -> A
     set_style_ref_asset_id(metadata, kind, request.assetId)
     write_metadata(slug, metadata)
     library.write_canvas(slug, library.sync_style_ref_canvas_nodes(slug, library.read_stored_canvas(slug), kind))
-    return status(slug)
-
-
-def import_existing_style_refs(slug: str) -> AdaptationStatus:
-    root = ensure_adaptation(slug)
-    metadata = read_metadata(slug)
-    imported_kinds: list[StyleRefKind] = []
-    for kind in STYLE_REF_KINDS:
-        path = style_ref_legacy_png_path(root, kind)
-        if get_style_ref_asset_id(metadata, kind) is not None or not path.is_file():
-            continue
-        summary = library.import_asset_file(slug, path, title=f"Comic adaptation {kind}")
-        set_style_ref_asset_id(metadata, kind, summary.id)
-        imported_kinds.append(kind)
-    write_metadata(slug, metadata)
-    if imported_kinds:
-        canvas = library.read_stored_canvas(slug)
-        for kind in imported_kinds:
-            canvas = library.sync_style_ref_canvas_nodes(slug, canvas, kind)
-        library.write_canvas(slug, canvas)
     return status(slug)
 
 
@@ -2154,40 +1385,11 @@ def generate_style_ref(slug: str, request: AdaptationGenerateStyleRefRequest) ->
     )
 
 
-def next_base_character(slug: str) -> tuple[str, Path, dict[str, str]] | None:
-    root = ensure_adaptation(slug)
-    metadata = sync_prompt_links(slug, read_metadata(slug))
-    from adaptation_workflow.character_file import parse_character_file
-
-    for char_file in sorted((root / "characters").glob("*.md")):
-        character_slug = char_file.stem
-        record = metadata.characters.get(character_slug)
-        base = record.variants.get("base") if record else None
-        if base is None:
-            continue
-        if base.mode != "new-image":
-            continue
-        if base.assetIds:
-            continue
-        try:
-            parsed = parse_character_file(char_file)
-        except ValueError:
-            continue
-        section = parsed.variants.get("base")
-        if section is None:
-            continue
-        return character_slug, char_file, section
-    return None
-
-
 def artifact_entries(metadata: AdaptationMetadata, artifact_kind: ArtifactKind) -> dict[str, AdaptationAssetLink]:
     if artifact_kind == "character-sheet":
         return {key: link for key, (_slug, _variant, link) in character_flat_entries(metadata).items()}
     groups = {
         "location-prompt": metadata.locations,
-        "scene-artifact": metadata.scenes,
-        "page-plan": metadata.pages,
-        "panel-prompt": metadata.panels,
     }
     return groups[artifact_kind]
 
@@ -2195,8 +1397,6 @@ def artifact_entries(metadata: AdaptationMetadata, artifact_kind: ArtifactKind) 
 def style_ref_asset_id(metadata: AdaptationMetadata, artifact_kind: ArtifactKind) -> str | None:
     if artifact_kind == "character-sheet":
         return metadata.styleRefs.archetypeCharacterAssetId
-    if artifact_kind in {"location-prompt", "page-plan", "panel-prompt"}:
-        return metadata.styleRefs.archetypeSceneAssetId
     return metadata.styleRefs.archetypeSceneAssetId
 
 
@@ -2222,12 +1422,6 @@ def entity_kind_for_semantic_ref(kind: str) -> str | None:
         return "characters"
     if kind in {"location", "location-prompt"}:
         return "locations"
-    if kind in {"scene", "scene-artifact"}:
-        return "scenes"
-    if kind in {"page", "page-plan"}:
-        return "pages"
-    if kind in {"panel", "panel-prompt"}:
-        return "panels"
     return None
 
 
@@ -2261,16 +1455,8 @@ def artifact_ref_asset_ids(
     *,
     model: str | None = None,
 ) -> list[str]:
-    if artifact_kind == "scene-artifact":
-        return []
     if artifact_kind == "concept-art":
         return []
-    if artifact_kind in {"page-plan", "panel-prompt"}:
-        import gemini
-        from moment_refs import assert_moment_refs_ready
-
-        resolved_model = model or gemini.default_model()
-        return assert_moment_refs_ready(slug, metadata, link.styleRef, model=resolved_model)
     if link.mode == "new-image":
         ref_asset_id = style_ref_asset_id(metadata, artifact_kind)
         if ref_asset_id is None:
@@ -2408,21 +1594,3 @@ def generate_artifact(slug: str, request: AdaptationGenerateArtifactRequest) -> 
         message=f"Generated {flat_key}.",
     )
 
-
-def generate_next_character_sheet(slug: str) -> AdaptationGenerateResponse:
-    metadata = sync_prompt_links(slug, read_metadata(slug))
-    if metadata.styleRefs.archetypeCharacterAssetId is None:
-        raise HTTPException(status_code=400, detail=missing_style_ref_detail("character-sheet"))
-    next_item = next_base_character(slug)
-    if next_item is None:
-        return AdaptationGenerateResponse(generated=False, kind="character", message="No missing base character sheets.")
-    key, _sheet, _section = next_item
-    response = generate_artifact(
-        slug,
-        AdaptationGenerateArtifactRequest(
-            artifactKind="character-sheet",
-            artifactKey=key,
-            variantKey="base",
-        ),
-    )
-    return response.model_copy(update={"kind": "character"})

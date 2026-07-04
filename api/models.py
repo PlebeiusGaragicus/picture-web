@@ -16,9 +16,8 @@ DEFAULT_AUTO_PLACE_W = LAYOUT_GRID_COLUMNS / 3.0
 DEFAULT_AUTO_PLACE_H = LAYOUT_PAGE_ROWS / 3.0
 
 AssetKind = Literal["imported", "generated"]
-StoryKind = Literal["picture-book", "illustrated-story", "comic-book"]
 ArtifactKind = Literal["character-sheet", "location-prompt", "scene-artifact", "page-plan", "panel-prompt", "concept-art"]
-AdaptationFileKind = Literal["characters", "locations", "scenes"]
+AdaptationFileKind = Literal["characters", "locations"]
 ConceptArtSubjectKind = Literal["character", "location"]
 StyleRefKind = Literal["archetype-character", "archetype-scene"]
 MODEL_CAPABILITIES = {
@@ -170,10 +169,6 @@ class ProjectCoverPatch(BaseModel):
     coverAssetId: str | None = None
 
 
-class AdaptationSettings(BaseModel):
-    storyKind: StoryKind = "comic-book"
-
-
 class AdaptationAssetLink(BaseModel):
     artifactKind: ArtifactKind
     promptPath: str
@@ -215,13 +210,9 @@ class StyleRefStatus(BaseModel):
 
 class AdaptationMetadata(BaseModel):
     version: int = 2
-    settings: AdaptationSettings = Field(default_factory=AdaptationSettings)
     styleRefs: AdaptationStyleRefs = Field(default_factory=AdaptationStyleRefs)
     characters: dict[str, CharacterRecord] = Field(default_factory=dict)
     locations: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
-    scenes: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
-    pages: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
-    panels: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
 
 
 class VisualStyleDefinition(BaseModel):
@@ -244,7 +235,6 @@ class VisualStylePatch(BaseModel):
 
 class AdaptationStatus(BaseModel):
     projectSlug: str
-    settings: AdaptationSettings
     hasBook: bool
     hasBookSession: bool
     styleRefs: dict[str, bool]
@@ -258,9 +248,6 @@ class AdaptationStatus(BaseModel):
     defaultVisualStyleId: str | None = Field(default=None, pattern=TAG_RE)
     characters: dict[str, CharacterRecord]
     locations: dict[str, AdaptationAssetLink]
-    scenes: dict[str, AdaptationAssetLink]
-    pages: dict[str, AdaptationAssetLink]
-    panels: dict[str, AdaptationAssetLink]
 
 
 class AdaptationWorkflowStatus(BaseModel):
@@ -462,111 +449,6 @@ class AdaptationStylePromptPatch(BaseModel):
     prompt: str
 
 
-class AdaptationSettingsPatch(BaseModel):
-    storyKind: StoryKind
-
-
-class AdaptationWorkflowStartRequest(BaseModel):
-    stage: Literal["ingest", "characters", "scene-list", "scenes", "locations", "moments", "all"] = "all"
-
-
-class SceneListLine(BaseModel):
-    slug: str = Field(pattern=SLUG_RE)
-    description: str = ""
-
-
-class SceneListDocument(BaseModel):
-    lines: list[SceneListLine] = Field(default_factory=list)
-
-
-class SceneListReplace(BaseModel):
-    lines: list[SceneListLine]
-
-
-class SceneListLineCreate(BaseModel):
-    slug: str = Field(pattern=SLUG_RE)
-    description: str = ""
-
-
-class MomentRefInput(BaseModel):
-    ref: str
-    kind: Literal["character", "location", "unknown"]
-    entityKey: str = ""
-    tagId: str = ""
-    ready: bool
-    assetIds: list[str] = Field(default_factory=list)
-    detail: str = ""
-
-
-class MomentLayoutSection(BaseModel):
-    key: str = Field(pattern=SLUG_RE)
-    refs: str = ""
-    narration: str = ""
-    dialogue: str = ""
-    caption: str = ""
-    prompt: str = ""
-    refInputs: list[MomentRefInput] = Field(default_factory=list)
-    canGenerate: bool = False
-    referenceImageCount: int = 0
-    referenceImageLimit: int = 14
-    referenceLimitExceeded: bool = False
-
-
-class SceneMomentsDocument(BaseModel):
-    sceneSlug: str
-    path: str
-    body: str
-    sections: list[MomentLayoutSection] = Field(default_factory=list)
-    sectionCount: int
-    storyKind: StoryKind
-    exists: bool = False
-
-
-class SceneMomentsUpdate(BaseModel):
-    body: str | None = None
-    sections: list[MomentLayoutSection] | None = None
-
-
-class MomentSequenceEntry(BaseModel):
-    momentKey: str
-    sceneSlug: str
-    artifactKind: ArtifactKind
-    promptPath: str
-    prompt: str = ""
-    narration: str = ""
-    dialogue: str = ""
-    caption: str = ""
-    refs: str = ""
-    assetIds: list[str] = Field(default_factory=list)
-    activeAssetId: str | None = None
-    finalized: bool = False
-    status: Literal["missing", "ready", "generated"] = "ready"
-    refInputs: list[MomentRefInput] = Field(default_factory=list)
-    canGenerate: bool = False
-    referenceImageCount: int = 0
-    referenceImageLimit: int = 14
-    referenceLimitExceeded: bool = False
-
-
-class MomentSequenceCounts(BaseModel):
-    total: int = 0
-    illustrated: int = 0
-    finalized: int = 0
-
-
-class MomentSequenceDocument(BaseModel):
-    moments: list[MomentSequenceEntry] = Field(default_factory=list)
-    counts: MomentSequenceCounts = Field(default_factory=MomentSequenceCounts)
-
-
-class MomentPatch(BaseModel):
-    narration: str | None = None
-    dialogue: str | None = None
-    caption: str | None = None
-    activeAssetId: str | None = None
-    finalized: bool | None = None
-
-
 class AdaptationFileBase(BaseModel):
     key: str = Field(pattern=SLUG_RE)
     body: str = ""
@@ -606,10 +488,6 @@ class AdaptationFileDocument(AdaptationFileBase):
 class AdaptationStyleRefAssetRequest(BaseModel):
     kind: StyleRefKind
     assetId: str
-
-
-class AdaptationSyncStyleRefRequest(BaseModel):
-    kind: StyleRefKind
 
 
 class AdaptationGenerateStyleRefRequest(BaseModel):

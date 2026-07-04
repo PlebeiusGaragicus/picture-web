@@ -10,22 +10,7 @@ from typing import Callable
 from adaptation_workflow.config import AdaptationContext, BookSession, utc_now
 from adaptation_workflow.events import WorkflowLogger
 from adaptation_workflow.pi_rpc import PiRpcClient, PiRpcError
-from adaptation_workflow.moments import moment_output_path, read_story_kind
-from adaptation_workflow.locations import cleanup_staging, merge_staging_into_index, staging_dir
-from adaptation_workflow.scene_list import find_scene_list_line
-from adaptation_workflow.sections import parse_index_sections_file
-from adaptation_workflow.entity_registry import (
-    assert_character_registry_ready,
-    format_entity_registry_prompt,
-    read_metadata_entity_keys,
-)
-from adaptation_workflow.validate import (
-    ValidationError,
-    validate_character_file,
-    validate_location_prompt,
-    validate_moment_file,
-    validate_scene_artifact,
-)
+from adaptation_workflow.validate import ValidationError, validate_character_file
 
 
 def write_multiline_prompt(skill_call: str, payload: str) -> str:
@@ -179,24 +164,6 @@ class StepRunner:
             )
         self._notify_progress()
 
-    def step_archetype_prompts(self) -> None:
-        style_refs = self.ctx.book_root_abs / "style-refs"
-        required = [
-            style_refs / "archetype-character.md",
-            style_refs / "archetype-scene.md",
-        ]
-        if all(path.is_file() for path in required):
-            self.logger.write_skip("ingest", "archetype prompts", f"{self.ctx.book_root}/style-refs/")
-            self.logger.record_task(name="archetype prompts", skipped=True, duration_ms=0)
-            self._notify_progress()
-            return
-        self.run_pi_step(
-            "ingest",
-            f"archetype prompts {self.ctx.book_root.name}",
-            f"{self.ctx.book_root}/style-refs/",
-            f"/skill:visual-style {self.ctx.book_root_abs}",
-        )
-
     def step_character_list(self) -> None:
         out = self.ctx.book_root / "characters" / "list.txt"
         if out.is_file():
@@ -268,156 +235,9 @@ class StepRunner:
             self.logger.write_line(f"[characters] Extract [{index}/{total}] {character_slug}")
             self.step_character_file(character_slug)
 
-    def stage_characters(self) -> None:
-        self.extract_all_characters()
-
     def list_characters(self) -> None:
         self.step_character_list()
         self.sync_character_stubs_from_list()
-
-    def step_scene_list(self) -> None:
-        out = self.ctx.book_root_abs / "scenes" / "list.txt"
-        rel_out = f"{self.ctx.book_root}/scenes/list.txt"
-        if out.is_file() and out.read_text().strip():
-            self.logger.write_skip("scene-list", "scene list", rel_out)
-            self.logger.record_task(name="scene list", skipped=True, duration_ms=0)
-            self._notify_progress()
-        else:
-            self.run_pi_step(
-                "scene-list",
-                f"scene list {self.ctx.book_root.name}",
-                rel_out,
-                f"/skill:scene-list {self.ctx.book_root_abs}",
-            )
-        if not out.is_file() or not out.read_text().strip():
-            raise RuntimeError(f"Missing or empty {out}")
-
-    def ensure_location_prompts(self, new_slugs: list[str]) -> None:
-        if not new_slugs:
-            return
-        book_root = self.ctx.book_root_abs
-        index_path = book_root / "locations" / "index.md"
-        sections = parse_index_sections_file(index_path)
-        for slug in new_slugs:
-            out = book_root / "locations" / "prompts" / f"{slug}.md"
-            rel_out = f"{self.ctx.book_root}/locations/prompts/{slug}.md"
-            if out.is_file():
-                self.logger.write_skip("locations", f"location prompt {slug}", rel_out)
-                self.logger.record_task(name=f"location prompt {slug}", skipped=True, duration_ms=0)
-                self._notify_progress()
-                continue
-            section = sections.get(slug)
-            if not section:
-                raise RuntimeError(f"Missing index section for new location slug: {slug}")
-            prompt = write_multiline_prompt(
-                f"/skill:location-prompt {self.ctx.book_root_abs} {out}",
-                section,
-            )
-            self.run_pi_step("locations", f"location prompt {slug}", rel_out, prompt)
-            try:
-                validate_location_prompt(out)
-            except ValidationError as exc:
-                raise RuntimeError(str(exc)) from exc
-
-    def extract_scene(self, scene_slug: str, *, force: bool = False) -> None:
-        list_path = self.ctx.book_root_abs / "scenes" / "list.txt"
-        if not list_path.is_file():
-            raise RuntimeError(f"Missing {list_path}")
-        scene_line = find_scene_list_line(list_path, scene_slug)
-        if scene_line is None:
-            raise RuntimeError(f"Scene slug not found in list.txt: {scene_slug}")
-
-        metadata_characters, metadata_locations = read_metadata_entity_keys(self.ctx.book_root_abs)
-        assert_character_registry_ready(self.ctx.book_root_abs, metadata_characters)
-
-        artifact_out = self.ctx.book_root_abs / "scenes" / "artifacts" / f"{scene_slug}.md"
-        rel_artifact = f"{self.ctx.book_root}/scenes/artifacts/{scene_slug}.md"
-        stage_path = staging_dir(self.ctx.book_root_abs, scene_slug)
-        stage_path.mkdir(parents=True, exist_ok=True)
-
-        characters_list = self.ctx.book_root_abs / "characters" / "list.txt"
-        locations_index = self.ctx.book_root_abs / "locations" / "index.md"
-        registry_block = format_entity_registry_prompt(
-            self.ctx.book_root_abs,
-            metadata_characters,
-            metadata_locations,
-        )
-        context_lines = [
-            f"/skill:scene-extract {self.ctx.book_root_abs} {artifact_out} {stage_path}",
-            "",
-            scene_line,
-        ]
-        if characters_list.is_file():
-            context_lines.extend(["", f"Existing characters list:\n{characters_list.read_text().rstrip()}"])
-        context_lines.extend(["", registry_block.rstrip()])
-        if locations_index.is_file():
-            context_lines.extend(["", f"Existing location index slugs:\n{locations_index.read_text().rstrip()}"])
-        prompt = "\n".join(context_lines).rstrip() + "\n"
-
-        if artifact_out.is_file() and not force:
-            self.logger.write_skip("scenes", f"scene extract {scene_slug}", rel_artifact)
-            self.logger.record_task(name=f"scene extract {scene_slug}", skipped=True, duration_ms=0)
-            self._notify_progress()
-        else:
-            if artifact_out.is_file() and force:
-                artifact_out.unlink()
-            self.run_pi_step("scenes", f"scene extract {scene_slug}", rel_artifact, prompt)
-            try:
-                validate_scene_artifact(artifact_out)
-            except ValidationError as exc:
-                raise RuntimeError(str(exc)) from exc
-
-        new_slugs = merge_staging_into_index(self.ctx.book_root_abs, scene_slug)
-        self.ensure_location_prompts(new_slugs)
-        cleanup_staging(self.ctx.book_root_abs, scene_slug)
-
-    def plan_scene(self, scene_slug: str) -> None:
-        list_path = self.ctx.book_root_abs / "scenes" / "list.txt"
-        if not list_path.is_file():
-            raise RuntimeError(f"Missing {list_path}")
-        scene_line = find_scene_list_line(list_path, scene_slug)
-        if scene_line is None:
-            raise RuntimeError(f"Scene slug not found in list.txt: {scene_slug}")
-
-        metadata_characters, metadata_locations = read_metadata_entity_keys(self.ctx.book_root_abs)
-        assert_character_registry_ready(self.ctx.book_root_abs, metadata_characters)
-
-        artifact_path = self.ctx.book_root_abs / "scenes" / "artifacts" / f"{scene_slug}.md"
-        if not artifact_path.is_file():
-            raise RuntimeError(f"Missing scene artifact: {artifact_path}")
-
-        story_kind = read_story_kind(self.ctx.book_root_abs)
-        output_path = moment_output_path(self.ctx.book_root_abs, story_kind, scene_slug)
-        rel_output = f"{self.ctx.book_root}/{output_path.relative_to(self.ctx.book_root_abs).as_posix()}"
-        artifact_text = artifact_path.read_text().rstrip()
-        registry_block = format_entity_registry_prompt(
-            self.ctx.book_root_abs,
-            metadata_characters,
-            metadata_locations,
-        )
-        prompt = (
-            f"/skill:story-layout {self.ctx.book_root_abs} {story_kind} {output_path}\n\n"
-            f"{registry_block.rstrip()}\n\n"
-            "Copy Visual Continuity keys verbatim into panel refs. Do not invent slugs.\n\n"
-            f"{artifact_text}\n"
-        )
-
-        if output_path.is_file():
-            try:
-                validate_moment_file(output_path)
-                self.logger.write_skip("moments", f"plan scene {scene_slug}", rel_output)
-                self.logger.record_task(name=f"plan scene {scene_slug}", skipped=True, duration_ms=0)
-                self._notify_progress()
-                return
-            except ValidationError:
-                self.logger.write_line(f"replacing invalid moment file: {rel_output}")
-
-        self.run_pi_step("moments", f"plan scene {scene_slug}", rel_output, prompt)
-        if output_path.is_file() and output_path.stat().st_size > 0:
-            try:
-                validate_moment_file(output_path)
-            except ValidationError as exc:
-                raise RuntimeError(str(exc)) from exc
 
     def step_generate_concept_character(self) -> str:
         import concept_cards

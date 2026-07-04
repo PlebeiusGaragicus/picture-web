@@ -50,24 +50,13 @@ from models import (
     ChatTurnResponse,
     AdaptationGenerateArtifactRequest,
     AdaptationGenerateStyleRefRequest,
-    AdaptationSyncStyleRefRequest,
     AdaptationGenerateResponse,
-    AdaptationSettingsPatch,
     AdaptationStatus,
     AdaptationStyleRefAssetRequest,
     AdaptationStylePromptPatch,
     VisualStyleCreate,
     VisualStylePatch,
-    AdaptationWorkflowStartRequest,
     AdaptationWorkflowStatus,
-    SceneListDocument,
-    SceneListLineCreate,
-    SceneListReplace,
-    SceneMomentsDocument,
-    SceneMomentsUpdate,
-    MomentSequenceDocument,
-    MomentSequenceEntry,
-    MomentPatch,
     StoryPanelCreate,
     StoryPanelBookmarkCreate,
     StoryPanelDocument,
@@ -213,11 +202,6 @@ def put_adaptation_style_ref_prompt(slug: str, payload: AdaptationStylePromptPat
     return adaptation.write_style_ref_prompt(slug, payload)
 
 
-@app.patch("/api/projects/{slug}/adaptation/settings", response_model=AdaptationStatus)
-def patch_adaptation_settings(slug: str, payload: AdaptationSettingsPatch) -> AdaptationStatus:
-    return adaptation.write_settings(slug, payload)
-
-
 @app.get("/api/projects/{slug}/adaptation/files/{kind}", response_model=list[AdaptationFileDocument])
 def list_adaptation_files(slug: str, kind: AdaptationFileKind) -> list[AdaptationFileDocument]:
     return adaptation.list_adaptation_files(slug, kind)
@@ -263,11 +247,6 @@ def draft_concept_card(slug: str, card_id: str) -> ConceptNodeResponse:
     return concept_cards.draft_card_to_canvas(slug, card_id)
 
 
-@app.post("/api/projects/{slug}/concept-nodes", response_model=ConceptCardDocument)
-def create_concept_node(slug: str, payload: ConceptNodeCreate) -> ConceptCardDocument:
-    return concept_cards.create_card(slug, payload)
-
-
 @app.post("/api/projects/{slug}/canvas/image-groups", response_model=ImageGroupNodeResponse)
 def create_canvas_image_group(slug: str, payload: ImageGroupNodeCreate) -> ImageGroupNodeResponse:
     return adaptation.create_image_group(slug, payload)
@@ -276,26 +255,6 @@ def create_canvas_image_group(slug: str, payload: ImageGroupNodeCreate) -> Image
 @app.post("/api/projects/{slug}/adaptation/concept-art/upload", response_model=ConceptCardDocument)
 async def upload_concept_art(slug: str, file: UploadFile = File(...)) -> ConceptCardDocument:
     return await concept_cards.upload_card_image(slug, file)
-
-
-@app.get("/api/projects/{slug}/adaptation/scenes/list", response_model=SceneListDocument)
-def get_scene_list(slug: str) -> SceneListDocument:
-    return adaptation.scene_list_document(slug)
-
-
-@app.put("/api/projects/{slug}/adaptation/scenes/list", response_model=SceneListDocument)
-def put_scene_list(slug: str, payload: SceneListReplace) -> SceneListDocument:
-    return adaptation.replace_scene_list(slug, payload)
-
-
-@app.post("/api/projects/{slug}/adaptation/scenes/list/lines", response_model=SceneListDocument)
-def add_scene_list_line(slug: str, payload: SceneListLineCreate) -> SceneListDocument:
-    return adaptation.add_scene_list_line(slug, payload)
-
-
-@app.delete("/api/projects/{slug}/adaptation/scenes/list/lines/{key}", response_model=SceneListDocument)
-def delete_scene_list_line(slug: str, key: str) -> SceneListDocument:
-    return adaptation.delete_scene_list_line(slug, key)
 
 
 @app.post("/api/projects/{slug}/adaptation/characters/list", response_model=AdaptationWorkflowStatus)
@@ -353,73 +312,6 @@ def reset_character_data(slug: str) -> AdaptationStatus:
     return adaptation.reset_character_data(slug)
 
 
-@app.post("/api/projects/{slug}/adaptation/scenes/{key}/extract", response_model=AdaptationWorkflowStatus)
-def start_scene_extract(slug: str, key: str, force: bool = False) -> AdaptationWorkflowStatus:
-    return adaptation.start_scene_extract(slug, key, force=force)
-
-
-@app.get("/api/projects/{slug}/adaptation/scenes/{key}/extract", response_model=AdaptationWorkflowStatus)
-def get_scene_extract(slug: str, key: str) -> AdaptationWorkflowStatus:
-    return adaptation.scene_extract_status(slug, key)
-
-
-@app.post("/api/projects/{slug}/adaptation/scenes/{key}/plan", response_model=AdaptationWorkflowStatus)
-def start_scene_plan(slug: str, key: str) -> AdaptationWorkflowStatus:
-    return adaptation.start_scene_plan(slug, key)
-
-
-@app.get("/api/projects/{slug}/adaptation/scenes/{key}/plan", response_model=AdaptationWorkflowStatus)
-def get_scene_plan(slug: str, key: str) -> AdaptationWorkflowStatus:
-    return adaptation.scene_plan_status(slug, key)
-
-
-@app.get("/api/projects/{slug}/adaptation/scenes/{key}/moments", response_model=SceneMomentsDocument)
-def get_scene_moments(slug: str, key: str) -> SceneMomentsDocument:
-    return adaptation.scene_moments_document(slug, key)
-
-
-@app.put("/api/projects/{slug}/adaptation/scenes/{key}/moments", response_model=SceneMomentsDocument)
-def put_scene_moments(slug: str, key: str, payload: SceneMomentsUpdate) -> SceneMomentsDocument:
-    return adaptation.put_scene_moments(slug, key, payload)
-
-
-@app.get("/api/projects/{slug}/adaptation/moments/sequence", response_model=MomentSequenceDocument)
-def get_moment_sequence(slug: str) -> MomentSequenceDocument:
-    return adaptation.moment_sequence_document(slug)
-
-
-@app.patch("/api/projects/{slug}/adaptation/moments/{key}", response_model=MomentSequenceEntry)
-def patch_moment(slug: str, key: str, payload: MomentPatch) -> MomentSequenceEntry:
-    return adaptation.patch_moment(slug, key, payload)
-
-
-@app.get("/api/projects/{slug}/adaptation/workflow", response_model=AdaptationWorkflowStatus)
-def get_adaptation_workflow(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
-    return adaptation.workflow_status(slug, stage)
-
-
-@app.post("/api/projects/{slug}/adaptation/workflow/start", response_model=AdaptationWorkflowStatus)
-def start_adaptation_workflow(
-    slug: str, payload: AdaptationWorkflowStartRequest = AdaptationWorkflowStartRequest()
-) -> AdaptationWorkflowStatus:
-    return adaptation.start_workflow(slug, payload.stage)
-
-
-@app.get("/api/projects/{slug}/adaptation/validation", response_model=AdaptationWorkflowStatus)
-def get_adaptation_validation(slug: str, stage: str = "all") -> AdaptationWorkflowStatus:
-    return adaptation.validation_status(slug, stage)
-
-
-@app.post("/api/projects/{slug}/adaptation/validation/start", response_model=AdaptationWorkflowStatus)
-def start_adaptation_validation(slug: str, payload: AdaptationWorkflowStartRequest = AdaptationWorkflowStartRequest()) -> AdaptationWorkflowStatus:
-    return adaptation.start_validation(slug, payload.stage)
-
-
-@app.post("/api/projects/{slug}/adaptation/import-drafts-to-canvas", response_model=AdaptationCanvasImportResponse)
-def import_adaptation_drafts_to_canvas(slug: str) -> AdaptationCanvasImportResponse:
-    return adaptation.import_drafts_to_canvas(slug)
-
-
 @app.post("/api/projects/{slug}/adaptation/import-artifact-to-canvas", response_model=AdaptationCanvasImportResponse)
 def import_adaptation_artifact_to_canvas(slug: str, payload: AdaptationImportArtifactRequest) -> AdaptationCanvasImportResponse:
     return adaptation.import_artifact_to_canvas(slug, payload.artifactKind, payload.artifactKey)
@@ -428,11 +320,6 @@ def import_adaptation_artifact_to_canvas(slug: str, payload: AdaptationImportArt
 @app.post("/api/projects/{slug}/adaptation/import-book", response_model=AdaptationStatus)
 async def import_adaptation_book(slug: str, file: UploadFile = File(...)) -> AdaptationStatus:
     return await adaptation.import_book(slug, file)
-
-
-@app.get("/api/projects/{slug}/adaptation/book")
-def get_adaptation_book(slug: str) -> dict[str, str]:
-    return {"text": adaptation.read_book(slug)}
 
 
 @app.get("/api/projects/{slug}/adaptation/book-session/load", response_model=AdaptationWorkflowStatus)
@@ -558,38 +445,14 @@ def reset_story_panel_chunks(slug: str) -> StoryPanelDocument:
     return story_panels.reset_chunks(slug)
 
 
-@app.post("/api/projects/{slug}/adaptation/import-style-ref", response_model=AdaptationStatus)
-async def import_adaptation_style_ref(
-    slug: str,
-    kind: str = Form(...),
-    file: UploadFile = File(...),
-) -> AdaptationStatus:
-    return await adaptation.import_style_ref(slug, kind, file)
-
-
-@app.post("/api/projects/{slug}/adaptation/import-existing-style-refs", response_model=AdaptationStatus)
-def import_existing_adaptation_style_refs(slug: str) -> AdaptationStatus:
-    return adaptation.import_existing_style_refs(slug)
-
-
 @app.post("/api/projects/{slug}/adaptation/style-ref-asset", response_model=AdaptationStatus)
 def set_adaptation_style_ref_asset(slug: str, payload: AdaptationStyleRefAssetRequest) -> AdaptationStatus:
     return adaptation.set_style_ref_asset(slug, payload)
 
 
-@app.post("/api/projects/{slug}/adaptation/sync-style-ref-to-canvas", response_model=AdaptationCanvasImportResponse)
-def sync_adaptation_style_ref_to_canvas(slug: str, payload: AdaptationSyncStyleRefRequest) -> AdaptationCanvasImportResponse:
-    return adaptation.sync_style_ref_to_canvas(slug, payload.kind)
-
-
 @app.post("/api/projects/{slug}/adaptation/generate-style-ref", response_model=AdaptationGenerateResponse)
 def generate_adaptation_style_ref(slug: str, payload: AdaptationGenerateStyleRefRequest) -> AdaptationGenerateResponse:
     return adaptation.generate_style_ref(slug, payload)
-
-
-@app.post("/api/projects/{slug}/adaptation/generate-next-character-sheet", response_model=AdaptationGenerateResponse)
-def generate_next_adaptation_character_sheet(slug: str) -> AdaptationGenerateResponse:
-    return adaptation.generate_next_character_sheet(slug)
 
 
 @app.post("/api/projects/{slug}/adaptation/generate-artifact", response_model=AdaptationGenerateResponse)

@@ -531,377 +531,6 @@ def test_import_duplicate_file_returns_conflict(tmp_path, monkeypatch):
     assert len(client.get("/api/projects/farm-comic/assets").json()) == 1
 
 
-def test_adaptation_settings_scene_panel_status_and_canvas_import(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-
-    settings = client.patch(
-        "/api/projects/farm-comic/adaptation/settings",
-        json={"storyKind": "picture-book"},
-    )
-    assert settings.status_code == 200
-    assert settings.json()["settings"]["storyKind"] == "picture-book"
-
-    root = library.project_dir("farm-comic") / "adaptation"
-    (root / "scenes" / "artifacts").mkdir(parents=True, exist_ok=True)
-    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
-    (root / "acts").mkdir(parents=True, exist_ok=True)
-    (root / "acts" / "play-by-play.md").write_text("# Play By Play\n\n## act-01\n\nScene Range: 001-001\nPurpose: Test.\nKey Beats:\n- `L001-L002`: Test. \"Quote.\"\n")
-    (root / "scenes" / "artifacts" / "001-test-scene.md").write_text(
-        "# Test Scene\n\nScene Id: 001-test-scene\nSource Lines: L001-L002\nMajor Act: act-01\nPrimary Location: test-location\n\n## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: test-character\n- Locations: test-location\n- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n\n## Text Candidates\n\n- Narration: None.\n- Dialogue: None.\n- Caption: None.\n\n## Adaptation Notes\n\nNone.\n"
-    )
-    (root / "panels" / "prompts" / "001-test-scene.md").write_text(
-        "## 001-test-scene-panel-01\n"
-        "mode: story-layout\n"
-        "refs: character:test-character, location:test-location\n"
-        "narration: None.\n"
-        "dialogue: \"Hello.\"\n"
-        "caption: None.\n\n"
-        "Comic panel of a test scene. No watermarks.\n"
-    )
-    (root / "scenes" / "list.txt").write_text("001-test-scene: Test scene summary.\n")
-
-    status = client.get("/api/projects/farm-comic/adaptation")
-    assert status.status_code == 200
-    payload = status.json()
-    assert payload["counts"]["sceneListLines"] == 1
-    assert payload["counts"]["sceneArtifacts"] == 1
-    assert payload["counts"]["panelPrompts"] == 1
-    assert payload["scenes"]["001-test-scene"]["artifactKind"] == "scene-artifact"
-    assert payload["panels"]["001-test-scene-panel-01"]["artifactKind"] == "panel-prompt"
-
-    canvas_response = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas")
-    assert canvas_response.status_code == 200
-    nodes = canvas_response.json()["canvas"]["nodes"]
-    artifact_kinds = {node["artifactKind"] for node in nodes.values() if node["type"] == "storyArtifact"}
-    assert "scene-artifact" in artifact_kinds
-    assert "panel-prompt" in artifact_kinds
-
-
-def test_adaptation_panel_generation_uses_entity_tag_semantic_refs(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
-    (root / "scenes").mkdir(parents=True, exist_ok=True)
-    (root / "scenes" / "list.txt").write_text("001-panel: Panel.\n")
-
-    for asset_id, title, tags in [
-        ("01HSTYLE", "Style", []),
-        ("01HCHAR", "Character A", ["hero"]),
-        ("01HCHAR2", "Character B", ["hero"]),
-        ("01HLOC", "Location", ["farm"]),
-    ]:
-        make_png(library.asset_png_path("farm-comic", asset_id), color="green")
-        library.write_json(
-            library.asset_json_path("farm-comic", asset_id),
-            {
-                "id": asset_id,
-                "kind": "imported",
-                "title": title,
-                "tags": tags,
-                "createdAt": "2026-01-01T00:00:00Z",
-                "updatedAt": "2026-01-01T00:00:00Z",
-            },
-        )
-
-    library.write_json(
-        root / "adaptation.json",
-        {
-            "version": 2,
-            "settings": {"storyKind": "comic-book"},
-            "styleRefs": {"archetypeSceneAssetId": "01HSTYLE"},
-            "characters": {
-                "hero": character_record_metadata("hero", asset_ids=["01HCHAR", "01HCHAR2"]),
-            },
-            "locations": {
-                "farm": {
-                    "artifactKind": "location-prompt",
-                    "promptPath": "locations/prompts/farm.md",
-                    "assetIds": ["01HLOC"],
-                    "status": "generated",
-                }
-            },
-            "scenes": {},
-            "pages": {},
-            "panels": {},
-        },
-    )
-    (root / "panels" / "prompts" / "001-panel.md").write_text(
-        "## 001-panel-01\n"
-        "mode: story-layout\n"
-        "refs: character:hero, location:farm\n"
-        "narration: None.\n"
-        "dialogue: None.\n"
-        "caption: None.\n\n"
-        "Hero crosses the farm in a comic panel. No watermarks.\n"
-    )
-    write_unified_character_file(root / "characters" / "hero.md", "hero")
-
-    captured_refs = []
-    captured_prompt = {}
-
-    def fake_generate(**kwargs):
-        captured_refs[:] = [path.stem for path in kwargs["parent_png_paths"]]
-        captured_prompt["text"] = kwargs["prompt_text"]
-        make_png(kwargs["output_png"], color="blue")
-
-        class Result:
-            provider_response = {"imageFile": kwargs["output_png"].name, "response": {"candidates": [{"finishReason": "STOP"}]}}
-
-        return Result()
-
-    monkeypatch.setattr(gemini, "generate_image", fake_generate)
-    style_id = visual_style_id_by_name(
-        client.post(
-            "/api/projects/farm-comic/adaptation/visual-styles",
-            json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
-        ).json()["visualStyles"],
-        "Comic ink",
-    )
-    missing_style = client.post(
-        "/api/projects/farm-comic/adaptation/generate-artifact",
-        json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01"},
-    )
-    assert missing_style.status_code == 400
-    response = client.post(
-        "/api/projects/farm-comic/adaptation/generate-artifact",
-        json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01", "visualStyleId": style_id},
-    )
-    assert response.status_code == 200
-    assert captured_refs == ["01HCHAR", "01HCHAR2", "01HLOC"]
-    assert "01HSTYLE" not in captured_refs
-    assert "bold comic ink" in captured_prompt["text"].lower()
-    panel_link = client.get("/api/projects/farm-comic/adaptation").json()["panels"]["001-panel-01"]
-    assert panel_link["assetIds"] == [response.json()["asset"]["id"]]
-    tags = client.get("/api/projects/farm-comic/tags").json()
-    assert any(tag["id"] == "hero" and tag["locked"] for tag in tags)
-    nodes = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
-    source_id = "artifact_panel_prompt_001_panel_01"
-    child_id = f"generated_{source_id}"
-    assert nodes[source_id]["type"] == "storyArtifact"
-    assert nodes[source_id]["role"] == {"type": "artifact-source", "artifactKind": "panel-prompt", "artifactKey": "001-panel-01"}
-    assert nodes[child_id]["type"] == "imageGroup"
-    assert nodes[child_id]["activeAssetId"] == response.json()["asset"]["id"]
-    assert nodes[child_id]["role"] == {"type": "generated-result", "sourceNodeId": source_id}
-
-    sequence = client.get("/api/projects/farm-comic/adaptation/moments/sequence").json()
-    moment = next(item for item in sequence["moments"] if item["momentKey"] == "001-panel-01")
-    assert moment["canGenerate"] is True
-    assert moment["referenceImageCount"] == 3
-    assert {item["ref"] for item in moment["refInputs"]} == {"character:hero", "location:farm"}
-    assert all(item["ready"] for item in moment["refInputs"] if item["kind"] in {"character", "location"})
-
-
-def test_adaptation_panel_generation_blocks_empty_refs(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
-    make_png(library.asset_png_path("farm-comic", "01HCHAR"), color="green")
-    library.write_json(
-        library.asset_json_path("farm-comic", "01HCHAR"),
-        {
-            "id": "01HCHAR",
-            "kind": "imported",
-            "title": "Character",
-            "tags": ["hero"],
-            "createdAt": "2026-01-01T00:00:00Z",
-            "updatedAt": "2026-01-01T00:00:00Z",
-        },
-    )
-    library.write_json(
-        root / "adaptation.json",
-        {
-            "version": 2,
-            "settings": {"storyKind": "comic-book"},
-            "styleRefs": {},
-            "characters": {"hero": character_record_metadata("hero", asset_ids=["01HCHAR"])},
-            "locations": {},
-            "scenes": {},
-            "pages": {},
-            "panels": {},
-        },
-    )
-    (root / "panels" / "prompts" / "001-panel.md").write_text(
-        "## 001-panel-01\n"
-        "mode: story-layout\n"
-        "refs:\n"
-        "narration: None.\n"
-        "dialogue: None.\n"
-        "caption: None.\n\n"
-        "Empty refs panel.\n"
-    )
-    style_id = visual_style_id_by_name(
-        client.post(
-            "/api/projects/farm-comic/adaptation/visual-styles",
-            json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
-        ).json()["visualStyles"],
-        "Comic ink",
-    )
-    response = client.post(
-        "/api/projects/farm-comic/adaptation/generate-artifact",
-        json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01", "visualStyleId": style_id},
-    )
-    assert response.status_code == 400
-    assert "character:" in response.json()["detail"].lower() or "location:" in response.json()["detail"].lower()
-
-
-def test_adaptation_panel_generation_blocks_untagged_assets(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
-    make_png(library.asset_png_path("farm-comic", "01HCHAR"), color="green")
-    library.write_json(
-        library.asset_json_path("farm-comic", "01HCHAR"),
-        {
-            "id": "01HCHAR",
-            "kind": "imported",
-            "title": "Character",
-            "tags": [],
-            "createdAt": "2026-01-01T00:00:00Z",
-            "updatedAt": "2026-01-01T00:00:00Z",
-        },
-    )
-    library.write_json(
-        root / "adaptation.json",
-        {
-            "version": 2,
-            "settings": {"storyKind": "comic-book"},
-            "styleRefs": {},
-            "characters": {"hero": character_record_metadata("hero", asset_ids=["01HCHAR"])},
-            "locations": {},
-            "scenes": {},
-            "pages": {},
-            "panels": {},
-        },
-    )
-    (root / "panels" / "prompts" / "001-panel.md").write_text(
-        "## 001-panel-01\n"
-        "mode: story-layout\n"
-        "refs: character:hero\n"
-        "narration: None.\n"
-        "dialogue: None.\n"
-        "caption: None.\n\n"
-        "Untagged panel.\n"
-    )
-    style_id = visual_style_id_by_name(
-        client.post(
-            "/api/projects/farm-comic/adaptation/visual-styles",
-            json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
-        ).json()["visualStyles"],
-        "Comic ink",
-    )
-    response = client.post(
-        "/api/projects/farm-comic/adaptation/generate-artifact",
-        json={"artifactKind": "panel-prompt", "artifactKey": "001-panel-01", "visualStyleId": style_id},
-    )
-    assert response.status_code == 400
-    assert "hero" in response.json()["detail"]
-
-
-def test_adaptation_panel_generation_blocks_over_reference_limit(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
-    asset_ids = []
-    for index in range(4):
-        asset_id = f"01HREF{index}"
-        asset_ids.append(asset_id)
-        make_png(library.asset_png_path("farm-comic", asset_id), color="green")
-        library.write_json(
-            library.asset_json_path("farm-comic", asset_id),
-            {
-                "id": asset_id,
-                "kind": "imported",
-                "title": f"Ref {index}",
-                "tags": ["hero"],
-                "createdAt": "2026-01-01T00:00:00Z",
-                "updatedAt": "2026-01-01T00:00:00Z",
-            },
-        )
-    library.write_json(
-        root / "adaptation.json",
-        {
-            "version": 2,
-            "settings": {"storyKind": "comic-book"},
-            "styleRefs": {},
-            "characters": {"hero": character_record_metadata("hero", asset_ids=asset_ids)},
-            "locations": {},
-            "scenes": {},
-            "pages": {},
-            "panels": {},
-        },
-    )
-    (root / "panels" / "prompts" / "001-panel.md").write_text(
-        "## 001-panel-01\n"
-        "mode: story-layout\n"
-        "refs: character:hero\n"
-        "narration: None.\n"
-        "dialogue: None.\n"
-        "caption: None.\n\n"
-        "Over limit panel.\n"
-    )
-    style_id = visual_style_id_by_name(
-        client.post(
-            "/api/projects/farm-comic/adaptation/visual-styles",
-            json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
-        ).json()["visualStyles"],
-        "Comic ink",
-    )
-    response = client.post(
-        "/api/projects/farm-comic/adaptation/generate-artifact",
-        json={
-            "artifactKind": "panel-prompt",
-            "artifactKey": "001-panel-01",
-            "visualStyleId": style_id,
-            "model": "gemini-2.5-flash-image",
-        },
-    )
-    assert response.status_code == 400
-    detail = response.json()["detail"]
-    assert "Too many reference images" in detail
-    assert "3" in detail
-
-
-def test_moment_ref_asset_order_is_stable(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    from moment_refs import ordered_moment_ref_asset_ids
-
-    for asset_id in ["01HZ", "01HA", "01HM"]:
-        make_png(library.asset_png_path("farm-comic", asset_id), color="green")
-        library.write_json(
-            library.asset_json_path("farm-comic", asset_id),
-            {
-                "id": asset_id,
-                "kind": "imported",
-                "title": asset_id,
-                "tags": ["hero"],
-                "createdAt": "2026-01-01T00:00:00Z",
-                "updatedAt": "2026-01-01T00:00:00Z",
-            },
-        )
-    make_png(library.asset_png_path("farm-comic", "01HLOC"), color="green")
-    library.write_json(
-        library.asset_json_path("farm-comic", "01HLOC"),
-        {
-            "id": "01HLOC",
-            "kind": "imported",
-            "title": "Loc",
-            "tags": ["farm"],
-            "createdAt": "2026-01-01T00:00:00Z",
-            "updatedAt": "2026-01-01T00:00:00Z",
-        },
-    )
-    style_ref = "character:hero, location:farm"
-    first = ordered_moment_ref_asset_ids("farm-comic", style_ref)
-    second = ordered_moment_ref_asset_ids("farm-comic", style_ref)
-    assert first == second == ["01HA", "01HM", "01HZ", "01HLOC"]
-
-
 def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
@@ -929,16 +558,6 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     )
     assert location.status_code == 200
 
-    scene = client.post(
-        "/api/projects/farm-comic/adaptation/files/scenes",
-        json={
-            "key": "opening-scene",
-            "body": "# Opening Scene\n\nThe hero arrives at the barn.",
-        },
-    )
-    assert scene.status_code == 200
-    assert scene.json()["artifactKind"] == "scene-artifact"
-
     update = client.put(
         "/api/projects/farm-comic/adaptation/files/characters/hero",
         json={
@@ -963,15 +582,6 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     assert "hero-primary" in payload["characters"]
     assert payload["characters"]["hero-primary"]["userTags"] == ["farm", "protagonist"]
     assert "barn" in payload["locations"]
-    assert "opening-scene" in payload["scenes"]
-
-    canvas_response = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas")
-    assert canvas_response.status_code == 200
-    nodes = canvas_response.json()["canvas"]["nodes"]
-    artifact_kinds = {node["artifactKind"] for node in nodes.values() if node["type"] == "storyArtifact"}
-    assert "scene-artifact" in artifact_kinds
-    assert "character-sheet" not in artifact_kinds
-    assert "location-prompt" not in artifact_kinds
 
     deleted = client.delete("/api/projects/farm-comic/adaptation/files/characters/hero-primary")
     assert deleted.status_code == 200
@@ -1175,111 +785,6 @@ def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monke
     assert location_node["type"] == "imageGroup"
     assert "barn" in location_node["tags"]
     assert location_node["assetIds"] == []
-
-
-def test_scene_list_api(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "book.txt").write_text("Once upon a time.\n")
-
-    empty = client.get("/api/projects/farm-comic/adaptation/scenes/list")
-    assert empty.status_code == 200
-    assert empty.json()["lines"] == []
-
-    created = client.post(
-        "/api/projects/farm-comic/adaptation/scenes/list/lines",
-        json={"slug": "001-opening", "description": "Opening beat."},
-    )
-    assert created.status_code == 200
-    assert created.json()["lines"][0]["slug"] == "001-opening"
-
-    replaced = client.put(
-        "/api/projects/farm-comic/adaptation/scenes/list",
-        json={"lines": [{"slug": "002-later", "description": "Later."}, {"slug": "001-opening", "description": "Opening beat."}]},
-    )
-    assert replaced.status_code == 200
-    assert [line["slug"] for line in replaced.json()["lines"]] == ["002-later", "001-opening"]
-
-    status = client.get("/api/projects/farm-comic/adaptation")
-    assert status.json()["counts"]["sceneListLines"] == 2
-
-    workflow = client.post("/api/projects/farm-comic/adaptation/workflow/start", json={"stage": "scene-list"})
-    assert workflow.status_code == 200
-
-    bad_extract = client.post("/api/projects/farm-comic/adaptation/scenes/missing-scene/extract")
-    assert bad_extract.status_code == 404
-
-
-def test_moment_output_path_helpers():
-    from pathlib import Path
-
-    from adaptation_workflow.moments import moment_output_path, moment_section_count, moment_uses_pages
-
-    root = Path("/tmp/adaptation")
-    assert moment_uses_pages("picture-book") is True
-    assert moment_uses_pages("illustrated-story") is True
-    assert moment_uses_pages("comic-book") is False
-    assert moment_output_path(root, "comic-book", "001-opening") == root / "panels" / "prompts" / "001-opening.md"
-    assert moment_output_path(root, "picture-book", "001-opening") == root / "pages" / "plans" / "001-opening.md"
-
-
-def test_scene_moments_file_api(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "book.txt").write_text("Once upon a time.\n")
-    (root / "scenes" / "artifacts").mkdir(parents=True, exist_ok=True)
-    (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
-    (root / "scenes" / "artifacts" / "001-opening.md").write_text(
-        "# Opening\n\nScene Id: 001-opening\nSource Lines: L001-L002\nPrimary Location: barn\n\n"
-        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: hero\n- Locations: barn\n"
-        "- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n"
-        "## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n"
-    )
-    library.write_json(
-        root / "adaptation.json",
-        {
-            "version": 2,
-            "settings": {"storyKind": "comic-book"},
-            "styleRefs": {},
-            "characters": {},
-            "locations": {},
-            "scenes": {},
-            "pages": {},
-            "panels": {},
-        },
-    )
-
-    missing = client.get("/api/projects/farm-comic/adaptation/scenes/001-opening/moments")
-    assert missing.status_code == 200
-    assert missing.json()["sectionCount"] == 0
-    assert missing.json()["sections"] == []
-    assert missing.json()["path"] == "panels/prompts/001-opening.md"
-
-    body = (
-        "## 001-opening-panel-01\n"
-        "mode: story-layout\n"
-        "refs: character:hero, location:barn\n"
-        "narration: None.\n"
-        "dialogue: None.\n"
-        "caption: None.\n\n"
-        "Opening panel. No watermarks.\n"
-    )
-    saved = client.put(
-        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
-        json={"body": body},
-    )
-    assert saved.status_code == 200
-    assert saved.json()["sectionCount"] == 1
-    assert saved.json()["body"].strip() == body.strip()
-    assert saved.json()["sections"][0]["key"] == "001-opening-panel-01"
-
-    status = client.get("/api/projects/farm-comic/adaptation")
-    assert status.json()["counts"]["momentSections"] == 1
-    assert "001-opening-panel-01" in status.json()["panels"]
 
 
 def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
@@ -2098,434 +1603,6 @@ def test_story_panels_booklet_pdf_endpoint(tmp_path, monkeypatch):
     assert response.content.startswith(b"%PDF")
 
 
-def test_scene_moments_sections_api(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "book.txt").write_text("Once upon a time.\n")
-    (root / "scenes" / "artifacts").mkdir(parents=True, exist_ok=True)
-    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
-    (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
-    (root / "scenes" / "artifacts" / "001-opening.md").write_text(
-        "# Opening\n\nScene Id: 001-opening\nSource Lines: L001-L002\nPrimary Location: barn\n\n"
-        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: hero\n- Locations: barn\n"
-        "- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n"
-        "## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n"
-    )
-    library.write_json(
-        root / "adaptation.json",
-        {
-            "version": 2,
-            "settings": {"storyKind": "comic-book"},
-            "styleRefs": {},
-            "characters": {},
-            "locations": {},
-            "scenes": {},
-            "pages": {},
-            "panels": {},
-        },
-    )
-
-    sections = [
-        {
-            "key": "001-opening-panel-01",
-            "refs": "character:hero, location:barn",
-            "narration": "None.",
-            "dialogue": "First.",
-            "caption": "None.",
-            "prompt": "First panel. No watermarks.",
-        },
-        {
-            "key": "001-opening-panel-02",
-            "refs": "character:hero, location:barn",
-            "narration": "None.",
-            "dialogue": "Second.",
-            "caption": "None.",
-            "prompt": "Second panel. No watermarks.",
-        },
-        {
-            "key": "001-opening-panel-03",
-            "refs": "character:hero, location:barn",
-            "narration": "None.",
-            "dialogue": "Third.",
-            "caption": "None.",
-            "prompt": "Third panel. No watermarks.",
-        },
-    ]
-    saved = client.put(
-        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
-        json={"sections": sections},
-    )
-    assert saved.status_code == 200
-    assert saved.json()["sectionCount"] == 3
-    assert [item["key"] for item in saved.json()["sections"]] == [
-        "001-opening-panel-01",
-        "001-opening-panel-02",
-        "001-opening-panel-03",
-    ]
-
-    reordered = client.put(
-        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
-        json={"sections": [sections[2], sections[0], sections[1]]},
-    )
-    assert reordered.status_code == 200
-    assert [item["key"] for item in reordered.json()["sections"]] == [
-        "001-opening-panel-03",
-        "001-opening-panel-01",
-        "001-opening-panel-02",
-    ]
-
-    sequence = client.get("/api/projects/farm-comic/adaptation/moments/sequence")
-    assert sequence.status_code == 200
-    assert [item["momentKey"] for item in sequence.json()["moments"]] == [
-        "001-opening-panel-03",
-        "001-opening-panel-01",
-        "001-opening-panel-02",
-    ]
-
-    duplicate_keys = client.put(
-        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
-        json={"sections": [sections[0], {**sections[1], "key": "001-opening-panel-01"}]},
-    )
-    assert duplicate_keys.status_code == 400
-
-    invalid_prompt = client.put(
-        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
-        json={"sections": [{**sections[0], "prompt": "Missing watermark line."}]},
-    )
-    assert invalid_prompt.status_code == 400
-
-    both_payloads = client.put(
-        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
-        json={"body": "ignored", "sections": sections},
-    )
-    assert both_payloads.status_code == 400
-
-
-def test_scene_moments_prune_metadata(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "book.txt").write_text("Once upon a time.\n")
-    (root / "scenes" / "artifacts").mkdir(parents=True, exist_ok=True)
-    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
-    (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
-    (root / "scenes" / "artifacts" / "001-opening.md").write_text(
-        "# Opening\n\nScene Id: 001-opening\nSource Lines: L001-L002\nPrimary Location: barn\n\n"
-        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n- Characters: hero\n- Locations: barn\n"
-        "- Props And Visual Assets: None.\n- Character States: None.\n- Location State: None.\n\n"
-        "## Dramatic Beats\n\n- `L001-L002`: Test. \"Quote.\"\n\n## Staging Notes\n\nTest.\n"
-    )
-    library.write_json(
-        root / "adaptation.json",
-        {
-            "version": 2,
-            "settings": {"storyKind": "comic-book"},
-            "styleRefs": {},
-            "characters": {},
-            "locations": {},
-            "scenes": {},
-            "pages": {},
-            "panels": {
-                "001-opening-panel-old": {
-                    "artifactKind": "panel-prompt",
-                    "promptPath": "panels/prompts/001-opening.md",
-                    "mode": "story-layout",
-                    "styleRef": "",
-                    "prompt": "Old panel. No watermarks.",
-                    "narration": "",
-                    "dialogue": "",
-                    "caption": "",
-                    "assetIds": ["01HOLDPANEL"],
-                    "activeAssetId": "01HOLDPANEL",
-                    "finalized": False,
-                    "status": "generated",
-                }
-            },
-        },
-    )
-
-    saved = client.put(
-        "/api/projects/farm-comic/adaptation/scenes/001-opening/moments",
-        json={
-            "sections": [
-                {
-                    "key": "001-opening-panel-new",
-                    "refs": "character:hero, location:barn",
-                    "narration": "None.",
-                    "dialogue": "None.",
-                    "caption": "None.",
-                    "prompt": "Renamed panel. No watermarks.",
-                }
-            ]
-        },
-    )
-    assert saved.status_code == 200
-
-    status = client.get("/api/projects/farm-comic/adaptation")
-    panels = status.json()["panels"]
-    assert "001-opening-panel-old" not in panels
-    assert "001-opening-panel-new" in panels
-
-
-def test_validate_moment_duplicate_slug(tmp_path):
-    from adaptation_workflow.validate import ValidationError, validate_moment_file
-
-    root = tmp_path / "adaptation" / "panels" / "prompts"
-    root.mkdir(parents=True)
-    path = root / "001-sunny-day.md"
-    path.write_text(
-        "## 001-sunny-day\n"
-        "mode: story-layout\n"
-        "refs: character:hero, location:barn\n\n"
-        "Panel 1. No watermarks.\n\n"
-        "## 001-sunny-day\n"
-        "mode: story-layout\n"
-        "refs: character:hero, location:barn\n\n"
-        "Panel 2. No watermarks.\n"
-    )
-    try:
-        validate_moment_file(path)
-        raise AssertionError("expected duplicate slug validation failure")
-    except ValidationError as exc:
-        assert "Duplicate section slug '001-sunny-day'" in str(exc)
-
-
-def test_plan_scene_api_guards(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "book.txt").write_text("Once upon a time.\n")
-    (root / "scenes").mkdir(parents=True, exist_ok=True)
-    (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
-
-    missing_scene = client.post("/api/projects/farm-comic/adaptation/scenes/missing-scene/plan")
-    assert missing_scene.status_code == 404
-
-    missing_artifact = client.post("/api/projects/farm-comic/adaptation/scenes/001-opening/plan")
-    assert missing_artifact.status_code == 409
-
-
-def test_entity_registry_prompt(tmp_path):
-    from adaptation_workflow.entity_registry import format_entity_registry_prompt
-
-    root = tmp_path / "adaptation"
-    characters = root / "characters"
-    characters.mkdir(parents=True)
-    write_unified_character_file(characters / "hero.md", "hero", variant_key="armor")
-    (root / "characters" / "list.txt").write_text("Hero: A hero.\n")
-
-    block = format_entity_registry_prompt(root)
-    assert "Entity registry" in block
-    assert "- hero (base)" in block
-    assert "- hero-armor (variant of hero)" in block
-
-
-def test_character_registry_gate_blocks_extract_and_plan(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "book.txt").write_text("Once upon a time.\n")
-    (root / "scenes").mkdir(parents=True, exist_ok=True)
-    (root / "scenes" / "list.txt").write_text("001-opening: Opening beat.\n")
-    (root / "scenes" / "artifacts").mkdir(parents=True, exist_ok=True)
-    (root / "scenes" / "artifacts" / "001-opening.md").write_text(
-        "# Scene\n\nScene Id: 001-opening\nSource Lines: L001\nPrimary Location: barn\n\n"
-        "## Story Function\n\nTest.\n\n## Visual Continuity\n\n"
-        "- Characters: hero\n- Locations: barn\n- Props And Visual Assets: None.\n"
-        "- Character States: None.\n- Location State: None.\n\n## Dramatic Beats\n\n"
-        "- `L001`: Test.\n\n## Staging Notes\n\nTest.\n\n## Text Candidates\n\n"
-        "- Narration: None.\n- Dialogue: None.\n- Caption: None.\n\n## Adaptation Notes\n\nNone.\n"
-    )
-
-    extract = client.post("/api/projects/farm-comic/adaptation/scenes/001-opening/extract")
-    assert extract.status_code == 409
-    assert "character" in extract.json()["detail"].lower()
-
-    plan = client.post("/api/projects/farm-comic/adaptation/scenes/001-opening/plan")
-    assert plan.status_code == 409
-    assert "character" in plan.json()["detail"].lower()
-
-
-def test_validate_unknown_entity_refs(tmp_path):
-    from adaptation_workflow.validate import run_validation
-
-    root = tmp_path / "adaptation"
-    characters = root / "characters"
-    characters.mkdir(parents=True)
-    write_unified_character_file(characters / "hero.md", "hero")
-    (root / "adaptation.json").write_text(
-        '{"characters":{"hero":{"slug":"hero","promptPath":"characters/hero.md","variants":{"base":{}}}},"locations":{"barn":{}}}'
-    )
-    panels = root / "panels" / "prompts"
-    panels.mkdir(parents=True)
-    (panels / "001-opening.md").write_text(
-        "## 001-opening-panel-01\n"
-        "mode: story-layout\n"
-        "refs: character:unknown-slug, location:barn\n\n"
-        "Panel. No watermarks.\n"
-    )
-
-    report = run_validation(root, "moments")
-    assert any("unknown-slug" in failure for failure in report.failures)
-
-
-def test_validate_character_artifact_rejects_forbidden_sections(tmp_path):
-    from adaptation_workflow.validate import ValidationError, validate_character_artifact
-
-    path = tmp_path / "hero.md"
-    path.write_text(
-        "# hero\n\n## Summary\n\nX.\n\n## Visual Description\n\nX.\n\n"
-        "## Visual Variants\n\n- `hero-base`: Base.\n\n## Source References\n\n- `L001`: \"Hi.\"\n"
-    )
-    with pytest.raises(ValidationError, match="Visual Variants"):
-        validate_character_artifact(path)
-
-
-def test_validate_moments(tmp_path):
-    from adaptation_workflow.validate import ValidationError, run_validation, validate_moment_file
-
-    root = tmp_path / "adaptation"
-    panels = root / "panels" / "prompts"
-    panels.mkdir(parents=True)
-    valid = panels / "001-opening.md"
-    valid.write_text(
-        "## 001-opening-panel-01\n"
-        "mode: story-layout\n"
-        "refs: character:hero, location:barn\n\n"
-        "Opening panel. No watermarks.\n"
-    )
-    validate_moment_file(valid)
-
-    invalid = panels / "002-bad.md"
-    invalid.write_text("## bad-panel\nmode: wrong\nrefs:\n\nMissing ending.\n")
-    try:
-        validate_moment_file(invalid)
-        raise AssertionError("expected validation failure")
-    except ValidationError:
-        pass
-
-    report = run_validation(root, "moments")
-    assert report.failures
-
-
-def test_layout_sections_round_trip(tmp_path):
-    from adaptation_workflow.moments import (
-        format_layout_section,
-        ordered_layout_sections,
-        parse_layout_sections,
-        write_layout_sections,
-        write_ordered_layout_sections,
-    )
-
-    path = tmp_path / "panels" / "prompts" / "001-opening.md"
-    section = {
-        "mode": "story-layout",
-        "style_ref": "character:hero, location:barn",
-        "narration": "Once upon a time.",
-        "dialogue": "\"Hi!\"",
-        "caption": "None.",
-        "prompt": "Opening panel. No watermarks.",
-    }
-    write_layout_sections(path, {"001-opening-panel-01": section})
-    parsed = parse_layout_sections(path)["001-opening-panel-01"]
-    assert parsed["narration"] == "Once upon a time."
-    assert parsed["dialogue"] == "\"Hi!\""
-    assert parsed["caption"] == "None."
-    assert parsed["prompt"] == "Opening panel. No watermarks."
-    assert format_layout_section("001-opening-panel-01", parsed) == path.read_text()
-
-    section_two = {**section, "prompt": "Second panel. No watermarks.", "dialogue": "Second."}
-    write_ordered_layout_sections(
-        path,
-        [
-            ("001-opening-panel-02", section_two),
-            ("001-opening-panel-01", section),
-        ],
-    )
-    assert [key for key, _ in ordered_layout_sections(path)] == [
-        "001-opening-panel-02",
-        "001-opening-panel-01",
-    ]
-
-
-def test_moment_sequence_and_patch_api(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "scenes").mkdir(parents=True, exist_ok=True)
-    (root / "scenes" / "list.txt").write_text("001-opening: Opening.\n002-later: Later.\n")
-    (root / "panels" / "prompts").mkdir(parents=True, exist_ok=True)
-    (root / "panels" / "prompts" / "001-opening.md").write_text(
-        "## 001-opening-panel-01\n"
-        "mode: story-layout\n"
-        "refs: character:hero, location:barn\n"
-        "narration: None.\n"
-        "dialogue: First line.\n"
-        "caption: None.\n\n"
-        "First panel. No watermarks.\n"
-    )
-    (root / "panels" / "prompts" / "002-later.md").write_text(
-        "## 002-later-panel-01\n"
-        "mode: story-layout\n"
-        "refs:\n"
-        "narration: None.\n"
-        "dialogue: Second line.\n"
-        "caption: None.\n\n"
-        "Second panel. No watermarks.\n"
-    )
-    library.write_json(
-        root / "adaptation.json",
-        {
-            "version": 2,
-            "settings": {"storyKind": "comic-book"},
-            "styleRefs": {},
-            "characters": {},
-            "locations": {},
-            "scenes": {},
-            "pages": {},
-            "panels": {},
-        },
-    )
-
-    sequence = client.get("/api/projects/farm-comic/adaptation/moments/sequence")
-    assert sequence.status_code == 200
-    payload = sequence.json()
-    assert [moment["momentKey"] for moment in payload["moments"]] == [
-        "001-opening-panel-01",
-        "002-later-panel-01",
-    ]
-    assert payload["counts"]["total"] == 2
-
-    opening = payload["moments"][0]
-    later = payload["moments"][1]
-    assert opening["canGenerate"] is False
-    assert opening["refInputs"]
-    assert any(not item["ready"] for item in opening["refInputs"])
-    assert later["canGenerate"] is False
-    assert any(item["detail"] for item in later["refInputs"] if not item["ready"])
-
-    patched = client.patch(
-        "/api/projects/farm-comic/adaptation/moments/001-opening-panel-01",
-        json={"narration": "Updated narration.", "finalized": True},
-    )
-    assert patched.status_code == 200
-    assert patched.json()["narration"] == "Updated narration."
-    assert patched.json()["finalized"] is True
-
-    on_disk = (root / "panels" / "prompts" / "001-opening.md").read_text()
-    assert "narration: Updated narration." in on_disk
-
-    status = client.get("/api/projects/farm-comic/adaptation")
-    assert status.json()["panels"]["001-opening-panel-01"]["finalized"] is True
-    assert status.json()["counts"]["finalizedMoments"] == 1
-
-
 def test_style_ref_status_clears_stale_asset_and_repairs_canvas(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
@@ -2576,9 +1653,12 @@ def test_style_ref_status_clears_stale_asset_and_repairs_canvas(tmp_path, monkey
     assert status.status_code == 200
     assert status.json()["styleRefStatuses"]["archetype-character"]["assetId"] is None
 
-    sync = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas")
+    sync = client.put(
+        "/api/projects/farm-comic/adaptation/style-ref-prompt",
+        json={"kind": "archetype-character", "prompt": "Character archetype prompt."},
+    )
     assert sync.status_code == 200
-    nodes = sync.json()["canvas"]["nodes"]
+    nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
     draft = nodes["archetype_archetype_character"]
     assert draft["type"] == "draft"
     assert draft["role"] == {"type": "style-ref-source", "kind": "archetype-character"}
@@ -2697,13 +1777,25 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
     (root / "style-refs").mkdir(parents=True, exist_ok=True)
     (root / "style-refs" / "archetype-character.md").write_text("Character archetype prompt.\n")
 
+    imported_asset_id = "01HIMPORT"
+    make_png(library.asset_png_path("farm-comic", imported_asset_id), color="green")
+    library.write_json(
+        library.asset_json_path("farm-comic", imported_asset_id),
+        {
+            "id": imported_asset_id,
+            "kind": "imported",
+            "title": "Character archetype",
+            "tags": [],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
     imported = client.post(
-        "/api/projects/farm-comic/adaptation/import-style-ref",
-        data={"kind": "archetype-character"},
-        files={"file": ("character.png", png_bytes("green"), "image/png")},
+        "/api/projects/farm-comic/adaptation/style-ref-asset",
+        json={"kind": "archetype-character", "assetId": imported_asset_id},
     )
     assert imported.status_code == 200
-    imported_asset_id = imported.json()["styleRefStatuses"]["archetype-character"]["assetId"]
+    assert imported.json()["styleRefStatuses"]["archetype-character"]["assetId"] == imported_asset_id
     canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
     assert imported.json()["styleRefStatuses"]["archetype-character"]["canvasDraftNodeId"] == "archetype_archetype_character"
     assert imported.json()["styleRefStatuses"]["archetype-character"]["canvasImageNodeId"] == "generated_archetype_archetype_character"
@@ -2775,13 +1867,21 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
     assert canvas_nodes["generated_archetype_archetype_character"]["type"] == "imageGroup"
     assert canvas_nodes["generated_archetype_archetype_character"]["activeAssetId"] == generated_asset_id
     assert "archetype_archetype_character_image" not in canvas_nodes
-    first_sync = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
-    second_sync = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
+    def sync_via_prompt_put():
+        response = client.put(
+            "/api/projects/farm-comic/adaptation/style-ref-prompt",
+            json={"kind": "archetype-character", "prompt": "Character archetype prompt."},
+        )
+        assert response.status_code == 200
+        return client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+
+    first_sync = sync_via_prompt_put()
+    second_sync = sync_via_prompt_put()
     assert first_sync == second_sync
     missing_source_canvas = client.get("/api/projects/farm-comic/canvas").json()
     missing_source_canvas["nodes"].pop("archetype_archetype_character")
     assert client.put("/api/projects/farm-comic/canvas", json=missing_source_canvas).status_code == 200
-    repaired_nodes = client.post("/api/projects/farm-comic/adaptation/import-drafts-to-canvas").json()["canvas"]["nodes"]
+    repaired_nodes = sync_via_prompt_put()
     assert repaired_nodes["archetype_archetype_character"]["type"] == "draft"
     assert repaired_nodes["archetype_archetype_character"]["role"] == {"type": "style-ref-source", "kind": "archetype-character"}
 
@@ -2791,7 +1891,7 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
     assert client.get("/api/projects/farm-comic/adaptation").json()["styleRefStatuses"]["archetype-character"]["assetId"] is None
 
 
-def test_sync_style_ref_to_canvas_preserves_visual_style_selection(tmp_path, monkeypatch):
+def test_style_ref_sync_preserves_visual_style_selection(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
     root = library.project_dir("farm-comic") / "adaptation"
@@ -2804,22 +1904,22 @@ def test_sync_style_ref_to_canvas_preserves_visual_style_selection(tmp_path, mon
         ).json()["visualStyles"],
         "Crayon",
     )
-    synced = client.post(
-        "/api/projects/farm-comic/adaptation/sync-style-ref-to-canvas",
-        json={"kind": "archetype-character"},
+    synced = client.put(
+        "/api/projects/farm-comic/adaptation/style-ref-prompt",
+        json={"kind": "archetype-character", "prompt": "Character archetype prompt."},
     )
     assert synced.status_code == 200
-    node_id = synced.json()["canvas"]["nodes"]["archetype_archetype_character"]
-    assert node_id["type"] == "draft"
     canvas = client.get("/api/projects/farm-comic/canvas").json()
+    assert canvas["nodes"]["archetype_archetype_character"]["type"] == "draft"
     canvas["nodes"]["archetype_archetype_character"]["visualStyleId"] = style_id
     assert client.put("/api/projects/farm-comic/canvas", json=canvas).status_code == 200
-    resynced = client.post(
-        "/api/projects/farm-comic/adaptation/sync-style-ref-to-canvas",
-        json={"kind": "archetype-character"},
+    resynced = client.put(
+        "/api/projects/farm-comic/adaptation/style-ref-prompt",
+        json={"kind": "archetype-character", "prompt": "Character archetype prompt."},
     )
     assert resynced.status_code == 200
-    assert resynced.json()["canvas"]["nodes"]["archetype_archetype_character"]["visualStyleId"] == style_id
+    nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
+    assert nodes["archetype_archetype_character"]["visualStyleId"] == style_id
 
 
 def test_generate_attaches_to_same_image_group_node(tmp_path, monkeypatch):
@@ -3918,4 +3018,3 @@ def test_concept_cards_draft_to_canvas(tmp_path, monkeypatch):
     assert len(upload_node["assetIds"]) == 1
 
     assert client.get("/api/projects/farm-comic/adaptation").json()["counts"]["conceptArt"] == 3
-

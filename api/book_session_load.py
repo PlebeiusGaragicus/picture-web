@@ -37,7 +37,6 @@ def book_session_load_status(slug: str) -> AdaptationWorkflowStatus:
         slug,
         book_session_load_status_path(slug),
         book_session_load_log_path(slug),
-        validation=False,
     )
 
 
