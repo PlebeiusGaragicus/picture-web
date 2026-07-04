@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import shutil
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -10,7 +12,7 @@ from pydantic import ValidationError
 
 import adaptation
 import library
-from common import slugify
+from common import slugify, utc_now
 from models import (
     DEFAULT_AUTO_PLACE_H,
     DEFAULT_AUTO_PLACE_W,
@@ -25,6 +27,8 @@ from models import (
     StoryPanelPatch,
     StoryPanelRect,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def story_panels_dir(slug: str) -> Path:
@@ -607,13 +611,24 @@ def _read_document_lenient(slug: str) -> StoryPanelDocument | None:
     return _normalize_document_pages(document)
 
 
+def _backup_document(slug: str) -> None:
+    """Copy panels.json aside before a destructive reset so user chunking is recoverable."""
+    path = document_path(slug)
+    if not path.is_file():
+        return
+    backup = path.with_name(f"panels.json.bak-{utc_now().replace(':', '-')}")
+    shutil.copyfile(path, backup)
+
+
 def reset_chunks(slug: str) -> StoryPanelDocument:
     """Wipe story-panel chunks and layout while keeping canvas, assets, tags, and adaptation.
 
     Writes a fresh document without reading the old file so projects with incompatible
     panels.json can recover after breaking schema changes during local development.
+    The old file is kept as panels.json.bak-<timestamp>.
     """
     library.require_project(slug)
+    _backup_document(slug)
     return _write_document(slug, empty_document())
 
 
@@ -625,6 +640,7 @@ def reset_layout(slug: str) -> StoryPanelDocument:
     """
     document = _read_document_lenient(slug)
     if document is None:
+        logger.warning("panels.json for %s no longer validates; falling back to reset_chunks", slug)
         return reset_chunks(slug)
     default_rect = StoryPanelRect(x=0, y=0, w=DEFAULT_AUTO_PLACE_W, h=DEFAULT_AUTO_PLACE_H)
     document.panels = [

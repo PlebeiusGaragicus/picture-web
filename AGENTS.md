@@ -44,3 +44,24 @@ Tests live under `api/` (`test_api.py`, `test_adaptation_workflow.py`). Run from
 **Avoid** running all tests unless the user asks or the change is cross-cutting. The API test file alone has 60+ tests.
 
 After code changes, run the smallest pytest command that covers the behavior you touched. Do not re-probe the environment (`which python`, `pip list`, etc.) if `.venv/bin/python -m pytest --version` succeeds.
+
+## Frontend gate
+
+The frontend has no test rig; `cd webui && npm run build` (tsc + vite) is the gate after any webui change. Use `npm run typecheck` for a faster tsc-only pass.
+
+## Backend conventions
+
+- **Routers hold no logic.** `api/routes/*` are thin FastAPI routers (one per feature area); domain logic lives in the top-level service modules (`library.py`, `adaptation.py`, `style_refs.py`, `visual_styles.py`, `adaptation_jobs.py`, `chat_sessions.py`, ...). Service modules never import `routes`.
+- **Models** stay in the single `api/models.py`.
+- **One of each:** `common.utc_now()`, `common.slugify(value, fallback)`, and `library.read_json`/`write_json` for persistent JSON. Do not add new local copies.
+- **Import cycles:** the lazy `import adaptation` pattern inside functions is the sanctioned way to break the documented `adaptation ↔ library/style_refs/visual_styles` cycles. Do not introduce new cycles.
+- **API shape:** camelCase query params and JSON fields. Raise `HTTPException` with a human-readable `detail` in service code. Detached jobs never raise across the process boundary — they write status JSON + logs and the status endpoint reports `returnCode`/`error`.
+- **Logging:** level comes from the `LOG_LEVEL` env var (default INFO); no hardcoded DEBUG.
+
+## Frontend conventions
+
+- **File naming:** PascalCase when the main export is a component (`CharactersHubView.tsx`); camelCase for hooks/utils (`useBookSessionLoad.ts`). Apply when creating or moving files; no mass renames.
+- **Directory per feature:** `canvas/`, `storyPanels/`, `sessions/`, `conceptArt/`, `characters/`, `visualStyles/`; cross-feature helpers in `shared/` and `ui.tsx`.
+- **Errors:** use `formatRequestError` and surface a view-local error banner; no empty `catch {}` — at minimum `console.error` plus a user-visible state.
+- **Debug logging** follows `import.meta.env.DEV`.
+- **CSS:** one `style.css` for now; add new rules next to the related ones. See ARCHITECTURE.md for the documented warts (nodeTagActions singleton, CSS split deferred).
