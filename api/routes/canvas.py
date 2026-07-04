@@ -6,7 +6,7 @@ import logging
 
 from fastapi import APIRouter, Query
 
-import adaptation
+import canvas_nodes
 import library
 from models import (
     CanvasDocument,
@@ -31,7 +31,7 @@ def put_canvas(slug: str, canvas: CanvasDocument) -> CanvasDocument:
 
 @router.post("/api/projects/{slug}/canvas/image-groups", response_model=ImageGroupNodeResponse)
 def create_canvas_image_group(slug: str, payload: ImageGroupNodeCreate) -> ImageGroupNodeResponse:
-    return adaptation.create_image_group(slug, payload)
+    return canvas_nodes.create_image_group(slug, payload)
 
 
 @router.post("/api/projects/{slug}/generate", response_model=GenerateResponse)

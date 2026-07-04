@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, File, UploadFile
 
 import adaptation
+import style_refs
+import visual_styles
 from models import (
     AdaptationCanvasImportResponse,
     AdaptationFileCreate,
@@ -30,22 +32,22 @@ def get_adaptation(slug: str) -> AdaptationStatus:
 
 @router.post("/api/projects/{slug}/adaptation/visual-styles", response_model=AdaptationStatus)
 def create_adaptation_visual_style(slug: str, payload: VisualStyleCreate) -> AdaptationStatus:
-    return adaptation.create_visual_style(slug, payload)
+    return visual_styles.create_visual_style(slug, payload)
 
 
 @router.patch("/api/projects/{slug}/adaptation/visual-styles/{style_id}", response_model=AdaptationStatus)
 def patch_adaptation_visual_style(slug: str, style_id: str, payload: VisualStylePatch) -> AdaptationStatus:
-    return adaptation.update_visual_style(slug, style_id, payload)
+    return visual_styles.update_visual_style(slug, style_id, payload)
 
 
 @router.delete("/api/projects/{slug}/adaptation/visual-styles/{style_id}", response_model=AdaptationStatus)
 def delete_adaptation_visual_style(slug: str, style_id: str) -> AdaptationStatus:
-    return adaptation.delete_visual_style(slug, style_id)
+    return visual_styles.delete_visual_style(slug, style_id)
 
 
 @router.put("/api/projects/{slug}/adaptation/style-ref-prompt", response_model=AdaptationStatus)
 def put_adaptation_style_ref_prompt(slug: str, payload: AdaptationStylePromptPatch) -> AdaptationStatus:
-    return adaptation.write_style_ref_prompt(slug, payload)
+    return style_refs.write_style_ref_prompt(slug, payload)
 
 
 @router.get("/api/projects/{slug}/adaptation/files/{kind}", response_model=list[AdaptationFileDocument])
@@ -80,9 +82,9 @@ async def import_adaptation_book(slug: str, file: UploadFile = File(...)) -> Ada
 
 @router.post("/api/projects/{slug}/adaptation/style-ref-asset", response_model=AdaptationStatus)
 def set_adaptation_style_ref_asset(slug: str, payload: AdaptationStyleRefAssetRequest) -> AdaptationStatus:
-    return adaptation.set_style_ref_asset(slug, payload)
+    return style_refs.set_style_ref_asset(slug, payload)
 
 
 @router.post("/api/projects/{slug}/adaptation/generate-style-ref", response_model=AdaptationGenerateResponse)
 def generate_adaptation_style_ref(slug: str, payload: AdaptationGenerateStyleRefRequest) -> AdaptationGenerateResponse:
-    return adaptation.generate_style_ref(slug, payload)
+    return style_refs.generate_style_ref(slug, payload)

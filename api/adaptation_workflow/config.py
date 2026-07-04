@@ -76,27 +76,21 @@ class AdaptationContext:
 
     @classmethod
     def for_slug(cls, project_slug: str) -> AdaptationContext:
-        slug = project_slug.strip().strip("/")
-        if slug.startswith("books/"):
-            book_root = REPO_ROOT / slug
-            project_slug = Path(slug).name.lower()
-            project_slug = slugify_path_segment(project_slug)
-        elif slug.startswith("photo-library/projects/") and slug.endswith("/adaptation"):
-            book_root = REPO_ROOT / slug
-            project_slug = slug.removeprefix("photo-library/projects/").removesuffix("/adaptation")
-        else:
-            book_root = LIBRARY_ROOT / "projects" / slug / "adaptation"
-            project_path = LIBRARY_ROOT / "projects" / slug / "project.json"
-            if not project_path.is_file():
-                raise FileNotFoundError(f"Project not found: {slug}")
+        project_slug = project_slug.strip().strip("/")
+        book_root = LIBRARY_ROOT / "projects" / project_slug / "adaptation"
+        project_path = LIBRARY_ROOT / "projects" / project_slug / "project.json"
+        if not project_path.is_file():
+            raise FileNotFoundError(f"Project not found: {project_slug}")
 
+        import adaptation
+
+        adaptation.ensure_adaptation(project_slug)
         book_root_abs = book_root.resolve()
         sessions = book_root_abs / "sessions"
         pi_workspace = sessions / "pi-workspace"
         pi_session_dir = sessions / "pi"
         pi_workspace.mkdir(parents=True, exist_ok=True)
         pi_session_dir.mkdir(parents=True, exist_ok=True)
-        ensure_adaptation_dirs(book_root_abs)
 
         if not SKILLS_DIR.is_dir():
             raise FileNotFoundError(f"Missing Pi skills directory: {SKILLS_DIR}")
@@ -124,31 +118,6 @@ def slugify_path_segment(value: str) -> str:
     lowered = value.lower()
     slug = re.sub(r"[^a-z0-9]+", "-", lowered)
     return slug.strip("-")
-
-
-def ensure_adaptation_dirs(book_root: Path) -> None:
-    for relative in [
-        "sessions",
-        "style-refs",
-        "characters",
-        "acts",
-        "locations",
-        "locations/staging",
-        "scenes",
-        "scenes/artifacts",
-        "pages/plans",
-        "panels/prompts",
-        "locations/prompts",
-    ]:
-        (book_root / relative).mkdir(parents=True, exist_ok=True)
-    visual_styles = book_root / "style-refs" / "visual-styles.json"
-    if not visual_styles.exists():
-        import adaptation
-
-        adaptation.write_visual_styles(book_root, adaptation.default_visual_styles())
-    metadata = book_root / "adaptation.json"
-    if not metadata.exists():
-        metadata.write_text(json.dumps({"version": 2, "settings": {"storyKind": "comic-book"}}, indent=2) + "\n")
 
 
 def utc_now() -> str:

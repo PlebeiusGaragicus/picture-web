@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import library
 from ids import new_ulid
-from models import CanvasDocument, GenerationParams, ImageGroupCanvasNode
+from models import CanvasDocument, GenerationParams, ImageGroupCanvasNode, ImageGroupNodeCreate, ImageGroupNodeResponse
 
 NODE_LAYOUT = {"columns": 5, "start_x": 80, "start_y": 320, "x_gap": 310, "y_gap": 230}
 
@@ -118,3 +118,19 @@ def spawn_from_location(slug: str, location_key: str) -> tuple[str, CanvasDocume
         y=y,
     )
     return node_id, saved
+
+
+def create_image_group(slug: str, payload: ImageGroupNodeCreate) -> ImageGroupNodeResponse:
+    canvas = library.read_stored_canvas(slug)
+    x, y = next_canvas_position(canvas)
+    node_id, saved = create_image_group_node(
+        slug,
+        display_name=payload.displayName.strip(),
+        tags=payload.tags,
+        prompt=payload.prompt,
+        refs=list(payload.refs),
+        visual_style_id=payload.visualStyleId,
+        x=x,
+        y=y,
+    )
+    return ImageGroupNodeResponse(nodeId=node_id, canvas=saved)

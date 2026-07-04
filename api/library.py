@@ -815,9 +815,9 @@ def compose_generation_prompt(user_prompt: str, style_prompt: str | None) -> str
 def resolve_visual_style_prompt(slug: str, visual_style_id: str | None) -> str | None:
     if not visual_style_id:
         return None
-    import adaptation
+    import visual_styles
 
-    return adaptation.visual_style_prompt(slug, visual_style_id).strip() or None
+    return visual_styles.visual_style_prompt(slug, visual_style_id).strip() or None
 
 
 def create_generated_assets(

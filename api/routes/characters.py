@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 import adaptation
+import adaptation_jobs
 from models import (
     AdaptationStatus,
     AdaptationWorkflowStatus,
@@ -14,32 +15,32 @@ router = APIRouter()
 
 @router.post("/api/projects/{slug}/adaptation/characters/list", response_model=AdaptationWorkflowStatus)
 def start_character_list(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.start_character_list(slug)
+    return adaptation_jobs.start_character_list(slug)
 
 
 @router.get("/api/projects/{slug}/adaptation/characters/list", response_model=AdaptationWorkflowStatus)
 def get_character_list(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.character_list_status(slug)
+    return adaptation_jobs.character_list_status(slug)
 
 
 @router.post("/api/projects/{slug}/adaptation/characters/extract-all", response_model=AdaptationWorkflowStatus)
 def start_character_extract_all(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.start_character_extract_all(slug)
+    return adaptation_jobs.start_character_extract_all(slug)
 
 
 @router.get("/api/projects/{slug}/adaptation/characters/extract-all", response_model=AdaptationWorkflowStatus)
 def get_character_extract_all(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.character_extract_all_status(slug)
+    return adaptation_jobs.character_extract_all_status(slug)
 
 
 @router.post("/api/projects/{slug}/adaptation/characters/{key}/extract", response_model=AdaptationWorkflowStatus)
 def start_character_extract(slug: str, key: str, force: bool = False) -> AdaptationWorkflowStatus:
-    return adaptation.start_character_extract(slug, key, force=force)
+    return adaptation_jobs.start_character_extract(slug, key, force=force)
 
 
 @router.get("/api/projects/{slug}/adaptation/characters/{key}/extract", response_model=AdaptationWorkflowStatus)
 def get_character_extract(slug: str, key: str) -> AdaptationWorkflowStatus:
-    return adaptation.character_extract_status(slug, key)
+    return adaptation_jobs.character_extract_status(slug, key)
 
 
 @router.post("/api/projects/{slug}/adaptation/characters/reset", response_model=AdaptationStatus)

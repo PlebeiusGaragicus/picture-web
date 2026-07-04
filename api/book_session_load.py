@@ -8,6 +8,7 @@ import sys
 from fastapi import HTTPException
 
 import adaptation
+import adaptation_jobs
 import agent_sessions
 import library
 from adaptation_workflow.config import AdaptationContext, ensure_node_runtime, find_pi_binary, pi_version
@@ -21,19 +22,19 @@ BOOK_SESSION_LOAD_STAGE = "book-session"
 
 
 def book_session_load_status_path(slug: str):
-    return adaptation.workflow_status_path(slug, BOOK_SESSION_LOAD_STAGE)
+    return adaptation_jobs.workflow_status_path(slug, BOOK_SESSION_LOAD_STAGE)
 
 
 def book_session_load_log_path(slug: str):
-    return adaptation.workflow_log_path(slug, BOOK_SESSION_LOAD_STAGE)
+    return adaptation_jobs.workflow_log_path(slug, BOOK_SESSION_LOAD_STAGE)
 
 
 def book_session_load_launcher_log_path(slug: str):
-    return adaptation.workflow_launcher_log_path(slug, BOOK_SESSION_LOAD_STAGE)
+    return adaptation_jobs.workflow_launcher_log_path(slug, BOOK_SESSION_LOAD_STAGE)
 
 
 def book_session_load_status(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.process_status(
+    return adaptation_jobs.process_status(
         slug,
         book_session_load_status_path(slug),
         book_session_load_log_path(slug),
@@ -52,16 +53,15 @@ def start_book_session_load(slug: str) -> AdaptationWorkflowStatus:
         kind="read-book",
         title="Read book",
         source={"type": "read-book", "stage": BOOK_SESSION_LOAD_STAGE},
-        log_files=adaptation.workflow_log_files(slug, BOOK_SESSION_LOAD_STAGE),
+        log_files=adaptation_jobs.workflow_log_files(slug, BOOK_SESSION_LOAD_STAGE),
     )
-    return adaptation.start_logged_process(
+    return adaptation_jobs.start_logged_process(
         slug,
         log_path=book_session_load_log_path(slug),
         launcher_log_path=book_session_load_launcher_log_path(slug),
         status_path=book_session_load_status_path(slug),
         start_line=f"Starting read-book session load for {slug}",
-        script_command=f"cd api && {adaptation.workflow_python()} -m book_session_load \"$SLUG\"",
-        validation=False,
+        script_command=f"cd api && {adaptation_jobs.workflow_python()} -m book_session_load \"$SLUG\"",
         extra_env={"AGENT_SESSION_ID": session.id},
     )
 
@@ -97,7 +97,7 @@ def run_load(project_slug: str) -> int:
             agent_session_id,
             status="failed",
             error=str(exc),
-            log_files=adaptation.workflow_log_files(ctx.project_slug, BOOK_SESSION_LOAD_STAGE),
+            log_files=adaptation_jobs.workflow_log_files(ctx.project_slug, BOOK_SESSION_LOAD_STAGE),
             completed=True,
         )
         print(f"error: {exc}", file=sys.stderr)
@@ -143,7 +143,7 @@ def run_load(project_slug: str) -> int:
             pi_session_id=session.session_id,
             pi_session_file=session.session_file,
             source={"bookPath": session.book_path},
-            log_files=adaptation.workflow_log_files(ctx.project_slug, BOOK_SESSION_LOAD_STAGE),
+            log_files=adaptation_jobs.workflow_log_files(ctx.project_slug, BOOK_SESSION_LOAD_STAGE),
             completed=True,
         )
         logger.write_line()
@@ -158,7 +158,7 @@ def run_load(project_slug: str) -> int:
             agent_session_id,
             status="failed",
             error=error,
-            log_files=adaptation.workflow_log_files(ctx.project_slug, BOOK_SESSION_LOAD_STAGE),
+            log_files=adaptation_jobs.workflow_log_files(ctx.project_slug, BOOK_SESSION_LOAD_STAGE),
             completed=True,
         )
         logger.write_line(f"error: {error}")

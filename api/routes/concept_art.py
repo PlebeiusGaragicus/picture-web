@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, File, Query, UploadFile
 from starlette import status
 
-import adaptation
+import adaptation_jobs
 import concept_cards
 from models import (
     AdaptationWorkflowStatus,
@@ -49,19 +49,19 @@ async def upload_concept_art(slug: str, file: UploadFile = File(...)) -> Concept
 
 @router.post("/api/projects/{slug}/adaptation/concept-art/generate-character", response_model=AdaptationWorkflowStatus)
 def start_generate_concept_character(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.start_generate_concept_character(slug)
+    return adaptation_jobs.start_generate_concept_character(slug)
 
 
 @router.get("/api/projects/{slug}/adaptation/concept-art/generate-character", response_model=AdaptationWorkflowStatus)
 def get_generate_concept_character(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.generate_concept_character_status(slug)
+    return adaptation_jobs.generate_concept_character_status(slug)
 
 
 @router.post("/api/projects/{slug}/adaptation/concept-art/generate-location", response_model=AdaptationWorkflowStatus)
 def start_generate_concept_location(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.start_generate_concept_location(slug)
+    return adaptation_jobs.start_generate_concept_location(slug)
 
 
 @router.get("/api/projects/{slug}/adaptation/concept-art/generate-location", response_model=AdaptationWorkflowStatus)
 def get_generate_concept_location(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation.generate_concept_location_status(slug)
+    return adaptation_jobs.generate_concept_location_status(slug)
