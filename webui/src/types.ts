@@ -68,12 +68,7 @@ export interface ProjectDetail {
   tags: TagDefinition[];
 }
 
-export type StoryKind = 'picture-book' | 'illustrated-story' | 'comic-book';
 export type StyleRefKind = 'archetype-character' | 'archetype-scene';
-
-export interface AdaptationSettings {
-  storyKind: StoryKind;
-}
 
 export interface CanvasDocument {
   version: 2;
@@ -223,7 +218,6 @@ export interface StyleRefStatus {
 
 export interface AdaptationStatus {
   projectSlug: string;
-  settings: AdaptationSettings;
   hasBook: boolean;
   hasBookSession: boolean;
   styleRefs: Record<string, boolean>;
@@ -240,80 +234,6 @@ export interface AdaptationStatus {
   scenes: Record<string, AdaptationAssetLink>;
   pages: Record<string, AdaptationAssetLink>;
   panels: Record<string, AdaptationAssetLink>;
-}
-
-export type AdaptationStage = 'ingest' | 'characters' | 'scene-list' | 'scenes' | 'locations' | 'moments' | 'all';
-
-export interface MomentRefInput {
-  ref: string;
-  kind: 'character' | 'location' | 'unknown';
-  entityKey: string;
-  tagId: string;
-  ready: boolean;
-  assetIds: string[];
-  detail: string;
-}
-
-export interface MomentLayoutSection {
-  key: string;
-  refs: string;
-  narration: string;
-  dialogue: string;
-  caption: string;
-  prompt: string;
-  refInputs?: MomentRefInput[];
-  canGenerate?: boolean;
-  referenceImageCount?: number;
-  referenceImageLimit?: number;
-  referenceLimitExceeded?: boolean;
-}
-
-export interface SceneMomentsDocument {
-  sceneSlug: string;
-  path: string;
-  body: string;
-  sections: MomentLayoutSection[];
-  sectionCount: number;
-  storyKind: StoryKind;
-  exists: boolean;
-}
-
-export interface MomentSequenceEntry {
-  momentKey: string;
-  sceneSlug: string;
-  artifactKind: ArtifactKind;
-  promptPath: string;
-  prompt: string;
-  narration: string;
-  dialogue: string;
-  caption: string;
-  refs: string;
-  assetIds: string[];
-  activeAssetId?: string | null;
-  finalized: boolean;
-  status: 'missing' | 'ready' | 'generated';
-  refInputs?: MomentRefInput[];
-  canGenerate?: boolean;
-  referenceImageCount?: number;
-  referenceImageLimit?: number;
-  referenceLimitExceeded?: boolean;
-}
-
-export interface MomentSequenceDocument {
-  moments: MomentSequenceEntry[];
-  counts: {
-    total: number;
-    illustrated: number;
-    finalized: number;
-  };
-}
-
-export interface MomentPatch {
-  narration?: string;
-  dialogue?: string;
-  caption?: string;
-  activeAssetId?: string | null;
-  finalized?: boolean;
 }
 
 export interface StoryPanelRect {
@@ -427,15 +347,6 @@ export interface StoryPanelBookmarkCreatePayload {
 export type StoryPanelPatchPayload = Partial<
   Pick<StoryPanel, 'order' | 'title' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'storyText' | 'visibleText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'captions' | 'imagePrompts' | 'finalized'>
 >;
-
-export interface SceneListLine {
-  slug: string;
-  description: string;
-}
-
-export interface SceneListDocument {
-  lines: SceneListLine[];
-}
 
 export interface AdaptationWorkflowStatus {
   running: boolean;

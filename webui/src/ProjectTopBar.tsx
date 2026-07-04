@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AutoPlaceToggle } from './storyPanels/AutoPlaceToggle';
 import { PanelChunksToggleButton } from './storyPanels/PanelChunksToggle';
-import { PhaseSidebarToggleIcon, SidebarCollapseButton } from './PhaseSidebarToggle';
+import { SidebarToggleIcon, SidebarCollapseButton } from './SidebarToggle';
 import { HelpTip } from './ui';
-import type { AdaptationStatus } from './types';
 import {
-  adaptationNavPhases,
-  phaseStatus,
   projectPhaseHelp,
   projectPhaseIcon,
   projectPhaseLabel,
@@ -16,7 +13,6 @@ import {
 
 export function ProjectTopBar({
   activePhase,
-  adaptation,
   onPhaseChange,
   sidebarCollapsed,
   onExpandSidebar,
@@ -31,7 +27,6 @@ export function ProjectTopBar({
   endContent,
 }: {
   activePhase: ProjectPhase;
-  adaptation: AdaptationStatus | null;
   onPhaseChange: (phase: ProjectPhase) => void;
   sidebarCollapsed: boolean;
   onExpandSidebar: () => void;
@@ -76,7 +71,7 @@ export function ProjectTopBar({
             title="Expand sidebar"
             aria-label="Expand sidebar"
           >
-            <PhaseSidebarToggleIcon variant="expand" />
+            <SidebarToggleIcon variant="expand" />
             <span>Sidebar</span>
           </button>
         ) : (
@@ -113,23 +108,6 @@ export function ProjectTopBar({
                       <strong>{item.label}</strong>
                     </button>
                   ))}
-                  <p className="project-top-bar-nav-heading">Story Adaptation</p>
-                  {adaptationNavPhases.map((phase) => {
-                    const status = phaseStatus(adaptation, phase.id);
-                    const selected = activePhase === phase.id;
-                    return (
-                      <button
-                        key={phase.id}
-                        type="button"
-                        role="menuitem"
-                        className={`project-top-bar-nav-item status-${status} ${selected ? 'is-selected' : ''}`}
-                        onClick={() => selectPhase(phase.id)}
-                      >
-                        <span className="project-top-bar-nav-icon" aria-hidden="true">{phase.number}</span>
-                        <strong>{phase.title}</strong>
-                      </button>
-                    );
-                  })}
                 </div>
               )}
             </div>

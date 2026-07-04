@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, AgentSession, ArtifactKind, Asset, BookChatSession, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, ImageGroupNodeResponse, MomentLayoutSection, MomentPatch, MomentSequenceDocument, MomentSequenceEntry, PiTraceDocument, Project, ProjectDetail, SceneListDocument, SceneListLine, SceneMomentsDocument, StoryKind, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStatus, AdaptationWorkflowStatus, AgentSession, ArtifactKind, Asset, BookChatSession, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, ImageGroupNodeResponse, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = import.meta.env.DEV;
 
@@ -112,11 +112,6 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ kind, prompt }),
     }),
-  saveAdaptationSettings: (slug: string, storyKind: StoryKind) =>
-    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/settings`, {
-      method: 'PATCH',
-      body: JSON.stringify({ storyKind }),
-    }),
   listAdaptationFiles: (slug: string, kind: AdaptationFileKind) =>
     request<AdaptationFileDocument[]>(`/api/projects/${slug}/adaptation/files/${kind}`),
   createAdaptationFile: (slug: string, kind: AdaptationFileKind, payload: AdaptationFilePayload) =>
@@ -133,30 +128,6 @@ export const api = {
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/files/${kind}/${key}`, {
       method: 'DELETE',
     }),
-  getSceneList: (slug: string) => request<SceneListDocument>(`/api/projects/${slug}/adaptation/scenes/list`),
-  putSceneList: (slug: string, lines: SceneListLine[]) =>
-    request<SceneListDocument>(`/api/projects/${slug}/adaptation/scenes/list`, {
-      method: 'PUT',
-      body: JSON.stringify({ lines }),
-    }),
-  addSceneListLine: (slug: string, line: SceneListLine) =>
-    request<SceneListDocument>(`/api/projects/${slug}/adaptation/scenes/list/lines`, {
-      method: 'POST',
-      body: JSON.stringify(line),
-    }),
-  deleteSceneListLine: (slug: string, key: string) =>
-    request<SceneListDocument>(`/api/projects/${slug}/adaptation/scenes/list/lines/${key}`, {
-      method: 'DELETE',
-    }),
-  startSceneExtract: (slug: string, sceneKey: string, force = false) =>
-    request<AdaptationWorkflowStatus>(
-      `/api/projects/${slug}/adaptation/scenes/${sceneKey}/extract${force ? '?force=true' : ''}`,
-      {
-        method: 'POST',
-      },
-    ),
-  getSceneExtract: (slug: string, sceneKey: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/extract`),
   startCharacterList: (slug: string) =>
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/list`, { method: 'POST' }),
   getCharacterList: (slug: string) =>
@@ -195,12 +166,6 @@ export const api = {
     request<void>(`/api/projects/${slug}/concept-cards/${cardId}`, { method: 'DELETE' }),
   draftConceptCard: (slug: string, cardId: string) =>
     request<ConceptNodeResponse>(`/api/projects/${slug}/concept-cards/${cardId}/draft`, { method: 'POST' }),
-  createConceptNode: (slug: string, payload: { subjectKind: ConceptArtSubjectKind; prompt?: string; displayName?: string }) =>
-    request<ConceptCard>(`/api/projects/${slug}/concept-nodes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }),
   createImageGroup: (slug: string, payload: { displayName?: string; tags?: string[]; prompt?: string; refs?: string[]; visualStyleId?: string | null }) =>
     request<ImageGroupNodeResponse>(`/api/projects/${slug}/canvas/image-groups`, {
       method: 'POST',
@@ -219,55 +184,11 @@ export const api = {
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/characters/reset`, {
       method: 'POST',
     }),
-  startScenePlan: (slug: string, sceneKey: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/plan`, {
-      method: 'POST',
-    }),
-  getScenePlan: (slug: string, sceneKey: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/plan`),
-  getSceneMoments: (slug: string, sceneKey: string) =>
-    request<SceneMomentsDocument>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/moments`),
-  putSceneMoments: (
-    slug: string,
-    sceneKey: string,
-    payload: { body: string } | { sections: MomentLayoutSection[] },
-  ) =>
-    request<SceneMomentsDocument>(`/api/projects/${slug}/adaptation/scenes/${sceneKey}/moments`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    }),
-  getMomentSequence: (slug: string) =>
-    request<MomentSequenceDocument>(`/api/projects/${slug}/adaptation/moments/sequence`),
-  patchMoment: (slug: string, momentKey: string, patch: MomentPatch) =>
-    request<MomentSequenceEntry>(`/api/projects/${slug}/adaptation/moments/${momentKey}`, {
-      method: 'PATCH',
-      body: JSON.stringify(patch),
-    }),
-  getAdaptationWorkflow: (slug: string, stage: AdaptationStage = 'all') =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/workflow?stage=${stage}`),
-  startAdaptationWorkflow: (slug: string, stage: AdaptationStage = 'all') =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/workflow/start`, {
-      method: 'POST',
-      body: JSON.stringify({ stage }),
-    }),
-  getAdaptationValidation: (slug: string, stage: AdaptationStage = 'all') =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/validation?stage=${stage}`),
-  startAdaptationValidation: (slug: string, stage: AdaptationStage = 'all') =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/validation/start`, {
-      method: 'POST',
-      body: JSON.stringify({ stage }),
-    }),
-  publishAdaptationPhaseToCanvas: (slug: string) =>
-    request<AdaptationCanvasImportResponse>(`/api/projects/${slug}/adaptation/import-drafts-to-canvas`, {
-      method: 'POST',
-    }),
   importAdaptationArtifactToCanvas: (slug: string, artifactKind: ArtifactKind, artifactKey: string) =>
     request<AdaptationCanvasImportResponse>(`/api/projects/${slug}/adaptation/import-artifact-to-canvas`, {
       method: 'POST',
       body: JSON.stringify({ artifactKind, artifactKey }),
     }),
-  getAdaptationBook: (slug: string) =>
-    request<{ text: string }>(`/api/projects/${slug}/adaptation/book`),
   getBookSessionLoad: (slug: string) =>
     request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/book-session/load`),
   startBookSessionLoad: (slug: string) =>
@@ -361,24 +282,10 @@ export const api = {
       body: data,
     });
   },
-  importAdaptationStyleRef: (slug: string, kind: StyleRefKind, file: File) => {
-    const data = new FormData();
-    data.append('kind', kind);
-    data.append('file', file);
-    return request<AdaptationStatus>(`/api/projects/${slug}/adaptation/import-style-ref`, {
-      method: 'POST',
-      body: data,
-    });
-  },
   setAdaptationStyleRefAsset: (slug: string, kind: StyleRefKind, assetId: string) =>
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/style-ref-asset`, {
       method: 'POST',
       body: JSON.stringify({ kind, assetId }),
-    }),
-  syncAdaptationStyleRefToCanvas: (slug: string, kind: StyleRefKind) =>
-    request<AdaptationCanvasImportResponse>(`/api/projects/${slug}/adaptation/sync-style-ref-to-canvas`, {
-      method: 'POST',
-      body: JSON.stringify({ kind }),
     }),
   generateAdaptationStyleRef: (slug: string, payload: GenerateStyleRefPayload) =>
     request<AdaptationGenerateResponse>(`/api/projects/${slug}/adaptation/generate-style-ref`, {

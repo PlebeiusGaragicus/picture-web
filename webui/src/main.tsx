@@ -20,16 +20,13 @@ import { formatRequestError, formatWorkflowStatusError } from './formatError';
 import { MouseTrail } from './MouseTrail';
 import { api } from './api';
 import { exportProjectAssetsToFolder, saveAssetImageToDisk } from './exportAssets';
-import { StyleRefCard, VisualStyleList } from './adaptation/cards';
-import { WorkflowLogPanel } from './adaptation/workflowLog';
-import { PhaseAssetType, PhaseMoments, PhaseScenes } from './adaptation/phaseScreens';
-import { MomentSequenceView } from './adaptation/momentSequenceView';
+import { VisualStyleList } from './adaptation/cards';
 import { BookTextView } from './storyPanels/BookTextView';
 import { readAutoPlaceEnabled, writeAutoPlaceEnabled } from './storyPanels/autoPlace';
 import { LayoutEditorView } from './storyPanels/LayoutEditorView';
 import { ProjectTopBar } from './ProjectTopBar';
-import { SidebarCollapseButton } from './PhaseSidebarToggle';
-import { adaptationNavPhases, phaseHasSidebarEdgeCollapse, phaseStatus, workspaceNavItems, type ProjectPhase } from './projectNavigation';
+import { SidebarCollapseButton } from './SidebarToggle';
+import { workspaceNavItems, type ProjectPhase } from './projectNavigation';
 import type { LayoutEditorNavigation } from './storyPanels/layoutEditorNavigation';
 import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './storyPanels/printLayout';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
@@ -43,72 +40,22 @@ import { TagColorPickerPopover } from './canvas/tagEditor';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './canvas/types';
 import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags, styleRefStatusFromAdaptation } from './styleRefs';
 import { HelpTip, HoverTooltip, Modal } from './ui';
-import type { AdaptationAssetLink, AdaptationFileKind, AdaptationFilePayload, AdaptationStage, AdaptationStatus, AdaptationWorkflowStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, CharacterRecord, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StoryKind, StyleRefKind, TagDefinition } from './types';
+import type { AdaptationAssetLink, AdaptationFileKind, AdaptationStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, CharacterRecord, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StyleRefKind, TagDefinition } from './types';
 import { AgentSessionsView } from './adaptation/bookChatView';
 import { ConceptArtView } from './adaptation/conceptArtView';
 import { HubCardMenu } from './adaptation/hubCardMenu';
 import { useBookSessionLoad } from './adaptation/useBookSessionLoad';
 
-type PhaseViewMode = 'list' | 'canvas' | 'view';
+type PhaseViewMode = 'list' | 'canvas';
 
 function phaseHasCanvas(phase: ProjectPhase) {
-  return phase === 'image-canvas' || phase === 'phase-1-characters' || phase === 'phase-3-locations' || phase === 'characters-hub' || phase === 'concept-art';
-}
-
-function phaseHasList(phase: ProjectPhase) {
-  return adaptationNavPhases.some((item) => item.id === phase);
-}
-
-function isAdaptationPhase(phase: ProjectPhase) {
-  return adaptationNavPhases.some((item) => item.id === phase);
-}
-
-function phaseHasViewToggle(phase: ProjectPhase) {
-  return phase === 'phase-4-moments';
-}
-
-function phaseAlternateViewLabel(phase: ProjectPhase) {
-  return phase === 'phase-4-moments' ? 'View' : 'Canvas';
-}
-
-function phaseWorkflowStage(phase: ProjectPhase): AdaptationStage | null {
-  switch (phase) {
-    case 'phase-0-ingestion':
-      return 'ingest';
-    case 'phase-1-characters':
-      return 'characters';
-    case 'phase-2-scenes':
-      return 'scene-list';
-    default:
-      return null;
-  }
-}
-
-function phaseValidationStage(phase: ProjectPhase): AdaptationStage | null {
-  switch (phase) {
-    case 'phase-0-ingestion':
-      return 'ingest';
-    case 'phase-1-characters':
-      return 'characters';
-    case 'phase-2-scenes':
-      return 'scenes';
-    case 'phase-3-locations':
-      return 'locations';
-    case 'phase-4-moments':
-      return 'moments';
-    default:
-      return null;
-  }
+  return phase === 'image-canvas' || phase === 'characters-hub' || phase === 'concept-art';
 }
 
 function isEditableShortcutTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   const tagName = target.tagName.toLowerCase();
   return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable;
-}
-
-function phaseStage(phase: ProjectPhase): AdaptationStage | null {
-  return phaseWorkflowStage(phase);
 }
 
 const emptyCanvas: CanvasDocument = {
@@ -332,8 +279,6 @@ function App() {
   const [storyPanelRecoveryKey, setStoryPanelRecoveryKey] = useState(0);
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const [adaptation, setAdaptation] = useState<AdaptationStatus | null>(null);
-  const [adaptationWorkflow, setAdaptationWorkflow] = useState<AdaptationWorkflowStatus | null>(null);
-  const [adaptationValidation, setAdaptationValidation] = useState<AdaptationWorkflowStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const reactFlowRef = useRef<ReactFlowInstance<PhotoNodeData> | null>(null);
@@ -1331,78 +1276,9 @@ function App() {
     loadAdaptation,
   );
 
-  const loadAdaptationWorkflow = useCallback(async () => {
-    const stage = phaseWorkflowStage(projectPhase);
-    setAdaptationWorkflow(null);
-    if (!openProjectSlug || !stage) {
-      return;
-    }
-    try {
-      setAdaptationWorkflow(await api.getAdaptationWorkflow(openProjectSlug, stage));
-    } catch (err) {
-      setError(String(err));
-    }
-  }, [openProjectSlug, projectPhase]);
-
-  const loadAdaptationValidation = useCallback(async () => {
-    const stage = phaseValidationStage(projectPhase);
-    if (!openProjectSlug) {
-      setAdaptationValidation(null);
-      return;
-    }
-    try {
-      setAdaptationValidation(stage ? await api.getAdaptationValidation(openProjectSlug, stage) : null);
-    } catch (err) {
-      setError(String(err));
-    }
-  }, [openProjectSlug, projectPhase]);
-
-  useEffect(() => {
-    void loadAdaptationWorkflow();
-  }, [loadAdaptationWorkflow]);
-
-  useEffect(() => {
-    void loadAdaptationValidation();
-  }, [loadAdaptationValidation]);
-
-  useEffect(() => {
-    const stage = phaseWorkflowStage(projectPhase);
-    if (!openProjectSlug || !stage || !adaptationWorkflow?.running) return;
-    const timer = window.setInterval(async () => {
-      const next = await api.getAdaptationWorkflow(openProjectSlug, stage);
-      setAdaptationWorkflow(next);
-      if (!next.running) {
-        await reload();
-        await loadAdaptation();
-      }
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [adaptationWorkflow?.running, loadAdaptation, openProjectSlug, projectPhase]);
-
-  useEffect(() => {
-    const stage = phaseValidationStage(projectPhase);
-    if (!openProjectSlug || !stage || !adaptationValidation?.running) return;
-    const timer = window.setInterval(async () => {
-      setAdaptationValidation(await api.getAdaptationValidation(openProjectSlug, stage));
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [adaptationValidation?.running, openProjectSlug, projectPhase]);
-
-
-  const saveAdaptationSettings = async (storyKind: StoryKind) => {
-    if (!openProjectSlug) return;
-    setAdaptation(await api.saveAdaptationSettings(openProjectSlug, storyKind));
-  };
-
   const importAdaptationBook = async (file: File) => {
     if (!openProjectSlug) return;
     setAdaptation(await api.importAdaptationBook(openProjectSlug, file));
-  };
-
-  const importAdaptationStyleRef = async (kind: StyleRefKind, file: File) => {
-    if (!openProjectSlug) return;
-    setAdaptation(await api.importAdaptationStyleRef(openProjectSlug, kind, file));
-    await reload();
   };
 
   const saveAdaptationStyleRefPrompt = async (kind: StyleRefKind, prompt: string) => {
@@ -1421,49 +1297,6 @@ function App() {
     if (!openProjectSlug) return;
     const updated = await api.setProjectCover(openProjectSlug, assetId);
     setProjects((current) => current.map((project) => (project.slug === updated.slug ? updated : project)));
-  };
-
-  const openStyleRefOnCanvas = useCallback(async (kind: StyleRefKind) => {
-    if (!openProjectSlug) return;
-    setError(null);
-    try {
-      const result = await api.syncAdaptationStyleRefToCanvas(openProjectSlug, kind);
-      setCanvas(result.canvas);
-      await loadProject(openProjectSlug);
-      const draftNodeId = styleRefDraftNodeId(kind, null);
-      setProjectPhase(kind === 'archetype-character' ? 'phase-1-characters' : 'phase-3-locations');
-      setPhaseViewMode('canvas');
-      setSelectedNodeIds([draftNodeId]);
-      setPopoverNodeId(draftNodeId);
-      window.setTimeout(() => focusNodeOnCanvas(draftNodeId), 0);
-    } catch (err) {
-      setError(String(err));
-    }
-  }, [focusNodeOnCanvas, loadProject, openProjectSlug]);
-
-  const startAdaptationWorkflow = async (stage: AdaptationStage = 'all') => {
-    if (!openProjectSlug) return;
-    setError(null);
-    setAdaptationWorkflow(await api.startAdaptationWorkflow(openProjectSlug, stage));
-  };
-
-  const startAdaptationValidation = async () => {
-    const stage = phaseValidationStage(projectPhase);
-    if (!openProjectSlug) return;
-    if (!stage) return;
-    setError(null);
-    setAdaptationValidation(await api.startAdaptationValidation(openProjectSlug, stage));
-  };
-
-  const publishAdaptationPhaseToCanvas = async () => {
-    if (!openProjectSlug) return;
-    setError(null);
-    const result = await api.publishAdaptationPhaseToCanvas(openProjectSlug);
-    setCanvas(result.canvas);
-    await loadProject(openProjectSlug);
-    if (phaseHasCanvas(projectPhase)) {
-      setPhaseViewMode('canvas');
-    }
   };
 
   const draftArtifactToCanvas = useCallback(async (artifactKind: ArtifactKind, artifactKey: string) => {
@@ -1596,11 +1429,7 @@ function App() {
     );
   }
 
-  const showViewToggle = ((phaseHasCanvas(projectPhase) && phaseHasList(projectPhase)) || phaseHasViewToggle(projectPhase))
-    && projectPhase !== 'characters-hub'
-    && projectPhase !== 'concept-art';
   const isCanvasActive = phaseHasCanvas(projectPhase) && phaseViewMode === 'canvas';
-  const isMomentViewActive = phaseHasViewToggle(projectPhase) && phaseViewMode === 'view';
   const isBookChatActive = projectPhase === 'chat';
   const isConceptArtActive = projectPhase === 'concept-art';
   const isLayoutEditorActive = projectPhase === 'layout-editor';
@@ -1628,7 +1457,6 @@ function App() {
     ) : button;
   })() : null;
   const isWorkspaceHubActive = isBookChatActive || isConceptArtActive || projectPhase === 'characters-hub';
-  const isAdaptationListActive = isAdaptationPhase(projectPhase) && !isCanvasActive && !isMomentViewActive;
   const showProjectTopBar = Boolean(openProjectSlug && (isPhaseSidebarCollapsed || isCanvasActive || isStoryPanelPhaseActive || isWorkspaceHubActive));
 
   const charactersHubViewToggle = projectPhase === 'characters-hub' ? (
@@ -1703,7 +1531,6 @@ function App() {
         project={currentProject}
         projectSlug={openProjectSlug}
         activePhase={projectPhase}
-        adaptation={adaptation}
         projectTags={userTagsForOrganize}
         tagAssetCounts={tagAssetCounts}
         error={error}
@@ -1765,7 +1592,7 @@ function App() {
       />
       <main
         ref={canvasRef}
-        className={`canvas ${!isCanvasActive ? 'story-adaptation-view' : ''} ${showViewToggle ? 'has-view-toggle' : ''} ${isPhaseSidebarCollapsed ? 'has-collapsed-sidebar' : ''} ${showProjectTopBar ? 'has-canvas-top-bar' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
+        className={`canvas ${!isCanvasActive ? 'story-adaptation-view' : ''} ${isPhaseSidebarCollapsed ? 'has-collapsed-sidebar' : ''} ${showProjectTopBar ? 'has-canvas-top-bar' : ''} ${isDraggingFile ? 'dragging-file' : ''}`}
         onDragOver={(event) => {
           if (!isCanvasActive) return;
           event.preventDefault();
@@ -1787,23 +1614,9 @@ function App() {
           setContextMenu({ x: event.clientX, y: event.clientY });
         }}
       >
-        {showViewToggle && (
-          <div className="phase-view-toggle" role="tablist" aria-label="Phase view">
-            <button role="tab" aria-selected={phaseViewMode === 'list'} className={phaseViewMode === 'list' ? 'active' : ''} onClick={() => setPhaseViewMode('list')}>List</button>
-            <button
-              role="tab"
-              aria-selected={phaseViewMode === 'canvas' || phaseViewMode === 'view'}
-              className={phaseViewMode === 'canvas' || phaseViewMode === 'view' ? 'active' : ''}
-              onClick={() => setPhaseViewMode(phaseHasViewToggle(projectPhase) ? 'view' : 'canvas')}
-            >
-              {phaseAlternateViewLabel(projectPhase)}
-            </button>
-          </div>
-        )}
         {showProjectTopBar && (
           <ProjectTopBar
             activePhase={projectPhase}
-            adaptation={adaptation}
             sidebarCollapsed={isPhaseSidebarCollapsed}
             onPhaseChange={handleProjectPhaseChange}
             onExpandSidebar={() => setIsPhaseSidebarCollapsed(false)}
@@ -1857,27 +1670,6 @@ function App() {
             event.currentTarget.value = '';
           }}
         />
-        {isAdaptationListActive && adaptation && (
-          <StoryPhaseScreen
-            phase={projectPhase}
-            projectSlug={openProjectSlug}
-            adaptation={adaptation}
-            assets={assets}
-            canvas={canvas}
-            workflow={adaptationWorkflow}
-            validation={adaptationValidation}
-            onSaveSettings={saveAdaptationSettings}
-            onImportBook={importAdaptationBook}
-            onImportStyleRef={importAdaptationStyleRef}
-            onSaveStylePrompt={saveAdaptationStyleRefPrompt}
-            onOpenStyleRefOnCanvas={openStyleRefOnCanvas}
-            onStartWorkflow={startAdaptationWorkflow}
-            onStartValidation={startAdaptationValidation}
-            onPublishPhaseToCanvas={publishAdaptationPhaseToCanvas}
-            onDraftArtifactToCanvas={draftArtifactToCanvas}
-            onReloadAdaptation={loadAdaptation}
-          />
-        )}
         {isBookChatActive && adaptation && (
           <AgentSessionsView
             projectSlug={openProjectSlug}
@@ -1946,17 +1738,6 @@ function App() {
             onNavigationComplete={() => setLayoutEditorNavigation(null)}
             onTopBarEndContentChange={setLayoutEditorTopBarEnd}
           />
-        )}
-        {isMomentViewActive && adaptation && (
-          <div className="story-adaptation-screen">
-            <div className="story-adaptation-grid is-moments">
-              <MomentSequenceView
-                projectSlug={openProjectSlug}
-                adaptation={adaptation}
-                onReloadAdaptation={loadAdaptation}
-              />
-            </div>
-          </div>
         )}
         {isCanvasActive && (
           <>
@@ -2406,7 +2187,6 @@ function ProjectPhaseSidebar({
   project,
   projectSlug,
   activePhase,
-  adaptation,
   projectTags,
   tagAssetCounts,
   error,
@@ -2427,7 +2207,6 @@ function ProjectPhaseSidebar({
   project: Project | undefined;
   projectSlug: string;
   activePhase: ProjectPhase;
-  adaptation: AdaptationStatus | null;
   projectTags: TagDefinition[];
   tagAssetCounts: Record<string, number>;
   error: string | null;
@@ -2523,24 +2302,6 @@ function ProjectPhaseSidebar({
           </button>
         ))}
       </nav>
-      <h3 className="phase-nav-heading">Story Adaptation</h3>
-      <nav className="phase-nav" aria-label="Story adaptation phases">
-        {adaptationNavPhases.map((phase) => {
-          const status = phaseStatus(adaptation, phase.id);
-          const selected = activePhase === phase.id;
-          return (
-            <button
-              key={phase.id}
-              className={`phase-nav-item status-${status} ${selected ? 'is-selected' : ''}`}
-              aria-current={selected ? 'page' : undefined}
-              onClick={() => onPhaseChange(phase.id)}
-            >
-              <span className="phase-number">{phase.number}</span>
-              <strong>{phase.title}</strong>
-            </button>
-          );
-        })}
-      </nav>
       <div className="phase-sidebar-footer">
         <button className="secondary" disabled={deleting || exportingAssets} onClick={() => setOrganizingTags(true)}>
           Your tags
@@ -2584,7 +2345,7 @@ function ProjectPhaseSidebar({
               />
             ))}
           </div>
-          <p className="muted tag-organizer-footer-note">Story entity tags are created from Characters and Locations in Story Adaptation.</p>
+          <p className="muted tag-organizer-footer-note">Story entity tags are created from the Characters hub.</p>
         </Modal>
       )}
       {pendingTagDelete && (
@@ -2689,9 +2450,6 @@ function ProjectPhaseSidebar({
         </div>
       )}
       </aside>
-      {phaseHasSidebarEdgeCollapse(activePhase) && (
-        <SidebarCollapseButton onClick={onToggleCollapsed} />
-      )}
     </div>
   );
 }
@@ -2795,194 +2553,6 @@ function FloatingTagsMenu({
       )}
     </div>
   );
-}
-
-function StoryPhaseScreen({
-  phase,
-  projectSlug,
-  adaptation,
-  assets,
-  canvas,
-  workflow,
-  validation,
-  onSaveSettings,
-  onImportBook,
-  onImportStyleRef,
-  onSaveStylePrompt,
-  onOpenStyleRefOnCanvas,
-  onStartWorkflow,
-  onStartValidation,
-  onPublishPhaseToCanvas,
-  onDraftArtifactToCanvas,
-  onReloadAdaptation,
-}: {
-  phase: ProjectPhase;
-  projectSlug: string;
-  adaptation: AdaptationStatus;
-  assets: Asset[];
-  canvas: CanvasDocument;
-  workflow: AdaptationWorkflowStatus | null;
-  validation: AdaptationWorkflowStatus | null;
-  onSaveSettings: (storyKind: StoryKind) => Promise<void>;
-  onImportBook: (file: File) => Promise<void>;
-  onImportStyleRef: (kind: StyleRefKind, file: File) => Promise<void>;
-  onSaveStylePrompt: (kind: StyleRefKind, prompt: string) => Promise<void>;
-  onOpenStyleRefOnCanvas: (kind: StyleRefKind) => Promise<void>;
-  onStartWorkflow: (stage: AdaptationStage) => Promise<void>;
-  onStartValidation: () => Promise<void>;
-  onPublishPhaseToCanvas: () => Promise<void>;
-  onDraftArtifactToCanvas: (artifactKind: ArtifactKind, artifactKey: string) => Promise<void>;
-  onReloadAdaptation: () => Promise<void>;
-}) {
-  const [isSavingSettings, setIsSavingSettings] = useState(false);
-  const [isPublishingPhase, setIsPublishingPhase] = useState(false);
-  const publishPhase = async () => {
-    setIsPublishingPhase(true);
-    try {
-      await onPublishPhaseToCanvas();
-    } finally {
-      setIsPublishingPhase(false);
-    }
-  };
-  const saveStoryKind = async (storyKind: StoryKind) => {
-    setIsSavingSettings(true);
-    try {
-      await onSaveSettings(storyKind);
-    } finally {
-      setIsSavingSettings(false);
-    }
-  };
-  const validationFailed = validation?.returnCode !== null && validation?.returnCode !== undefined && validation.returnCode !== 0;
-  return (
-    <div className="story-adaptation-screen">
-      {validationFailed && (
-        <div className="validation-warning">
-          Validation found issues in the adaptation artifacts. You can continue, but review the log before importing drafts to the canvas.
-        </div>
-      )}
-      <div className={`story-adaptation-grid ${phase === 'phase-0-ingestion' ? 'is-ingest' : ''} ${phase === 'phase-1-characters' || phase === 'phase-3-locations' ? 'is-assets' : ''} ${phase === 'phase-2-scenes' ? 'is-scenes' : ''} ${phase === 'phase-4-moments' ? 'is-moments' : ''}`}>
-        {phase === 'phase-0-ingestion' && (
-          <PhaseIngestion
-            projectSlug={projectSlug}
-            adaptation={adaptation}
-            workflow={workflow}
-            onImportBook={onImportBook}
-            onStartWorkflow={() => onStartWorkflow('ingest')}
-            onReloadAdaptation={onReloadAdaptation}
-          />
-        )}
-        {phase === 'phase-1-characters' && (
-          <PhaseAssetType
-            kind="characters"
-            projectSlug={projectSlug}
-            adaptation={adaptation}
-            assets={assets}
-            workflow={workflow}
-            validation={validation}
-            onImportStyleRef={onImportStyleRef}
-            onSaveStylePrompt={onSaveStylePrompt}
-            onOpenStyleRefOnCanvas={onOpenStyleRefOnCanvas}
-            onStartWorkflow={() => onStartWorkflow('characters')}
-            onStartValidation={onStartValidation}
-            fileEditor={(
-              <AdaptationFileEditor
-                projectSlug={projectSlug}
-                kind="characters"
-                links={adaptation.characters as unknown as Record<string, AdaptationAssetLink>}
-                canvasKeysOnCanvas={storyArtifactKeysOnCanvas(canvas.nodes, 'character-sheet')}
-                onDraftToCanvas={(key) => onDraftArtifactToCanvas('character-sheet', key)}
-                onReloadAdaptation={onReloadAdaptation}
-              />
-            )}
-          />
-        )}
-        {phase === 'phase-2-scenes' && (
-          <PhaseScenes
-            projectSlug={projectSlug}
-            adaptation={adaptation}
-            workflow={workflow}
-            validation={validation}
-            isSavingSettings={isSavingSettings}
-            onSaveStoryKind={saveStoryKind}
-            onGenerateSceneList={() => onStartWorkflow('scene-list')}
-            onStartValidation={onStartValidation}
-            onPublishPhaseToCanvas={publishPhase}
-            isPublishingPhase={isPublishingPhase}
-            onReloadAdaptation={onReloadAdaptation}
-            artifactEditor={(
-              <AdaptationFileEditor
-                projectSlug={projectSlug}
-                kind="scenes"
-                links={adaptation.scenes}
-                onReloadAdaptation={onReloadAdaptation}
-              />
-            )}
-          />
-        )}
-        {phase === 'phase-3-locations' && (
-          <PhaseAssetType
-            kind="locations"
-            projectSlug={projectSlug}
-            adaptation={adaptation}
-            assets={assets}
-            workflow={workflow}
-            validation={validation}
-            onImportStyleRef={onImportStyleRef}
-            onSaveStylePrompt={onSaveStylePrompt}
-            onOpenStyleRefOnCanvas={onOpenStyleRefOnCanvas}
-            onStartWorkflow={async () => {}}
-            onStartValidation={onStartValidation}
-            fileEditor={(
-              <AdaptationFileEditor
-                projectSlug={projectSlug}
-                kind="locations"
-                links={adaptation.locations}
-                canvasKeysOnCanvas={storyArtifactKeysOnCanvas(canvas.nodes, 'location-prompt')}
-                onDraftToCanvas={(key) => onDraftArtifactToCanvas('location-prompt', key)}
-                onReloadAdaptation={onReloadAdaptation}
-              />
-            )}
-          />
-        )}
-        {phase === 'phase-4-moments' && (
-          <PhaseMoments
-            projectSlug={projectSlug}
-            adaptation={adaptation}
-            assets={assets}
-            workflow={workflow}
-            validation={validation}
-            onStartValidation={onStartValidation}
-            onReloadAdaptation={onReloadAdaptation}
-          />
-        )}
-      </div>
-      {workflow && (workflow.log || workflow.running || workflow.returnCode !== null) && (
-        <div className="story-log-card">
-          <WorkflowLogPanel
-            title="Workflow Output"
-            workflow={workflow}
-          />
-        </div>
-      )}
-      {validation && (validation.log || validation.running || validation.returnCode !== null) && (
-        <div className="story-log-card">
-          <WorkflowLogPanel
-            title="Validation Output"
-            workflow={validation}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function fileKindLabel(kind: AdaptationFileKind) {
-  const labels: Record<AdaptationFileKind, string> = {
-    characters: 'Characters',
-    locations: 'Locations',
-    scenes: 'Scenes',
-  };
-  return labels[kind];
 }
 
 function characterEntityTagForKey(key: string, projectTags: TagDefinition[]) {
@@ -3570,15 +3140,6 @@ function CharactersHubView({
   );
 }
 
-function singularFileKindLabel(kind: AdaptationFileKind) {
-  const labels: Record<AdaptationFileKind, string> = {
-    characters: 'character',
-    locations: 'location',
-    scenes: 'scene',
-  };
-  return labels[kind];
-}
-
 function slugifyFileKey(value: string) {
   return value
     .trim()
@@ -3586,245 +3147,6 @@ function slugifyFileKey(value: string) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     || 'new-item';
-}
-
-function filesFromLinks(kind: AdaptationFileKind, links: Record<string, AdaptationAssetLink>) {
-  return Object.entries(links)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, link]) => ({
-      key,
-      body: link.prompt,
-      mode: link.mode,
-      styleRef: link.styleRef,
-      status: link.status,
-      promptPath: link.promptPath,
-      artifactKind: link.artifactKind,
-      kind,
-    }));
-}
-
-function emptyFileDraft(kind: AdaptationFileKind, existingKeys: string[]): AdaptationFilePayload {
-  const base = `new-${singularFileKindLabel(kind)}`;
-  let index = existingKeys.length + 1;
-  let key = `${base}-${index}`;
-  while (existingKeys.includes(key)) {
-    index += 1;
-    key = `${base}-${index}`;
-  }
-  return {
-    key,
-    body: kind === 'scenes' ? `# ${key}\n\nScene summary:\n` : '',
-    mode: kind === 'scenes' ? '' : 'new-image',
-    styleRef: '',
-  };
-}
-
-function AdaptationFileEditor({
-  projectSlug,
-  kind,
-  links,
-  canvasKeysOnCanvas,
-  onDraftToCanvas,
-  onReloadAdaptation,
-}: {
-  projectSlug: string;
-  kind: AdaptationFileKind;
-  links: Record<string, AdaptationAssetLink>;
-  canvasKeysOnCanvas?: Set<string>;
-  onDraftToCanvas?: (key: string) => Promise<void>;
-  onReloadAdaptation: () => Promise<void>;
-}) {
-  const files = filesFromLinks(kind, links);
-  const singular = singularFileKindLabel(kind);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const [editingKey, setEditingKey] = useState<string | null>(null);
-  const [draft, setDraft] = useState<AdaptationFilePayload>(() => emptyFileDraft(kind, []));
-  const [isSaving, setIsSaving] = useState(false);
-  const [draftingKey, setDraftingKey] = useState<string | null>(null);
-  const supportsDraftToCanvas = kind === 'characters' || kind === 'locations';
-
-  const openNew = () => {
-    setIsCreating(true);
-    setEditingKey(null);
-    setDraft(emptyFileDraft(kind, files.map((file) => file.key)));
-    setIsModalOpen(true);
-  };
-
-  const openEdit = (file: ReturnType<typeof filesFromLinks>[number]) => {
-    setIsCreating(false);
-    setEditingKey(file.key);
-    setDraft({ key: file.key, body: file.body, mode: file.mode, styleRef: file.styleRef });
-    setIsModalOpen(true);
-  };
-
-  const save = async () => {
-    const payload = {
-      key: slugifyFileKey(draft.key),
-      body: draft.body,
-      mode: draft.mode,
-      styleRef: draft.styleRef,
-    };
-    setIsSaving(true);
-    try {
-      if (isCreating) {
-        await api.createAdaptationFile(projectSlug, kind, payload);
-      } else if (editingKey) {
-        await api.updateAdaptationFile(projectSlug, kind, editingKey, payload);
-      }
-      await onReloadAdaptation();
-      setIsModalOpen(false);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  return (
-    <section className="story-card adaptation-file-card">
-      <div className="adaptation-file-header">
-        <div>
-          <h2>{fileKindLabel(kind)}</h2>
-          {files.length > 0 && <p className="muted">{files.length} saved {fileKindLabel(kind).toLowerCase()} · click to edit</p>}
-        </div>
-        <button className="secondary" onClick={openNew}>New {singular}</button>
-      </div>
-      <div className="adaptation-file-grid">
-        {files.map((file) => {
-          const onCanvas = canvasKeysOnCanvas?.has(file.key) ?? false;
-          return (
-            <div key={file.key} className="adaptation-file-list-item">
-              <button type="button" className="adaptation-file-list-main" onClick={() => openEdit(file)}>
-                <strong>{file.key}</strong>
-                <small>{file.status} · {file.promptPath}</small>
-              </button>
-              {supportsDraftToCanvas && onDraftToCanvas && (
-                <button
-                  type="button"
-                  className="secondary adaptation-file-draft-button"
-                  disabled={onCanvas || draftingKey === file.key}
-                  onClick={async (event) => {
-                    event.stopPropagation();
-                    setDraftingKey(file.key);
-                    try {
-                      await onDraftToCanvas(file.key);
-                    } finally {
-                      setDraftingKey(null);
-                    }
-                  }}
-                >
-                  {draftingKey === file.key ? 'Drafting...' : onCanvas ? 'On canvas' : 'Draft on canvas'}
-                </button>
-              )}
-            </div>
-          );
-        })}
-        {!files.length && <p className="muted">No {fileKindLabel(kind).toLowerCase()} yet.</p>}
-      </div>
-      {isModalOpen && (
-        <Modal title={isCreating ? `New ${singular}` : `Edit ${draft.key || singular}`} onClose={() => setIsModalOpen(false)}>
-          <div className="adaptation-file-form">
-            <label className="field-label">
-              Key
-              <input value={draft.key} readOnly />
-            </label>
-            {kind !== 'scenes' && (
-              <label className="field-label">
-                Style ref
-                <input value={draft.styleRef ?? ''} readOnly placeholder={kind === 'characters' ? 'character:base' : 'location:base'} />
-              </label>
-            )}
-            <label className="field-label">
-              {kind === 'scenes' ? 'Scene artifact' : 'Image prompt'}
-              <textarea className="modal-textarea" rows={10} value={draft.body} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} />
-            </label>
-          </div>
-          <div className="modal-actions">
-            <button className="secondary" onClick={() => setIsModalOpen(false)} disabled={isSaving}>Cancel</button>
-            <button className="generate-button" onClick={save} disabled={isSaving || !draft.key.trim()}>
-              {isSaving ? 'Saving...' : isCreating ? `Create ${singular}` : 'Save changes'}
-            </button>
-          </div>
-        </Modal>
-      )}
-    </section>
-  );
-}
-
-function PhaseIngestion({
-  projectSlug,
-  adaptation,
-  workflow,
-  onImportBook,
-  onStartWorkflow,
-  onReloadAdaptation,
-}: {
-  projectSlug: string;
-  adaptation: AdaptationStatus;
-  workflow: AdaptationWorkflowStatus | null;
-  onImportBook: (file: File) => Promise<void>;
-  onStartWorkflow: () => Promise<void>;
-  onReloadAdaptation: () => Promise<void>;
-}) {
-  const [bookText, setBookText] = useState<string | null>(null);
-  const [isLoadingBook, setIsLoadingBook] = useState(false);
-  const [isBookOpen, setIsBookOpen] = useState(false);
-  const viewBook = async () => {
-    setIsBookOpen(true);
-    if (bookText === null) {
-      setIsLoadingBook(true);
-      try {
-        const result = await api.getAdaptationBook(projectSlug);
-        setBookText(result.text);
-      } finally {
-        setIsLoadingBook(false);
-      }
-    }
-  };
-  return (
-    <>
-      <section className="ingest-panel">
-        <ol className="ingest-steps">
-          <li className={`ingest-step ${adaptation.hasBook ? 'is-done' : ''}`}>
-            <span className="ingest-step-index">1</span>
-            <div className="ingest-step-content">
-              <h2>Book Source</h2>
-              {adaptation.hasBook ? (
-                <button className="generate-button book-upload-button" onClick={viewBook}>View book</button>
-              ) : (
-                <label className="generate-button file-button book-upload-button">
-                  Upload book.txt
-                  <input type="file" accept=".txt,text/plain" hidden onChange={(event) => event.target.files?.[0] && void onImportBook(event.target.files[0])} />
-                </label>
-              )}
-            </div>
-          </li>
-          <li className={`ingest-step ${adaptation.hasBookSession ? 'is-done' : ''}`}>
-            <span className="ingest-step-index">2</span>
-            <div className="ingest-step-content">
-              <h2>Read Book &amp; Archetype Prompts</h2>
-              <p className="muted">Creates the read-book session and generates archetype character and scene prompts.</p>
-              <button className="generate-button workflow-run-button" onClick={onStartWorkflow} disabled={!adaptation.hasBook || workflow?.running}>
-                {workflow?.running && <span className="spinner" aria-hidden="true" />}
-                {workflow?.running ? 'Loading book & archetypes...' : adaptation.hasBookSession ? 'Rebuild session & archetypes' : 'Load book & build archetypes'}
-              </button>
-            </div>
-          </li>
-        </ol>
-      </section>
-
-      <VisualStyleList
-        projectSlug={projectSlug}
-        styles={adaptation.visualStyles}
-        onReload={onReloadAdaptation}
-      />
-
-      {isBookOpen && (
-        <Modal title="Book" onClose={() => setIsBookOpen(false)}>
-          {isLoadingBook ? <p className="muted">Loading book...</p> : <pre className="book-text">{bookText}</pre>}
-        </Modal>
-      )}
-    </>
-  );
 }
 
 function ChatRefinementPanel({

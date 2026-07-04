@@ -1,4 +1,4 @@
-export function PhaseSidebarToggleIcon({ variant }: { variant: 'collapse' | 'expand' }) {
+export function SidebarToggleIcon({ variant }: { variant: 'collapse' | 'expand' }) {
   return (
     <svg className="phase-sidebar-toggle-icon" viewBox="0 0 16 16" aria-hidden="true">
       <rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="none" stroke="currentColor" strokeWidth="1.25" />
@@ -27,7 +27,7 @@ export function SidebarCollapseButton({
       title="Collapse sidebar"
       aria-label="Collapse sidebar"
     >
-      <PhaseSidebarToggleIcon variant="collapse" />
+      <SidebarToggleIcon variant="collapse" />
     </button>
   );
 }
