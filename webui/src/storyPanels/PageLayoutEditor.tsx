@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { isEditableShortcutTarget } from '../shared/dom';
 import type { CSSProperties, ReactNode } from 'react';
 import { nonArchivedVariants } from '../canvas/shared';
 import type { Asset, CanvasDocument, StoryPanel, StoryPanelCaption, StoryPanelDocument, StoryPanelImageCrop, StoryPanelRect, StoryPanelTextStyle, TagDefinition } from '../types';
@@ -17,7 +18,6 @@ import {
   lockedAspectRectFromPointer,
   PANEL_COMMIT_SNAP_SCALE,
   PANEL_DRAG_SNAP_SCALE,
-  pageRowsForPanels,
   panelVisualAspectRatio,
   parseAspectRatio,
   snapNearestAspectRect,
@@ -417,12 +417,6 @@ function normalizePageOrder(pages: StoryPanelDocument['pages']) {
   return pages
     .map((page, index) => ({ ...page, order: index }))
     .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-}
-
-function isEditableShortcutTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  const tagName = target.tagName.toLowerCase();
-  return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable;
 }
 
 export function PageLayoutEditor({
@@ -1287,13 +1281,13 @@ export function PageLayoutEditor({
   };
   const snapPanelToAspectRatio = (panel: StoryPanel, aspectRatio: string) => {
     if (!panel.pageId) return;
-    const pageRows = pageRowsForPanels(displayDocument.panels, panel.pageId);
+    const pageRows = LAYOUT_PAGE_ROWS;
     const nextRect = snapRectToAspectRatio(panel.rect, pageRows, parseAspectRatio(aspectRatio), panel.panelKind, clampRect);
     updatePanelById(panel.id, { rect: nextRect, aspectRatio });
   };
   const snapPanelToPageSizeFraction = (panel: StoryPanel, axis: 'width' | 'height', fraction: PageSizeFraction) => {
     if (!panel.pageId) return;
-    const pageRows = pageRowsForPanels(displayDocument.panels, panel.pageId);
+    const pageRows = LAYOUT_PAGE_ROWS;
     const sized = rectWithPageSizeFractions(panel.rect, {
       width: axis === 'width' ? fraction : undefined,
       height: axis === 'height' ? fraction : undefined,
@@ -1327,7 +1321,7 @@ export function PageLayoutEditor({
       return;
     }
     if (!panel.pageId) return;
-    const pageRows = pageRowsForPanels(displayDocument.panels, panel.pageId);
+    const pageRows = LAYOUT_PAGE_ROWS;
     const visualRatio = panelVisualAspectRatio(panel.rect, pageRows);
     const currentRatio = formatAspectRatioFromPixels(
       Math.round(visualRatio * 10000),
@@ -1511,7 +1505,7 @@ export function PageLayoutEditor({
     const snapScale = draggedPanel && isCaption(draggedPanel) ? CAPTION_GRID_SNAP : panelSnapScale;
     const deltaColumns = targetPageId === state.pageId ? roundStep((event.clientX - state.startClientX) / columnWidth, snapScale) : roundStep((event.clientX - bounds.left) / columnWidth, snapScale) - state.startRect.x;
     const deltaRows = targetPageId === state.pageId ? roundStep((event.clientY - state.startClientY) / rowHeight, snapScale) : roundStep((event.clientY - bounds.top) / rowHeight, snapScale) - state.startRect.y;
-    const pageRows = pageRowsForPanels(layoutPanels(displayDocument), targetPageId);
+    const pageRows = LAYOUT_PAGE_ROWS;
     let nextPatch: Partial<StoryPanel>;
       if (state.mode === 'resize') {
         if (draggedPanel.aspectRatioLocked && draggedPanel.aspectRatio) {
@@ -1598,7 +1592,7 @@ export function PageLayoutEditor({
     if (dragState.mode === 'resize') {
       const resizedPanel = findPanelOrCaption(nextDocument, dragState.panelId);
       if (resizedPanel?.aspectRatioLocked && resizedPanel.aspectRatio) {
-        const pageRows = pageRowsForPanels(layoutPanels(nextDocument), resizedPanel.pageId ?? dragState.pageId);
+        const pageRows = LAYOUT_PAGE_ROWS;
         const caption = isCaption(resizedPanel);
         const minWidth = caption ? 0.5 : resizedPanel.panelKind === 'text' ? minTextPanelWidth : minPanelWidth;
         const minHeight = caption ? 0.25 : resizedPanel.panelKind === 'text' ? minTextPanelHeight : minPanelHeight;

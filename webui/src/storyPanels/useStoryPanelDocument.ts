@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { emptyCanvas } from '../shared/canvasDefaults';
 import { formatRequestError } from '../formatError';
 import { api } from '../api';
 import type { Asset, CanvasDocument, StoryPanelDocument, TagDefinition } from '../types';
 import { sortedPanels } from './storyPanelUtils';
 import { topLevelPanels } from './panelModel';
 
-const emptyCanvas: CanvasDocument = { version: 2, viewport: { x: 0, y: 0, zoom: 1 }, nodes: {} };
 
 export function useStoryPanelDocument(projectSlug: string, options?: { withCanvasContext?: boolean }) {
   const withCanvasContext = options?.withCanvasContext ?? false;
@@ -27,8 +27,11 @@ export function useStoryPanelDocument(projectSlug: string, options?: { withCanva
       try {
         const book = await api.getStoryPanelBook(projectSlug);
         setBookText(book.text);
-      } catch {
+      } catch (bookErr) {
+        // A project without book.txt is a normal state; a failed request is not.
+        console.error('[photo-web] failed to load book text', bookErr);
         setBookText('');
+        setError(formatRequestError(bookErr));
       }
       if (withCanvasContext) {
         const [projectDetail, nextCanvas] = await Promise.all([

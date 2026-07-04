@@ -27,6 +27,8 @@ import { LayoutEditorView } from './storyPanels/LayoutEditorView';
 import { ProjectTopBar } from './ProjectTopBar';
 import { SidebarCollapseButton } from './SidebarToggle';
 import { workspaceNavItems, type ProjectPhase } from './projectNavigation';
+import { isEditableShortcutTarget } from './shared/dom';
+import { emptyCanvas } from './shared/canvasDefaults';
 import type { LayoutEditorNavigation } from './storyPanels/layoutEditorNavigation';
 import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './storyPanels/printLayout';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
@@ -50,18 +52,6 @@ type PhaseViewMode = 'list' | 'canvas';
 function phaseHasCanvas(phase: ProjectPhase) {
   return phase === 'image-canvas' || phase === 'characters-hub' || phase === 'concept-art';
 }
-
-function isEditableShortcutTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  const tagName = target.tagName.toLowerCase();
-  return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable;
-}
-
-const emptyCanvas: CanvasDocument = {
-  version: 2,
-  viewport: { x: 0, y: 0, zoom: 1 },
-  nodes: {},
-};
 
 const minZoom = 0.2;
 const maxZoom = 2;

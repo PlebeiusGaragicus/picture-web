@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useRepositionOnViewportChange } from '../shared/popover';
 import { createPortal } from 'react-dom';
 import type { EntityKind, TagDefinition } from '../types';
 import { isValidTagName, normalizeTagName, tagColorOptions, tagColors } from './shared';
@@ -46,15 +47,7 @@ export function TagColorPickerPopover({
     updatePosition();
   }, [updatePosition, selectedColor]);
 
-  useEffect(() => {
-    const reposition = () => updatePosition();
-    window.addEventListener('resize', reposition);
-    window.addEventListener('scroll', reposition, true);
-    return () => {
-      window.removeEventListener('resize', reposition);
-      window.removeEventListener('scroll', reposition, true);
-    };
-  }, [updatePosition]);
+  useRepositionOnViewportChange(true, updatePosition);
 
   useEffect(() => {
     const closeOnOutsideClick = (event: MouseEvent) => {

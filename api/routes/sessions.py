@@ -110,11 +110,6 @@ def patch_chat_session(
     return chat_sessions.patch_session(slug, session_id, payload)
 
 
-@router.post("/api/projects/{slug}/chat-sessions/{session_id}/fork", response_model=ChatSessionDocument)
-def fork_chat_session(slug: str, session_id: str, sourceAssetId: str | None = None) -> ChatSessionDocument:
-    return chat_sessions.fork_session(slug, session_id, source_asset_id=sourceAssetId)
-
-
 @router.post("/api/projects/{slug}/chat-sessions/{session_id}/turns", response_model=ChatTurnResponse)
 def send_chat_turn(slug: str, session_id: str, payload: ChatTurnRequest) -> ChatTurnResponse:
     return chat_sessions.append_turn_with_gemini(slug, session_id, payload)

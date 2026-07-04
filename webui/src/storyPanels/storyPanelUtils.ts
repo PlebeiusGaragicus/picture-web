@@ -11,8 +11,3 @@ export function withSelectedText(bookText: string, panel: StoryPanel): StoryPane
   return { ...panel, selectedText: bookText.slice(panel.startOffset, panel.endOffset) };
 }
 
-export function isEditableShortcutTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  const tagName = target.tagName.toLowerCase();
-  return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable;
-}

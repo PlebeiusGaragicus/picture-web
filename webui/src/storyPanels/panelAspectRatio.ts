@@ -51,10 +51,6 @@ export function panelVisualAspectRatio(rect: StoryPanelRect, pageRows: number): 
   return (rect.w * rows * PAGE_LAYOUT_ASPECT) / (rect.h * LAYOUT_GRID_COLUMNS);
 }
 
-export function pageRowsForPanels(_panels?: StoryPanel[], _pageId?: string): number {
-  return LAYOUT_PAGE_ROWS;
-}
-
 function pageAspectFactor(pageRows: number): number {
   const rows = Math.max(1, pageRows);
   return (rows * PAGE_LAYOUT_ASPECT) / LAYOUT_GRID_COLUMNS;

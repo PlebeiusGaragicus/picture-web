@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useDismissOnOutsidePointerDown, useRepositionOnViewportChange } from '../shared/popover';
 import { createPortal } from 'react-dom';
 
 export function HubCardMenu({
@@ -43,27 +44,8 @@ export function HubCardMenu({
     updatePopoverPosition();
   }, [open, updatePopoverPosition]);
 
-  useEffect(() => {
-    if (!open) return;
-    const reposition = () => updatePopoverPosition();
-    window.addEventListener('resize', reposition);
-    window.addEventListener('scroll', reposition, true);
-    return () => {
-      window.removeEventListener('resize', reposition);
-      window.removeEventListener('scroll', reposition, true);
-    };
-  }, [open, updatePopoverPosition]);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (menuRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    document.addEventListener('pointerdown', closeOnOutsideClick);
-    return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
-  }, [open]);
+  useRepositionOnViewportChange(open, updatePopoverPosition);
+  useDismissOnOutsidePointerDown(open, [menuRef, popoverRef], useCallback(() => setOpen(false), []));
 
   const popover = open ? createPortal(
     <div

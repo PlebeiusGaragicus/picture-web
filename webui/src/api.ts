@@ -323,10 +323,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  forkChatSession: (slug: string, sessionId: string, sourceAssetId?: string | null) =>
-    request<ChatSession>(`/api/projects/${slug}/chat-sessions/${sessionId}/fork${sourceAssetId ? `?sourceAssetId=${encodeURIComponent(sourceAssetId)}` : ''}`, {
-      method: 'POST',
-    }),
   importAsset: (slug: string, file: File, position?: { x: number; y: number }) => {
     const data = new FormData();
     data.append('file', file);

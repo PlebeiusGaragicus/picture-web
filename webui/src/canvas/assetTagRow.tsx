@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useRepositionOnViewportChange } from '../shared/popover';
 import { createPortal } from 'react-dom';
 import type { TagDefinition } from '../types';
 import { SplitTagPopover } from './splitTagPopover';
@@ -138,16 +139,7 @@ export function TagControlButton({
     return () => observer.disconnect();
   }, [isOpen, portaled, updatePopoverPosition]);
 
-  useEffect(() => {
-    if (!isOpen || !portaled) return;
-    const reposition = () => updatePopoverPosition();
-    window.addEventListener('resize', reposition);
-    window.addEventListener('scroll', reposition, true);
-    return () => {
-      window.removeEventListener('resize', reposition);
-      window.removeEventListener('scroll', reposition, true);
-    };
-  }, [isOpen, portaled, updatePopoverPosition]);
+  useRepositionOnViewportChange(isOpen && portaled, updatePopoverPosition);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -249,5 +241,3 @@ export function NodeTagButton({
   );
 }
 
-export const NodeAssetTagRows = NodeTagButton;
-export const NodeAssetTagRow = NodeTagButton;

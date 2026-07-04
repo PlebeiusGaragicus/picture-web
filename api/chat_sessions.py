@@ -292,18 +292,6 @@ def blocking_session_ids(slug: str, asset_id: str) -> list[str]:
     return blockers
 
 
-def fork_session(slug: str, session_id: str, source_asset_id: str | None = None) -> ChatSessionDocument:
-    source = read_session(slug, session_id)
-    return create_session(
-        slug,
-        ChatSessionCreate(
-            sourceAssetId=source_asset_id or source.source.assetId,
-            canvasNodeId=source.source.canvasNodeId,
-            title=f"{source.title} fork",
-        ),
-    )
-
-
 def append_turn(
     slug: str,
     session_id: str,

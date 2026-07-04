@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useRepositionOnViewportChange } from './shared/popover';
 
 export function Modal({
   title,
@@ -73,16 +74,7 @@ export function HelpTip({ text, placement = 'bottom' }: { text: string; placemen
     updatePosition();
   }, [open, text, updatePosition]);
 
-  useEffect(() => {
-    if (!open) return;
-    const reposition = () => updatePosition();
-    window.addEventListener('resize', reposition);
-    window.addEventListener('scroll', reposition, true);
-    return () => {
-      window.removeEventListener('resize', reposition);
-      window.removeEventListener('scroll', reposition, true);
-    };
-  }, [open, updatePosition]);
+  useRepositionOnViewportChange(open, updatePosition);
 
   return (
     <>
