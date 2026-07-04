@@ -5,7 +5,7 @@ import type { PhotoNodeData } from './types';
 type RoleCarrier = Pick<CanvasNodeLayout, 'role'>;
 
 export function isDurableSourceRole(role: RoleCarrier['role'] | undefined | null): boolean {
-  return role?.type === 'style-ref-source' || role?.type === 'artifact-source';
+  return role?.type === 'style-ref-source';
 }
 
 export function isDurableSourceNode(node: Node<PhotoNodeData> | RoleCarrier | null | undefined): boolean {

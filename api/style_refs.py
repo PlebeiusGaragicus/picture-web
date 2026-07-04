@@ -1,73 +1,9 @@
-"""Story graph projection for book-derived artifacts on the canvas."""
+"""Canvas projection for style-reference prompts and their canonical images."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import library
-from models import ArtifactSourceRole, CanvasDocument, DraftCanvasNode, GeneratedResultRole, GenerationParams, ImageGroupCanvasNode, StoryArtifactCanvasNode, StyleRefSourceRole
-
-
-def story_artifact_refs(entries: dict[str, object], entry: object) -> list[str]:
-    mode = getattr(entry, "mode", "")
-    style_ref = getattr(entry, "styleRef", "")
-    if mode != "edit-reference" or not style_ref:
-        return []
-    base_key = Path(style_ref).stem
-    base = entries.get(base_key)
-    if base is None:
-        return []
-    asset_ids = getattr(base, "assetIds", None) or []
-    return list(asset_ids)
-
-
-def story_artifact_base_tags(kind: str) -> list[str]:
-    tags_by_kind = {
-        "character-sheet": ["adaptation", "character-sheet"],
-        "location-prompt": ["adaptation", "location"],
-        "scene-artifact": ["adaptation", "scene"],
-        "page-plan": ["adaptation", "page"],
-        "panel-prompt": ["adaptation", "panel"],
-    }
-    return tags_by_kind.get(kind, ["adaptation"])
-
-
-def entry_has_assets(entry: object) -> bool:
-    asset_ids = getattr(entry, "assetIds", None) or []
-    return len(asset_ids) > 0
-
-
-def sync_existing_story_artifacts(slug: str, canvas: CanvasDocument) -> CanvasDocument:
-    """Refresh existing story source nodes without creating new source nodes."""
-    import adaptation
-
-    status = adaptation.status(slug)
-    character_entries = adaptation.character_entries_from_records(status.characters)
-    groups = {
-        "character-sheet": character_entries,
-        "location-prompt": status.locations,
-    }
-    next_canvas = canvas.model_copy(deep=True)
-    for node_id, node in list(next_canvas.nodes.items()):
-        if not isinstance(node, StoryArtifactCanvasNode):
-            continue
-        entries = groups.get(node.artifactKind)
-        if entries is None:
-            continue
-        entry = entries.get(node.artifactKey)
-        if entry is None:
-            continue
-        node.promptPath = entry.promptPath
-        node.prompt = entry.prompt
-        node.refs = story_artifact_refs(entries, entry)
-        node.generatedAssetIds = list(entry.assetIds)
-        node.tags = library.node_tags(
-            *story_artifact_base_tags(node.artifactKind),
-            "generated" if entry_has_assets(entry) else "missing",
-        )
-        node.role = ArtifactSourceRole(artifactKind=node.artifactKind, artifactKey=node.artifactKey)
-        next_canvas.nodes[node_id] = node
-    return next_canvas
+from models import CanvasDocument, DraftCanvasNode, GeneratedResultRole, GenerationParams, ImageGroupCanvasNode, StyleRefSourceRole
 
 
 def sync_style_ref_canvas_nodes(slug: str, canvas: CanvasDocument, kind: str | None = None) -> CanvasDocument:

@@ -1,4 +1,4 @@
-import type { Asset, DraftCanvasNode, ImageGroupCanvasNode, StoryArtifactCanvasNode, TagDefinition } from '../types';
+import type { Asset, DraftCanvasNode, ImageGroupCanvasNode, TagDefinition } from '../types';
 
 export interface DraftNodeData extends DraftCanvasNode {
   kind: 'draft';
@@ -23,14 +23,4 @@ export interface ImageGroupNodeData extends ImageGroupCanvasNode {
   archivedOnlyView?: boolean;
 }
 
-export interface StoryArtifactNodeData extends StoryArtifactCanvasNode {
-  kind: 'storyArtifact';
-  nodeId: string;
-  generatedAsset: Asset | null;
-  onRefineChat: (nodeId: string, assetId: string) => void;
-  isGenerating?: boolean;
-  onDetails: (nodeId: string) => void;
-  onViewAsset: (assetId: string) => void;
-}
-
-export type PhotoNodeData = DraftNodeData | StoryArtifactNodeData | ImageGroupNodeData;
+export type PhotoNodeData = DraftNodeData | ImageGroupNodeData;

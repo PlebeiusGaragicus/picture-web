@@ -1922,7 +1922,7 @@ def test_style_ref_sync_preserves_visual_style_selection(tmp_path, monkeypatch):
     assert nodes["archetype_archetype_character"]["visualStyleId"] == style_id
 
 
-def test_generate_attaches_to_same_image_group_node(tmp_path, monkeypatch):
+def test_import_artifact_to_canvas_creates_empty_image_group(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
     style_ref_id = "01HARCH"
@@ -1971,51 +1971,6 @@ def test_generate_attaches_to_same_image_group_node(tmp_path, monkeypatch):
     node_id = imported.json()["nodeId"]
     assert imported.json()["canvas"]["nodes"][node_id]["type"] == "imageGroup"
     assert imported.json()["canvas"]["nodes"][node_id]["assetIds"] == []
-
-    def fake_generate(**kwargs):
-        make_png(kwargs["output_png"], color="green")
-
-        class Result:
-            provider_response = {"imageFile": kwargs["output_png"].name, "response": {"candidates": [{"finishReason": "STOP"}]}}
-
-        return Result()
-
-    monkeypatch.setattr(gemini, "generate_image", fake_generate)
-    style_id = visual_style_id_by_name(
-        client.post(
-            "/api/projects/farm-comic/adaptation/visual-styles",
-            json={"name": "Comic ink", "prompt": "Style: bold comic ink lines\n"},
-        ).json()["visualStyles"],
-        "Comic ink",
-    )
-    generated = client.post(
-        "/api/projects/farm-comic/adaptation/generate-artifact",
-        json={
-            "artifactKind": "character-sheet",
-            "artifactKey": "hero",
-            "variantKey": "base",
-            "visualStyleId": style_id,
-            "canvasNodeId": node_id,
-        },
-    )
-    assert generated.status_code == 200
-    asset_id = generated.json()["asset"]["id"]
-    nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
-    assert node_id in nodes
-    assert nodes[node_id]["type"] == "imageGroup"
-    assert nodes[node_id]["assetIds"] == [asset_id]
-    assert nodes[node_id]["activeAssetId"] == asset_id
-    assert not any(node_id.startswith("generated_") for node_id in nodes)
-    assert generated.json()["status"]["characters"]["hero"]["variants"]["base"]["assetIds"] == [asset_id]
-
-    delete_asset = client.delete(f"/api/projects/farm-comic/assets/{asset_id}")
-    assert delete_asset.status_code == 204
-    status = client.get("/api/projects/farm-comic/adaptation").json()
-    assert status["characters"]["hero"]["variants"]["base"]["assetIds"] == []
-    canvas_nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
-    assert canvas_nodes[node_id]["type"] == "imageGroup"
-    assert canvas_nodes[node_id]["assetIds"] == []
-    assert f"generated_{node_id}" not in canvas_nodes
 
 
 def test_chat_session_create_list_archive_and_protect_source(tmp_path, monkeypatch):

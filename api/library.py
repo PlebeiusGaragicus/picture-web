@@ -35,7 +35,6 @@ from models import (
     ProjectCreate,
     ProjectDetail,
     ProjectMetadata,
-    StoryArtifactCanvasNode,
     TagDefinition,
     TagRegistryDocument,
     TAG_RE,
@@ -513,8 +512,7 @@ def patch_archive(slug: str, asset_id: str, payload: ArchivePatch) -> AssetSumma
 
 def read_canvas(slug: str, include_archived: bool = False) -> CanvasDocument:
     require_project(slug)
-    canvas = sync_existing_story_artifacts(slug, read_stored_canvas(slug))
-    canvas = default_canvas_for_assets(slug, canvas, include_archived=include_archived)
+    canvas = default_canvas_for_assets(slug, read_stored_canvas(slug), include_archived=include_archived)
     return normalize_variant_groups(slug, canvas)
 
 
@@ -536,7 +534,7 @@ def write_canvas(slug: str, canvas: CanvasDocument) -> CanvasDocument:
 def validate_canvas(slug: str, canvas: CanvasDocument) -> None:
     require_project(slug)
     for node_id, node in canvas.nodes.items():
-        if isinstance(node, DraftCanvasNode | StoryArtifactCanvasNode):
+        if isinstance(node, DraftCanvasNode):
             validate_refs(slug, node.refs)
         elif isinstance(node, ImageGroupCanvasNode):
             for asset_id in node.assetIds:
@@ -546,12 +544,6 @@ def validate_canvas(slug: str, canvas: CanvasDocument) -> None:
 
 def canvas_node_id(asset_id: str) -> str:
     return f"node_{asset_id}"
-
-
-def story_artifact_node_id(kind: str, key: str) -> str:
-    safe_kind = kind.replace("-", "_")
-    safe_key = "".join(char if char.isalnum() else "_" for char in key.lower()).strip("_")
-    return f"artifact_{safe_kind}_{safe_key}"
 
 
 def archetype_node_id(kind: str) -> str:
@@ -566,40 +558,10 @@ def node_tags(*tags: str) -> list[str]:
     return list(dict.fromkeys(tags))
 
 
-def story_artifact_refs(entries: dict[str, object], entry: object) -> list[str]:
-    mode = getattr(entry, "mode", "")
-    style_ref = getattr(entry, "styleRef", "")
-    if mode != "edit-reference" or not style_ref:
-        return []
-    base_key = Path(style_ref).stem
-    base = entries.get(base_key)
-    if base is None:
-        return []
-    asset_ids = getattr(base, "assetIds", None) or []
-    return list(asset_ids)
-
-
-def story_artifact_base_tags(kind: str) -> list[str]:
-    tags_by_kind = {
-        "character-sheet": ["adaptation", "character-sheet"],
-        "location-prompt": ["adaptation", "location"],
-        "scene-artifact": ["adaptation", "scene"],
-        "page-plan": ["adaptation", "page"],
-        "panel-prompt": ["adaptation", "panel"],
-    }
-    return tags_by_kind.get(kind, ["adaptation"])
-
-
-def sync_existing_story_artifacts(slug: str, canvas: CanvasDocument) -> CanvasDocument:
-    import story_graph
-
-    return story_graph.sync_existing_story_artifacts(slug, canvas)
-
-
 def sync_style_ref_canvas_nodes(slug: str, canvas: CanvasDocument, kind: str | None = None) -> CanvasDocument:
-    import story_graph
+    import style_refs
 
-    return story_graph.sync_style_ref_canvas_nodes(slug, canvas, kind)
+    return style_refs.sync_style_ref_canvas_nodes(slug, canvas, kind)
 
 
 def restore_asset_to_canvas(slug: str, asset_id: str) -> None:
@@ -617,7 +579,7 @@ def restore_asset_to_canvas(slug: str, asset_id: str) -> None:
     index = len(canvas.nodes)
     max_story_x = 80.0
     for node in canvas.nodes.values():
-        if isinstance(node, DraftCanvasNode | StoryArtifactCanvasNode):
+        if isinstance(node, DraftCanvasNode):
             max_story_x = max(max_story_x, node.x + (node.width or 240) + 80)
     asset_start_x = max(1500.0, max_story_x)
     node_id = canvas_node_id(asset.id)
@@ -648,7 +610,7 @@ def default_canvas_for_assets(slug: str, canvas: CanvasDocument, include_archive
     index = len(next_canvas.nodes)
     max_story_x = 80.0
     for node in next_canvas.nodes.values():
-        if isinstance(node, DraftCanvasNode | StoryArtifactCanvasNode):
+        if isinstance(node, DraftCanvasNode):
             max_story_x = max(max_story_x, node.x + (node.width or 240) + 80)
     asset_start_x = max(1500.0, max_story_x)
     for asset in list_assets(slug, include_archived=include_archived):
@@ -685,7 +647,7 @@ def variant_key_for_node(slug: str, node: ImageGroupCanvasNode) -> tuple[str, tu
     return None
 
 
-def canvas_role_type(node: DraftCanvasNode | StoryArtifactCanvasNode | ImageGroupCanvasNode) -> str | None:
+def canvas_role_type(node: DraftCanvasNode | ImageGroupCanvasNode) -> str | None:
     role = node.role
     if role is None:
         return None

@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStatus, AdaptationWorkflowStatus, AgentSession, ArtifactKind, Asset, BookChatSession, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GenerateArtifactPayload, GeneratePayload, GenerateStyleRefPayload, ImageGroupNodeResponse, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStatus, AdaptationWorkflowStatus, AgentSession, ArtifactKind, Asset, BookChatSession, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, GenerateStyleRefPayload, ImageGroupNodeResponse, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = import.meta.env.DEV;
 
@@ -289,11 +289,6 @@ export const api = {
     }),
   generateAdaptationStyleRef: (slug: string, payload: GenerateStyleRefPayload) =>
     request<AdaptationGenerateResponse>(`/api/projects/${slug}/adaptation/generate-style-ref`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  generateAdaptationArtifact: (slug: string, payload: GenerateArtifactPayload) =>
-    request<AdaptationGenerateResponse>(`/api/projects/${slug}/adaptation/generate-artifact`, {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

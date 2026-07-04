@@ -1,5 +1,5 @@
 import type { Edge, Node } from 'reactflow';
-import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './types';
+import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData } from './types';
 import { canDeleteNode } from './roles';
 
 export function generatedResultNodeId(sourceNodeId: string): string {
@@ -8,26 +8,18 @@ export function generatedResultNodeId(sourceNodeId: string): string {
 
 export function deriveStoryGraphEdges(filteredNodes: Node<PhotoNodeData>[]): Edge[] {
   const visibleNodeIds = new Set(filteredNodes.map((node) => node.id));
-  const nodeForAsset = new Map<string, Node<ImageGroupNodeData> | Node<StoryArtifactNodeData>>();
+  const nodeForAsset = new Map<string, Node<ImageGroupNodeData>>();
   filteredNodes.forEach((node) => {
     if (node.data.kind === 'imageGroup') {
       const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
       node.data.assetIds.forEach((assetId) => nodeForAsset.set(assetId, imageNode));
     }
-    if (node.data.kind === 'storyArtifact') {
-      const artifactNode: Node<StoryArtifactNodeData> = { ...node, data: node.data };
-      node.data.generatedAssetIds.forEach((assetId) => nodeForAsset.set(assetId, artifactNode));
-    }
   });
-  const edgeForAssetRef = (childNode: Node<ImageGroupNodeData> | Node<DraftNodeData> | Node<StoryArtifactNodeData>, childAssetId: string | null, ref: string): Edge | null => {
+  const edgeForAssetRef = (childNode: Node<ImageGroupNodeData> | Node<DraftNodeData>, childAssetId: string | null, ref: string): Edge | null => {
     const sourceNode = nodeForAsset.get(ref);
     if (!sourceNode || sourceNode.id === childNode.id) return null;
-    const sourceVisible = sourceNode.data.kind === 'imageGroup'
-      ? sourceNode.data.activeAsset?.id === ref
-      : sourceNode.data.kind === 'storyArtifact'
-        ? sourceNode.data.generatedAssetIds.includes(ref)
-        : false;
-    const childVisible = childNode.data.kind === 'draft' || childNode.data.kind === 'storyArtifact' || childNode.data.activeAsset?.id === childAssetId;
+    const sourceVisible = sourceNode.data.activeAsset?.id === ref;
+    const childVisible = childNode.data.kind === 'draft' || childNode.data.activeAsset?.id === childAssetId;
     const isVisibleLineage = sourceVisible && childVisible;
     return {
       id: `${sourceNode.id}-${childNode.id}-${childAssetId ?? 'draft'}-${ref}`,
@@ -47,11 +39,6 @@ export function deriveStoryGraphEdges(filteredNodes: Node<PhotoNodeData>[]): Edg
     if (node.data.kind !== 'draft') return [];
     const draftNode: Node<DraftNodeData> = { ...node, data: node.data };
     return node.data.refs.flatMap((ref) => edgeForAssetRef(draftNode, null, ref) ?? []);
-  });
-  const artifactRefEdges = filteredNodes.flatMap((node) => {
-    if (node.data.kind !== 'storyArtifact') return [];
-    const artifactNode: Node<StoryArtifactNodeData> = { ...node, data: node.data };
-    return node.data.refs.flatMap((ref) => edgeForAssetRef(artifactNode, null, ref) ?? []);
   });
   const generatedResultEdges = filteredNodes.flatMap((node) => {
     const sourceNodeId = node.data.role?.type === 'generated-result' ? node.data.role.sourceNodeId : null;
@@ -75,7 +62,7 @@ export function deriveStoryGraphEdges(filteredNodes: Node<PhotoNodeData>[]): Edg
       className: 'lineage-edge-visible',
     }];
   });
-  return [...assetEdges, ...draftEdges, ...artifactRefEdges, ...generatedResultEdges, ...textResultEdges];
+  return [...assetEdges, ...draftEdges, ...generatedResultEdges, ...textResultEdges];
 }
 
 export function deletableSelectedNodes(nodes: Node<PhotoNodeData>[], selectedNodeIds: string[]): Node<PhotoNodeData>[] {

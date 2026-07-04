@@ -16,7 +16,7 @@ DEFAULT_AUTO_PLACE_W = LAYOUT_GRID_COLUMNS / 3.0
 DEFAULT_AUTO_PLACE_H = LAYOUT_PAGE_ROWS / 3.0
 
 AssetKind = Literal["imported", "generated"]
-ArtifactKind = Literal["character-sheet", "location-prompt", "scene-artifact", "page-plan", "panel-prompt", "concept-art"]
+ArtifactKind = Literal["character-sheet", "location-prompt", "concept-art"]
 AdaptationFileKind = Literal["characters", "locations"]
 ConceptArtSubjectKind = Literal["character", "location"]
 StyleRefKind = Literal["archetype-character", "archetype-scene"]
@@ -501,19 +501,6 @@ class AdaptationGenerateStyleRefRequest(BaseModel):
     batchCount: int = Field(default=1, ge=1, le=8)
 
 
-class AdaptationGenerateArtifactRequest(BaseModel):
-    artifactKind: ArtifactKind
-    artifactKey: str = Field(min_length=1)
-    variantKey: str = Field(default="base", pattern=SLUG_RE)
-    canvasNodeId: str | None = None
-    visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
-    model: str | None = None
-    aspectRatio: str | None = None
-    imageSize: str | None = None
-    seed: int | None = Field(default=None, ge=0)
-    batchCount: int = Field(default=1, ge=1, le=8)
-
-
 class AdaptationGenerateResponse(BaseModel):
     generated: bool
     kind: Literal["character", "artifact", "style-ref"]
@@ -760,12 +747,6 @@ class StyleRefSourceRole(BaseModel):
     kind: StyleRefKind
 
 
-class ArtifactSourceRole(BaseModel):
-    type: Literal["artifact-source"] = "artifact-source"
-    artifactKind: ArtifactKind
-    artifactKey: str
-
-
 class TextResultRole(BaseModel):
     type: Literal["text-result"] = "text-result"
     sourceNodeId: str
@@ -782,7 +763,7 @@ class RefinementRole(BaseModel):
     sourceAssetId: str | None = None
 
 
-CanvasRole = Annotated[StyleRefSourceRole | ArtifactSourceRole | TextResultRole | GeneratedResultRole | RefinementRole, Field(discriminator="type")]
+CanvasRole = Annotated[StyleRefSourceRole | TextResultRole | GeneratedResultRole | RefinementRole, Field(discriminator="type")]
 
 
 class CanvasNodeLayout(BaseModel):
@@ -887,18 +868,6 @@ class DraftCanvasNode(CanvasNodeLayout):
     visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
 
 
-class StoryArtifactCanvasNode(CanvasNodeLayout):
-    type: Literal["storyArtifact"] = "storyArtifact"
-    artifactKind: ArtifactKind
-    artifactKey: str
-    promptPath: str
-    prompt: str = ""
-    refs: list[str] = Field(default_factory=list)
-    params: GenerationParams = Field(default_factory=GenerationParams)
-    visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
-    generatedAssetIds: list[str] = Field(default_factory=list)
-
-
 class ImageGroupCanvasNode(CanvasNodeLayout):
     type: Literal["imageGroup"] = "imageGroup"
     refs: list[str] = Field(default_factory=list)
@@ -922,7 +891,7 @@ def is_prompt_only_image_group(node: ImageGroupCanvasNode) -> bool:
     return not node.assetIds
 
 
-CanvasNode = Annotated[DraftCanvasNode | StoryArtifactCanvasNode | ImageGroupCanvasNode, Field(discriminator="type")]
+CanvasNode = Annotated[DraftCanvasNode | ImageGroupCanvasNode, Field(discriminator="type")]
 
 
 class CanvasDocument(BaseModel):

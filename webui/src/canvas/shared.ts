@@ -179,26 +179,7 @@ export function locationEntityTagsOnAsset(tagIds: string[], projectTags: TagDefi
 }
 
 export function adaptationFileKindToArtifactKind(kind: AdaptationFileKind): ArtifactKind {
-  if (kind === 'characters') return 'character-sheet';
-  if (kind === 'locations') return 'location-prompt';
-  return 'scene-artifact';
-}
-
-export function storyArtifactNodeId(artifactKind: ArtifactKind, artifactKey: string): string {
-  const safeKind = artifactKind.replace(/-/g, '_');
-  const safeKey = artifactKey.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-  return `artifact_${safeKind}_${safeKey}`;
-}
-
-export function storyArtifactKeysOnCanvas(
-  nodes: Record<string, { type?: string; artifactKind?: ArtifactKind; artifactKey?: string }>,
-  artifactKind: ArtifactKind,
-): Set<string> {
-  return new Set(
-    Object.values(nodes)
-      .filter((node) => node.type === 'storyArtifact' && node.artifactKind === artifactKind && node.artifactKey)
-      .map((node) => node.artifactKey as string),
-  );
+  return kind === 'characters' ? 'character-sheet' : 'location-prompt';
 }
 
 export function mergeAvailableUserTags(projectTags: TagDefinition[], assets: Asset[]): TagDefinition[] {
@@ -258,9 +239,6 @@ export function artifactKindLabel(kind: ArtifactKind) {
   const labels: Record<ArtifactKind, string> = {
     'character-sheet': 'Character Sheet',
     'location-prompt': 'Location Prompt',
-    'scene-artifact': 'Scene Artifact',
-    'page-plan': 'Page Plan',
-    'panel-prompt': 'Panel Prompt',
     'concept-art': 'Concept Art',
   };
   return labels[kind];

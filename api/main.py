@@ -48,7 +48,6 @@ from models import (
     ChatSessionPatch,
     ChatTurnRequest,
     ChatTurnResponse,
-    AdaptationGenerateArtifactRequest,
     AdaptationGenerateStyleRefRequest,
     AdaptationGenerateResponse,
     AdaptationStatus,
@@ -453,11 +452,6 @@ def set_adaptation_style_ref_asset(slug: str, payload: AdaptationStyleRefAssetRe
 @app.post("/api/projects/{slug}/adaptation/generate-style-ref", response_model=AdaptationGenerateResponse)
 def generate_adaptation_style_ref(slug: str, payload: AdaptationGenerateStyleRefRequest) -> AdaptationGenerateResponse:
     return adaptation.generate_style_ref(slug, payload)
-
-
-@app.post("/api/projects/{slug}/adaptation/generate-artifact", response_model=AdaptationGenerateResponse)
-def generate_adaptation_artifact(slug: str, payload: AdaptationGenerateArtifactRequest) -> AdaptationGenerateResponse:
-    return adaptation.generate_artifact(slug, payload)
 
 
 @app.get("/api/projects/{slug}/chat-sessions", response_model=list[ChatSessionDocument])

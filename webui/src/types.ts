@@ -95,7 +95,6 @@ export interface CanvasNodeLayout {
 
 export type CanvasRole =
   | { type: 'style-ref-source'; kind: StyleRefKind }
-  | { type: 'artifact-source'; artifactKind: ArtifactKind; artifactKey: string }
   | { type: 'text-result'; sourceNodeId: string }
   | { type: 'generated-result'; sourceNodeId: string }
   | { type: 'refinement'; sourceNodeId: string; sourceAssetId?: string | null };
@@ -108,21 +107,9 @@ export interface DraftCanvasNode extends CanvasNodeLayout {
   visualStyleId?: string | null;
 }
 
-export type ArtifactKind = 'character-sheet' | 'location-prompt' | 'scene-artifact' | 'page-plan' | 'panel-prompt' | 'concept-art';
-export type AdaptationFileKind = 'characters' | 'locations' | 'scenes';
+export type ArtifactKind = 'character-sheet' | 'location-prompt' | 'concept-art';
+export type AdaptationFileKind = 'characters' | 'locations';
 export type ConceptArtSubjectKind = 'character' | 'location';
-
-export interface StoryArtifactCanvasNode extends CanvasNodeLayout {
-  type: 'storyArtifact';
-  artifactKind: ArtifactKind;
-  artifactKey: string;
-  promptPath: string;
-  prompt: string;
-  refs: string[];
-  params: GenerationParams;
-  visualStyleId?: string | null;
-  generatedAssetIds: string[];
-}
 
 export interface ImageGroupCanvasNode extends CanvasNodeLayout {
   type: 'imageGroup';
@@ -135,7 +122,7 @@ export interface ImageGroupCanvasNode extends CanvasNodeLayout {
   sourceConceptCardId?: string | null;
 }
 
-export type CanvasNode = DraftCanvasNode | StoryArtifactCanvasNode | ImageGroupCanvasNode;
+export type CanvasNode = DraftCanvasNode | ImageGroupCanvasNode;
 
 export interface GeneratePayload {
   prompt: string;
@@ -155,19 +142,6 @@ export interface GenerateStyleRefPayload {
   kind: StyleRefKind;
   canvasNodeId?: string | null;
   visualStyleId: string;
-  model?: string | null;
-  aspectRatio?: string | null;
-  imageSize?: string | null;
-  seed?: number | null;
-  batchCount?: number;
-}
-
-export interface GenerateArtifactPayload {
-  artifactKind: ArtifactKind;
-  artifactKey: string;
-  variantKey?: string;
-  canvasNodeId?: string | null;
-  visualStyleId?: string | null;
   model?: string | null;
   aspectRatio?: string | null;
   imageSize?: string | null;
@@ -231,9 +205,6 @@ export interface AdaptationStatus {
   defaultVisualStyleId?: string | null;
   characters: Record<string, CharacterRecord>;
   locations: Record<string, AdaptationAssetLink>;
-  scenes: Record<string, AdaptationAssetLink>;
-  pages: Record<string, AdaptationAssetLink>;
-  panels: Record<string, AdaptationAssetLink>;
 }
 
 export interface StoryPanelRect {

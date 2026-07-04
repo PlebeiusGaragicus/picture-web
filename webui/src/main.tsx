@@ -31,16 +31,16 @@ import type { LayoutEditorNavigation } from './storyPanels/layoutEditorNavigatio
 import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './storyPanels/printLayout';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
-import { SYSTEM_TAGS, artifactKindLabel, assetLabel, adaptationFileKindToArtifactKind, archivedVariants, capabilitiesForModel, characterEntityTags, conceptSubjectFromTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, isCharacterCanvasNode, isConceptTagged, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, normalizedParamsForModel, partitionAssetTagIds, storyArtifactKeysOnCanvas, storyArtifactNodeId, userProjectTags, visibleDisplayName, visibleVariants } from './canvas/shared';
+import { SYSTEM_TAGS, assetLabel, adaptationFileKindToArtifactKind, archivedVariants, capabilitiesForModel, characterEntityTags, conceptSubjectFromTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, isCharacterCanvasNode, isConceptTagged, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, normalizedParamsForModel, partitionAssetTagIds, userProjectTags, visibleDisplayName, visibleVariants } from './canvas/shared';
 import { NodeSidebar } from './canvas/sidebars';
 import { NodeTagButton, TagControlButton } from './canvas/assetTagRow';
 import { nodeTagActionsRef } from './canvas/nodeTagActions';
 import { SplitTagPopover } from './canvas/splitTagPopover';
 import { TagColorPickerPopover } from './canvas/tagEditor';
-import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData, StoryArtifactNodeData } from './canvas/types';
+import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData } from './canvas/types';
 import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags, styleRefStatusFromAdaptation } from './styleRefs';
 import { HelpTip, HoverTooltip, Modal } from './ui';
-import type { AdaptationAssetLink, AdaptationFileKind, AdaptationStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, CharacterRecord, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StoryArtifactCanvasNode, StyleRefKind, TagDefinition } from './types';
+import type { AdaptationAssetLink, AdaptationFileKind, AdaptationStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, CharacterRecord, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StyleRefKind, TagDefinition } from './types';
 import { AgentSessionsView } from './adaptation/bookChatView';
 import { ConceptArtView } from './adaptation/conceptArtView';
 import { HubCardMenu } from './adaptation/hubCardMenu';
@@ -100,27 +100,6 @@ function nodesToCanvas(canvas: CanvasDocument, nodes: Node<PhotoNodeData>[]): Ca
               refs: node.data.refs,
               prompt: node.data.prompt,
               params: node.data.params,
-            },
-          ];
-        }
-        if (node.data.kind === 'storyArtifact') {
-          return [
-            node.id,
-            {
-              type: 'storyArtifact',
-              displayName: node.data.displayName ?? existing?.displayName ?? '',
-              x: finiteCanvasNumber(node.position?.x, existing?.x ?? 0),
-              y: finiteCanvasNumber(node.position?.y, existing?.y ?? 0),
-              width: existing?.width ?? node.data.width ?? null,
-              tags: node.data.tags ?? [],
-              role: node.data.role ?? null,
-              artifactKind: node.data.artifactKind,
-              artifactKey: node.data.artifactKey,
-              promptPath: node.data.promptPath,
-              prompt: node.data.prompt,
-              refs: node.data.refs,
-              params: node.data.params,
-              generatedAssetIds: node.data.generatedAssetIds ?? [],
             },
           ];
         }
@@ -196,18 +175,6 @@ function toFlowNodes(
         position: { x: canvasNode.x, y: canvasNode.y },
         type: 'draft',
         data: { ...canvasNode, kind: 'draft', nodeId: id, parentDisplayNames: displayNameByAssetId, isGenerating: generatingNodeIds.has(id), onDetails },
-      };
-    }
-    if (canvasNode.type === 'storyArtifact') {
-      const latestGeneratedId = canvasNode.generatedAssetIds.length > 0
-        ? canvasNode.generatedAssetIds[canvasNode.generatedAssetIds.length - 1]
-        : null;
-      const generatedAsset = latestGeneratedId ? assetById.get(latestGeneratedId) ?? null : null;
-      return {
-        id,
-        position: { x: canvasNode.x, y: canvasNode.y },
-        type: 'storyArtifact',
-        data: { ...canvasNode, generatedAssetIds: canvasNode.generatedAssetIds ?? [], kind: 'storyArtifact', nodeId: id, generatedAsset, isGenerating: generatingNodeIds.has(id), onDetails, onViewAsset, onRefineChat },
       };
     }
     const groupAssets = canvasNode.assetIds.map((assetId) => assetById.get(assetId)).filter((asset): asset is Asset => Boolean(asset));
@@ -914,19 +881,6 @@ function App() {
     });
   };
 
-  const updateStoryArtifact = async (id: string, patch: Partial<StoryArtifactCanvasNode>) => {
-    setNodes((current) => {
-      const nextNodes = current.map((node) =>
-        node.id === id && node.data.kind === 'storyArtifact' ? { ...node, data: { ...node.data, ...patch } } : node,
-      );
-      persistNodes(nextNodes, { refresh: false }).catch((err) => {
-        console.error('[photo-web] failed to persist story artifact update', err);
-        setError(String(err));
-      });
-      return nextNodes;
-    });
-  };
-
   const updateImageGroup = async (id: string, patch: Partial<ImageGroupCanvasNode>) => {
     const cleanPatch = omitUndefined(patch as Record<string, unknown>) as Partial<ImageGroupCanvasNode>;
     setNodes((current) => {
@@ -1115,7 +1069,7 @@ function App() {
     await createDraftAt(refs, position, { prompt: sourceAsset.prompt?.text ?? '', params });
   };
 
-  const createChildTextArtifact = async (sourceNode: Node<DraftNodeData> | Node<StoryArtifactNodeData>) => {
+  const createChildTextArtifact = async (sourceNode: Node<DraftNodeData>) => {
     const position = { x: sourceNode.position.x + 320, y: sourceNode.position.y + 80 };
     const prompt = sourceNode.data.prompt;
     const displayName = `${visibleDisplayName(sourceNode.data.displayName) || 'Source'} child`;
@@ -1345,44 +1299,6 @@ function App() {
     setPopoverNodeId(nodeId);
     window.setTimeout(() => focusNodeOnCanvas(nodeId), 0);
   }, [focusNodeOnCanvas]);
-
-  const generateStoryArtifact = async (id: string, artifact: StoryArtifactNodeData) => {
-    if (!openProjectSlug) return;
-    const visualStyleId = artifact.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null;
-    if (!visualStyleId) {
-      setError('Pick a visual style before generating.');
-      return;
-    }
-    setGeneratingNodeIds((current) => new Set(current).add(id));
-    setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
-    try {
-      clearGenerationFailure();
-      setError(null);
-      const result = await api.generateAdaptationArtifact(openProjectSlug, {
-        artifactKind: artifact.artifactKind,
-        artifactKey: artifact.artifactKey,
-        canvasNodeId: id,
-        visualStyleId: visualStyleId,
-        model: artifact.params.model,
-        aspectRatio: artifact.params.aspectRatio,
-        imageSize: artifact.params.imageSize,
-        seed: artifact.params.seed,
-        batchCount: artifact.params.batchCount,
-      });
-      if (result.status) setAdaptation(result.status);
-      await reload();
-      setPopoverNodeId(generatedResultNodeId(id));
-    } catch (err) {
-      reportGenerationFailure(id, err);
-    } finally {
-      setGeneratingNodeIds((current) => {
-        const next = new Set(current);
-        next.delete(id);
-        return next;
-      });
-      setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: false } } : node)));
-    }
-  };
 
   const handleProjectPhaseChange = useCallback((phase: ProjectPhase) => {
     setProjectPhase(phase);
@@ -1761,11 +1677,7 @@ function App() {
                 const sourceNode = nodes.find((node) => node.id === params.nodeId);
                 const sourceAssetId = sourceNode?.data.kind === 'imageGroup'
                   ? sourceNode.data.activeAsset?.id ?? null
-                  : sourceNode?.data.kind === 'storyArtifact'
-                    ? (sourceNode.data.generatedAssetIds.length > 0
-                      ? sourceNode.data.generatedAssetIds[sourceNode.data.generatedAssetIds.length - 1]
-                      : null)
-                    : null;
+                  : null;
                 setPendingConnectionSource(sourceAssetId);
               }}
               onConnectEnd={(event) => {
@@ -1797,12 +1709,8 @@ function App() {
                 if (!connection.source || !connection.target) return;
                 const sourceNode = nodes.find((node) => node.id === connection.source);
                 const sourceAssetId = sourceNode?.data.kind === 'imageGroup'
-                  ? sourceNode.data.activeAsset?.id
-                  : sourceNode?.data.kind === 'storyArtifact'
-                    ? (sourceNode.data.generatedAssetIds.length > 0
-                      ? sourceNode.data.generatedAssetIds[sourceNode.data.generatedAssetIds.length - 1]
-                      : null)
-                    : null;
+                  ? sourceNode.data.activeAsset?.id ?? null
+                  : null;
                 if (!sourceAssetId) return;
                 const nextNodes = nodes.map((node) =>
                   node.id === connection.target && node.data.kind === 'draft'
@@ -1855,13 +1763,12 @@ function App() {
           projectTags={projectTags}
           coverAssetId={currentProject?.coverAssetId ?? null}
           onDraftChange={updateDraft}
-          onStoryArtifactChange={updateStoryArtifact}
           onImageGroupChange={updateImageGroup}
           onGenerate={generateDraft}
-          onGenerateArtifact={generateStoryArtifact}
           onGenerateVariants={generateImageVariants}
           generationError={generationError?.nodeId === selectedNode.id ? generationError.message : null}
           onCreateChildText={createChildTextArtifact}
+          onSaveStyleRefPrompt={saveAdaptationStyleRefPrompt}
           onSetStyleRefAsset={setAdaptationStyleRefAsset}
           onSetProjectCover={setProjectCover}
           onFindOnCanvas={focusNodeOnCanvas}
@@ -3832,57 +3739,8 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
   );
 }
 
-function StoryArtifactNode({ data }: NodeProps<StoryArtifactNodeData>) {
-  const generatedAssetIds = data.generatedAssetIds ?? [];
-  const latestGeneratedId = generatedAssetIds.length > 0
-    ? generatedAssetIds[generatedAssetIds.length - 1]
-    : null;
-  const hasGenerated = generatedAssetIds.length > 0;
-  const tooltip = [
-    data.prompt || 'Story artifact prompt not set',
-    `source: ${data.promptPath}`,
-    `artifact: ${data.artifactKind}`,
-    hasGenerated ? `generated: ${generatedAssetIds.join(', ')}` : 'not generated',
-  ].join('\n');
-  const kindClass = `${data.artifactKind}-artifact-node`;
-  return (
-    <div className={`node story-artifact-node ${kindClass} ${hasGenerated ? 'generated' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
-      <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
-      <strong className="node-title">{data.displayName || data.artifactKey}</strong>
-      <div className="story-artifact-card">
-        <span className="story-artifact-badge">{artifactKindLabel(data.artifactKind)}</span>
-        <div className="story-artifact-icon" aria-hidden="true">
-          {data.isGenerating ? (
-            <div className="node-generating-overlay">
-              <span className="spinner" aria-hidden="true" />
-              <span>Generating</span>
-            </div>
-          ) : (
-            <span>{hasGenerated ? (generatedAssetIds.length > 1 ? `${generatedAssetIds.length} refs` : 'SRC') : data.artifactKind === 'character-sheet' ? 'CS' : 'LP'}</span>
-          )}
-        </div>
-        {latestGeneratedId && (
-          <button
-            className="node-action-button view-image-button nodrag nopan"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              data.onViewAsset(latestGeneratedId);
-            }}
-            title="View latest reference image"
-          >
-            👁️
-          </button>
-        )}
-      </div>
-      {hasGenerated && <Handle type="source" position={Position.Right} className="output-handle" />}
-    </div>
-  );
-}
-
 const nodeTypes = {
   imageGroup: ImageGroupNode,
-  storyArtifact: StoryArtifactNode,
   draft: DraftNode,
 };
 
