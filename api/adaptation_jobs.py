@@ -16,7 +16,8 @@ from fastapi import HTTPException
 
 import adaptation
 import library
-from models import AdaptationWorkflowStatus, utc_now
+from common import utc_now
+from models import AdaptationWorkflowStatus
 
 
 def workflow_status_path(slug: str, stage: str) -> Path:

@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from adaptation_workflow.slugify import slugify_name
+from common import slugify as slugify_name
 
 REQUIRED_DESCRIPTION_SECTIONS = (
     "## Summary",

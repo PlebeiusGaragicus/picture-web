@@ -8,7 +8,8 @@ from pathlib import Path
 from fastapi import HTTPException
 
 import library
-from adaptation_workflow.config import AdaptationContext, BookSession, utc_now
+from adaptation_workflow.config import AdaptationContext, BookSession
+from common import utc_now
 from adaptation_workflow.events import project_event
 from adaptation_workflow.pi_rpc import PiRpcClient, PiRpcError
 from ids import new_ulid

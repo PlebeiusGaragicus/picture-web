@@ -10,6 +10,7 @@ import adaptation
 import library
 from canvas_nodes import create_image_group_node, next_canvas_position
 from ids import new_ulid
+from common import utc_now
 from models import (
     ConceptArtSubjectKind,
     ConceptCardDocument,
@@ -19,7 +20,6 @@ from models import (
     DisplayPatch,
     GenerationParams,
     ImageGroupCanvasNode,
-    utc_now,
 )
 
 CONCEPT_TAG = "concept"

@@ -8,12 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from adaptation_workflow.config import utc_now
-
-
-def slugify_task_name(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower())
-    return slug.strip("-") or "task"
+from common import slugify, utc_now
 
 
 @dataclass
@@ -52,7 +47,7 @@ class RunDiagnostics:
 
     def begin_task(self, name: str) -> TaskDiagnostics:
         self._task_index += 1
-        slug = slugify_task_name(name)
+        slug = slugify(name, "task")
         stem = f"{self._task_index:03d}-{slug}"
         return TaskDiagnostics(
             index=self._task_index,

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from fastapi import HTTPException
 
 import library
+from common import slugify
 from models import AdaptationStatus, VisualStyleCreate, VisualStyleDefinition, VisualStylePatch
 
 
@@ -73,15 +73,10 @@ def _mark_default_visual_style(styles: list[VisualStyleDefinition], style_id: st
     ]
 
 
-def slugify_style_name(name: str) -> str:
-    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    return base or "style"
-
-
 def unique_style_id(root: Path, name: str) -> str:
     styles = read_visual_styles(root)
     existing = {style.id for style in styles}
-    candidate = slugify_style_name(name)
+    candidate = slugify(name, "style")
     if candidate not in existing:
         return candidate
     index = 2

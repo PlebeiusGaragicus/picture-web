@@ -1,4 +1,11 @@
-"""Persistent Pi agent-session registry and trace access."""
+"""Persistent Pi agent-session registry and trace access.
+
+Book chats are bridged into this registry ON PURPOSE under the same id:
+a stored session with kind "book-chat" is hydrated from the book-chat
+store, and book chats without a stored session are listed virtually.
+All ids are ULIDs; create_session refuses to overwrite an existing id so
+the two stores can never silently shadow each other.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +16,8 @@ from fastapi import HTTPException
 
 import adaptation
 import library
-from adaptation_workflow.config import AdaptationContext, utc_now
+from adaptation_workflow.config import AdaptationContext
+from common import utc_now
 from ids import new_ulid
 from models import (
     AgentSessionDocument,
@@ -60,6 +68,8 @@ def create_session(
     log_files: dict[str, str] | None = None,
 ) -> AgentSessionDocument:
     root = adaptation.ensure_adaptation(slug)
+    if session_id is not None and kind != "book-chat" and _read_stored_session(slug, session_id) is not None:
+        raise HTTPException(status_code=409, detail=f"Agent session id already exists: {session_id}")
     now = utc_now()
     session = AgentSessionDocument(
         id=session_id or new_ulid(),

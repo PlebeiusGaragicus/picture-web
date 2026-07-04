@@ -129,6 +129,7 @@ class PiRpcClient:
                 if message is None:
                     if on_event is not None and time.monotonic() - last_heartbeat >= 30:
                         last_heartbeat = time.monotonic()
+                        on_event({"type": "heartbeat", "waitingSeconds": int(last_heartbeat + self.task_timeout_s - deadline)})
                     continue
                 if message.get("type") == "agent_end":
                     break

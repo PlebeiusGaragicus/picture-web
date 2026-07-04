@@ -7,7 +7,8 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from adaptation_workflow.config import AdaptationContext, BookSession, utc_now
+from adaptation_workflow.config import AdaptationContext, BookSession
+from common import utc_now
 from adaptation_workflow.events import WorkflowLogger
 from adaptation_workflow.pi_rpc import PiRpcClient, PiRpcError
 from adaptation_workflow.validate import ValidationError, validate_character_file

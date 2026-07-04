@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from PIL import Image
 
 from ids import new_ulid
+from common import utc_now
 from models import (
     AssetMetadata,
     ChatProviderState,
@@ -26,7 +27,6 @@ from models import (
     GenerationReceipt,
     Prompt,
     ProviderCapture,
-    utc_now,
 )
 
 logger = logging.getLogger(__name__)

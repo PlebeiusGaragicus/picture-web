@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 import adaptation
 import library
+from common import slugify
 from models import (
     DEFAULT_AUTO_PLACE_H,
     DEFAULT_AUTO_PLACE_W,
@@ -250,11 +251,6 @@ def _validate_story_overlaps(document: StoryPanelDocument) -> None:
 
 def save_document(slug: str, document: StoryPanelDocument) -> StoryPanelDocument:
     return _write_document(slug, _validate_against_book(slug, _normalize_document_pages(document)))
-
-
-def _slugify(value: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return slug or "panel"
 
 
 def _next_panel_id(document: StoryPanelDocument) -> str:
@@ -653,7 +649,7 @@ def add_page(slug: str, title: str = "") -> StoryPanelDocument:
     existing = {page.id for page in document.pages}
     index = len(existing) + 1
     while True:
-        page_id = _slugify(title) if title else f"page-{index:03d}"
+        page_id = slugify(title, "panel") if title else f"page-{index:03d}"
         if page_id not in existing:
             break
         index += 1

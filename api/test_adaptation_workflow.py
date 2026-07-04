@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from adaptation_workflow.events import clip_text, project_event
-from adaptation_workflow.slugify import slugify_name
+from common import slugify as slugify_name
 from adaptation_workflow.validate import ValidationError, validate_character_file
 
 

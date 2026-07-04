@@ -12,8 +12,8 @@ from adaptation_workflow.config import (
     find_pi_binary,
     node_version,
     pi_version,
-    utc_now,
 )
+from common import utc_now
 from adaptation_workflow.diagnostics import RunDiagnostics
 from adaptation_workflow.events import WorkflowLogger
 from adaptation_workflow.steps import StepRunner

@@ -112,16 +112,7 @@ class AdaptationContext:
         )
 
 
-def slugify_path_segment(value: str) -> str:
-    import re
 
-    lowered = value.lower()
-    slug = re.sub(r"[^a-z0-9]+", "-", lowered)
-    return slug.strip("-")
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def find_pi_binary() -> str:

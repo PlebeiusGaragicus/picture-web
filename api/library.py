@@ -15,6 +15,7 @@ from fastapi import HTTPException, UploadFile
 from PIL import Image
 
 from ids import new_seed, new_ulid
+from common import utc_now
 from models import (
     ArchivePatch,
     AssetMetadata,
@@ -39,7 +40,6 @@ from models import (
     TagRegistryDocument,
     TAG_RE,
     EntityKind,
-    utc_now,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
