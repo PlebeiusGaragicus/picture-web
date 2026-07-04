@@ -6,7 +6,7 @@ import {
 } from './storyPanelSidebar';
 
 function manualSegmentStoryText(panel: StoryPanel) {
-  return (panel.storyText || panel.selectedText).trim();
+  return (panel.storyText || panel.selectedText || panel.visibleText).trim();
 }
 
 export function ManualStoryReader({

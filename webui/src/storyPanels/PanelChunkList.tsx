@@ -392,6 +392,7 @@ export function PanelChunkList({
   const [editTextValue, setEditTextValue] = useState('');
   const [panelEditorPanelId, setPanelEditorPanelId] = useState<string | null>(null);
   const [panelEditorTitle, setPanelEditorTitle] = useState('');
+  const [panelEditorKind, setPanelEditorKind] = useState<StoryPanel['panelKind']>('image');
   const [panelEditorStoryText, setPanelEditorStoryText] = useState('');
   const [panelEditorVisibleText, setPanelEditorVisibleText] = useState('');
   const [captionDrafts, setCaptionDrafts] = useState<StoryPanelCaption[]>([]);
@@ -463,6 +464,7 @@ export function PanelChunkList({
     onSelectPanel(panel.id);
     setPanelEditorPanelId(panel.id);
     setPanelEditorTitle(panel.title.trim());
+    setPanelEditorKind(panel.panelKind);
     setPanelEditorStoryText(usefulStoryText(panel));
     setPanelEditorVisibleText(usefulVisibleText(panel));
     setCaptionDrafts((panel.captions ?? []).map((caption) => ({ ...caption, textStyle: { ...caption.textStyle }, rect: { ...caption.rect } })));
@@ -499,6 +501,7 @@ export function PanelChunkList({
   const closePanelEditor = () => {
     setPanelEditorPanelId(null);
     setPanelEditorTitle('');
+    setPanelEditorKind('image');
     setPanelEditorStoryText('');
     setPanelEditorVisibleText('');
     setCaptionDrafts([]);
@@ -526,6 +529,7 @@ export function PanelChunkList({
     try {
       await onSavePanelEdit(panelEditorPanelId, {
         title: panelEditorTitle.trim(),
+        panelKind: panelEditorKind,
         storyText: isBookLinked(panelEditorPanel) ? panelEditorPanel.selectedText : panelEditorStoryText.trim(),
         visibleText: panelEditorVisibleText.trim(),
         richText: plainTextToRichText(panelEditorVisibleText.trim()),
@@ -816,6 +820,30 @@ export function PanelChunkList({
                   onKeyDown={(event) => event.stopPropagation()}
                 />
               </label>
+              <div className="story-panels-info-control story-panels-panel-editor-kind">
+                <div className="story-panels-kind-toggle" role="tablist" aria-label="Panel kind">
+                  <button
+                    type="button"
+                    className={panelEditorKind === 'image' ? 'active' : ''}
+                    role="tab"
+                    aria-selected={panelEditorKind === 'image'}
+                    disabled={isCreating}
+                    onClick={() => setPanelEditorKind('image')}
+                  >
+                    Image panel
+                  </button>
+                  <button
+                    type="button"
+                    className={panelEditorKind === 'text' ? 'active' : ''}
+                    role="tab"
+                    aria-selected={panelEditorKind === 'text'}
+                    disabled={isCreating}
+                    onClick={() => setPanelEditorKind('text')}
+                  >
+                    Text / caption
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="story-panels-panel-editor-text-grid">
               <label className="story-panels-panel-editor-field">
@@ -830,7 +858,7 @@ export function PanelChunkList({
                   onKeyDown={(event) => event.stopPropagation()}
                 />
               </label>
-              {panelEditorPanel.panelKind === 'text' && (
+              {panelEditorKind === 'text' && (
                 <label className="story-panels-panel-editor-field">
                   Visible text
                   <textarea

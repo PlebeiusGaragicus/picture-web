@@ -549,12 +549,13 @@ export function PageLayoutEditor({
     ? pages.slice(clampedPageIndex, clampedPageIndex + 1)
     : spreadVisiblePages(clampedPageIndex, pages, coverPage, backCoverPage);
   const selectedPanel = findPanelOrCaption(displayDocument, selectedPanelId);
-  const placeablePanels = topLevelPanels(displayDocument.panels);
+  const placeablePanels = topLevelPanels(unplacedPanels);
   const selectedChunkPanel = layoutMode === 'single'
     && singleSidePanel === 'chunks'
     && selectedPanel
     && isPanel(selectedPanel)
     && selectedPanel.parentPanelId == null
+    && isUnplaced(selectedPanel)
     ? selectedPanel
     : null;
   const quickPlacePanels = selectedChunkPanel ? [selectedChunkPanel] : unplacedPanels.slice(0, 3);
@@ -2722,7 +2723,9 @@ export function PageLayoutEditor({
             <h2 id="story-panels-placement-picker-title">Place panel here</h2>
             <p>Choose a panel to place at the clicked location.</p>
             <div className="story-panels-placement-picker-list">
-              {placeablePanels.map((panel) => (
+              {placeablePanels.length === 0 ? (
+                <p className="muted">No unplaced panels available.</p>
+              ) : placeablePanels.map((panel) => (
                 <button key={panel.id} type="button" disabled={isSaving || !onPlacePanelAt} onClick={() => void placePanelFromPicker(panel.id)}>
                   <span>{panelLabelFor(panel)}</span>
                   {sidebarPanelPreview(panel) && <small>{sidebarPanelPreview(panel)}</small>}
