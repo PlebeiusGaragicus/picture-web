@@ -30,6 +30,7 @@ import { SidebarCollapseButton } from './SidebarToggle';
 import { workspaceNavItems, type ProjectPhase } from './projectNavigation';
 import { isEditableShortcutTarget } from './shared/dom';
 import { useDismissOnOutsidePointerDown } from './shared/popover';
+import { ToastProvider, useToast } from './shared/toast';
 import { emptyCanvas } from './shared/canvasDefaults';
 import type { LayoutEditorNavigation } from './storyPanels/layoutEditorNavigation';
 import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './storyPanels/printLayout';
@@ -43,7 +44,7 @@ import { SplitTagPopover } from './canvas/splitTagPopover';
 import { TagColorPickerPopover } from './canvas/tagEditor';
 import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData } from './canvas/types';
 import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags, styleRefStatusFromAdaptation } from './styleRefs';
-import { HelpTip, HoverTooltip, Modal } from './ui';
+import { ConfirmDialog, HelpTip, HoverTooltip, Modal } from './ui';
 import type { AdaptationStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StyleRefKind, TagDefinition } from './types';
 import { AgentSessionsView } from './sessions/BookChatView';
 import { ConceptArtView } from './conceptArt/ConceptArtView';
@@ -197,6 +198,7 @@ function toFlowNodes(
 }
 
 function App() {
+  const toast = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
   const [openProjectSlug, setOpenProjectSlug] = useState('');
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -217,6 +219,8 @@ function App() {
   const [viewerNodeId, setViewerNodeId] = useState<string | null>(null);
   const [viewerAssetId, setViewerAssetId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ nodeId: string; assetId?: string } | null>(null);
+  const [pendingBulkDelete, setPendingBulkDelete] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<{ nodeId: string; assetId: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [activeUserTagFilters, setActiveUserTagFilters] = useState<string[]>([]);
@@ -304,7 +308,7 @@ function App() {
       );
       void persistNodesRef.current(nextNodes, { refresh: false }).catch((err) => {
         console.error('[photo-web] failed to persist image group name', err);
-        setError(String(err));
+        toast.error(formatRequestError(err));
       });
       return nextNodes;
     });
@@ -574,7 +578,7 @@ function App() {
         .then(() => loadProject(openProjectSlug))
         .catch((err) => {
           console.error('[photo-web] failed to delete image asset', err);
-          setError(String(err));
+          toast.error(formatRequestError(err));
         });
     }
     setNodes((current) => {
@@ -621,7 +625,7 @@ function App() {
       await loadProject(openProjectSlug);
     } catch (err) {
       console.error('[photo-web] failed to archive image asset', err);
-      setError(String(err));
+      toast.error(formatRequestError(err));
     }
   }, [loadProject, openProjectSlug]);
 
@@ -632,7 +636,7 @@ function App() {
       await loadProject(openProjectSlug);
     } catch (err) {
       console.error('[photo-web] failed to restore image asset', err);
-      setError(String(err));
+      toast.error(formatRequestError(err));
     }
   }, [loadProject, openProjectSlug]);
 
@@ -647,7 +651,7 @@ function App() {
   const createProjectTag = useCallback((tag: TagDefinition) => {
     void saveProjectTags([...projectTags.filter((existing) => existing.id !== tag.id), tag]).catch((err) => {
       console.error('[photo-web] failed to save project tags', err);
-      setError(String(err));
+      toast.error(formatRequestError(err));
     });
   }, [projectTags, saveProjectTags]);
 
@@ -661,7 +665,7 @@ function App() {
     };
     void saveProjectTags(projectTags.map((tag) => (tag.id === tagId ? nextTag : tag))).catch((err) => {
       console.error('[photo-web] failed to update project tag', err);
-      setError(String(err));
+      toast.error(formatRequestError(err));
     });
   }, [projectTags, saveProjectTags]);
 
@@ -692,7 +696,7 @@ function App() {
       )));
     } catch (err) {
       console.error('[photo-web] failed to delete project tag', err);
-      setError(String(err));
+      toast.error(formatRequestError(err));
       await loadProject(openProjectSlug);
     }
   }, [assets, loadProject, openProjectSlug, projectTags]);
@@ -710,7 +714,7 @@ function App() {
     }));
     void api.patchDisplay(openProjectSlug, assetId, asset.title, nextTags).catch((err) => {
       console.error('[photo-web] failed to update asset tags', err);
-      setError(String(err));
+      toast.error(formatRequestError(err));
     });
   }, [openProjectSlug]);
 
@@ -831,27 +835,33 @@ function App() {
   };
 
   const importFiles = async (files: FileList | File[], position?: { x: number; y: number }) => {
-    if (!openProjectSlug) return;
+    if (!openProjectSlug || isImporting) return;
     const images = Array.from(files).filter((file) => file.type.startsWith('image/'));
     if (!images.length) return;
+    setIsImporting(true);
+    let imported = 0;
     try {
       setError(null);
       for (const [index, file] of images.entries()) {
         try {
           const nextPosition = position ? { x: position.x + (index % 3) * 280, y: position.y + Math.floor(index / 3) * 240 } : undefined;
           await api.importAsset(openProjectSlug, file, nextPosition);
+          imported += 1;
         } catch (err) {
           const message = String(err);
           if (message.includes('Already imported')) {
-            setError(message);
+            toast.info(`Skipped ${file.name}: already imported`);
             continue;
           }
           throw err;
         }
       }
       await reload();
+      if (imported) toast.success(`Imported ${imported} image${imported === 1 ? '' : 's'}`);
     } catch (err) {
-      setError(String(err));
+      toast.error(formatRequestError(err));
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -869,7 +879,7 @@ function App() {
       );
       persistNodes(nextNodes, { refresh: false }).catch((err) => {
         console.error('[photo-web] failed to persist draft update', err);
-        setError(String(err));
+        toast.error(formatRequestError(err));
       });
       return nextNodes;
     });
@@ -900,7 +910,7 @@ function App() {
       });
       persistNodes(nextNodes, { refresh: false }).catch((err) => {
         console.error('[photo-web] failed to persist image group update', err);
-        setError(String(err));
+        toast.error(formatRequestError(err));
       });
       return nextNodes;
     });
@@ -960,6 +970,14 @@ function App() {
     }));
   }, [onCreateTagForNode, projectTags]);
 
+  const requestDeleteSelectedNodes = useCallback(() => {
+    if (!selectedNodeIds.length) return;
+    const deletableNodes = deletableSelectedNodes(nodes, selectedNodeIds);
+    if (!deletableNodes.length) return;
+    const imageNodeCount = deletableNodes.filter((node) => node.data.kind === 'imageGroup').length;
+    setPendingBulkDelete(deleteSelectedNodesMessage(selectedNodeIds.length, deletableNodes.length, imageNodeCount));
+  }, [nodes, selectedNodeIds]);
+
   const deleteSelectedNodes = useCallback(async () => {
     if (!selectedNodeIds.length) return;
     const deletableNodes = deletableSelectedNodes(nodes, selectedNodeIds);
@@ -967,15 +985,13 @@ function App() {
     const deletable = new Set(deletableNodes.map((node) => node.id));
     const selectedImageNodes = deletableNodes.filter((node) => node.data.kind === 'imageGroup') as Node<ImageGroupNodeData>[];
     const selectedDraftNodes = deletableNodes.filter((node) => node.data.kind !== 'imageGroup');
-    const message = deleteSelectedNodesMessage(selectedNodeIds.length, deletableNodes.length, selectedImageNodes.length);
-    if (!window.confirm(message)) return;
     try {
       if (selectedImageNodes.length) {
         await Promise.all(selectedImageNodes.flatMap((node) => node.data.assetIds.map((assetId) => api.archiveAsset(openProjectSlug, assetId, true))));
       }
     } catch (err) {
       console.error('[photo-web] failed to archive selected image assets', err);
-      setError(String(err));
+      toast.error(formatRequestError(err));
       return;
     }
     const nextNodes = selectedDraftNodes.length
@@ -997,11 +1013,11 @@ function App() {
       const isTyping = target?.matches?.('input, textarea, select, [contenteditable="true"]');
       if (isTyping || !['Backspace', 'Delete'].includes(event.key)) return;
       event.preventDefault();
-      void deleteSelectedNodes();
+      requestDeleteSelectedNodes();
     };
     window.addEventListener('keydown', deleteOnKey);
     return () => window.removeEventListener('keydown', deleteOnKey);
-  }, [deleteSelectedNodes]);
+  }, [requestDeleteSelectedNodes]);
 
   const createDraftAt = async (
     refs: string[],
@@ -1744,7 +1760,7 @@ function App() {
         )}
         {contextMenu && isCanvasActive && (
           <div ref={contextMenuRef} className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
-            <button onClick={openImportPicker}>Import</button>
+            <button onClick={openImportPicker} disabled={isImporting}>{isImporting ? 'Importing...' : 'Import'}</button>
             <button onClick={createLooseDraft}>Generate</button>
           </div>
         )}
@@ -1820,52 +1836,47 @@ function App() {
         />
       )}
       {isCanvasActive && pendingArchive && (
-        <div className="confirm-backdrop" onClick={() => setPendingArchive(null)}>
-          <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
-            <h2>Confirm archive</h2>
-            <p>Archive this variant? Open Tags and choose Show archived to find and restore it.</p>
-            <div className="row">
-              <button
-                className="secondary"
-                onClick={() => {
-                  void performArchiveImageAsset(pendingArchive.nodeId, pendingArchive.assetId);
-                  setPendingArchive(null);
-                }}
-              >
-                Archive
-              </button>
-              <button className="secondary" onClick={() => setPendingArchive(null)}>Cancel</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Confirm archive"
+          body="Archive this variant? Open Tags and choose Show archived to find and restore it."
+          confirmLabel="Archive"
+          onConfirm={() => {
+            void performArchiveImageAsset(pendingArchive.nodeId, pendingArchive.assetId);
+            setPendingArchive(null);
+          }}
+          onCancel={() => setPendingArchive(null)}
+        />
+      )}
+      {isCanvasActive && pendingBulkDelete && (
+        <ConfirmDialog
+          title="Delete selected nodes"
+          body={pendingBulkDelete}
+          confirmLabel="Delete"
+          tone="danger"
+          onConfirm={() => {
+            setPendingBulkDelete(null);
+            void deleteSelectedNodes();
+          }}
+          onCancel={() => setPendingBulkDelete(null)}
+        />
       )}
       {isCanvasActive && pendingDelete && (
-        <div className="confirm-backdrop" onClick={() => setPendingDelete(null)}>
-          <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
-            <h2>Confirm delete</h2>
-            <p>
-              {nodes.find((node) => node.id === pendingDelete.nodeId)?.data.kind === 'imageGroup'
-                ? 'Remove this empty image node from the canvas?'
-                : 'Delete this draft?'}
-            </p>
-            <div className="row">
-              <button
-                className="danger"
-                onClick={() => {
-                  performDeleteNodeById(pendingDelete.nodeId, pendingDelete.assetId);
-                  setPendingDelete(null);
-                }}
-              >
-                Delete
-              </button>
-              <button className="secondary" onClick={() => setPendingDelete(null)}>Cancel</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Confirm delete"
+          body={nodes.find((node) => node.id === pendingDelete.nodeId)?.data.kind === 'imageGroup'
+            ? 'Remove this empty image node from the canvas?'
+            : 'Delete this draft?'}
+          confirmLabel="Delete"
+          tone="danger"
+          onConfirm={() => {
+            performDeleteNodeById(pendingDelete.nodeId, pendingDelete.assetId);
+            setPendingDelete(null);
+          }}
+          onCancel={() => setPendingDelete(null)}
+        />
       )}
       {openProjectSlug && showExportPdfModal && (
-        <div className="confirm-backdrop" onClick={() => !isExportingPdf && setShowExportPdfModal(false)}>
-          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="export-booklet-title" onClick={(event) => event.stopPropagation()}>
+        <Modal title="Export comic booklet PDF" onClose={() => !isExportingPdf && setShowExportPdfModal(false)} dialogClassName="confirm-dialog-modal" hideHeader>
             <h2 id="export-booklet-title">Export comic booklet PDF</h2>
             <p className="muted">Landscape letter sheets with saddle-stitch imposition. Print duplex on the long edge, fold, and staple on the center crease.</p>
             <fieldset className="story-panels-export-options">
@@ -1890,8 +1901,7 @@ function App() {
                 {isExportingPdf ? 'Exporting...' : 'Export PDF'}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
@@ -2250,44 +2260,41 @@ function ProjectPhaseSidebar({
         </Modal>
       )}
       {pendingTagDelete && (
-        <div className="confirm-backdrop" onClick={() => !deletingTag && setPendingTagDelete(null)}>
-          <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
-            <h2>Delete tag?</h2>
-            <p>
-              Remove tag <strong>{pendingTagDelete.name}</strong> from the project?
-            </p>
-            <p>
-              {(() => {
-                const imageCount = tagAssetCounts[pendingTagDelete.id] ?? 0;
-                if (imageCount === 0) return 'This tag is not assigned to any images.';
-                if (imageCount === 1) return 'This removes it from 1 image.';
-                return `This removes it from ${imageCount} images.`;
-              })()}
-            </p>
-            <div className="row">
-              <button
-                className="danger"
-                disabled={deletingTag}
-                onClick={async () => {
-                  setDeletingTag(true);
-                  try {
-                    await onDeleteTag(pendingTagDelete.id);
-                    setPendingTagDelete(null);
-                  } finally {
-                    setDeletingTag(false);
-                  }
-                }}
-              >
-                {deletingTag ? 'Deleting...' : 'Delete tag'}
-              </button>
-              <button className="secondary" disabled={deletingTag} onClick={() => setPendingTagDelete(null)}>Cancel</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Delete tag?"
+          body={(
+            <>
+              <p>
+                Remove tag <strong>{pendingTagDelete.name}</strong> from the project?
+              </p>
+              <p>
+                {(() => {
+                  const imageCount = tagAssetCounts[pendingTagDelete.id] ?? 0;
+                  if (imageCount === 0) return 'This tag is not assigned to any images.';
+                  if (imageCount === 1) return 'This removes it from 1 image.';
+                  return `This removes it from ${imageCount} images.`;
+                })()}
+              </p>
+            </>
+          )}
+          confirmLabel="Delete tag"
+          tone="danger"
+          busy={deletingTag}
+          busyLabel="Deleting..."
+          onConfirm={async () => {
+            setDeletingTag(true);
+            try {
+              await onDeleteTag(pendingTagDelete.id);
+              setPendingTagDelete(null);
+            } finally {
+              setDeletingTag(false);
+            }
+          }}
+          onCancel={() => setPendingTagDelete(null)}
+        />
       )}
       {pendingDelete && (
-        <div className="confirm-backdrop" onClick={() => !deleting && setPendingDelete(false)}>
-          <div className="confirm-dialog project-delete-dialog" onClick={(event) => event.stopPropagation()}>
+        <Modal title="Delete or reset?" onClose={() => !deleting && setPendingDelete(false)} dialogClassName="project-delete-dialog" hideHeader>
             <h2>Delete or reset?</h2>
             <p>
               Choose what to remove from <strong>{project?.name ?? projectSlug}</strong>. Canvas assets, tags, and
@@ -2328,27 +2335,24 @@ function ProjectPhaseSidebar({
               </button>
               <button className="secondary" disabled={deleting} onClick={() => setPendingDelete(false)}>Cancel</button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
       {pendingDeleteAction && (
-        <div className="confirm-backdrop" onClick={() => !deleting && setPendingDeleteAction(null)}>
-          <div className="confirm-dialog project-delete-dialog" onClick={(event) => event.stopPropagation()}>
-            <h2>{deleteActionCopy[pendingDeleteAction].title}</h2>
-            <p>{deleteActionCopy[pendingDeleteAction].body}</p>
-            <p className="muted">This action cannot be undone automatically.</p>
-            <div className="row">
-              <button
-                className="danger"
-                disabled={deleting}
-                onClick={() => void runDeleteAction(pendingDeleteAction)}
-              >
-                {deleteAction === pendingDeleteAction ? deleteActionCopy[pendingDeleteAction].busy : deleteActionCopy[pendingDeleteAction].confirm}
-              </button>
-              <button className="secondary" disabled={deleting} onClick={() => setPendingDeleteAction(null)}>Cancel</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title={deleteActionCopy[pendingDeleteAction].title}
+          body={(
+            <>
+              <p>{deleteActionCopy[pendingDeleteAction].body}</p>
+              <p className="muted">This action cannot be undone automatically.</p>
+            </>
+          )}
+          confirmLabel={deleteActionCopy[pendingDeleteAction].confirm}
+          tone="danger"
+          busy={deleting}
+          busyLabel={deleteActionCopy[pendingDeleteAction].busy}
+          onConfirm={() => void runDeleteAction(pendingDeleteAction)}
+          onCancel={() => setPendingDeleteAction(null)}
+        />
       )}
       </aside>
     </div>
@@ -2907,6 +2911,7 @@ function ImageViewer({
   onSetProjectCover: (assetId: string) => void;
   archivedOnly?: boolean;
 }) {
+  const toast = useToast();
   const [isSavingImage, setIsSavingImage] = useState(false);
   const viewerVariants = node ? visibleVariants(node.data.assets, node.data.assetIds, archivedOnly) : [];
   useEffect(() => {
@@ -2991,7 +2996,7 @@ function ImageViewer({
                   } catch (err) {
                     if (err instanceof DOMException && err.name === 'AbortError') return;
                     console.error('[photo-web] failed to save image', err);
-                    window.alert(err instanceof Error ? err.message : String(err));
+                    toast.error(formatRequestError(err));
                   } finally {
                     setIsSavingImage(false);
                   }
@@ -3136,6 +3141,8 @@ const nodeTypes = {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ToastProvider>
+      <App />
+    </ToastProvider>
   </React.StrictMode>,
 );

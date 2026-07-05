@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRepositionOnViewportChange } from './shared/popover';
+import { useFocusTrap, useScrollLock } from './shared/focus';
 
 export function Modal({
   title,
@@ -15,16 +16,23 @@ export function Modal({
   dialogClassName?: string;
   hideHeader?: boolean;
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(dialogRef);
+  useScrollLock(true);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Escape') return;
+      // Keep canvas-level Escape handlers from co-firing behind the dialog.
+      event.stopPropagation();
+      onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
   return (
     <div className="confirm-backdrop" onClick={onClose}>
       <div
+        ref={dialogRef}
         className={`editor-dialog${dialogClassName ? ` ${dialogClassName}` : ''}`}
         role="dialog"
         aria-modal="true"
@@ -40,6 +48,46 @@ export function Modal({
         {children}
       </div>
     </div>
+  );
+}
+
+export function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  tone = 'default',
+  busy = false,
+  busyLabel,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  body: React.ReactNode;
+  confirmLabel: string;
+  tone?: 'default' | 'danger';
+  busy?: boolean;
+  busyLabel?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Modal title={title} onClose={() => !busy && onCancel()} dialogClassName="confirm-dialog-modal" hideHeader>
+      <h2>{title}</h2>
+      {typeof body === 'string' ? <p>{body}</p> : body}
+      <div className="row modal-actions">
+        <button
+          className={tone === 'danger' ? 'danger' : ''}
+          disabled={busy}
+          onClick={onConfirm}
+          data-autofocus={tone === 'danger' ? undefined : true}
+        >
+          {busy ? (busyLabel ?? 'Working...') : confirmLabel}
+        </button>
+        <button className="secondary" disabled={busy} onClick={onCancel} data-autofocus={tone === 'danger' ? true : undefined}>
+          Cancel
+        </button>
+      </div>
+    </Modal>
   );
 }
 
