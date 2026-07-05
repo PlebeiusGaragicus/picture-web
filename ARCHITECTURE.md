@@ -70,14 +70,13 @@ view and is transport-independent.
 
 See [pi-idea.md](pi-idea.md) for the full verified design (pi SDK/RPC/extension findings, PiSessionManager, streaming chat, domain tools).
 
-Replace the detached-bash layer with an in-process **JobManager** (threads,
-status registry, cancellation by terminating the pi process group; still
-snapshotting status JSON so an API restart reports "interrupted" instead of a
-stale "running"). `PiRpcClient` stays the transport behind a small
-`PiSession.run_task(prompt, fork_from, on_event)` interface. Before swapping the
-transport for a pi SDK / server mode, verify: whether pi ships a programmatic
-API, the stability of the `--mode rpc` message schema, cancellation support,
-and whether one pi process can host concurrent sessions.
+Replace the detached-bash layer with an in-process **PiSessionManager** (threads,
+event ring buffers + SSE streaming, cancellation via the RPC `abort` command,
+status snapshots so an API restart reports "interrupted" instead of a stale
+"running"). The `pi --mode rpc` transport stays: pi-idea.md records the verified
+answers to the former unknowns (pi ships a Node SDK; the RPC schema is a typed
+published contract with abort/new_session/steer; one process hosts sequential
+sessions; extensions can register LLM-callable tools).
 
 ## Frontend map
 
@@ -98,8 +97,8 @@ and whether one pi process can host concurrent sessions.
 - `canvas/nodeTagActions.ts` is a module-level mutable ref that bridges main.tsx
   callbacks into React Flow node components. It bypasses React data flow but is
   the sanctioned pattern here until the canvas gets a real store.
-- `style.css` is one file. Add new styles next to the related rules; a per-area
-  split needs visual verification of cascade order first.
+- CSS lives in per-area files under `webui/src/styles/` with tokens in
+  `tokens.css`; load order in `styles/index.css` is load-bearing.
 - Lazy `import adaptation` inside functions breaks import cycles between
   `adaptation`, `library`, `style_refs`, and `visual_styles`. Documented,
   intentional; don't add new cycles.
