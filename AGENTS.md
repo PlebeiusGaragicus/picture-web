@@ -47,7 +47,9 @@ After code changes, run the smallest pytest command that covers the behavior you
 
 ## Frontend gate
 
-The frontend has no test rig; `cd webui && npm run build` (tsc + vite) is the gate after any webui change. Use `npm run typecheck` for a faster tsc-only pass.
+After any webui change, run `cd webui && npm run build` (tsc + vite) **and** `npm run test:e2e` (Playwright smoke: boots API+UI against an isolated fixture library, walks all six views, asserts no console errors, compares screenshots against `webui/e2e/baselines/`). Use `npm run typecheck` for a faster tsc-only pass while iterating.
+
+Screenshot baselines are committed. A commit that intentionally changes pixels must refresh them (`npm run test:e2e:update`) in the same commit and say so in the message; every other commit must pass on the existing baselines.
 
 ## Backend conventions
 
