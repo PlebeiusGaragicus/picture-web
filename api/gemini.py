@@ -15,7 +15,7 @@ from google.genai import types
 from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-LIBRARY_ROOT = REPO_ROOT / "photo-library"
+LIBRARY_ROOT = Path(os.environ.get("PHOTO_WEB_LIBRARY_ROOT", str(REPO_ROOT / "photo-library")))
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gemini-3.1-flash-image"

@@ -12,7 +12,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = REPO_ROOT / ".pi" / "skills"
-LIBRARY_ROOT = REPO_ROOT / "photo-library"
+LIBRARY_ROOT = Path(os.environ.get("PHOTO_WEB_LIBRARY_ROOT", str(REPO_ROOT / "photo-library")))
 
 WORKFLOW_STAGES = ("ingest", "characters", "scene-list", "scenes", "locations", "moments", "all")
 STYLE_TEMPLATE = "Style:\nColor palette:\nRealism:\nLighting:\n"
