@@ -13,35 +13,35 @@
   height: 18px;
   padding: 0;
   flex: 0 0 auto;
-  color: #94a3b8;
-  background: rgb(148 163 184 / 0.14);
-  border: 1px solid rgb(148 163 184 / 0.3);
-  border-radius: 999px;
-  font-size: 11px;
+  color: var(--text-muted);
+  background: rgb(var(--slate-400-rgb) / 0.14);
+  border: 1px solid rgb(var(--slate-400-rgb) / 0.3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
   font-weight: 800;
   line-height: 1;
 }
 
 .help-tip:hover {
-  color: #e2e8f0;
-  border-color: #475569;
+  color: var(--slate-200);
+  border-color: var(--border-strong);
 }
 
 .help-tip-bubble {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 50%;
-  z-index: 60;
+  z-index: var(--z-sidebar);
   width: max-content;
   max-width: 260px;
   transform: translateX(-50%);
   padding: 8px 10px;
-  color: #e5e7eb;
-  background: #020617;
-  border: 1px solid #475569;
-  border-radius: 8px;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
-  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+  font-size: var(--text-sm);
   font-weight: 500;
   line-height: 1.45;
   text-transform: none;
@@ -65,7 +65,7 @@
 
 .help-tip-bubble.is-portaled {
   position: fixed;
-  z-index: 250;
+  z-index: calc(var(--z-popover) + 50);
   bottom: auto;
   opacity: 1;
   visibility: visible;
@@ -104,7 +104,7 @@
   z-index: 120;
   display: grid;
   place-items: center;
-  background: rgb(2 6 23 / 0.72);
+  background: rgb(var(--slate-950-rgb) / 0.72);
 }
 
 .confirm-dialog {
@@ -112,11 +112,11 @@
   gap: 14px;
   width: min(380px, calc(100vw - 32px));
   padding: 18px;
-  color: #e5e7eb;
-  background: #0f172a;
-  border: 1px solid #475569;
-  border-radius: 16px;
-  box-shadow: 0 24px 80px rgb(0 0 0 / 0.5);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-4);
 }
 
 .confirm-dialog h2,

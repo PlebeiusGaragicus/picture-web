@@ -1,7 +1,7 @@
 /* Image refinement chat panel. */
 
 .chat-refinement-panel {
-  border-left: 1px solid #334155;
+  border-left: 1px solid var(--border);
 }
 
 .chat-message-list {
@@ -14,13 +14,13 @@
   display: grid;
   gap: 6px;
   padding: 10px;
-  border: 1px solid #334155;
-  border-radius: 12px;
-  background: #111827;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-app);
 }
 
 .chat-turn.user {
-  border-color: #2563eb;
+  border-color: var(--blue-600);
 }
 
 .chat-turn.model {
@@ -29,7 +29,7 @@
 
 .chat-turn p {
   margin: 0;
-  color: #cbd5e1;
+  color: var(--text-secondary);
   white-space: pre-wrap;
 }
 
@@ -44,9 +44,9 @@
   height: 54px;
   padding: 0;
   overflow: hidden;
-  border: 1px solid #475569;
-  border-radius: 8px;
-  background: #fff;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--white);
 }
 
 .chat-thumb.generated {
@@ -65,13 +65,13 @@
   gap: 8px;
   align-items: center;
   padding: 10px;
-  border-radius: 10px;
-  font-size: 13px;
+  border-radius: var(--radius-lg);
+  font-size: var(--text-md);
   font-weight: 700;
 }
 
 .chat-generation-status {
-  color: #dbeafe;
+  color: var(--blue-100);
   background: rgb(30 64 175 / 0.32);
-  border: 1px solid #2563eb;
+  border: 1px solid var(--blue-600);
 }

@@ -47,8 +47,8 @@
   width: 100%;
   aspect-ratio: 4 / 5;
   min-height: 200px;
-  background: rgb(2 6 23 / 0.72);
-  border-bottom: 1px solid #334155;
+  background: rgb(var(--slate-950-rgb) / 0.72);
+  border-bottom: 1px solid var(--border);
 }
 
 .character-hub-thumb.has-image {
@@ -70,11 +70,11 @@
   width: 48px;
   height: 48px;
   padding: 0;
-  color: #dbeafe;
-  background: radial-gradient(circle, rgb(15 23 42 / 0.72) 0%, rgb(15 23 42 / 0.52) 46%, rgb(15 23 42 / 0.12) 100%);
-  border: 1px solid rgb(255 255 255 / 0.18);
-  border-radius: 999px;
-  box-shadow: 0 10px 24px rgb(0 0 0 / 0.28);
+  color: var(--blue-100);
+  background: radial-gradient(circle, rgb(var(--slate-900-rgb) / 0.72) 0%, rgb(var(--slate-900-rgb) / 0.52) 46%, rgb(var(--slate-900-rgb) / 0.12) 100%);
+  border: 1px solid rgb(var(--white-rgb) / 0.18);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-1);
   backdrop-filter: blur(2px);
   opacity: 0;
   transform: translate(-50%, -50%);
@@ -99,12 +99,12 @@
   justify-content: space-between;
   gap: 8px;
   padding: 4px 6px;
-  color: #e2e8f0;
+  color: var(--slate-200);
   font-size: 0.72rem;
   font-weight: 700;
-  background: rgb(2 6 23 / 0.72);
-  border: 1px solid rgb(148 163 184 / 0.28);
-  border-radius: 999px;
+  background: rgb(var(--slate-950-rgb) / 0.72);
+  border: 1px solid rgb(var(--slate-400-rgb) / 0.28);
+  border-radius: var(--radius-full);
   backdrop-filter: blur(2px);
 }
 
@@ -116,7 +116,7 @@
   padding: 0;
   font-size: 1rem;
   line-height: 1;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
 }
 
 .character-hub-body {
@@ -151,7 +151,7 @@
 }
 
 .confirm-backdrop.character-delete-confirm {
-  z-index: 300;
+  z-index: var(--z-modal);
 }
 
 .character-delete-confirm-dialog {
@@ -187,10 +187,10 @@
 .character-edit-form input[type='text'] {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #334155;
-  border-radius: 10px;
-  background: rgb(2 6 23 / 0.72);
-  color: #e2e8f0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgb(var(--slate-950-rgb) / 0.72);
+  color: var(--slate-200);
 }
 
 .character-edit-description {
@@ -205,7 +205,7 @@
 .character-edit-section-heading {
   margin: 2px 0 0;
   font-size: 0.92rem;
-  color: #cbd5e1;
+  color: var(--text-secondary);
 }
 
 .character-edit-variant-item {

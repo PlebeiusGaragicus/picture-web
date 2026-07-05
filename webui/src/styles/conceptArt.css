@@ -21,7 +21,7 @@
 }
 
 .concept-art-styles-panel .visual-style-panel-head h2 {
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .concept-art-styles-panel .visual-style-chip {
@@ -77,7 +77,7 @@
 
 .concept-art-toolbar-label {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -113,10 +113,10 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: #cbd5e1;
-  background: rgb(51 65 85 / 0.55);
-  border: 1px solid #334155;
-  border-radius: 999px;
+  color: var(--text-secondary);
+  background: rgb(var(--slate-700-rgb) / 0.55);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
 }
 
 .concept-art-style-hint {
@@ -182,13 +182,13 @@
 .visual-style-default-badge {
   margin-left: 0;
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
-  color: #86efac;
+  color: var(--green-300);
   vertical-align: middle;
   background: rgb(34 197 94 / 0.12);
   border: 1px solid rgb(34 197 94 / 0.28);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   flex-shrink: 0;
 }
 
@@ -208,13 +208,13 @@
 
 .visual-style-panel-head h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
 }
 
 .visual-style-empty {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .visual-style-chip-grid {
@@ -236,7 +236,7 @@
   padding: 10px 12px;
   background: #0a0a0a;
   border: 1px solid #262626;
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
 }
 
 .visual-style-chip.is-default {
@@ -256,7 +256,7 @@
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -272,7 +272,7 @@
   padding: 0;
   overflow: hidden;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.4;
   color: #737373;
   text-align: left;
