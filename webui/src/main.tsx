@@ -1371,7 +1371,7 @@ function App() {
         type="button"
         role="tab"
         aria-selected={phaseViewMode !== 'canvas'}
-        className={phaseViewMode !== 'canvas' ? 'active' : ''}
+        className={phaseViewMode !== 'canvas' ? 'is-active' : ''}
         onClick={() => setPhaseViewMode('list')}
       >
         List
@@ -1380,7 +1380,7 @@ function App() {
         type="button"
         role="tab"
         aria-selected={phaseViewMode === 'canvas'}
-        className={phaseViewMode === 'canvas' ? 'active' : ''}
+        className={phaseViewMode === 'canvas' ? 'is-active' : ''}
         onClick={() => setPhaseViewMode('canvas')}
       >
         Canvas
@@ -1394,7 +1394,7 @@ function App() {
         type="button"
         role="tab"
         aria-selected={phaseViewMode !== 'canvas'}
-        className={phaseViewMode !== 'canvas' ? 'active' : ''}
+        className={phaseViewMode !== 'canvas' ? 'is-active' : ''}
         onClick={() => setPhaseViewMode('list')}
       >
         List
@@ -1403,7 +1403,7 @@ function App() {
         type="button"
         role="tab"
         aria-selected={phaseViewMode === 'canvas'}
-        className={phaseViewMode === 'canvas' ? 'active' : ''}
+        className={phaseViewMode === 'canvas' ? 'is-active' : ''}
         onClick={() => setPhaseViewMode('canvas')}
       >
         Canvas
@@ -2440,7 +2440,7 @@ function FloatingTagsMenu({
           footer={(
             <button
               type="button"
-              className={showArchived ? 'active' : ''}
+              className={showArchived ? 'is-active' : ''}
               onClick={() => onShowArchivedChange(!showArchived)}
             >
               {showArchived ? 'Show active' : 'Show archived'}

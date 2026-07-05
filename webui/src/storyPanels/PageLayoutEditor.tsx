@@ -2128,7 +2128,7 @@ export function PageLayoutEditor({
                   <div className="story-panels-kind-toggle" role="tablist" aria-label="Panel kind">
                     <button
                       type="button"
-                      className={panelKindHost.panelKind === 'image' ? 'active' : ''}
+                      className={panelKindHost.panelKind === 'image' ? 'is-active' : ''}
                       role="tab"
                       aria-selected={panelKindHost.panelKind === 'image'}
                       disabled={isSaving}
@@ -2138,7 +2138,7 @@ export function PageLayoutEditor({
                     </button>
                     <button
                       type="button"
-                      className={panelKindHost.panelKind === 'text' ? 'active' : ''}
+                      className={panelKindHost.panelKind === 'text' ? 'is-active' : ''}
                       role="tab"
                       aria-selected={panelKindHost.panelKind === 'text'}
                       disabled={isSaving}
@@ -2191,7 +2191,7 @@ export function PageLayoutEditor({
                         </button>
                         <button
                           type="button"
-                          className={`secondary ${imageInfoHost.aspectRatioLocked ? 'active' : ''}`}
+                          className={`secondary ${imageInfoHost.aspectRatioLocked ? 'is-active' : ''}`}
                           disabled={isSaving}
                           onClick={() => togglePanelAspectRatioLock(imageInfoHost)}
                         >
@@ -2200,7 +2200,7 @@ export function PageLayoutEditor({
                         <div className="story-panels-info-aspect-popover-wrap">
                           <button
                             type="button"
-                            className={`secondary ${ratioPopoverOpen ? 'active' : ''}`}
+                            className={`secondary ${ratioPopoverOpen ? 'is-active' : ''}`}
                             disabled={isSaving}
                             onClick={() => {
                               setSizePopoverOpen(false);
@@ -2216,7 +2216,7 @@ export function PageLayoutEditor({
                                   key={ratio}
                                   type="button"
                                   role="menuitem"
-                                  className={imageInfoHost.aspectRatio === ratio ? 'active' : ''}
+                                  className={imageInfoHost.aspectRatio === ratio ? 'is-active' : ''}
                                   disabled={isSaving}
                                   onClick={() => {
                                     snapPanelToAspectRatio(imageInfoHost, ratio);
@@ -2232,7 +2232,7 @@ export function PageLayoutEditor({
                         <div className="story-panels-info-size-popover-wrap">
                           <button
                             type="button"
-                            className={`secondary ${sizePopoverOpen ? 'active' : ''}`}
+                            className={`secondary ${sizePopoverOpen ? 'is-active' : ''}`}
                             disabled={isSaving}
                             onClick={() => {
                               setRatioPopoverOpen(false);
@@ -2259,7 +2259,7 @@ export function PageLayoutEditor({
                                       imageInfoHost.rect.w,
                                       gridColumns,
                                       fraction,
-                                    ) ? 'active' : ''}
+                                    ) ? 'is-active' : ''}
                                     disabled={isSaving}
                                     onClick={() => {
                                       snapPanelToPageSizeFraction(imageInfoHost, 'width', fraction);
@@ -2273,7 +2273,7 @@ export function PageLayoutEditor({
                                       imageInfoHost.rect.h,
                                       LAYOUT_PAGE_ROWS,
                                       fraction,
-                                    ) ? 'active' : ''}
+                                    ) ? 'is-active' : ''}
                                     disabled={isSaving}
                                     onClick={() => {
                                       snapPanelToPageSizeFraction(imageInfoHost, 'height', fraction);
@@ -2363,7 +2363,7 @@ export function PageLayoutEditor({
                               <div className="story-panels-info-caption-style-wrap">
                                 <button
                                   type="button"
-                                  className={`story-panels-caption-style-button ${captionStylePopoverId === caption.id ? 'active' : ''}`}
+                                  className={`story-panels-caption-style-button ${captionStylePopoverId === caption.id ? 'is-active' : ''}`}
                                   disabled={isSaving}
                                   aria-label={`Style ${captionLabel(index)}`}
                                   aria-expanded={captionStylePopoverId === caption.id}
@@ -2383,7 +2383,7 @@ export function PageLayoutEditor({
                                       <div className="story-panels-caption-style-options">
                                         <button
                                           type="button"
-                                          className={captionSpeechKindFor(captionStyleForPanel(caption)) === 'dialogue' ? 'active' : ''}
+                                          className={captionSpeechKindFor(captionStyleForPanel(caption)) === 'dialogue' ? 'is-active' : ''}
                                           disabled={isSaving}
                                           onClick={() => setCaptionSpeechKind(caption.id, 'dialogue')}
                                         >
@@ -2391,7 +2391,7 @@ export function PageLayoutEditor({
                                         </button>
                                         <button
                                           type="button"
-                                          className={captionSpeechKindFor(captionStyleForPanel(caption)) === 'narration' ? 'active' : ''}
+                                          className={captionSpeechKindFor(captionStyleForPanel(caption)) === 'narration' ? 'is-active' : ''}
                                           disabled={isSaving}
                                           onClick={() => setCaptionSpeechKind(caption.id, 'narration')}
                                         >
@@ -2424,7 +2424,7 @@ export function PageLayoutEditor({
                                           <button
                                             key={color}
                                             type="button"
-                                            className={captionStyleForPanel(caption).color === color ? 'active' : ''}
+                                            className={captionStyleForPanel(caption).color === color ? 'is-active' : ''}
                                             disabled={isSaving}
                                             aria-label={color}
                                             style={{ backgroundColor: color }}
@@ -2450,7 +2450,7 @@ export function PageLayoutEditor({
                                             <button
                                               key={`outline-${color}`}
                                               type="button"
-                                              className={captionStyleForPanel(caption).outlineColor === color ? 'active' : ''}
+                                              className={captionStyleForPanel(caption).outlineColor === color ? 'is-active' : ''}
                                               disabled={isSaving}
                                               aria-label={color}
                                               style={{ backgroundColor: color }}
@@ -2674,7 +2674,7 @@ export function PageLayoutEditor({
                       <>
                         <button
                           type="button"
-                          className={cropModePanelId === menuPanel.id ? 'active' : ''}
+                          className={cropModePanelId === menuPanel.id ? 'is-active' : ''}
                           onClick={() => {
                             onSelectPanel(menuPanel.id);
                             setCropModePanelId((current) => (current === menuPanel.id ? null : menuPanel.id));

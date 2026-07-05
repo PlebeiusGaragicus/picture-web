@@ -72,7 +72,7 @@ export function TagColorPickerPopover({
         <button
           key={color}
           type="button"
-          className={selectedColor === color ? 'active' : ''}
+          className={selectedColor === color ? 'is-active' : ''}
           onClick={() => {
             onSelect(color);
             onClose();
@@ -157,7 +157,7 @@ export function EntityTagSection({
         {suggestions.map((tag) => (
           <button
             key={tag.id}
-            className={`entity-tag-suggestion ${selected.has(tag.id) ? 'active' : ''}`}
+            className={`entity-tag-suggestion ${selected.has(tag.id) ? 'is-active' : ''}`}
             onClick={(event) => {
               event.stopPropagation();
               toggleTag(tag.id);
@@ -250,7 +250,7 @@ export function EntityTagPopover({
         {suggestions.map((tag) => (
           <button
             key={tag.id}
-            className={`entity-tag-suggestion ${selected.has(tag.id) ? 'active' : ''}`}
+            className={`entity-tag-suggestion ${selected.has(tag.id) ? 'is-active' : ''}`}
             onClick={(event) => {
               event.stopPropagation();
               toggleTag(tag.id);
@@ -361,7 +361,7 @@ export function UserTagColumn({
         {suggestions.map((tag) => (
           <button
             key={tag.id}
-            className={selected.has(tag.id) ? 'active' : ''}
+            className={selected.has(tag.id) ? 'is-active' : ''}
             onClick={(event) => {
               event.stopPropagation();
               toggleTag(tag.id);
@@ -382,7 +382,7 @@ export function UserTagColumn({
               {tagColors.map((color) => (
                 <button
                   key={color}
-                  className={selectedColor === color ? 'active' : ''}
+                  className={selectedColor === color ? 'is-active' : ''}
                   onClick={() => setSelectedColor(color)}
                   aria-label={`Use ${color}`}
                   style={{ backgroundColor: color }}

@@ -84,23 +84,27 @@ textarea {
   min-height: 100px;
 }
 
+/* The de-facto base button. Variants and one-off button families override
+   the --btn-* hooks instead of restating the whole visual. */
 button {
-  padding: 8px 10px;
-  color: var(--slate-900);
-  background: var(--blue-300);
-  border: 0;
-  border-radius: var(--radius-md);
-  font-weight: 700;
+  padding: var(--btn-pad, 8px 10px);
+  color: var(--btn-fg, var(--slate-900));
+  background: var(--btn-bg, var(--blue-300));
+  border: var(--btn-border, 0);
+  border-radius: var(--btn-radius, var(--radius-md));
+  font-weight: var(--btn-weight, 700);
+  font-size: var(--btn-font, inherit);
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
 }
 
 button.secondary {
-  color: var(--text-primary);
-  background: var(--border);
+  --btn-fg: var(--text-primary);
+  --btn-bg: var(--border);
 }
 
 button.danger {
-  color: var(--white);
-  background: #dc2626;
+  --btn-fg: var(--white);
+  --btn-bg: #dc2626;
 }
 
 .small-button {
@@ -186,4 +190,10 @@ pre {
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--slate-600) transparent;
+}
+
+/* One focus ring for every interactive element. */
+:is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }

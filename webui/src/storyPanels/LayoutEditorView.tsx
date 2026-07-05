@@ -301,7 +301,7 @@ export function LayoutEditorView({
           >
             <button
               type="button"
-              className={`secondary small-button layout-view-export-button ${singlePagePreviewMode === 'print' ? 'active' : ''}`}
+              className={`secondary small-button layout-view-export-button ${singlePagePreviewMode === 'print' ? 'is-active' : ''}`}
               disabled={isSaving}
               aria-pressed={singlePagePreviewMode === 'print'}
               aria-label={singlePagePreviewMode === 'print' ? 'Hide print preview' : 'Show print preview'}
@@ -313,7 +313,7 @@ export function LayoutEditorView({
           {layoutMode === 'spread' && (
             <button
               type="button"
-              className={`secondary small-button layout-view-spread-info-toggle ${spreadPanelInfoEnabled ? 'active' : ''}`}
+              className={`secondary small-button layout-view-spread-info-toggle ${spreadPanelInfoEnabled ? 'is-active' : ''}`}
               disabled={isSaving}
               aria-pressed={spreadPanelInfoEnabled}
               aria-label={spreadPanelInfoEnabled ? 'Hide panel info in spread view' : 'Show panel info in spread view'}
@@ -329,7 +329,7 @@ export function LayoutEditorView({
             <div className="story-panels-preview-toggle" role="group" aria-label="Side panel">
               <button
                 type="button"
-                className={singleSidePanel === 'info' ? 'active' : ''}
+                className={singleSidePanel === 'info' ? 'is-active' : ''}
                 disabled={isSaving}
                 aria-pressed={singleSidePanel === 'info'}
                 onClick={() => selectSingleSidePanel('info')}
@@ -338,7 +338,7 @@ export function LayoutEditorView({
               </button>
               <button
                 type="button"
-                className={singleSidePanel === 'chunks' ? 'active' : ''}
+                className={singleSidePanel === 'chunks' ? 'is-active' : ''}
                 disabled={isSaving}
                 aria-pressed={singleSidePanel === 'chunks'}
                 onClick={() => selectSingleSidePanel('chunks')}

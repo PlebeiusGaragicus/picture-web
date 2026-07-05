@@ -824,7 +824,7 @@ export function PanelChunkList({
                 <div className="story-panels-kind-toggle" role="tablist" aria-label="Panel kind">
                   <button
                     type="button"
-                    className={panelEditorKind === 'image' ? 'active' : ''}
+                    className={panelEditorKind === 'image' ? 'is-active' : ''}
                     role="tab"
                     aria-selected={panelEditorKind === 'image'}
                     disabled={isCreating}
@@ -834,7 +834,7 @@ export function PanelChunkList({
                   </button>
                   <button
                     type="button"
-                    className={panelEditorKind === 'text' ? 'active' : ''}
+                    className={panelEditorKind === 'text' ? 'is-active' : ''}
                     role="tab"
                     aria-selected={panelEditorKind === 'text'}
                     disabled={isCreating}

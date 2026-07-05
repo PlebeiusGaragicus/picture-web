@@ -53,8 +53,8 @@
   align-items: center;
 }
 
-.layout-view-export-button.active,
-.layout-view-spread-info-toggle.active {
+.layout-view-export-button.is-active,
+.layout-view-spread-info-toggle.is-active {
   color: #0b1120;
   background: var(--blue-300);
   border-color: var(--blue-300);

@@ -1501,7 +1501,7 @@
   color: var(--slate-200);
 }
 
-.story-panels-preview-toggle button.active {
+.story-panels-preview-toggle button.is-active {
   color: #0b1120;
   background: var(--blue-300);
 }
@@ -2025,7 +2025,7 @@
   color: var(--slate-200);
 }
 
-.story-panels-kind-toggle button.active {
+.story-panels-kind-toggle button.is-active {
   color: #0b1120;
   background: var(--blue-300);
 }
@@ -2162,7 +2162,7 @@
 }
 
 .story-panels-caption-style-button:hover:not(:disabled),
-.story-panels-caption-style-button.active {
+.story-panels-caption-style-button.is-active {
   border-color: var(--blue-300);
   background: rgb(30 58 138 / 0.25);
 }
@@ -2226,7 +2226,7 @@
   font-size: var(--text-xs);
 }
 
-.story-panels-caption-style-options button.active {
+.story-panels-caption-style-options button.is-active {
   border-color: var(--blue-300);
   background: rgb(30 58 138 / 0.35);
 }
@@ -2246,7 +2246,7 @@
   cursor: pointer;
 }
 
-.story-panels-caption-color-presets button.active {
+.story-panels-caption-color-presets button.is-active {
   border-color: var(--blue-300);
   box-shadow: 0 0 0 1px var(--blue-300);
 }
@@ -2375,7 +2375,7 @@
   text-align: left;
 }
 
-.story-panels-aspect-ratio-popover button.active {
+.story-panels-aspect-ratio-popover button.is-active {
   background: var(--bg-raised);
   border-color: var(--blue-300);
 }
@@ -2417,7 +2417,7 @@
   text-align: center;
 }
 
-.story-panels-page-size-popover-row button.active {
+.story-panels-page-size-popover-row button.is-active {
   background: var(--bg-raised);
   border-color: var(--blue-300);
 }

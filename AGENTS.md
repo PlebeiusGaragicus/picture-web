@@ -66,4 +66,6 @@ Screenshot baselines are committed. A commit that intentionally changes pixels m
 - **Directory per feature:** `canvas/`, `storyPanels/`, `sessions/`, `conceptArt/`, `characters/`, `visualStyles/`; cross-feature helpers in `shared/` and `ui.tsx`.
 - **Errors:** use `formatRequestError` and surface a view-local error banner; no empty `catch {}` — at minimum `console.error` plus a user-visible state.
 - **Debug logging** follows `import.meta.env.DEV`.
-- **CSS:** one `style.css` for now; add new rules next to the related ones. See ARCHITECTURE.md for the documented warts (nodeTagActions singleton, CSS split deferred).
+- **CSS:** per-area files under `webui/src/styles/` loaded in the order declared by `styles/index.css` (reset → tokens → base → features). New rules go in the owning area file and use the tokens in `styles/tokens.css` (`--bg-*`, `--text-*`, `--border*`, `--accent*`, spacing/radius/type scales) instead of raw values.
+- **Buttons:** the `button` element style in `styles/base.css` is the base; variants and one-off button families override the `--btn-*` custom-property hooks (`--btn-bg/--btn-fg/--btn-border/--btn-radius/--btn-pad/--btn-font/--btn-weight`) rather than restating the visual. Active/selected state class is `is-active` (never `active`).
+- **classNames:** use `clsx` for conditional classes in new or touched code.

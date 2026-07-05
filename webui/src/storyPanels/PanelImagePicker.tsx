@@ -111,7 +111,7 @@ export function PanelImagePicker({
               footer={(
                 <button
                   type="button"
-                  className={showArchived ? 'active' : ''}
+                  className={showArchived ? 'is-active' : ''}
                   onClick={() => setShowArchived((current) => !current)}
                 >
                   {showArchived ? 'Hide archived' : 'Show archived'}

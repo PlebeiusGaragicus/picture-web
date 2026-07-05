@@ -393,7 +393,7 @@
   font-weight: 800;
 }
 
-.view-switcher button.active {
+.view-switcher button.is-active {
   color: var(--slate-900);
   background: var(--blue-300);
 }
@@ -705,7 +705,7 @@
   color: var(--slate-200);
 }
 
-.phase-view-toggle button.active {
+.phase-view-toggle button.is-active {
   color: #0b1120;
   background: var(--blue-300);
 }
