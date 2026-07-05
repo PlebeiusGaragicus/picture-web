@@ -11,6 +11,8 @@ import { readSinglePagePreviewMode, writeSinglePagePreviewMode, type SinglePageP
 import { sortedPanels } from './storyPanelUtils';
 import { isEditableShortcutTarget } from '../shared/dom';
 import { useStoryPanelDocument } from './useStoryPanelDocument';
+import { PiTaskPanel } from '../sessions/PiTaskPanel';
+import { usePiTask } from '../sessions/usePiTask';
 import { formatRequestError } from '../formatError';
 import { HoverTooltip } from '../ui';
 import { api } from '../api';
@@ -63,6 +65,7 @@ export function LayoutEditorView({
     assets,
     projectTags,
     canvas,
+    reload,
   } = useStoryPanelDocument(projectSlug, { withCanvasContext: true });
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [focusedChunkPanelId, setFocusedChunkPanelId] = useState<string | null>(null);
@@ -74,6 +77,18 @@ export function LayoutEditorView({
   const [singleSidePanel, setSingleSidePanel] = useState<SingleSidePanel>(readSingleSidePanel);
   const [singlePagePreviewMode, setSinglePagePreviewMode] = useState<SinglePagePreviewMode>(readSinglePagePreviewMode);
   const [isPlacingPanel, setIsPlacingPanel] = useState(false);
+  const [promptRefreshKey, setPromptRefreshKey] = useState(0);
+
+  // Panel-prompt pi tasks: on finish, reload the document and bump the key so
+  // an open panel editor re-syncs its image-prompt drafts from the server.
+  const onPromptTaskFinished = async (state: string) => {
+    if (state !== 'done') return;
+    await reload();
+    setPromptRefreshKey((current) => current + 1);
+  };
+  const draftPromptTask = usePiTask(projectSlug, 'draft-panel-prompt', onPromptTaskFinished);
+  const refinePromptTask = usePiTask(projectSlug, 'refine-panel-prompt', onPromptTaskFinished);
+  const promptTaskBusy = draftPromptTask.isActive || refinePromptTask.isActive;
 
   const selectSingleSidePanel = (panel: SingleSidePanel) => {
     writeSingleSidePanel(panel);
@@ -284,6 +299,11 @@ export function LayoutEditorView({
       onDeletePanel={handleDeletePanel}
       onInsertDraft={insertDraft}
       onSavePanelEdit={savePanelEdit}
+      onDraftPrompt={(panelId, instructions) => void draftPromptTask.start({ target: panelId, instructions })}
+      onRefinePrompt={(panelId, promptId, feedback) =>
+        void refinePromptTask.start({ target: `${panelId}:${promptId}`, instructions: feedback })}
+      promptTaskBusy={promptTaskBusy}
+      promptRefreshKey={promptRefreshKey}
       isSaving={isSaving || isPlacingPanel}
     />
   );
@@ -353,6 +373,26 @@ export function LayoutEditorView({
         </div>
       </header>
       {error && <p className="error error-banner layout-view-error">{error}</p>}
+      {draftPromptTask.state !== null && (
+        <PiTaskPanel
+          title="Draft panel prompt"
+          state={draftPromptTask.state}
+          events={draftPromptTask.events}
+          error={draftPromptTask.error}
+          onAbort={() => void draftPromptTask.abort()}
+          onDismiss={draftPromptTask.dismiss}
+        />
+      )}
+      {refinePromptTask.state !== null && (
+        <PiTaskPanel
+          title="Refine panel prompt"
+          state={refinePromptTask.state}
+          events={refinePromptTask.events}
+          error={refinePromptTask.error}
+          onAbort={() => void refinePromptTask.abort()}
+          onDismiss={refinePromptTask.dismiss}
+        />
+      )}
       <div className="layout-view-workspace">
         <PageLayoutEditor
           document={document}

@@ -7,9 +7,8 @@ that touches the filesystem, validation, Gemini, and the pi agent.
 ```text
 webui (React, React Flow)  ── REST /api ──  api (FastAPI)
                                               ├─ gemini.py            → Google GenAI image generation
-                                              ├─ adaptation_jobs.py   → detached pi agent jobs
-                                              │    └─ python -m adaptation_workflow …
-                                              │         └─ pi --mode rpc (JSON-RPC subprocess)
+                                              ├─ pi_runtime.py        → in-process pi tasks
+                                              │    └─ pi --mode rpc (JSON-RPC subprocess)
                                               └─ photo-library/       → all pixels + JSON
 ```
 
@@ -26,12 +25,12 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
 | `adaptation.py` | Adaptation core: `adaptation/` dir + `adaptation.json` metadata, book text, character records, editable character/location files. |
 | `visual_styles.py` | Reusable style snippets appended to generation prompts. |
 | `style_refs.py` | Archetype style references: prompt files, canonical asset ids, canvas projection (`sync_style_ref_canvas_nodes`). |
-| `adaptation_jobs.py` | Detached pi job launch + status-JSON contract (see below). |
 | `canvas_nodes.py` | Canvas node factories (image groups, character/location spawns). |
 | `chat_sessions.py` | Gemini image-refinement chats (thought signatures preserved, archive-first). |
-| `agent_sessions.py` / `book_chat_sessions.py` / `book_session_load.py` / `pi_session_trace.py` | Pi agent session registry, book chats, read-book loading, session-file trace parsing. |
+| `agent_sessions.py` / `book_chat_sessions.py` / `pi_session_trace.py` | Pi agent session registry, book chats, session-file trace parsing. |
+| `pi_runtime.py` / `pi_profiles.py` | In-process pi task runtime (one `pi --mode rpc` subprocess per step, `task_progress` between steps, SSE event ring buffer, abort, restart-safe snapshots) and the narrow task profiles it runs (`read-book`, `extract-character-list`, `extract-character` (targeted), `extract-all-characters` (multi-step), `suggest-concept-character/location`). |
 | `story_panels.py` / `story_panels_print.py` | Panel chunks, page layout, booklet PDF (reportlab). |
-| `adaptation_workflow/` | Subprocess-side pi orchestration: `config.py` (context, pi/node discovery), `runner.py` (per-job entry points), `steps.py` (`StepRunner`), `pi_rpc.py` (`PiRpcClient`), `character_file.py`, `concept_art.py`, `validate.py`, `events.py`, `diagnostics.py`. |
+| `adaptation_workflow/` | Pi plumbing shared by `pi_runtime` and book chat: `config.py` (context, pi/node discovery), `pi_rpc.py` (`PiRpcClient`, book chat only), `character_file.py`, `concept_art.py`, `validate.py`, `events.py` (`project_event`), `diagnostics.py` (`TaskDiagnostics`). |
 
 ## Canvas model
 
@@ -51,32 +50,34 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
 
 ## The pi agent seam
 
-Two invocation paths, both ultimately speaking JSON-RPC to a `pi --mode rpc`
-subprocess via `adaptation_workflow/pi_rpc.py` (`PiRpcClient.run_task`):
+Two invocation paths (the first is the target; book chat is legacy — see
+pi-idea.md):
 
-1. **Async jobs** (read-book, character list/extract, concept generate):
-   endpoint → `adaptation_jobs.start_logged_process` spawns a detached
-   `bash -lc "cd api && python -m adaptation_workflow <cmd> …"` with a status
-   JSON (`running`, `pid`, `processStartTime`, `returnCode`) next to the job
-   logs. Liveness checks require both the PID *and* its kernel start time to
-   match, so PID reuse can't report a dead job as running.
+1. **Pi tasks** (read-book, character list/extract, concept suggest): endpoint
+   → `pi_runtime.PiSessionManager` runs the profile's step plan, one
+   `pi --mode rpc` subprocess per step (threads, in-process), emitting a
+   `task_progress {index, label}` event before each step. Events stream over
+   SSE (`GET /pi-tasks/{id}/events`, `Last-Event-ID` replay); cancellation is
+   the RPC `abort` command with a terminate fallback; per-task snapshot JSON
+   under `adaptation/sessions/pi-tasks/` (PID + kernel start time, so PID
+   reuse can't fake liveness) lets an API restart mark interrupted tasks
+   failed. Tasks are registered in `agent_sessions` for trace viewing. The
+   manager assumes a single uvicorn worker (`./run` runs one). Targeted
+   profiles (extract-character) take a `target`; duplicates are keyed on
+   `(profile, target)` and answered with 409.
 2. **Sync book-chat turns**: `book_chat_sessions.append_turn` runs `PiRpcClient`
    inside the request (blocks a worker for the duration of the pi turn).
 
 `pi_session_trace.py` parses pi's on-disk session `.jsonl` files for the trace
 view and is transport-independent.
 
-### Planned direction (design, not yet implemented)
+### Planned direction
 
 See [pi-idea.md](pi-idea.md) for the full verified design (pi SDK/RPC/extension findings, PiSessionManager, narrow single-purpose task profiles, domain tools). The product direction is button-driven AI augmentation — many narrow pi agents (character/scene/prop extraction, panel image-prompt drafting/refinement), no general chat agent; book chat is slated for removal.
 
-Replace the detached-bash layer with an in-process **PiSessionManager** (threads,
-event ring buffers + SSE streaming, cancellation via the RPC `abort` command,
-status snapshots so an API restart reports "interrupted" instead of a stale
-"running"). The `pi --mode rpc` transport stays: pi-idea.md records the verified
-answers to the former unknowns (pi ships a Node SDK; the RPC schema is a typed
-published contract with abort/new_session/steer; one process hosts sequential
-sessions; extensions can register LLM-callable tools).
+The detached-bash layer is gone; all one-shot pi work runs on the in-process
+**PiSessionManager**. Remaining planned work: panel image-prompt drafting and
+refinement profiles, the imagen prompt guide injection, and removing book chat.
 
 ## Frontend map
 

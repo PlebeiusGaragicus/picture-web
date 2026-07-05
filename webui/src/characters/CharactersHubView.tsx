@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api';
+import { PiTaskPanel } from '../sessions/PiTaskPanel';
+import { usePiTask } from '../sessions/usePiTask';
 import { HubCardMenu } from '../conceptArt/HubCardMenu';
 import { VisualStyleList } from '../visualStyles/VisualStyleList';
-import { formatRequestError, formatWorkflowStatusError } from '../formatError';
+import { formatRequestError } from '../formatError';
 import { HelpTip, HoverTooltip, Modal } from '../ui';
 import { SYSTEM_TAGS, characterEntityTags, isCharacterCanvasNode, locationEntityTags, partitionAssetTagIds, userProjectTags, visibleDisplayName } from '../canvas/shared';
 import { TagControlButton } from '../canvas/assetTagRow';
-import type { AdaptationAssetLink, AdaptationStatus, AdaptationWorkflowStatus, Asset, CanvasDocument, CharacterRecord, ImageGroupCanvasNode, TagDefinition } from '../types';
+import type { AdaptationAssetLink, AdaptationStatus, Asset, CanvasDocument, CharacterRecord, ImageGroupCanvasNode, TagDefinition } from '../types';
 
 function characterEntityTagForKey(key: string, projectTags: TagDefinition[]) {
   const tagId = slugifyFileKey(key);
@@ -153,9 +155,18 @@ export function CharactersHubView({
   const [draftTagIds, setDraftTagIds] = useState<string[]>([]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [listJobRunning, setListJobRunning] = useState(false);
-  const [extractAllRunning, setExtractAllRunning] = useState(false);
-  const [extractingSlug, setExtractingSlug] = useState<string | null>(null);
+  const listTask = usePiTask(projectSlug, 'extract-character-list', async () => {
+    await onReloadProject();
+  });
+  const extractAllTask = usePiTask(projectSlug, 'extract-all-characters', async () => {
+    await onReloadProject();
+  });
+  const extractOneTask = usePiTask(projectSlug, 'extract-character', async () => {
+    await onReloadProject();
+  });
+  const listJobRunning = listTask.isActive;
+  const extractAllRunning = extractAllTask.isActive;
+  const extractingSlug = extractOneTask.isActive ? extractOneTask.target : null;
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
   const [deletingCharacter, setDeletingCharacter] = useState(false);
   const [thumbnailIndexes, setThumbnailIndexes] = useState<Record<string, number>>({});
@@ -287,81 +298,6 @@ export function CharactersHubView({
     }
   };
 
-  const listCharacters = async () => {
-    setError(null);
-    setListJobRunning(true);
-    try {
-      await api.startCharacterList(projectSlug);
-    } catch (err) {
-      setListJobRunning(false);
-      setError(formatRequestError(err));
-    }
-  };
-
-  const extractAllCharacters = async () => {
-    setError(null);
-    setExtractAllRunning(true);
-    try {
-      await api.startCharacterExtractAll(projectSlug);
-    } catch (err) {
-      setExtractAllRunning(false);
-      setError(formatRequestError(err));
-    }
-  };
-
-  const extractCharacter = async (key: string) => {
-    setExtractingSlug(key);
-    setError(null);
-    try {
-      await api.startCharacterExtract(projectSlug, key);
-    } catch (err) {
-      setExtractingSlug(null);
-      setError(formatRequestError(err));
-    }
-  };
-
-  useEffect(() => {
-    if (!listJobRunning) return;
-    const timer = window.setInterval(async () => {
-      const status = await api.getCharacterList(projectSlug);
-      if (!status.running) {
-        setListJobRunning(false);
-        const workflowError = formatWorkflowStatusError(status);
-        if (workflowError) setError(workflowError);
-        await onReloadProject();
-      }
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [listJobRunning, onReloadProject, projectSlug]);
-
-  useEffect(() => {
-    if (!extractAllRunning) return;
-    const timer = window.setInterval(async () => {
-      const status = await api.getCharacterExtractAll(projectSlug);
-      if (!status.running) {
-        setExtractAllRunning(false);
-        const workflowError = formatWorkflowStatusError(status);
-        if (workflowError) setError(workflowError);
-        await onReloadProject();
-      }
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [extractAllRunning, onReloadProject, projectSlug]);
-
-  useEffect(() => {
-    if (!extractingSlug) return;
-    const timer = window.setInterval(async () => {
-      const status = await api.getCharacterExtract(projectSlug, extractingSlug);
-      if (!status.running) {
-        setExtractingSlug(null);
-        const workflowError = formatWorkflowStatusError(status);
-        if (workflowError) setError(workflowError);
-        await onReloadProject();
-      }
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [extractingSlug, onReloadProject, projectSlug]);
-
   const workflowBusy = listJobRunning || extractAllRunning || Boolean(extractingSlug);
 
   return (
@@ -373,15 +309,45 @@ export function CharactersHubView({
               <button className="secondary" type="button" onClick={() => void createCharacter()} disabled={busyKey === '__create__'}>
                 {busyKey === '__create__' ? 'Creating…' : '+ character'}
               </button>
-              <button className="secondary" type="button" onClick={() => void listCharacters()} disabled={!adaptation.hasBookSession || workflowBusy}>
+              <button className="secondary" type="button" onClick={() => void listTask.start()} disabled={!adaptation.hasBookSession || workflowBusy}>
                 {listJobRunning ? 'Listing…' : 'List characters'}
               </button>
-              <button className="generate-button" type="button" onClick={() => void extractAllCharacters()} disabled={!adaptation.hasBookSession || workflowBusy}>
+              <button className="generate-button" type="button" onClick={() => void extractAllTask.start()} disabled={!adaptation.hasBookSession || workflowBusy}>
                 {extractAllRunning ? 'Extracting all…' : 'Extract all'}
               </button>
             </div>
           </header>
           {error && <p className="error error-banner layout-view-error">{error}</p>}
+          {listTask.state !== null && (
+            <PiTaskPanel
+              title="List characters"
+              state={listTask.state}
+              events={listTask.events}
+              error={listTask.error}
+              onAbort={() => void listTask.abort()}
+              onDismiss={listTask.dismiss}
+            />
+          )}
+          {extractAllTask.state !== null && (
+            <PiTaskPanel
+              title="Extract all characters"
+              state={extractAllTask.state}
+              events={extractAllTask.events}
+              error={extractAllTask.error}
+              onAbort={() => void extractAllTask.abort()}
+              onDismiss={extractAllTask.dismiss}
+            />
+          )}
+          {extractOneTask.state !== null && (
+            <PiTaskPanel
+              title={extractOneTask.target ? `Extract ${extractOneTask.target}` : 'Extract character'}
+              state={extractOneTask.state}
+              events={extractOneTask.events}
+              error={extractOneTask.error}
+              onAbort={() => void extractOneTask.abort()}
+              onDismiss={extractOneTask.dismiss}
+            />
+          )}
           <div className="characters-hub-workspace">
             <section className="character-card-grid">
               {Object.entries(adaptation.characters).sort(([left], [right]) => left.localeCompare(right)).map(([characterSlug, record]) => {
@@ -452,7 +418,7 @@ export function CharactersHubView({
                       )}
                       <div className="character-hub-actions">
                         {characterSlug && canExtract && (
-                          <button className="secondary" type="button" disabled={busy || !adaptation.hasBookSession} onClick={() => void extractCharacter(characterSlug)}>
+                          <button className="secondary" type="button" disabled={busy || !adaptation.hasBookSession} onClick={() => void extractOneTask.start({ target: characterSlug })}>
                             {extractingSlug === characterSlug ? 'Extracting…' : 'Extract'}
                           </button>
                         )}

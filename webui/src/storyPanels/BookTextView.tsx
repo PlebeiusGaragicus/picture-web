@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatRequestError } from '../formatError';
 import { api } from '../api';
 import { BookTextSelector, type TextSelectionRange } from './BookTextSelector';
 import { ManualStoryReader } from './ManualStoryReader';
 import { PanelChunkList } from './PanelChunkList';
+import { PiTaskPanel } from '../sessions/PiTaskPanel';
+import { usePiTask } from '../sessions/usePiTask';
 import { StorySetupView } from './StorySetupView';
 import type { LayoutEditorNavigation } from './layoutEditorNavigation';
 import type { InsertDraftPayload } from './storyPanelSidebar';
@@ -50,6 +52,20 @@ export function BookTextView({
   const [editorPanelRequestId, setEditorPanelRequestId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isPlacingPanel, setIsPlacingPanel] = useState(false);
+  const [isImportingBook, setIsImportingBook] = useState(false);
+  const [promptRefreshKey, setPromptRefreshKey] = useState(0);
+  const bookUploadInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Panel-prompt pi tasks: on finish, reload the document and bump the key so
+  // an open panel editor re-syncs its image-prompt drafts from the server.
+  const onPromptTaskFinished = async (state: string) => {
+    if (state !== 'done') return;
+    await reload();
+    setPromptRefreshKey((current) => current + 1);
+  };
+  const draftPromptTask = usePiTask(projectSlug, 'draft-panel-prompt', onPromptTaskFinished);
+  const refinePromptTask = usePiTask(projectSlug, 'refine-panel-prompt', onPromptTaskFinished);
+  const promptTaskBusy = draftPromptTask.isActive || refinePromptTask.isActive;
 
   const hasBookText = bookText.length > 0;
   const showStorySetup = !hasBookText && sidebarPanels.length === 0;
@@ -62,6 +78,19 @@ export function BookTextView({
     } catch (err) {
       setError(formatRequestError(err));
       throw err;
+    }
+  };
+
+  const handleManualBookUpload = async (file: File | undefined) => {
+    if (!file) return;
+    setIsImportingBook(true);
+    try {
+      await handleImportBook(file);
+    } catch {
+      // handleImportBook already surfaced the error banner.
+    } finally {
+      setIsImportingBook(false);
+      if (bookUploadInputRef.current) bookUploadInputRef.current.value = '';
     }
   };
 
@@ -274,8 +303,38 @@ export function BookTextView({
       onInsertDraft={hasBookText ? undefined : insertDraft}
       onEditPanelText={hasBookText ? undefined : editPanelText}
       onSavePanelEdit={savePanelEdit}
+      onDraftPrompt={(panelId, instructions) => void draftPromptTask.start({ target: panelId, instructions })}
+      onRefinePrompt={(panelId, promptId, feedback) =>
+        void refinePromptTask.start({ target: `${panelId}:${promptId}`, instructions: feedback })}
+      promptTaskBusy={promptTaskBusy}
+      promptRefreshKey={promptRefreshKey}
       isSaving={isSaving || isPlacingPanel}
     />
+  );
+
+  const promptTaskPanels = (
+    <>
+      {draftPromptTask.state !== null && (
+        <PiTaskPanel
+          title="Draft panel prompt"
+          state={draftPromptTask.state}
+          events={draftPromptTask.events}
+          error={draftPromptTask.error}
+          onAbort={() => void draftPromptTask.abort()}
+          onDismiss={draftPromptTask.dismiss}
+        />
+      )}
+      {refinePromptTask.state !== null && (
+        <PiTaskPanel
+          title="Refine panel prompt"
+          state={refinePromptTask.state}
+          events={refinePromptTask.events}
+          error={refinePromptTask.error}
+          onAbort={() => void refinePromptTask.abort()}
+          onDismiss={refinePromptTask.dismiss}
+        />
+      )}
+    </>
   );
 
   if (showStorySetup) {
@@ -294,6 +353,7 @@ export function BookTextView({
   return (
     <div className="story-adaptation-screen story-panels-screen story-view-screen">
       {error && <p className="error error-banner story-view-error">{error}</p>}
+      {promptTaskPanels}
       <div
         className={[
           'story-view-workspace',
@@ -316,17 +376,38 @@ export function BookTextView({
               isCreating={isCreating}
             />
           ) : (
-            <ManualStoryReader
-              panels={sidebarPanels}
-              selectedPanelId={selectedPanelId}
-              focusedPanelId={focusedBookPanelId}
-              onSelectPanel={selectPanelChunk}
-              onFocusPanelChunk={focusPanelChunk}
-              onOpenPanelEditor={openPanelEditor}
-              onInsertDraft={insertDraft}
-              onEditPanelText={editPanelText}
-              isSaving={isSaving || isCreating}
-            />
+            <>
+              <div className="story-view-manual-import">
+                <input
+                  ref={bookUploadInputRef}
+                  type="file"
+                  accept=".txt,text/plain"
+                  hidden
+                  disabled={isImportingBook}
+                  onChange={(event) => void handleManualBookUpload(event.target.files?.[0])}
+                />
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={isImportingBook || isSaving}
+                  onClick={() => bookUploadInputRef.current?.click()}
+                >
+                  {isImportingBook ? 'Uploading…' : 'Upload book.txt'}
+                </button>
+                <span className="muted">Import your manuscript to highlight passages into panels.</span>
+              </div>
+              <ManualStoryReader
+                panels={sidebarPanels}
+                selectedPanelId={selectedPanelId}
+                focusedPanelId={focusedBookPanelId}
+                onSelectPanel={selectPanelChunk}
+                onFocusPanelChunk={focusPanelChunk}
+                onOpenPanelEditor={openPanelEditor}
+                onInsertDraft={insertDraft}
+                onEditPanelText={editPanelText}
+                isSaving={isSaving || isCreating}
+              />
+            </>
           )}
         </div>
 

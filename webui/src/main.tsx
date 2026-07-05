@@ -17,7 +17,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import '@fontsource-variable/inter';
 import './styles/index.css';
-import { formatRequestError, formatWorkflowStatusError } from './formatError';
+import { formatRequestError } from './formatError';
 import { MouseTrail } from './MouseTrail';
 import { api } from './api';
 import { exportProjectAssetsToFolder, saveAssetImageToDisk } from './exportAssets';
@@ -49,7 +49,8 @@ import { ConfirmDialog, HelpTip, HoverTooltip, Modal } from './ui';
 import type { AdaptationStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StyleRefKind, TagDefinition } from './types';
 import { AgentSessionsView } from './sessions/BookChatView';
 import { ConceptArtView } from './conceptArt/ConceptArtView';
-import { useBookSessionLoad } from './sessions/useBookSessionLoad';
+import { usePiTask } from './sessions/usePiTask';
+import { PiTaskPanel } from './sessions/PiTaskPanel';
 
 type PhaseViewMode = 'list' | 'canvas';
 
@@ -1257,10 +1258,9 @@ function App() {
     }
   }, [loadAdaptation, openProjectSlug, projectPhase]);
 
-  const { isLoading: isReadingBook, startLoad: startReadBook } = useBookSessionLoad(
-    openProjectSlug,
-    loadAdaptation,
-  );
+  const readBookTask = usePiTask(openProjectSlug, 'read-book', loadAdaptation);
+  const isReadingBook = readBookTask.isActive;
+  const startReadBook = readBookTask.start;
 
   const importAdaptationBook = async (file: File) => {
     if (!openProjectSlug) return;
@@ -1389,10 +1389,7 @@ function App() {
       <button
         className="generate-button project-top-bar-read-book"
         type="button"
-        onClick={async () => {
-          await startReadBook();
-          setProjectPhase('chat');
-        }}
+        onClick={() => void startReadBook()}
         disabled={isReadingBook || bookAlreadyRead}
       >
         {isReadingBook ? 'Reading book…' : 'Read book'}
@@ -1618,6 +1615,18 @@ function App() {
             event.currentTarget.value = '';
           }}
         />
+        {readBookTask.state !== null && (
+          <div className="pi-task-panel-float">
+            <PiTaskPanel
+              title="Read book"
+              state={readBookTask.state}
+              events={readBookTask.events}
+              error={readBookTask.error}
+              onAbort={() => void readBookTask.abort()}
+              onDismiss={readBookTask.dismiss}
+            />
+          </div>
+        )}
         {isBookChatActive && adaptation && (
           <AgentSessionsView
             projectSlug={openProjectSlug}

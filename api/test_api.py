@@ -8,7 +8,6 @@ import library
 import gemini
 import chat_sessions
 import book_chat_sessions
-import book_session_load
 import adaptation
 import adaptation_workflow.config as workflow_config
 import story_panels
@@ -2029,73 +2028,6 @@ def test_book_chat_requires_read_book_session(tmp_path, monkeypatch):
 
     assert response.status_code == 409
     assert "No read-book session" in response.text
-
-
-def test_book_session_load_run_writes_manifest_without_archetypes(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    monkeypatch.setattr(workflow_config, "LIBRARY_ROOT", library.LIBRARY_ROOT)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    book_path = root / "book.txt"
-    book_path.write_text("Once upon a time.\n")
-    pi_session_file = root / "sessions" / "pi" / "fresh-session.json"
-    pi_session_file.parent.mkdir(parents=True, exist_ok=True)
-    pi_session_file.write_text("{}\n")
-
-    calls = []
-
-    class FakePiRpcClient:
-        def __init__(self, ctx):
-            self.ctx = ctx
-
-        def run_task(self, **kwargs):
-            calls.append(kwargs)
-
-            class Result:
-                session_id = "fresh-session"
-                session_file = str(pi_session_file)
-                stats = None
-
-            return Result()
-
-    monkeypatch.setattr("adaptation_workflow.steps.PiRpcClient", FakePiRpcClient)
-    monkeypatch.setattr(book_session_load, "ensure_node_runtime", lambda: ("/tmp/node", "v22.0.0"))
-    monkeypatch.setattr(book_session_load, "find_pi_binary", lambda: "/tmp/pi")
-    monkeypatch.setattr(book_session_load, "pi_version", lambda _path: "test")
-
-    assert book_session_load.run_load("farm-comic") == 0
-    assert len(calls) == 1
-    assert calls[0]["prompt"] == f"/skill:read-book {book_path}"
-
-    manifest = root / "sessions" / "book-session.json"
-    assert manifest.is_file()
-    assert library.read_json(manifest)["sessionId"] == "fresh-session"
-    assert not (root / "style-refs" / "archetype-character.md").exists()
-    assert not (root / "style-refs" / "archetype-scene.md").exists()
-
-
-def test_book_session_load_api_requires_book(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-
-    response = client.post("/api/projects/farm-comic/adaptation/book-session/load")
-
-    assert response.status_code == 400
-    assert "Upload book.txt" in response.text
-
-
-def test_book_session_load_api_get_status(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "book.txt").write_text("Once upon a time.\n")
-
-    response = client.get("/api/projects/farm-comic/adaptation/book-session/load")
-
-    assert response.status_code == 200
-    assert response.json()["running"] is False
 
 
 def test_book_chat_turn_forks_read_book_session_and_persists_reply(tmp_path, monkeypatch):

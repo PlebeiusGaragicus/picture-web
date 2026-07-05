@@ -49,202 +49,147 @@ def test_project_event_tool_end() -> None:
     assert projected["isError"] is False
 
 
-def test_step_character_file_uses_list_line(tmp_path: Path) -> None:
-    from adaptation_workflow.character_file import format_character_stub
+def _make_ctx(tmp_path: Path):
     from adaptation_workflow.config import AdaptationContext, REPO_ROOT, SKILLS_DIR
-    from adaptation_workflow.steps import StepRunner
 
     book_root = tmp_path / "proj" / "adaptation"
-    characters = book_root / "characters"
+    book_root.mkdir(parents=True, exist_ok=True)
+    return AdaptationContext(
+        repo_root=REPO_ROOT,
+        project_slug="proj",
+        book_root=Path("photo-library/projects/proj/adaptation"),
+        book_root_abs=book_root,
+        pi_workspace=book_root / "sessions" / "pi-workspace",
+        pi_session_dir=book_root / "sessions" / "pi",
+        skills_dir=SKILLS_DIR,
+        book_session_path=book_root / "sessions" / "book-session.json",
+        book_path=book_root / "book.txt",
+    )
+
+
+VALID_CHARACTER_FILE = (
+    "# {stem}\n\n"
+    "## Summary\n\nA yellow filly.\n\n"
+    "## Visual Description\n\nYellow coat.\n\n"
+    "## Behaviour, mannerisms and personality\n\nShy.\n\n"
+    "## Continuity Notes\n\nStay yellow.\n\n"
+    "## Source References\n\n- `L001`: \"Hi.\"\n\n"
+    "# base\n"
+    "mode: new-image\n"
+    "style_ref: style-refs/archetype-character.png\n\n"
+    "Character reference sheet. "
+    "Layout: top row — front full-body, three-quarter full-body, back full-body, same neutral standing pose, consistent scale. "
+    "Bottom row — four head close-ups. White background. No text, no labels, no watermarks. "
+    "Expressions: joy, surprise, concern, determination.\n"
+)
+
+
+def test_extract_character_step_uses_list_line(tmp_path: Path) -> None:
+    from adaptation_workflow.character_file import format_character_stub
+    from pi_profiles import _extract_character_step
+
+    ctx = _make_ctx(tmp_path)
+    characters = ctx.book_root_abs / "characters"
     characters.mkdir(parents=True)
     (characters / "list.txt").write_text("Gilda: A yellow filly.\n")
     (characters / "gilda.md").write_text(format_character_stub("gilda", "Gilda: A yellow filly."))
 
-    ctx = AdaptationContext(
-        repo_root=REPO_ROOT,
-        project_slug="proj",
-        book_root=Path("photo-library/projects/proj/adaptation"),
-        book_root_abs=book_root,
-        pi_workspace=book_root / "sessions" / "pi-workspace",
-        pi_session_dir=book_root / "sessions" / "pi",
-        skills_dir=SKILLS_DIR,
-        book_session_path=book_root / "sessions" / "book-session.json",
-        book_path=book_root / "book.txt",
-    )
+    step = _extract_character_step(ctx, "gilda", force=False)
+    prompt = step.build_prompt()
+    assert prompt is not None
+    assert "/skill:character-file" in prompt
+    assert "Gilda: A yellow filly." in prompt
 
-    captured: dict[str, str] = {}
+    (characters / "gilda.md").write_text(VALID_CHARACTER_FILE.format(stem="gilda"))
+    step.on_success(None)
 
-    class FakeLogger:
-        def write_line(self, *_args, **_kwargs) -> None:
-            return None
-
-        def write_skip(self, *_args, **_kwargs) -> None:
-            return None
-
-        def record_task(self, **_kwargs) -> None:
-            return None
-
-    steps = StepRunner(ctx, FakeLogger())  # type: ignore[arg-type]
-
-    def fake_run_pi_step(_stage: str, _name: str, _rel_out: str, prompt: str) -> None:
-        captured["prompt"] = prompt
-        (characters / "gilda.md").write_text(
-            "# gilda\n\n"
-            "## Summary\n\nGilda: A yellow filly.\n\n"
-            "## Visual Description\n\nYellow coat.\n\n"
-            "## Behaviour, mannerisms and personality\n\nShy.\n\n"
-            "## Continuity Notes\n\nStay yellow.\n\n"
-            "## Source References\n\n- `L001`: \"Hi.\"\n\n"
-            "# base\n"
-            "mode: new-image\n"
-            "style_ref: style-refs/archetype-character.png\n\n"
-            "Character reference sheet for Gilda. "
-            "Layout: top row — front full-body, three-quarter full-body, back full-body, same neutral standing pose, consistent scale. "
-            "Bottom row — four head close-ups. White background. No text, no labels, no watermarks. "
-            "Expressions: joy, surprise, concern, determination.\n"
-        )
-
-    steps.run_pi_step = fake_run_pi_step  # type: ignore[method-assign]
-    steps.step_character_file("gilda")
-    assert "Gilda: A yellow filly." in captured["prompt"]
+    # A valid file without force means there is nothing for pi to do.
+    assert _extract_character_step(ctx, "gilda", force=False).build_prompt() is None
+    assert _extract_character_step(ctx, "gilda", force=True).build_prompt() is not None
 
 
-def test_step_generate_concept_character_writes_file(tmp_path: Path, monkeypatch) -> None:
+def test_suggest_concept_character_plan(tmp_path: Path, monkeypatch) -> None:
     from adaptation_workflow.character_file import CHARACTER_SHEET_LAYOUT_BLOCK
-    from adaptation_workflow.concept_art import concept_scratch_path, next_character_concept_key
-    from adaptation_workflow.config import AdaptationContext, REPO_ROOT, SKILLS_DIR
-    from adaptation_workflow.steps import StepRunner
+    from adaptation_workflow.concept_art import concept_scratch_path
+    from pi_profiles import _suggest_concept_plan
 
-    book_root = tmp_path / "proj" / "adaptation"
-    book_root.mkdir(parents=True)
-    (book_root / "characters" / "list.txt").parent.mkdir(parents=True, exist_ok=True)
-    (book_root / "characters" / "list.txt").write_text("Pinkie Pie: Party pony.\n")
+    ctx = _make_ctx(tmp_path)
+    characters = ctx.book_root_abs / "characters"
+    characters.mkdir(parents=True)
+    (characters / "list.txt").write_text("Pinkie Pie: Party pony.\n")
 
-    ctx = AdaptationContext(
-        repo_root=REPO_ROOT,
-        project_slug="proj",
-        book_root=Path("photo-library/projects/proj/adaptation"),
-        book_root_abs=book_root,
-        pi_workspace=book_root / "sessions" / "pi-workspace",
-        pi_session_dir=book_root / "sessions" / "pi",
-        skills_dir=SKILLS_DIR,
-        book_session_path=book_root / "sessions" / "book-session.json",
-        book_path=book_root / "book.txt",
-    )
-
-    captured: dict[str, str] = {}
-
-    class FakeLogger:
-        def write_line(self, *_args, **_kwargs) -> None:
-            return None
-
-        def write_skip(self, *_args, **_kwargs) -> None:
-            return None
-
-        def record_task(self, **_kwargs) -> None:
-            return None
-
-    steps = StepRunner(ctx, FakeLogger())  # type: ignore[arg-type]
-    key = next_character_concept_key(book_root)
-
-    def fake_run_pi_step(_stage: str, _name: str, _rel_out: str, prompt: str) -> None:
-        captured["prompt"] = prompt
-        out = concept_scratch_path(book_root, key)
-        out.write_text(
-            f"## {key}\n"
-            "subject: character\n"
-            "mode: new-image\n"
-            "style_ref:\n\n"
-            "Character reference sheet\n"
-            "A weathered night watch pony with a brass lantern and navy cloak.\n"
-            f"{CHARACTER_SHEET_LAYOUT_BLOCK}\n"
-            "Expressions: alert, tired, stern, amused.\n"
-        )
+    created: dict[str, str] = {}
 
     def fake_create_from_pi(slug: str, subject_kind: str, path: Path, *, expected_key: str) -> str:
         assert slug == "proj"
         assert subject_kind == "character"
-        assert expected_key == key
         assert path.is_file()
+        created["key"] = expected_key
         path.unlink()
         return f"draft_{expected_key}"
 
-    steps.run_pi_step = fake_run_pi_step  # type: ignore[method-assign]
     monkeypatch.setattr("concept_cards.create_concept_card_from_pi_file", fake_create_from_pi)
     monkeypatch.setattr("concept_cards.existing_concept_summaries", lambda _slug: [])
-    node_id = steps.step_generate_concept_character()
-    assert node_id == f"draft_{key}"
-    assert "/skill:concept-character" in captured["prompt"]
-    assert "Pinkie Pie: Party pony." in captured["prompt"]
-    assert f"File key: {key}" in captured["prompt"]
+
+    steps = list(_suggest_concept_plan(ctx, "character"))
+    assert len(steps) == 1
+    prompt = steps[0].build_prompt()
+    assert prompt is not None
+    assert "/skill:concept-character" in prompt
+    assert "Pinkie Pie: Party pony." in prompt
+    key = prompt.split("File key: ", 1)[1].split("\n", 1)[0].strip()
+    assert f"File key: {key}" in prompt
+
+    concept_scratch_path(ctx.book_root_abs, key).write_text(
+        f"## {key}\n"
+        "subject: character\n"
+        "mode: new-image\n"
+        "style_ref:\n\n"
+        "Character reference sheet\n"
+        "A weathered night watch pony with a brass lantern and navy cloak.\n"
+        f"{CHARACTER_SHEET_LAYOUT_BLOCK}\n"
+        "Expressions: alert, tired, stern, amused.\n"
+    )
+    update = steps[0].on_success(None)
+    assert update == {"outputCardId": f"draft_{key}", "subjectKind": "character"}
+    assert created["key"] == key
 
 
-def test_step_generate_concept_location_writes_file(tmp_path: Path, monkeypatch) -> None:
-    from adaptation_workflow.concept_art import concept_scratch_path, next_location_concept_key
-    from adaptation_workflow.config import AdaptationContext, REPO_ROOT, SKILLS_DIR
-    from adaptation_workflow.steps import StepRunner
+def test_suggest_concept_location_plan(tmp_path: Path, monkeypatch) -> None:
+    from adaptation_workflow.concept_art import concept_scratch_path
+    from pi_profiles import _suggest_concept_plan
 
-    book_root = tmp_path / "proj" / "adaptation"
-    book_root.mkdir(parents=True)
-    locations_dir = book_root / "locations"
+    ctx = _make_ctx(tmp_path)
+    locations_dir = ctx.book_root_abs / "locations"
     locations_dir.mkdir(parents=True)
     (locations_dir / "index.md").write_text("## sunny-barn\nName: Sunny Barn\n")
 
-    ctx = AdaptationContext(
-        repo_root=REPO_ROOT,
-        project_slug="proj",
-        book_root=Path("photo-library/projects/proj/adaptation"),
-        book_root_abs=book_root,
-        pi_workspace=book_root / "sessions" / "pi-workspace",
-        pi_session_dir=book_root / "sessions" / "pi",
-        skills_dir=SKILLS_DIR,
-        book_session_path=book_root / "sessions" / "book-session.json",
-        book_path=book_root / "book.txt",
-    )
-
-    captured: dict[str, str] = {}
-
-    class FakeLogger:
-        def write_line(self, *_args, **_kwargs) -> None:
-            return None
-
-        def write_skip(self, *_args, **_kwargs) -> None:
-            return None
-
-        def record_task(self, **_kwargs) -> None:
-            return None
-
-    steps = StepRunner(ctx, FakeLogger())  # type: ignore[arg-type]
-    key = next_location_concept_key(book_root)
-
-    def fake_run_pi_step(_stage: str, _name: str, _rel_out: str, prompt: str) -> None:
-        captured["prompt"] = prompt
-        out = concept_scratch_path(book_root, key)
-        out.write_text(
-            f"## {key}\n"
-            "subject: location\n"
-            "mode: new-image\n"
-            "style_ref:\n\n"
-            "A weathered hillside stone bridge over a shallow creek at dusk, with mossy railings "
-            "and distant farm roofs visible through mist. Match the reference image's environmental "
-            "rendering, palette, lighting, and detail level. No characters, no text, no labels, no watermarks.\n"
-        )
-
     def fake_create_from_pi(slug: str, subject_kind: str, path: Path, *, expected_key: str) -> str:
-        assert slug == "proj"
         assert subject_kind == "location"
-        assert expected_key == key
         path.unlink()
         return f"draft_{expected_key}"
 
-    steps.run_pi_step = fake_run_pi_step  # type: ignore[method-assign]
     monkeypatch.setattr("concept_cards.create_concept_card_from_pi_file", fake_create_from_pi)
     monkeypatch.setattr("concept_cards.existing_concept_summaries", lambda _slug: [])
-    node_id = steps.step_generate_concept_location()
-    assert node_id == f"draft_{key}"
-    assert "/skill:concept-location" in captured["prompt"]
-    assert "sunny-barn" in captured["prompt"]
-    assert f"File key: {key}" in captured["prompt"]
+
+    steps = list(_suggest_concept_plan(ctx, "location"))
+    assert len(steps) == 1
+    prompt = steps[0].build_prompt()
+    assert prompt is not None
+    assert "/skill:concept-location" in prompt
+    assert "sunny-barn" in prompt
+    key = prompt.split("File key: ", 1)[1].split("\n", 1)[0].strip()
+
+    concept_scratch_path(ctx.book_root_abs, key).write_text(
+        f"## {key}\n"
+        "subject: location\n"
+        "mode: new-image\n"
+        "style_ref:\n\n"
+        "A weathered hillside stone bridge over a shallow creek at dusk. "
+        "No characters, no text, no labels, no watermarks.\n"
+    )
+    update = steps[0].on_success(None)
+    assert update == {"outputCardId": f"draft_{key}", "subjectKind": "location"}
 
 
 def test_validate_character_file_stub_and_full(tmp_path: Path) -> None:
@@ -310,19 +255,6 @@ def test_pi_runtime_env_prefers_node22(tmp_path: Path, monkeypatch) -> None:
     env = pi_runtime_env({"PATH": "/usr/bin"})
     node = resolve_node_path(env)
     assert node == str(fake_node22 / "node")
-
-
-def test_run_diagnostics_manifest(tmp_path: Path) -> None:
-    from adaptation_workflow.diagnostics import RunDiagnostics
-
-    book_root = tmp_path / "adaptation"
-    book_root.mkdir()
-    diag = RunDiagnostics.create(book_root, "ingest", validation=False)
-    diag.write_manifest(book_root, extra={"project": "cup"})
-    manifest = json.loads(diag.manifest_path.read_text())
-    assert manifest["stage"] == "ingest"
-    assert manifest["project"] == "cup"
-    assert manifest["tasksDir"] == "sessions/tasks"
 
 
 def test_book_session_roundtrip(tmp_path: Path) -> None:

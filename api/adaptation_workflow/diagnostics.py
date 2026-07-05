@@ -1,78 +1,10 @@
-"""Per-task and run-level diagnostic log paths under each project's adaptation/sessions/."""
+"""Per-task diagnostic log paths under each project's adaptation/sessions/."""
 
 from __future__ import annotations
 
 import json
-import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-
-from common import slugify, utc_now
-
-
-@dataclass
-class RunDiagnostics:
-    stage: str
-    sessions_dir: Path
-    ui_log_path: Path
-    events_path: Path
-    summary_path: Path
-    manifest_path: Path
-    tasks_dir: Path
-    started_at: str = field(default_factory=utc_now)
-    _task_index: int = 0
-
-    @classmethod
-    def create(cls, book_root: Path, stage: str, *, validation: bool = False) -> RunDiagnostics:
-        prefix = "validate" if validation else "run"
-        sessions = book_root / "sessions"
-        tasks_dir = sessions / "tasks"
-        tasks_dir.mkdir(parents=True, exist_ok=True)
-        return cls(
-            stage=stage,
-            sessions_dir=sessions,
-            ui_log_path=sessions / f"{prefix}-{stage}.log",
-            events_path=sessions / f"{prefix}-{stage}.events.jsonl",
-            summary_path=sessions / f"{prefix}-{stage}.summary.json",
-            manifest_path=sessions / f"{prefix}-{stage}-manifest.json",
-            tasks_dir=tasks_dir,
-        )
-
-    def rel(self, path: Path, book_root: Path) -> str:
-        try:
-            return path.relative_to(book_root).as_posix()
-        except ValueError:
-            return path.as_posix()
-
-    def begin_task(self, name: str) -> TaskDiagnostics:
-        self._task_index += 1
-        slug = slugify(name, "task")
-        stem = f"{self._task_index:03d}-{slug}"
-        return TaskDiagnostics(
-            index=self._task_index,
-            name=name,
-            stem=stem,
-            dir=self.tasks_dir,
-            started_at=utc_now(),
-        )
-
-    def manifest_payload(self, book_root: Path, *, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "stage": self.stage,
-            "startedAt": self.started_at,
-            "updatedAt": utc_now(),
-            "log": self.rel(self.ui_log_path, book_root),
-            "events": self.rel(self.events_path, book_root),
-            "summary": self.rel(self.summary_path, book_root),
-            "tasksDir": self.rel(self.tasks_dir, book_root),
-        }
-        if extra:
-            payload.update(extra)
-        return payload
-
-    def write_manifest(self, book_root: Path, *, extra: dict[str, Any] | None = None) -> None:
-        self.manifest_path.write_text(json.dumps(self.manifest_payload(book_root, extra=extra), indent=2) + "\n")
 
 
 @dataclass

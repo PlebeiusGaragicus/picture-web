@@ -246,22 +246,46 @@ class AdaptationStatus(BaseModel):
     locations: dict[str, AdaptationAssetLink]
 
 
-class AdaptationWorkflowStatus(BaseModel):
-    running: bool
-    returnCode: int | None = None
-    startedAt: str | None = None
-    completedAt: str | None = None
-    log: str = ""
-    logFiles: dict[str, str] = Field(default_factory=dict)
-
-
 AgentSessionKind = Literal[
     "read-book",
+    "extract-character-list",
+    "extract-character",
+    "extract-all-characters",
+    "suggest-concept-character",
+    "suggest-concept-location",
+    "draft-panel-prompt",
+    "refine-panel-prompt",
     "book-chat",
-    "concept-character-suggest",
-    "concept-location-suggest",
 ]
 AgentSessionStatus = Literal["running", "succeeded", "failed", "archived"]
+
+
+PiTaskState = Literal["starting", "running", "aborting", "done", "failed", "cancelled"]
+
+
+class PiTaskStartRequest(BaseModel):
+    profile: str
+    target: str | None = None
+    force: bool = False
+    instructions: str | None = None
+
+
+class PiTaskStatus(BaseModel):
+    taskId: str
+    projectSlug: str
+    profile: str
+    title: str
+    target: str | None = None
+    state: PiTaskState
+    startedAt: str
+    completedAt: str | None = None
+    error: str | None = None
+    piSessionId: str | None = None
+    lastSeq: int | None = None
+
+
+class PiTaskAbortResponse(BaseModel):
+    cancelled: bool
 
 
 class AgentSessionDocument(BaseModel):

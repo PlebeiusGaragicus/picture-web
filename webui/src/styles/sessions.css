@@ -486,3 +486,136 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* --- Pi task panel (live narrow-agent runs: read-book, list characters) --- */
+
+.pi-task-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
+  max-width: 720px;
+}
+
+.pi-task-panel-float {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 40;
+  width: min(420px, calc(100vw - 2 * var(--space-4)));
+  box-shadow: 0 8px 32px rgb(var(--black-rgb) / 0.45);
+  border-radius: var(--radius-lg);
+}
+
+.pi-task-panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pi-task-panel-header h3 {
+  margin: 0;
+  font-size: var(--text-md);
+  flex: 1;
+}
+
+.pi-task-state-label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.pi-task-state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--text-muted);
+  flex: none;
+}
+
+.pi-task-state-dot.is-running,
+.pi-task-state-dot.is-starting {
+  background: var(--accent);
+  animation: pi-task-pulse 1.2s ease-in-out infinite;
+}
+
+.pi-task-state-dot.is-aborting { background: var(--red-300); }
+.pi-task-state-dot.is-done { background: var(--green-300); }
+.pi-task-state-dot.is-failed,
+.pi-task-state-dot.is-cancelled { background: var(--red-400); }
+
+@keyframes pi-task-pulse {
+  50% { opacity: 0.35; }
+}
+
+.pi-task-panel-button {
+  --btn-pad: 2px 10px;
+  --btn-font: var(--text-xs);
+}
+
+.pi-task-panel-error {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.pi-task-panel-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: var(--text-sm);
+}
+
+.pi-task-text {
+  margin: 0;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.pi-task-tool-chip {
+  --btn-bg: var(--bg-inset);
+  --btn-border: 1px solid var(--border);
+  --btn-radius: var(--radius-full);
+  --btn-pad: 2px 10px;
+  --btn-font: var(--text-xs);
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.pi-task-tool-chip.is-error { color: var(--red-300); }
+
+.pi-task-tool-chip.is-expanded {
+  --btn-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  max-width: 100%;
+}
+
+.pi-task-tool-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 100%;
+}
+
+.pi-task-tool-detail code {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.pi-task-progress {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: none;
+}

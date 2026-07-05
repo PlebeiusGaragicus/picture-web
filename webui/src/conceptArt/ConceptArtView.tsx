@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api';
-import { formatRequestError, formatWorkflowStatusError } from '../formatError';
+import { formatRequestError } from '../formatError';
+import { PiTaskPanel } from '../sessions/PiTaskPanel';
+import { usePiTask } from '../sessions/usePiTask';
 import { VisualStyleList } from '../visualStyles/VisualStyleList';
 import { HubCardMenu } from './HubCardMenu';
 import type { Asset, AdaptationStatus, CanvasDocument, ConceptArtSubjectKind, ConceptCard } from '../types';
@@ -67,7 +69,6 @@ export function ConceptArtView({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingConcept, setDeletingConcept] = useState(false);
-  const [suggestJob, setSuggestJob] = useState<'character' | 'location' | null>(null);
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
   const [uploadingConcept, setUploadingConcept] = useState(false);
   const [editingCard, setEditingCard] = useState<ConceptCard | null>(null);
@@ -100,27 +101,12 @@ export function ConceptArtView({
     }
   };
 
-  const suggestConceptCharacter = async () => {
-    setError(null);
-    setSuggestJob('character');
-    try {
-      await api.startGenerateConceptCharacter(projectSlug);
-    } catch (err) {
-      setSuggestJob(null);
-      setError(formatRequestError(err));
-    }
-  };
-
-  const suggestConceptLocation = async () => {
-    setError(null);
-    setSuggestJob('location');
-    try {
-      await api.startGenerateConceptLocation(projectSlug);
-    } catch (err) {
-      setSuggestJob(null);
-      setError(formatRequestError(err));
-    }
-  };
+  const onSuggestFinished = useCallback(async () => {
+    await loadConceptCards();
+    await onReloadAdaptation();
+  }, [loadConceptCards, onReloadAdaptation]);
+  const characterSuggestTask = usePiTask(projectSlug, 'suggest-concept-character', onSuggestFinished);
+  const locationSuggestTask = usePiTask(projectSlug, 'suggest-concept-location', onSuggestFinished);
 
   const uploadConceptImage = async (file: File) => {
     setUploadingConcept(true);
@@ -190,29 +176,7 @@ export function ConceptArtView({
     }
   };
 
-  useEffect(() => {
-    if (!suggestJob) return;
-    const timer = window.setInterval(async () => {
-      try {
-        const status = suggestJob === 'character'
-          ? await api.getGenerateConceptCharacter(projectSlug)
-          : await api.getGenerateConceptLocation(projectSlug);
-        if (!status.running) {
-          setSuggestJob(null);
-          const workflowError = formatWorkflowStatusError(status);
-          if (workflowError) setError(workflowError);
-          await loadConceptCards();
-          await onReloadAdaptation();
-        }
-      } catch (err) {
-        setSuggestJob(null);
-        setError(formatRequestError(err));
-      }
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [loadConceptCards, onReloadAdaptation, projectSlug, suggestJob]);
-
-  const conceptWorkflowBusy = suggestJob !== null;
+  const conceptWorkflowBusy = characterSuggestTask.isActive || locationSuggestTask.isActive;
 
   const conceptChrome = (
     <>
@@ -241,10 +205,10 @@ export function ConceptArtView({
               <button
                 className="secondary"
                 type="button"
-                onClick={() => void suggestConceptCharacter()}
+                onClick={() => void characterSuggestTask.start()}
                 disabled={!adaptation.hasBookSession || conceptWorkflowBusy || uploadingConcept}
               >
-                {suggestJob === 'character' ? 'Suggesting...' : 'Suggest'}
+                {characterSuggestTask.isActive ? 'Suggesting...' : 'Suggest'}
               </button>
             </div>
           </div>
@@ -262,10 +226,10 @@ export function ConceptArtView({
               <button
                 className="secondary"
                 type="button"
-                onClick={() => void suggestConceptLocation()}
+                onClick={() => void locationSuggestTask.start()}
                 disabled={!adaptation.hasBookSession || conceptWorkflowBusy || uploadingConcept}
               >
-                {suggestJob === 'location' ? 'Suggesting...' : 'Suggest'}
+                {locationSuggestTask.isActive ? 'Suggesting...' : 'Suggest'}
               </button>
             </div>
           </div>
@@ -285,6 +249,26 @@ export function ConceptArtView({
         </div>
       </header>
       {error && <p className="error error-banner layout-view-error">{error}</p>}
+      {characterSuggestTask.state !== null && (
+        <PiTaskPanel
+          title="Suggest character concept"
+          state={characterSuggestTask.state}
+          events={characterSuggestTask.events}
+          error={characterSuggestTask.error}
+          onAbort={() => void characterSuggestTask.abort()}
+          onDismiss={characterSuggestTask.dismiss}
+        />
+      )}
+      {locationSuggestTask.state !== null && (
+        <PiTaskPanel
+          title="Suggest location concept"
+          state={locationSuggestTask.state}
+          events={locationSuggestTask.events}
+          error={locationSuggestTask.error}
+          onAbort={() => void locationSuggestTask.abort()}
+          onDismiss={locationSuggestTask.dismiss}
+        />
+      )}
     </>
   );
 

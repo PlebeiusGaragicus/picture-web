@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStatus, AdaptationWorkflowStatus, AgentSession, ArtifactKind, Asset, BookChatSession, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, GenerateStyleRefPayload, ImageGroupNodeResponse, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStatus, AgentSession, ArtifactKind, Asset, BookChatSession, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, GenerateStyleRefPayload, ImageGroupNodeResponse, PiTaskProfile, PiTaskStatus, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = import.meta.env.DEV;
 
@@ -128,26 +128,6 @@ export const api = {
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/files/${kind}/${key}`, {
       method: 'DELETE',
     }),
-  startCharacterList: (slug: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/list`, { method: 'POST' }),
-  getCharacterList: (slug: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/list`),
-  startCharacterExtractAll: (slug: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/extract-all`, { method: 'POST' }),
-  getCharacterExtractAll: (slug: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/extract-all`),
-  startCharacterExtract: (slug: string, characterKey: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/${characterKey}/extract`, { method: 'POST' }),
-  getCharacterExtract: (slug: string, characterKey: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/characters/${characterKey}/extract`),
-  startGenerateConceptCharacter: (slug: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/concept-art/generate-character`, { method: 'POST' }),
-  getGenerateConceptCharacter: (slug: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/concept-art/generate-character`),
-  startGenerateConceptLocation: (slug: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/concept-art/generate-location`, { method: 'POST' }),
-  getGenerateConceptLocation: (slug: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/concept-art/generate-location`),
   listConceptCards: (slug: string, includeArchived = false) =>
     request<ConceptCard[]>(`/api/projects/${slug}/concept-cards${includeArchived ? '?includeArchived=true' : ''}`),
   createConceptCard: (slug: string, payload: { subjectKind: ConceptArtSubjectKind; prompt?: string; displayName?: string }) =>
@@ -189,12 +169,33 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ artifactKind, artifactKey }),
     }),
-  getBookSessionLoad: (slug: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/book-session/load`),
-  startBookSessionLoad: (slug: string) =>
-    request<AdaptationWorkflowStatus>(`/api/projects/${slug}/adaptation/book-session/load`, {
+  startPiTask: (
+    slug: string,
+    profile: PiTaskProfile,
+    options: { target?: string; force?: boolean; instructions?: string } = {},
+  ) =>
+    request<PiTaskStatus>(`/api/projects/${slug}/pi-tasks`, {
       method: 'POST',
+      body: JSON.stringify({
+        profile,
+        target: options.target ?? null,
+        force: options.force ?? false,
+        instructions: options.instructions ?? null,
+      }),
     }),
+  listPiTasks: (slug: string, params: { profile?: string; active?: boolean } = {}) => {
+    const query = new URLSearchParams();
+    if (params.profile) query.set('profile', params.profile);
+    if (params.active !== undefined) query.set('active', String(params.active));
+    const suffix = query.size ? `?${query.toString()}` : '';
+    return request<PiTaskStatus[]>(`/api/projects/${slug}/pi-tasks${suffix}`);
+  },
+  getPiTask: (slug: string, taskId: string) =>
+    request<PiTaskStatus>(`/api/projects/${slug}/pi-tasks/${taskId}`),
+  abortPiTask: (slug: string, taskId: string) =>
+    request<{ cancelled: boolean }>(`/api/projects/${slug}/pi-tasks/${taskId}/abort`, { method: 'POST' }),
+  piTaskEventsUrl: (slug: string, taskId: string) =>
+    `/api/projects/${slug}/pi-tasks/${taskId}/events`,
   listBookChatSessions: (slug: string, includeArchived = false) =>
     request<BookChatSession[]>(`/api/projects/${slug}/adaptation/book-chats${includeArchived ? '?includeArchived=true' : ''}`),
   getBookChatSession: (slug: string, sessionId: string) =>

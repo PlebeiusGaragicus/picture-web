@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { formatRequestError } from '../formatError';
 import type { AdaptationStatus, AgentSession, AgentSessionKind, AgentSessionStatus, BookChatSession, PiTraceDocument } from '../types';
-import { useBookSessionLoad } from './useBookSessionLoad';
+import { usePiTask } from './usePiTask';
 import { cleanSessionPreview, formatSessionSubtitle, PiTraceTimeline, summarizeTrace } from './PiTraceView';
 
 const emptyTrace: PiTraceDocument = {
@@ -16,9 +16,15 @@ function kindLabel(kind: AgentSessionKind) {
       return 'Read book';
     case 'book-chat':
       return 'Book chat';
-    case 'concept-character-suggest':
+    case 'extract-character-list':
+      return 'List characters';
+    case 'extract-character':
+      return 'Extract character';
+    case 'extract-all-characters':
+      return 'Extract all characters';
+    case 'suggest-concept-character':
       return 'Character suggest';
-    case 'concept-location-suggest':
+    case 'suggest-concept-location':
       return 'Location suggest';
     default:
       return kind;
@@ -101,7 +107,7 @@ export function AgentSessionsView({
   const [isSending, setIsSending] = useState(false);
   const [traceCollapsed, setTraceCollapsed] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { isLoading: isReadingBook } = useBookSessionLoad(projectSlug, onReloadAdaptation);
+  const { isActive: isReadingBook } = usePiTask(projectSlug, 'read-book', onReloadAdaptation);
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0] ?? null;
   const activeBookChatId = bookChatSessionId(activeSession);
   const canCreateChat = adaptation.hasBookSession && !isReadingBook;

@@ -42,6 +42,15 @@ function captionTextareaRows(value: string) {
   return Math.min(12, lineCount);
 }
 
+// Image prompts are long single-paragraph prose, so size by estimated wrapped
+// lines (~90 chars per line at the modal's width), not just newline count.
+function promptTextareaRows(value: string) {
+  const wrappedLines = value
+    .split(/\n/)
+    .reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 90)), 0);
+  return Math.min(14, Math.max(3, wrappedLines));
+}
+
 function usefulStoryText(panel: StoryPanel) {
   const text = (panel.storyText.trim() || panel.selectedText.trim()).trim();
   return ['Image panel', 'Text panel', 'Text block'].includes(text) ? '' : text;
@@ -168,9 +177,12 @@ function ChunkActionsMenu({
   onDelete,
   onInsertAfter,
   onEditText,
+  onDraftPrompt,
+  onDraftPromptWithInput,
   onPlaceOnLayout,
   showInsert,
   showEditText,
+  showDraftPrompt = false,
   showPlaceOnLayout,
   isSaving,
 }: {
@@ -180,9 +192,12 @@ function ChunkActionsMenu({
   onDelete?: () => void;
   onInsertAfter?: () => void;
   onEditText?: () => void;
+  onDraftPrompt?: () => void;
+  onDraftPromptWithInput?: () => void;
   onPlaceOnLayout?: () => void;
   showInsert: boolean;
   showEditText: boolean;
+  showDraftPrompt?: boolean;
   showPlaceOnLayout: boolean;
   isSaving: boolean;
 }) {
@@ -281,6 +296,34 @@ function ChunkActionsMenu({
           Edit text…
         </button>
       )}
+      {showDraftPrompt && onDraftPrompt && (
+        <button
+          type="button"
+          role="menuitem"
+          className="story-panels-chunk-menu-item"
+          disabled={isSaving}
+          onClick={() => {
+            onClose();
+            onDraftPrompt();
+          }}
+        >
+          Draft with pi
+        </button>
+      )}
+      {showDraftPrompt && onDraftPromptWithInput && (
+        <button
+          type="button"
+          role="menuitem"
+          className="story-panels-chunk-menu-item"
+          disabled={isSaving}
+          onClick={() => {
+            onClose();
+            onDraftPromptWithInput();
+          }}
+        >
+          Draft with input…
+        </button>
+      )}
       {showPlaceOnLayout && onPlaceOnLayout && (
         <button
           type="button"
@@ -349,6 +392,10 @@ export function PanelChunkList({
   onInsertDraft,
   onEditPanelText,
   onSavePanelEdit,
+  onDraftPrompt,
+  onRefinePrompt,
+  promptTaskBusy = false,
+  promptRefreshKey = 0,
   isSaving,
   variant = 'card',
 }: {
@@ -366,6 +413,10 @@ export function PanelChunkList({
   onInsertDraft?: (payload: InsertDraftPayload) => Promise<void>;
   onEditPanelText?: (panelId: string, text: string) => Promise<void>;
   onSavePanelEdit?: (panelId: string, patch: StoryPanelPatchPayload) => Promise<void>;
+  onDraftPrompt?: (panelId: string, instructions?: string) => void;
+  onRefinePrompt?: (panelId: string, promptId: string, feedback: string) => void;
+  promptTaskBusy?: boolean;
+  promptRefreshKey?: number;
   isSaving: boolean;
   variant?: 'card' | 'plain';
 }) {
@@ -389,6 +440,9 @@ export function PanelChunkList({
   const [panelEditorVisibleText, setPanelEditorVisibleText] = useState('');
   const [captionDrafts, setCaptionDrafts] = useState<StoryPanelCaption[]>([]);
   const [imagePromptDrafts, setImagePromptDrafts] = useState<StoryPanelImagePrompt[]>([]);
+  const [refineFeedbackDrafts, setRefineFeedbackDrafts] = useState<Record<string, string>>({});
+  const [draftInputPanelId, setDraftInputPanelId] = useState<string | null>(null);
+  const [draftInputValue, setDraftInputValue] = useState('');
   const hasBookText = bookLength > 0;
   const manualMode = !hasBookText;
   const allItems = sortSidebarItems(panels);
@@ -443,6 +497,19 @@ export function PanelChunkList({
     setShowInsertDialog(true);
   };
 
+  const openDraftInputDialog = (panelId: string) => {
+    setDraftInputPanelId(panelId);
+    setDraftInputValue('');
+    setOpenMenuId(null);
+  };
+
+  const submitDraftInput = () => {
+    if (!draftInputPanelId || !onDraftPrompt || !draftInputValue.trim()) return;
+    onDraftPrompt(draftInputPanelId, draftInputValue.trim());
+    setDraftInputPanelId(null);
+    setDraftInputValue('');
+  };
+
   const openEditTextDialog = (panelId: string) => {
     const panel = panels.find((item) => item.id === panelId);
     setEditTextPanelId(panelId);
@@ -473,6 +540,18 @@ export function PanelChunkList({
     onOpenEditorPanelComplete?.();
   }, [openEditorPanelId, onOpenEditorPanelComplete, panels]);
 
+  // A finished pi prompt task patched the server-side panel; re-sync the open
+  // editor's prompt drafts so the new/revised prompt appears in place.
+  useEffect(() => {
+    if (promptRefreshKey === 0 || !panelEditorPanelId) return;
+    const panel = panels.find((item) => item.id === panelEditorPanelId);
+    if (panel) {
+      setImagePromptDrafts((panel.imagePrompts ?? []).map((prompt) => ({ ...prompt })));
+      setRefineFeedbackDrafts({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promptRefreshKey]);
+
   const addCaptionDraft = () => {
     if (!panelEditorPanel) return;
     setCaptionDrafts((current) => [...current, newCaptionForPanel({ ...panelEditorPanel, captions: current }, panels)]);
@@ -498,6 +577,7 @@ export function PanelChunkList({
     setPanelEditorVisibleText('');
     setCaptionDrafts([]);
     setImagePromptDrafts([]);
+    setRefineFeedbackDrafts({});
   };
 
   const addImagePromptDraft = () => {
@@ -701,9 +781,12 @@ export function PanelChunkList({
                   onDelete={() => setPendingDeletePanelId(panel.id)}
                   onInsertAfter={canInsertDraft ? () => openInsertDialog(panel.id) : undefined}
                   onEditText={onEditPanelText && isPanel(panel) && !isBookLinked(panel) && manualMode ? () => openEditTextDialog(panel.id) : undefined}
+                  onDraftPrompt={onDraftPrompt ? () => onDraftPrompt(panel.id) : undefined}
+                  onDraftPromptWithInput={onDraftPrompt ? () => openDraftInputDialog(panel.id) : undefined}
                   onPlaceOnLayout={!isPlaced && onPlacePanelOnLayout ? () => void onPlacePanelOnLayout(panel.id) : undefined}
                   showInsert={canInsertDraft}
                   showEditText={Boolean(onEditPanelText && isPanel(panel) && !isBookLinked(panel) && manualMode)}
+                  showDraftPrompt={Boolean(onDraftPrompt && isPanel(panel) && usefulStoryText(panel) && !promptTaskBusy)}
                   showPlaceOnLayout={Boolean(!isPlaced && onPlacePanelOnLayout && showPlacement)}
                   isSaving={isSaving || isCreating}
                 />
@@ -782,14 +865,10 @@ export function PanelChunkList({
       {panelEditorPanel && onSavePanelEdit && (
         <div className="confirm-backdrop" onClick={() => !isCreating && closePanelEditor()}>
           <div className="confirm-dialog story-panels-panel-editor-popover" role="dialog" aria-modal="true" aria-labelledby="panel-caption-editor-title" onClick={(event) => event.stopPropagation()}>
-            <h2 id="panel-caption-editor-title">Panel editor</h2>
-            <div className="story-panels-panel-editor-meta-row">
-              <div className="story-panels-info-control story-panels-panel-editor-id">
-                <span>Panel ID</span>
-                <code>{panelEditorPanel.id}</code>
-              </div>
-              <div className="story-panels-info-control story-panels-panel-editor-placement">
-                <span>Placement</span>
+            <header className="story-panels-panel-editor-head">
+              <h2 id="panel-caption-editor-title">Panel editor</h2>
+              <div className="story-panels-panel-editor-head-meta">
+                <code className="story-panels-panel-editor-id-chip">{panelEditorPanel.id}</code>
                 <PlacementBadge
                   panel={panelEditorPanel}
                   pages={pages}
@@ -800,7 +879,7 @@ export function PanelChunkList({
                   } : undefined}
                 />
               </div>
-            </div>
+            </header>
             <div className="story-panels-panel-editor-grid">
               <label>
                 Panel name
@@ -812,7 +891,8 @@ export function PanelChunkList({
                   onKeyDown={(event) => event.stopPropagation()}
                 />
               </label>
-              <div className="story-panels-info-control story-panels-panel-editor-kind">
+              <div className="story-panels-panel-editor-kind">
+                <span className="story-panels-panel-editor-kind-label">Panel kind</span>
                 <div className="story-panels-kind-toggle" role="tablist" aria-label="Panel kind">
                   <button
                     type="button"
@@ -867,28 +947,80 @@ export function PanelChunkList({
             <div className="story-panels-panel-caption-editor-group">
               <div className="story-panels-panel-editor-section-head">
                 <strong>Image prompts</strong>
-                <button type="button" className="secondary" disabled={isCreating} onClick={addImagePromptDraft}>Add prompt</button>
+                <span className="story-panels-panel-editor-section-actions">
+                  {onDraftPrompt && (
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={isCreating || promptTaskBusy}
+                      title="Have pi draft an imagen-ready prompt from the panel's story text"
+                      onClick={() => onDraftPrompt(panelEditorPanel.id)}
+                    >
+                      {promptTaskBusy ? 'Drafting…' : 'Draft with pi'}
+                    </button>
+                  )}
+                  {onDraftPrompt && (
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={isCreating || promptTaskBusy}
+                      title="Give pi an idea or concept to build the prompt around"
+                      onClick={() => openDraftInputDialog(panelEditorPanel.id)}
+                    >
+                      Draft with input…
+                    </button>
+                  )}
+                  <button type="button" className="secondary" disabled={isCreating} onClick={addImagePromptDraft}>Add prompt</button>
+                </span>
               </div>
               <div className="story-panels-panel-caption-editor-list">
                 {imagePromptDrafts.length === 0 ? (
                   <p className="muted">No image prompts yet.</p>
-                ) : imagePromptDrafts.map((prompt, index) => (
-                  <label key={prompt.id}>
-                    <span>
-                      Prompt {index + 1}
-                      <button type="button" className="danger subtle" disabled={isCreating} onClick={() => deleteImagePromptDraft(prompt.id)}>Delete</button>
-                    </span>
-                    <textarea
-                      className="story-panels-caption-draft-textarea"
-                      value={prompt.text}
-                      rows={captionTextareaRows(prompt.text)}
-                      disabled={isCreating}
-                      placeholder="Describe the image to generate..."
-                      onChange={(event) => updateImagePromptDraftText(prompt.id, event.target.value)}
-                      onKeyDown={(event) => event.stopPropagation()}
-                    />
-                  </label>
-                ))}
+                ) : imagePromptDrafts.map((prompt, index) => {
+                  const savedOnServer = (panelEditorPanel.imagePrompts ?? []).some((item) => item.id === prompt.id);
+                  const feedback = refineFeedbackDrafts[prompt.id] ?? '';
+                  return (
+                    <label key={prompt.id}>
+                      <span>
+                        Prompt {index + 1}
+                        <button type="button" className="danger subtle" disabled={isCreating} onClick={() => deleteImagePromptDraft(prompt.id)}>Delete</button>
+                      </span>
+                      <textarea
+                        className="story-panels-caption-draft-textarea"
+                        value={prompt.text}
+                        rows={promptTextareaRows(prompt.text)}
+                        disabled={isCreating}
+                        placeholder="Describe the image to generate..."
+                        onChange={(event) => updateImagePromptDraftText(prompt.id, event.target.value)}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      />
+                      {onRefinePrompt && savedOnServer && (
+                        <span className="story-panels-prompt-refine-row">
+                          <input
+                            value={feedback}
+                            disabled={isCreating || promptTaskBusy}
+                            placeholder="Feedback, e.g. 'too dark, emphasize the fog'"
+                            onChange={(event) => setRefineFeedbackDrafts((current) => ({ ...current, [prompt.id]: event.target.value }))}
+                            onKeyDown={(event) => {
+                              event.stopPropagation();
+                              if (event.key === 'Enter' && feedback.trim()) {
+                                onRefinePrompt(panelEditorPanel.id, prompt.id, feedback.trim());
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={isCreating || promptTaskBusy || !feedback.trim()}
+                            onClick={() => onRefinePrompt(panelEditorPanel.id, prompt.id, feedback.trim())}
+                          >
+                            Refine
+                          </button>
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
               </div>
             </div>
             <div className="story-panels-panel-caption-editor-group">
@@ -919,8 +1051,41 @@ export function PanelChunkList({
             </div>
             <div className="modal-actions">
               <button type="button" className="secondary" disabled={isCreating} onClick={closePanelEditor}>Cancel</button>
-              <button type="button" disabled={isCreating} onClick={() => void submitPanelEditor()}>
+              <button
+                type="button"
+                disabled={isCreating || promptTaskBusy}
+                title={promptTaskBusy ? 'Wait for the pi prompt task to finish' : undefined}
+                onClick={() => void submitPanelEditor()}
+              >
                 {isCreating ? 'Saving...' : 'Save panel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {draftInputPanelId && onDraftPrompt && (
+        <div className="confirm-backdrop" onClick={() => setDraftInputPanelId(null)}>
+          <div className="confirm-dialog story-panels-insert-dialog" role="dialog" aria-modal="true" aria-labelledby="draft-input-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="draft-input-title">Draft with input</h2>
+            <p className="muted">
+              Give pi an idea, concept, or direction for this panel's image. It will build a full
+              imagen-ready prompt around it, using the panel's story text and character looks.
+            </p>
+            <label>
+              Your idea
+              <textarea
+                value={draftInputValue}
+                rows={4}
+                autoFocus
+                placeholder="e.g. 'close-up on her hands as she opens the letter, window light from the left'"
+                onChange={(event) => setDraftInputValue(event.target.value)}
+                onKeyDown={(event) => event.stopPropagation()}
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={() => setDraftInputPanelId(null)}>Cancel</button>
+              <button type="button" disabled={!draftInputValue.trim() || promptTaskBusy} onClick={submitDraftInput}>
+                Draft prompt
               </button>
             </div>
           </div>

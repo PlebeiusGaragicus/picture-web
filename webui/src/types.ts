@@ -319,15 +319,6 @@ export type StoryPanelPatchPayload = Partial<
   Pick<StoryPanel, 'order' | 'title' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'storyText' | 'visibleText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'captions' | 'imagePrompts' | 'finalized'>
 >;
 
-export interface AdaptationWorkflowStatus {
-  running: boolean;
-  returnCode?: number | null;
-  startedAt?: string | null;
-  completedAt?: string | null;
-  log: string;
-  logFiles?: Record<string, string>;
-}
-
 export interface AdaptationGenerateResponse {
   generated: boolean;
   kind: 'character' | 'artifact' | 'style-ref';
@@ -486,9 +477,49 @@ export interface ConceptCard {
 
 export type AgentSessionKind =
   | 'read-book'
-  | 'book-chat'
-  | 'concept-character-suggest'
-  | 'concept-location-suggest';
+  | 'extract-character-list'
+  | 'extract-character'
+  | 'extract-all-characters'
+  | 'suggest-concept-character'
+  | 'suggest-concept-location'
+  | 'draft-panel-prompt'
+  | 'refine-panel-prompt'
+  | 'book-chat';
+
+export type PiTaskProfile =
+  | 'read-book'
+  | 'extract-character-list'
+  | 'extract-character'
+  | 'extract-all-characters'
+  | 'suggest-concept-character'
+  | 'suggest-concept-location'
+  | 'draft-panel-prompt'
+  | 'refine-panel-prompt';
+
+export type PiTaskState = 'starting' | 'running' | 'aborting' | 'done' | 'failed' | 'cancelled';
+
+export interface PiTaskStatus {
+  taskId: string;
+  projectSlug: string;
+  profile: string;
+  title: string;
+  target?: string | null;
+  state: PiTaskState;
+  startedAt: string;
+  completedAt?: string | null;
+  error?: string | null;
+  piSessionId?: string | null;
+  lastSeq?: number | null;
+}
+
+export interface PiTaskEvent {
+  seq: number;
+  ts: string;
+  event: {
+    type: string;
+    [key: string]: unknown;
+  };
+}
 
 export type AgentSessionStatus = 'running' | 'succeeded' | 'failed' | 'archived';
 

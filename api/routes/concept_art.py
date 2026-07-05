@@ -1,14 +1,12 @@
-"""Concept card and concept-art generation routes."""
+"""Concept card routes (concept suggestions run through /pi-tasks)."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, File, Query, UploadFile
 from starlette import status
 
-import adaptation_jobs
 import concept_cards
 from models import (
-    AdaptationWorkflowStatus,
     ConceptCardDocument,
     ConceptCardPatch,
     ConceptNodeCreate,
@@ -45,23 +43,3 @@ def draft_concept_card(slug: str, card_id: str) -> ConceptNodeResponse:
 @router.post("/api/projects/{slug}/adaptation/concept-art/upload", response_model=ConceptCardDocument)
 async def upload_concept_art(slug: str, file: UploadFile = File(...)) -> ConceptCardDocument:
     return await concept_cards.upload_card_image(slug, file)
-
-
-@router.post("/api/projects/{slug}/adaptation/concept-art/generate-character", response_model=AdaptationWorkflowStatus)
-def start_generate_concept_character(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation_jobs.start_generate_concept_character(slug)
-
-
-@router.get("/api/projects/{slug}/adaptation/concept-art/generate-character", response_model=AdaptationWorkflowStatus)
-def get_generate_concept_character(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation_jobs.generate_concept_character_status(slug)
-
-
-@router.post("/api/projects/{slug}/adaptation/concept-art/generate-location", response_model=AdaptationWorkflowStatus)
-def start_generate_concept_location(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation_jobs.start_generate_concept_location(slug)
-
-
-@router.get("/api/projects/{slug}/adaptation/concept-art/generate-location", response_model=AdaptationWorkflowStatus)
-def get_generate_concept_location(slug: str) -> AdaptationWorkflowStatus:
-    return adaptation_jobs.generate_concept_location_status(slug)

@@ -1,15 +1,19 @@
-"""Pi agent sessions, book chats, and image refinement chat routes."""
+"""Pi tasks, agent sessions, book chats, and image refinement chat routes."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+import json
+from queue import Empty
+from typing import Iterator
+
+from fastapi import APIRouter, Header, Query
+from fastapi.responses import StreamingResponse
 
 import agent_sessions
 import book_chat_sessions
-import book_session_load
 import chat_sessions
+import pi_runtime
 from models import (
-    AdaptationWorkflowStatus,
     AgentSessionDocument,
     AgentSessionPatch,
     BookChatSessionCreate,
@@ -21,19 +25,102 @@ from models import (
     ChatSessionPatch,
     ChatTurnRequest,
     ChatTurnResponse,
+    PiTaskAbortResponse,
+    PiTaskStartRequest,
+    PiTaskStatus,
     PiTraceDocument,
 )
 
 router = APIRouter()
 
-@router.get("/api/projects/{slug}/adaptation/book-session/load", response_model=AdaptationWorkflowStatus)
-def get_book_session_load(slug: str) -> AdaptationWorkflowStatus:
-    return book_session_load.book_session_load_status(slug)
+@router.post("/api/projects/{slug}/pi-tasks", response_model=PiTaskStatus, status_code=202)
+def start_pi_task(slug: str, payload: PiTaskStartRequest) -> PiTaskStatus:
+    return pi_runtime.MANAGER.start_task(
+        slug,
+        payload.profile,
+        target=payload.target,
+        force=payload.force,
+        instructions=payload.instructions,
+    ).to_status()
 
 
-@router.post("/api/projects/{slug}/adaptation/book-session/load", response_model=AdaptationWorkflowStatus)
-def start_book_session_load(slug: str) -> AdaptationWorkflowStatus:
-    return book_session_load.start_book_session_load(slug)
+@router.get("/api/projects/{slug}/pi-tasks", response_model=list[PiTaskStatus])
+def list_pi_tasks(
+    slug: str,
+    profile: str | None = Query(default=None),
+    active: bool | None = Query(default=None),
+) -> list[PiTaskStatus]:
+    return pi_runtime.MANAGER.list_statuses(slug, profile=profile, active=active)
+
+
+@router.get("/api/projects/{slug}/pi-tasks/{task_id}", response_model=PiTaskStatus)
+def get_pi_task(slug: str, task_id: str) -> PiTaskStatus:
+    return pi_runtime.MANAGER.get_status(slug, task_id)
+
+
+@router.post("/api/projects/{slug}/pi-tasks/{task_id}/abort", response_model=PiTaskAbortResponse)
+def abort_pi_task(slug: str, task_id: str) -> PiTaskAbortResponse:
+    return PiTaskAbortResponse(cancelled=pi_runtime.MANAGER.abort(slug, task_id))
+
+
+@router.get("/api/projects/{slug}/pi-tasks/{task_id}/events")
+def stream_pi_task_events(
+    slug: str,
+    task_id: str,
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    lastEventId: int | None = Query(default=None),
+) -> StreamingResponse:
+    since_seq = 0
+    if last_event_id is not None:
+        try:
+            since_seq = int(last_event_id)
+        except ValueError:
+            since_seq = 0
+    elif lastEventId is not None:
+        since_seq = lastEventId
+
+    handle = pi_runtime.MANAGER.get_handle(slug, task_id)
+    status = pi_runtime.MANAGER.get_status(slug, task_id)  # 404s early for unknown tasks
+
+    def sse_record(record: dict) -> str:
+        return f"id: {record['seq']}\ndata: {json.dumps(record, ensure_ascii=False)}\n\n"
+
+    def generate() -> Iterator[str]:
+        if handle is None:
+            # Task is not live; emit the terminal snapshot state and close.
+            terminal = {
+                "seq": since_seq + 1,
+                "ts": status.completedAt or status.startedAt,
+                "event": {"type": "task_state", "state": status.state, "error": status.error},
+            }
+            yield sse_record(terminal)
+            return
+        listener = handle.subscribe()
+        try:
+            last_seq = since_seq
+            for record in handle.events_since(since_seq):
+                last_seq = record["seq"]
+                yield sse_record(record)
+            while True:
+                if handle.state not in pi_runtime.ACTIVE_STATES and not handle.events_since(last_seq):
+                    return
+                try:
+                    record = listener.get(timeout=15)
+                except Empty:
+                    yield ": keep-alive\n\n"
+                    continue
+                if record["seq"] <= last_seq:
+                    continue
+                last_seq = record["seq"]
+                yield sse_record(record)
+        finally:
+            handle.unsubscribe(listener)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/api/projects/{slug}/adaptation/book-chats", response_model=list[BookChatSessionDocument])
