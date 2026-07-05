@@ -68,6 +68,8 @@ view and is transport-independent.
 
 ### Planned direction (design, not yet implemented)
 
+See [pi-idea.md](pi-idea.md) for the full verified design (pi SDK/RPC/extension findings, PiSessionManager, streaming chat, domain tools).
+
 Replace the detached-bash layer with an in-process **JobManager** (threads,
 status registry, cancellation by terminating the pi process group; still
 snapshotting status JSON so an API restart reports "interrupted" instead of a
