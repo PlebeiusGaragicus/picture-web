@@ -31,10 +31,11 @@ import { workspaceNavItems, type ProjectPhase } from './projectNavigation';
 import { isEditableShortcutTarget } from './shared/dom';
 import { useDismissOnOutsidePointerDown } from './shared/popover';
 import { ToastProvider, useToast } from './shared/toast';
+import { useDebouncedAsyncCallback } from './shared/debounce';
 import { emptyCanvas } from './shared/canvasDefaults';
 import type { LayoutEditorNavigation } from './storyPanels/layoutEditorNavigation';
 import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './storyPanels/printLayout';
-import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId } from './canvas/graph';
+import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId, mergeFlowNodes } from './canvas/graph';
 import { canDeleteNode } from './canvas/roles';
 import { SYSTEM_TAGS, assetLabel, archivedVariants, capabilitiesForModel, characterEntityTags, conceptSubjectFromTags, countEntityTagsOnAssets, countUserTagAssignments, countUserTagsOnAssets, defaultDraftParams, isCharacterCanvasNode, isConceptTagged, locationEntityTags, mergeAvailableUserTagsOnly, modelCapabilities, normalizedParamsForModel, partitionAssetTagIds, userProjectTags, visibleDisplayName, visibleVariants } from './canvas/shared';
 import { NodeSidebar } from './canvas/sidebars';
@@ -426,6 +427,7 @@ function App() {
 
   const loadProject = useCallback(async (projectSlug: string) => {
     if (!projectSlug) return;
+    await flushCanvasSave();
     const [detail, layout, sessions] = await Promise.all([
       api.getProject(projectSlug, showArchived),
       api.getCanvas(projectSlug, showArchived),
@@ -436,7 +438,7 @@ function App() {
     setProjectTags(detail.tags);
     setChatSessions(sessions);
     setCanvas(layout);
-    setNodes(toFlowNodes(
+    const freshNodes = toFlowNodes(
       layout,
       detail.assets,
       generatingNodeIdsRef.current,
@@ -448,7 +450,8 @@ function App() {
       updateImageGroupDisplayName,
       openChatForAsset,
       onCreateTagForNode,
-    ));
+    );
+    setNodes((current) => mergeFlowNodes(current, freshNodes));
   }, [changeVariant, openAssetInViewer, openChatForAsset, openDetails, openViewer, onCreateTagForNode, showArchived, updateImageGroupDisplayName]);
 
   useEffect(() => {
@@ -543,14 +546,25 @@ function App() {
     setNodes((current) => applyNodeChanges(changes, current));
   }, []);
 
+  // Coalesce layout writes: local state updates immediately, the network
+  // write trails by 600ms and is flushed before any server-side canvas read.
+  const { call: scheduleCanvasSave, flush: flushCanvasSave } = useDebouncedAsyncCallback(async (next: CanvasDocument) => {
+    if (!openProjectSlug) return;
+    try {
+      const saved = await api.saveCanvas(openProjectSlug, next);
+      setCanvas(saved);
+    } catch (err) {
+      console.error('[photo-web] failed to save canvas layout', err);
+      toast.error(formatRequestError(err));
+    }
+  }, 600);
+
   const saveLayout = useCallback(async (_: React.MouseEvent, draggedNode?: Node<PhotoNodeData>) => {
     if (!openProjectSlug) return;
     const currentNodes = draggedNode ? nodes.map((node) => (node.id === draggedNode.id ? draggedNode : node)) : nodes;
-    const next = nodesToCanvas(canvas, currentNodes);
-    const saved = await api.saveCanvas(openProjectSlug, next);
-    setCanvas(saved);
     setNodes(currentNodes);
-  }, [assets, canvas, nodes, openProjectSlug]);
+    scheduleCanvasSave(nodesToCanvas(canvas, currentNodes));
+  }, [canvas, nodes, openProjectSlug, scheduleCanvasSave]);
 
   const reload = async () => loadProject(openProjectSlug);
 
@@ -836,6 +850,7 @@ function App() {
 
   const importFiles = async (files: FileList | File[], position?: { x: number; y: number }) => {
     if (!openProjectSlug || isImporting) return;
+    await flushCanvasSave();
     const images = Array.from(files).filter((file) => file.type.startsWith('image/'));
     if (!images.length) return;
     setIsImporting(true);
@@ -919,6 +934,11 @@ function App() {
   const persistNodes = useCallback(async (nextNodes: Node<PhotoNodeData>[], options: { refresh?: boolean } = {}) => {
     if (!openProjectSlug) return;
     const next = nodesToCanvas(canvas, nextNodes);
+    if (!(options.refresh ?? true)) {
+      scheduleCanvasSave(next);
+      return;
+    }
+    await flushCanvasSave();
     const saved = await api.saveCanvas(openProjectSlug, next);
     setCanvas(saved);
     if (options.refresh ?? true) {
@@ -937,7 +957,7 @@ function App() {
         onCreateTagForNode,
       ));
     }
-  }, [assets, canvas, onCreateTagForNode, openProjectSlug]);
+  }, [assets, canvas, flushCanvasSave, onCreateTagForNode, openProjectSlug, scheduleCanvasSave]);
 
   useEffect(() => {
     persistNodesRef.current = persistNodes;
@@ -980,6 +1000,7 @@ function App() {
 
   const deleteSelectedNodes = useCallback(async () => {
     if (!selectedNodeIds.length) return;
+    await flushCanvasSave();
     const deletableNodes = deletableSelectedNodes(nodes, selectedNodeIds);
     if (!deletableNodes.length) return;
     const deletable = new Set(deletableNodes.map((node) => node.id));
@@ -1005,19 +1026,18 @@ function App() {
       await persistNodes(nextNodes);
     }
     await loadProject(openProjectSlug);
-  }, [loadProject, nodes, openProjectSlug, persistNodes, popoverNodeId, selectedNodeIds]);
+  }, [flushCanvasSave, loadProject, nodes, openProjectSlug, persistNodes, popoverNodeId, selectedNodeIds]);
 
   useEffect(() => {
+    if (!(phaseHasCanvas(projectPhase) && phaseViewMode === 'canvas')) return;
     const deleteOnKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isTyping = target?.matches?.('input, textarea, select, [contenteditable="true"]');
-      if (isTyping || !['Backspace', 'Delete'].includes(event.key)) return;
+      if (isEditableShortcutTarget(event.target) || !['Backspace', 'Delete'].includes(event.key)) return;
       event.preventDefault();
       requestDeleteSelectedNodes();
     };
     window.addEventListener('keydown', deleteOnKey);
     return () => window.removeEventListener('keydown', deleteOnKey);
-  }, [requestDeleteSelectedNodes]);
+  }, [phaseViewMode, projectPhase, requestDeleteSelectedNodes]);
 
   const createDraftAt = async (
     refs: string[],
@@ -1104,6 +1124,7 @@ function App() {
   };
 
   const generateDraft = async (id: string, draft: DraftNodeData | ImageGroupNodeData) => {
+    await flushCanvasSave();
     const styleRefKind = styleRefKindForTags(draft.tags);
     const generatingId = styleRefKind ? styleRefImageNodeId(styleRefKind, adaptation) : id;
     try {
@@ -1170,6 +1191,7 @@ function App() {
   };
 
   const generateImageVariants = async (id: string, group: ImageGroupNodeData, params: GenerationParams, visualStyleId?: string | null) => {
+    await flushCanvasSave();
     if (styleRefKindForTags(group.tags)) {
       setError('Generate style reference replacements from the adaptation style reference action.');
       return;

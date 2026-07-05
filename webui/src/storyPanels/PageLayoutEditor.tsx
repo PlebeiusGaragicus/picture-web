@@ -887,6 +887,25 @@ export function PageLayoutEditor({
     setUndoStack((current) => [...current, { document, label: entry.label }]);
     onSaveDocument(entry.document);
   };
+  const undoRef = useRef(undo);
+  undoRef.current = undo;
+  const redoRef = useRef(redo);
+  redoRef.current = redo;
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      if (event.key.toLowerCase() !== 'z') return;
+      if (isEditableShortcutTarget(event.target)) return;
+      event.preventDefault();
+      if (event.shiftKey) {
+        redoRef.current();
+      } else {
+        undoRef.current();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
   const pagesToReachNextStorySignature = () => {
     const remainder = storyPages.length % 4;
     return remainder === 0 ? 4 : 4 - remainder;

@@ -82,3 +82,28 @@ export function deleteSelectedNodesMessage(selectedCount: number, deletableCount
   }
   return `Delete ${deletableCount} selected draft node(s)?${suffix}`;
 }
+
+
+function nodeFingerprint(node: Node<PhotoNodeData>): string {
+  const data: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node.data as unknown as Record<string, unknown>)) {
+    if (typeof value === 'function') continue;
+    data[key] = value instanceof Map ? Array.from(value.entries()) : value;
+  }
+  return JSON.stringify({ x: node.position.x, y: node.position.y, type: node.type, data });
+}
+
+/**
+ * Reconcile a reloaded node list against the current one: reuse the previous
+ * node object when nothing observable changed (React Flow then skips
+ * re-render/remount) and carry selection flags across the reload.
+ */
+export function mergeFlowNodes(prev: Node<PhotoNodeData>[], next: Node<PhotoNodeData>[]): Node<PhotoNodeData>[] {
+  const prevById = new Map(prev.map((node) => [node.id, node]));
+  return next.map((nextNode) => {
+    const prevNode = prevById.get(nextNode.id);
+    if (!prevNode) return nextNode;
+    if (nodeFingerprint(prevNode) === nodeFingerprint(nextNode)) return prevNode;
+    return prevNode.selected ? { ...nextNode, selected: true } : nextNode;
+  });
+}
