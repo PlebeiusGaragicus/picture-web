@@ -1014,11 +1014,6 @@ button {
   flex: 1;
 }
 
-.character-hub-card {
-  display: grid;
-  gap: 14px;
-}
-
 .pi-trace-timeline {
   display: grid;
   gap: 12px;
@@ -1346,6 +1341,7 @@ button {
   align-self: start;
   display: flex;
   flex-direction: column;
+  gap: 14px;
 }
 
 .character-hub-card h3 {
@@ -3039,14 +3035,6 @@ button {
   gap: 14px;
 }
 
-.story-panels-layout-workspace.is-single {
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
-  grid-template-rows: minmax(0, 1fr);
-  align-items: stretch;
-  gap: 10px;
-  min-height: 0;
-}
-
 .story-panels-layout-workspace.is-single .story-panels-pages {
   grid-template-columns: minmax(0, 1fr);
   justify-items: center;
@@ -3153,6 +3141,11 @@ button {
 }
 
 .story-panels-layout-workspace.is-single {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 10px;
+  min-height: 0;
   overflow: hidden;
 }
 
