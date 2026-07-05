@@ -68,7 +68,7 @@ view and is transport-independent.
 
 ### Planned direction (design, not yet implemented)
 
-See [pi-idea.md](pi-idea.md) for the full verified design (pi SDK/RPC/extension findings, PiSessionManager, streaming chat, domain tools).
+See [pi-idea.md](pi-idea.md) for the full verified design (pi SDK/RPC/extension findings, PiSessionManager, narrow single-purpose task profiles, domain tools). The product direction is button-driven AI augmentation — many narrow pi agents (character/scene/prop extraction, panel image-prompt drafting/refinement), no general chat agent; book chat is slated for removal.
 
 Replace the detached-bash layer with an in-process **PiSessionManager** (threads,
 event ring buffers + SSE streaming, cancellation via the RPC `abort` command,
