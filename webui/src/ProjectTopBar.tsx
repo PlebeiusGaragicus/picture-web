@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useDismissOnOutsidePointerDown } from './shared/popover';
 import { AutoPlaceToggle } from './storyPanels/AutoPlaceToggle';
 import { PanelChunksToggleButton } from './storyPanels/PanelChunksToggle';
 import { SidebarToggleIcon, SidebarCollapseButton } from './SidebarToggle';
@@ -44,16 +45,7 @@ export function ProjectTopBar({
   const navRef = useRef<HTMLDivElement | null>(null);
   const help = projectPhaseHelp(activePhase);
 
-  useEffect(() => {
-    if (!navOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!navRef.current?.contains(event.target as Node)) {
-        setNavOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [navOpen]);
+  useDismissOnOutsidePointerDown(navOpen, [navRef], useCallback(() => setNavOpen(false), []));
 
   const selectPhase = (phase: ProjectPhase) => {
     onPhaseChange(phase);

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useDismissOnOutsidePointerDown, useRepositionOnViewportChange } from '../shared/popover';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
+import { menuKeyboardHandlers, useDismissOnOutsidePointerDown } from '../shared/popover';
 
 export function HubCardMenu({
   disabled,
@@ -19,107 +20,57 @@ export function HubCardMenu({
 }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
-  const [isPositioned, setIsPositioned] = useState(false);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const { refs, floatingStyles } = useFloating({
+    open,
+    placement: 'bottom-end',
+    middleware: [offset(4), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
 
-  const updatePopoverPosition = useCallback(() => {
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    const popoverWidth = 140;
-    const padding = 8;
-    let left = rect.right - popoverWidth;
-    left = Math.max(padding, Math.min(left, window.innerWidth - popoverWidth - padding));
-    setPopoverPosition({ top: rect.bottom + 4, left });
-    setIsPositioned(true);
-  }, []);
+  const close = () => {
+    setOpen(false);
+    (refs.reference.current as HTMLElement | null)?.focus();
+  };
+  useDismissOnOutsidePointerDown(open, [menuRef, popoverRef], close);
+  const { onKeyDown, focusFirst } = menuKeyboardHandlers(popoverRef, close);
+  useEffect(() => {
+    if (open) focusFirst();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
-  useLayoutEffect(() => {
-    if (!open) {
-      setIsPositioned(false);
-      return;
-    }
-    updatePopoverPosition();
-  }, [open, updatePopoverPosition]);
-
-  useRepositionOnViewportChange(open, updatePopoverPosition);
-  useDismissOnOutsidePointerDown(open, [menuRef, popoverRef], useCallback(() => setOpen(false), []));
+  const item = (label: string, action: () => void, danger = false) => (
+    <button
+      type="button"
+      role="menuitem"
+      className={`story-panels-chunk-menu-item${danger ? ' story-panels-chunk-menu-item--danger' : ''}`}
+      disabled={disabled}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        action();
+        setOpen(false);
+      }}
+    >
+      {label}
+    </button>
+  );
 
   const popover = open ? createPortal(
     <div
-      ref={popoverRef}
+      ref={(node) => {
+        popoverRef.current = node;
+        refs.setFloating(node);
+      }}
       className="story-panels-chunk-menu-popover is-portaled"
       role="menu"
-      style={{
-        top: popoverPosition.top,
-        left: popoverPosition.left,
-        visibility: isPositioned ? 'visible' : 'hidden',
-      }}
+      style={floatingStyles}
+      onKeyDown={onKeyDown}
     >
-      {onUploadImage && (
-        <button
-          type="button"
-          role="menuitem"
-          className="story-panels-chunk-menu-item"
-          disabled={disabled}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            setOpen(false);
-            window.setTimeout(() => onUploadImage(), 0);
-          }}
-        >
-          Upload image
-        </button>
-      )}
-      {onEdit && (
-        <button
-          type="button"
-          role="menuitem"
-          className="story-panels-chunk-menu-item"
-          disabled={disabled}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            setOpen(false);
-            window.setTimeout(() => onEdit(), 0);
-          }}
-        >
-          Edit
-        </button>
-      )}
-      {onSetDefault && (
-        <button
-          type="button"
-          role="menuitem"
-          className="story-panels-chunk-menu-item"
-          disabled={disabled}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            setOpen(false);
-            window.setTimeout(() => onSetDefault(), 0);
-          }}
-        >
-          Set as default
-        </button>
-      )}
-      <button
-        type="button"
-        role="menuitem"
-        className="story-panels-chunk-menu-item story-panels-chunk-menu-item--danger"
-        disabled={disabled}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          setOpen(false);
-          window.setTimeout(() => onDelete(), 0);
-        }}
-      >
-        Delete
-      </button>
+      {onUploadImage && item('Upload image', onUploadImage)}
+      {onEdit && item('Edit', onEdit)}
+      {onSetDefault && item('Set as default', onSetDefault)}
+      {item('Delete', onDelete, true)}
     </div>,
     document.body,
   ) : null;
@@ -127,7 +78,7 @@ export function HubCardMenu({
   return (
     <div className="story-panels-chunk-menu character-hub-card-menu" ref={menuRef}>
       <button
-        ref={triggerRef}
+        ref={refs.setReference}
         type="button"
         className="story-panels-chunk-menu-trigger"
         aria-label={ariaLabel}

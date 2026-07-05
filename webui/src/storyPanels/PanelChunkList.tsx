@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useDismissOnOutsidePointerDown } from '../shared/popover';
 import type { StoryPanel, StoryPanelCaption, StoryPanelImagePrompt, StoryPanelPage, StoryPanelPatchPayload } from '../types';
 import { defaultCaptionTextStyle } from './captionPanelStyle';
 import { panelIsPlacedOnLayout } from './panelPlacement';
@@ -239,16 +240,7 @@ function ChunkActionsMenu({
     return () => observer.disconnect();
   }, [isOpen, updatePopoverPosition]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (menuRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
-      onClose();
-    };
-    document.addEventListener('pointerdown', closeOnOutsideClick);
-    return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
-  }, [isOpen, onClose]);
+  useDismissOnOutsidePointerDown(isOpen, [menuRef, popoverRef], onClose);
 
   const popover = isOpen ? (
     <div

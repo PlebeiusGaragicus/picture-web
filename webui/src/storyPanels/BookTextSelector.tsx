@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDismissOnOutsidePointerDown } from '../shared/popover';
 import type { StoryPanel } from '../types';
 import { bookAnchorPanels } from './storyPanelSidebar';
 import { isBookLinked, isPanel } from './panelModel';
@@ -114,17 +115,13 @@ export function BookTextSelector({
     return () => window.clearTimeout(timeout);
   }, [focusedPanelId]);
 
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (!cardRef.current?.contains(event.target as Node)) {
-        onSelectionChange(null);
-        setMenu(null);
-        window.getSelection()?.removeAllRanges();
-      }
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
+  const clearSelection = useCallback(() => {
+    onSelectionChange(null);
+    setMenu(null);
+    window.getSelection()?.removeAllRanges();
   }, [onSelectionChange]);
+  // Only listen while something is selected so Escape isn't swallowed globally.
+  useDismissOnOutsidePointerDown(Boolean(selection ?? menu), [cardRef], clearSelection);
 
   const offsetFromPoint = (clientX: number, clientY: number): number | null => {
     const root = textRef.current;

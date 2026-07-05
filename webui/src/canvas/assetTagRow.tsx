@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useRepositionOnViewportChange } from '../shared/popover';
+import { useDismissOnOutsidePointerDown, useRepositionOnViewportChange } from '../shared/popover';
 import { createPortal } from 'react-dom';
 import type { TagDefinition } from '../types';
 import { SplitTagPopover } from './splitTagPopover';
@@ -141,18 +141,7 @@ export function TagControlButton({
 
   useRepositionOnViewportChange(isOpen && portaled, updatePopoverPosition);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) return;
-      if (menuRef.current?.contains(target)) return;
-      if (popoverRef.current?.contains(target)) return;
-      setIsOpen(false);
-    };
-    document.addEventListener('click', closeOnOutsideClick, true);
-    return () => document.removeEventListener('click', closeOnOutsideClick, true);
-  }, [isOpen]);
+  useDismissOnOutsidePointerDown(isOpen, [menuRef, popoverRef], useCallback(() => setIsOpen(false), []));
 
   const applyEntityTags = (entityTags: string[]) => {
     const characterTags = entityTags.filter((tagId) => characterAvailable.some((tag) => tag.id === tagId));

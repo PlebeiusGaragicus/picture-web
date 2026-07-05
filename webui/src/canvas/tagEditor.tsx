@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useRepositionOnViewportChange } from '../shared/popover';
+import { useDismissOnOutsidePointerDown, useRepositionOnViewportChange } from '../shared/popover';
 import { createPortal } from 'react-dom';
 import type { EntityKind, TagDefinition } from '../types';
 import { isValidTagName, normalizeTagName, tagColorOptions, tagColors } from './shared';
@@ -49,17 +49,7 @@ export function TagColorPickerPopover({
 
   useRepositionOnViewportChange(true, updatePosition);
 
-  useEffect(() => {
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) return;
-      if (popoverRef.current?.contains(target)) return;
-      if (anchorRef.current?.contains(target)) return;
-      onClose();
-    };
-    document.addEventListener('mousedown', closeOnOutsideClick, true);
-    return () => document.removeEventListener('mousedown', closeOnOutsideClick, true);
-  }, [anchorRef, onClose]);
+  useDismissOnOutsidePointerDown(true, [popoverRef, anchorRef], onClose);
 
   return createPortal(
     <div

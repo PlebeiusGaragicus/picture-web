@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isEditableShortcutTarget } from '../shared/dom';
+import { useDismissOnOutsidePointerDown } from '../shared/popover';
 import type { CSSProperties, ReactNode } from 'react';
 import { nonArchivedVariants } from '../canvas/shared';
 import type { Asset, CanvasDocument, StoryPanel, StoryPanelCaption, StoryPanelDocument, StoryPanelImageCrop, StoryPanelRect, StoryPanelTextStyle, TagDefinition } from '../types';
@@ -613,15 +614,12 @@ export function PageLayoutEditor({
     onSaveDocument(nextDocument);
   };
   persistPanelTextDraftRef.current = persistPanelTextDraft;
-  useEffect(() => {
-    if (!pageMenu) return;
-    const close = () => {
-      setPageMenu(null);
-      setPageMenuSubmenu(null);
-    };
-    window.document.addEventListener('pointerdown', close);
-    return () => window.document.removeEventListener('pointerdown', close);
-  }, [pageMenu]);
+  const pageMenuRef = useRef<HTMLDivElement | null>(null);
+  const closePageMenu = useCallback(() => {
+    setPageMenu(null);
+    setPageMenuSubmenu(null);
+  }, []);
+  useDismissOnOutsidePointerDown(Boolean(pageMenu), [pageMenuRef], closePageMenu);
   useEffect(() => {
     setRatioPopoverOpen(false);
     setCaptionStylePopoverId(null);
@@ -666,39 +664,12 @@ export function PageLayoutEditor({
       window.removeEventListener('resize', updateInfoPopoverAnchor);
     };
   }, [layoutMode, visibleSelectedPanel?.id, visibleSelectedPanel?.rect, clampedPageIndex, dragState, updateInfoPopoverAnchor]);
-  useEffect(() => {
-    if (!ratioPopoverOpen) return;
-    const close = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) return;
-      if (target.closest('.story-panels-info-aspect-popover-wrap')) return;
-      setRatioPopoverOpen(false);
-    };
-    window.document.addEventListener('mousedown', close, true);
-    return () => window.document.removeEventListener('mousedown', close, true);
-  }, [ratioPopoverOpen]);
-  useEffect(() => {
-    if (!sizePopoverOpen) return;
-    const close = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) return;
-      if (target.closest('.story-panels-info-size-popover-wrap')) return;
-      setSizePopoverOpen(false);
-    };
-    window.document.addEventListener('mousedown', close, true);
-    return () => window.document.removeEventListener('mousedown', close, true);
-  }, [sizePopoverOpen]);
-  useEffect(() => {
-    if (!captionStylePopoverId) return;
-    const close = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) return;
-      if (target.closest('.story-panels-info-caption-style-wrap')) return;
-      setCaptionStylePopoverId(null);
-    };
-    window.document.addEventListener('mousedown', close, true);
-    return () => window.document.removeEventListener('mousedown', close, true);
-  }, [captionStylePopoverId]);
+  const ratioPopoverWrapRef = useRef<HTMLDivElement | null>(null);
+  useDismissOnOutsidePointerDown(ratioPopoverOpen, [ratioPopoverWrapRef], useCallback(() => setRatioPopoverOpen(false), []));
+  const sizePopoverWrapRef = useRef<HTMLDivElement | null>(null);
+  useDismissOnOutsidePointerDown(sizePopoverOpen, [sizePopoverWrapRef], useCallback(() => setSizePopoverOpen(false), []));
+  const captionStyleWrapRef = useRef<HTMLDivElement | null>(null);
+  useDismissOnOutsidePointerDown(Boolean(captionStylePopoverId), [captionStyleWrapRef], useCallback(() => setCaptionStylePopoverId(null), []));
   useEffect(() => {
     if (!captionStylePopoverId) setCaptionFontSizeDraft(null);
   }, [captionStylePopoverId]);
@@ -2197,7 +2168,7 @@ export function PageLayoutEditor({
                         >
                           {imageInfoHost.aspectRatioLocked ? '🔓 ratio' : '🔒 ratio'}
                         </button>
-                        <div className="story-panels-info-aspect-popover-wrap">
+                        <div ref={ratioPopoverWrapRef} className="story-panels-info-aspect-popover-wrap">
                           <button
                             type="button"
                             className={`secondary ${ratioPopoverOpen ? 'is-active' : ''}`}
@@ -2229,7 +2200,7 @@ export function PageLayoutEditor({
                             </div>
                           )}
                         </div>
-                        <div className="story-panels-info-size-popover-wrap">
+                        <div ref={sizePopoverWrapRef} className="story-panels-info-size-popover-wrap">
                           <button
                             type="button"
                             className={`secondary ${sizePopoverOpen ? 'is-active' : ''}`}
@@ -2360,7 +2331,7 @@ export function PageLayoutEditor({
                               >
                                 <TrashIcon />
                               </button>
-                              <div className="story-panels-info-caption-style-wrap">
+                              <div ref={captionStyleWrapRef} className="story-panels-info-caption-style-wrap">
                                 <button
                                   type="button"
                                   className={`story-panels-caption-style-button ${captionStylePopoverId === caption.id ? 'is-active' : ''}`}
@@ -2605,7 +2576,7 @@ export function PageLayoutEditor({
         )}
         </div>
       {pageMenu && (
-        <div className="story-panels-page-context-menu" style={{ left: pageMenu.x, top: pageMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+        <div ref={pageMenuRef} className="story-panels-page-context-menu" style={{ left: pageMenu.x, top: pageMenu.y }}>
           {pageMenu.kind === 'page' && (
             <>
               <button

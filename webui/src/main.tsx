@@ -29,6 +29,7 @@ import { ProjectTopBar } from './ProjectTopBar';
 import { SidebarCollapseButton } from './SidebarToggle';
 import { workspaceNavItems, type ProjectPhase } from './projectNavigation';
 import { isEditableShortcutTarget } from './shared/dom';
+import { useDismissOnOutsidePointerDown } from './shared/popover';
 import { emptyCanvas } from './shared/canvasDefaults';
 import type { LayoutEditorNavigation } from './storyPanels/layoutEditorNavigation';
 import { BOOKLET_PAGE_BORDER_OPTIONS, type BookletPageBorder } from './storyPanels/printLayout';
@@ -454,21 +455,24 @@ function App() {
     loadProject(openProjectSlug).catch((err) => setError(String(err)));
   }, [loadProject, openProjectSlug]);
 
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  useDismissOnOutsidePointerDown(Boolean(contextMenu), [contextMenuRef], useCallback(() => setContextMenu(null), []));
   useEffect(() => {
-    const closeMenu = () => setContextMenu(null);
+    if (!contextMenu) return;
+    // React Flow zoom/pan is wheel-driven; don't leave the menu floating detached.
+    const closeOnWheel = () => setContextMenu(null);
+    window.addEventListener('wheel', closeOnWheel, { passive: true });
+    return () => window.removeEventListener('wheel', closeOnWheel);
+  }, [contextMenu]);
+  useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setContextMenu(null);
         setPopoverNodeId(null);
         setIsUserTagFilterMenuOpen(false);
       }
     };
-    window.addEventListener('click', closeMenu);
     window.addEventListener('keydown', closeOnEscape);
-    return () => {
-      window.removeEventListener('click', closeMenu);
-      window.removeEventListener('keydown', closeOnEscape);
-    };
+    return () => window.removeEventListener('keydown', closeOnEscape);
   }, []);
 
   const availableUserTags = useMemo(() => mergeAvailableUserTagsOnly(projectTags, assets), [assets, projectTags]);
@@ -1739,7 +1743,7 @@ function App() {
           </>
         )}
         {contextMenu && isCanvasActive && (
-          <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()}>
+          <div ref={contextMenuRef} className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
             <button onClick={openImportPicker}>Import</button>
             <button onClick={createLooseDraft}>Generate</button>
           </div>
@@ -2385,17 +2389,7 @@ function FloatingTagsMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const activeCount = activeUserTags.length + activeEntityTags.length;
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) return;
-      if (menuRef.current?.contains(target)) return;
-      onClose();
-    };
-    document.addEventListener('mousedown', closeOnOutsideClick, true);
-    return () => document.removeEventListener('mousedown', closeOnOutsideClick, true);
-  }, [isOpen, onClose]);
+  useDismissOnOutsidePointerDown(isOpen, [menuRef], onClose);
 
   return (
     <div ref={menuRef} className="project-top-bar-tags-menu">
