@@ -15,7 +15,7 @@ import ReactFlow, {
   applyNodeChanges,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import './style.css';
+import './styles/index.css';
 import { formatRequestError, formatWorkflowStatusError } from './formatError';
 import { MouseTrail } from './MouseTrail';
 import { api } from './api';

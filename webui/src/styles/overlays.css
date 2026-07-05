@@ -1,0 +1,131 @@
+/* Modals, confirm dialogs, tooltips. */
+
+.help-tip-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.help-tip {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  flex: 0 0 auto;
+  color: #94a3b8;
+  background: rgb(148 163 184 / 0.14);
+  border: 1px solid rgb(148 163 184 / 0.3);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.help-tip:hover {
+  color: #e2e8f0;
+  border-color: #475569;
+}
+
+.help-tip-bubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  z-index: 60;
+  width: max-content;
+  max-width: 260px;
+  transform: translateX(-50%);
+  padding: 8px 10px;
+  color: #e5e7eb;
+  background: #020617;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.help-tip-wrap:hover .help-tip-bubble,
+.help-tip:focus-visible + .help-tip-bubble {
+  opacity: 1;
+  visibility: visible;
+}
+
+.help-tip-wrap.is-below .help-tip-bubble {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
+
+.help-tip-bubble.is-portaled {
+  position: fixed;
+  z-index: 250;
+  bottom: auto;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: none;
+  transform: none;
+}
+
+.hover-tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.hover-tooltip-wrap:hover .hover-tooltip-bubble,
+.hover-tooltip-wrap:focus-within .hover-tooltip-bubble {
+  opacity: 1;
+  visibility: visible;
+}
+
+.hover-tooltip-wrap.is-below .hover-tooltip-bubble {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
+
+.hover-tooltip-wrap.is-right .hover-tooltip-bubble {
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: calc(100% + 8px);
+  transform: translateY(-50%);
+}
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  background: rgb(2 6 23 / 0.72);
+}
+
+.confirm-dialog {
+  display: grid;
+  gap: 14px;
+  width: min(380px, calc(100vw - 32px));
+  padding: 18px;
+  color: #e5e7eb;
+  background: #0f172a;
+  border: 1px solid #475569;
+  border-radius: 16px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.5);
+}
+
+.confirm-dialog h2,
+.confirm-dialog p {
+  margin: 0;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}

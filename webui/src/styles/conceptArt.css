@@ -1,0 +1,289 @@
+/* Concept art hub and visual style chips. */
+
+.characters-hub-screen,
+.concept-art-screen {
+  gap: 0;
+  padding: 0;
+  background: #000;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.concept-art-styles-panel {
+  flex: 0 0 auto;
+  padding: 12px 16px 0;
+}
+
+.concept-art-styles-panel .visual-style-panel {
+  gap: 10px;
+}
+
+.concept-art-styles-panel .visual-style-panel-head h2 {
+  font-size: 13px;
+}
+
+.concept-art-styles-panel .visual-style-chip {
+  flex-basis: 200px;
+}
+
+.concept-art-screen .concept-art-style-hint {
+  flex: 0 0 auto;
+  padding: 0 16px 8px;
+}
+
+.concept-art-canvas-chrome {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: #000;
+  border-bottom: 1px solid #1a1a1a;
+}
+
+.concept-art-node-preview {
+  display: -webkit-box;
+  margin: 0 0 8px;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.concept-art-toolbar {
+  grid-template-columns: 1fr;
+}
+
+.concept-art-toolbar-groups {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 0;
+  min-width: 0;
+}
+
+.concept-art-toolbar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.concept-art-toolbar-group + .concept-art-toolbar-group {
+  padding-left: 16px;
+  margin-left: 16px;
+  border-left: 1px solid #262626;
+}
+
+.concept-art-toolbar-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #737373;
+  white-space: nowrap;
+}
+
+.concept-art-toolbar-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.concept-art-toolbar-actions button {
+  white-space: nowrap;
+}
+
+.concept-art-card-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.concept-art-card-head .character-hub-card-header {
+  width: 100%;
+}
+
+.concept-art-subject-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #cbd5e1;
+  background: rgb(51 65 85 / 0.55);
+  border: 1px solid #334155;
+  border-radius: 999px;
+}
+
+.concept-art-style-hint {
+  margin: 0;
+}
+
+.concept-art-edit-subject {
+  margin: 0 0 8px;
+}
+
+.concept-art-screen .character-hub-thumb:not(.has-image) {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 12px;
+}
+
+.concept-art-screen .character-hub-thumb-prompt {
+  flex: 1 1 auto;
+  align-self: stretch;
+  width: 100%;
+  margin: 0;
+  overflow: auto;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.concept-art-screen .character-hub-thumb.has-image {
+  cursor: default;
+}
+
+.concept-art-screen .character-hub-card {
+  min-height: 0;
+}
+
+.concept-art-screen .character-hub-thumb {
+  flex: 0 0 auto;
+  height: 240px;
+  min-height: 0;
+  aspect-ratio: auto;
+  overflow: hidden;
+}
+
+.concept-art-screen .character-hub-thumb-frame {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.concept-art-screen .character-hub-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.concept-art-screen .character-hub-thumb-frame:hover .character-hub-preview-eye,
+.concept-art-screen .character-hub-preview-eye:focus-visible {
+  opacity: 1;
+}
+
+.visual-style-default-badge {
+  margin-left: 0;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #86efac;
+  vertical-align: middle;
+  background: rgb(34 197 94 / 0.12);
+  border: 1px solid rgb(34 197 94 / 0.28);
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.visual-style-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.visual-style-panel-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.visual-style-panel-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.visual-style-empty {
+  margin: 0;
+  font-size: 13px;
+}
+
+.visual-style-chip-grid {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 10px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.visual-style-chip {
+  display: flex;
+  flex: 0 0 240px;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: #0a0a0a;
+  border: 1px solid #262626;
+  border-radius: 12px;
+}
+
+.visual-style-chip.is-default {
+  border-color: rgb(34 197 94 / 0.35);
+  background: rgb(34 197 94 / 0.04);
+}
+
+.visual-style-chip-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.visual-style-chip-head h3 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-style-chip-head .character-hub-card-menu {
+  flex-shrink: 0;
+}
+
+.visual-style-chip-preview {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #737373;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.visual-style-chip-preview:hover,
+.visual-style-chip-preview:focus-visible {
+  color: #a3a3a3;
+}
