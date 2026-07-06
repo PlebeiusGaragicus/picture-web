@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useRepositionOnViewportChange } from './shared/popover';
+import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
 import { useFocusTrap, useScrollLock } from './shared/focus';
 
 export function Modal({
@@ -93,42 +93,18 @@ export function ConfirmDialog({
 
 export function HelpTip({ text, placement = 'bottom' }: { text: string; placement?: 'top' | 'bottom' }) {
   const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const bubbleRef = useRef<HTMLSpanElement>(null);
-  const [position, setPosition] = useState({ top: 0, left: 0 });
-  const [isPositioned, setIsPositioned] = useState(false);
-
-  const updatePosition = useCallback(() => {
-    const trigger = triggerRef.current;
-    const bubble = bubbleRef.current;
-    if (!trigger || !bubble) return;
-    const rect = trigger.getBoundingClientRect();
-    const bubbleRect = bubble.getBoundingClientRect();
-    const padding = 8;
-    let left = rect.left;
-    left = Math.max(padding, Math.min(left, window.innerWidth - bubbleRect.width - padding));
-    const top = placement === 'bottom'
-      ? rect.bottom + 8
-      : rect.top - bubbleRect.height - 8;
-    setPosition({ top: Math.max(padding, top), left });
-    setIsPositioned(true);
-  }, [placement]);
-
-  useLayoutEffect(() => {
-    if (!open) {
-      setIsPositioned(false);
-      return;
-    }
-    updatePosition();
-  }, [open, text, updatePosition]);
-
-  useRepositionOnViewportChange(open, updatePosition);
+  const { refs, floatingStyles } = useFloating({
+    open,
+    placement: placement === 'bottom' ? 'bottom-start' : 'top-start',
+    middleware: [offset(8), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
 
   return (
     <>
       <span className={`help-tip-wrap ${placement === 'bottom' ? 'is-below' : ''}`.trim()}>
         <button
-          ref={triggerRef}
+          ref={refs.setReference}
           type="button"
           className="help-tip"
           aria-label={text}
@@ -141,14 +117,10 @@ export function HelpTip({ text, placement = 'bottom' }: { text: string; placemen
       </span>
       {open && createPortal(
         <span
-          ref={bubbleRef}
+          ref={refs.setFloating}
           className="help-tip-bubble is-portaled"
           role="tooltip"
-          style={{
-            top: position.top,
-            left: position.left,
-            visibility: isPositioned ? 'visible' : 'hidden',
-          }}
+          style={floatingStyles}
           onMouseEnter={() => setOpen(true)}
           onMouseLeave={() => setOpen(false)}
         >{text}</span>,

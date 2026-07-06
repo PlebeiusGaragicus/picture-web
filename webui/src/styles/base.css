@@ -2,7 +2,7 @@
 
 .field-label {
   display: grid;
-  gap: 6px;
+  gap: var(--space-3);
   color: var(--text-muted);
   font-size: var(--text-sm);
   font-weight: 700;
@@ -14,7 +14,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 10px;
+  padding: var(--space-4) 10px;
   color: var(--white);
   background: var(--accent-strong);
   border-radius: var(--radius-md);
@@ -57,13 +57,13 @@
 
 section {
   display: grid;
-  gap: 8px;
+  gap: var(--space-4);
   margin: 18px 0;
 }
 
 .row {
   display: flex;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .row.compact {
@@ -74,7 +74,7 @@ input,
 select,
 textarea {
   width: 100%;
-  padding: 8px;
+  padding: var(--space-4);
   color: var(--text-primary);
   background: #1f2937;
   border: 1px solid var(--border-strong);
@@ -88,7 +88,7 @@ textarea {
 /* The de-facto base button — the primary action. Variants and one-off button
    families override the --btn-* hooks instead of restating the whole visual. */
 button {
-  padding: var(--btn-pad, 8px 10px);
+  padding: var(--btn-pad, var(--space-4) 10px);
   color: var(--btn-fg, var(--white));
   background: var(--btn-bg, var(--accent-strong));
   border: var(--btn-border, 0);
@@ -170,7 +170,7 @@ pre {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-5);
   min-width: 0;
 }
 

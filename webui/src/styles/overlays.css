@@ -35,7 +35,7 @@
   width: max-content;
   max-width: 260px;
   transform: translateX(-50%);
-  padding: 8px 10px;
+  padding: var(--space-4) 10px;
   color: var(--text-primary);
   background: var(--bg-inset);
   border: 1px solid var(--border-strong);
@@ -149,7 +149,7 @@
   display: flex;
   align-items: flex-start;
   gap: var(--space-4);
-  padding: 10px 12px;
+  padding: 10px var(--space-5);
   color: var(--text-primary);
   background: var(--bg-raised);
   border: 1px solid var(--border);

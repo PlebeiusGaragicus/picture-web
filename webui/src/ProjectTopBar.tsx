@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react';
-import { useDismissOnOutsidePointerDown } from './shared/popover';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { menuKeyboardHandlers, useDismissOnOutsidePointerDown } from './shared/popover';
 import { AutoPlaceToggle } from './storyPanels/AutoPlaceToggle';
 import { PanelChunksToggleButton } from './storyPanels/PanelChunksToggle';
 import { SidebarToggleIcon, SidebarCollapseButton } from './SidebarToggle';
@@ -43,9 +43,20 @@ export function ProjectTopBar({
 }) {
   const [navOpen, setNavOpen] = useState(false);
   const navRef = useRef<HTMLDivElement | null>(null);
+  const navMenuRef = useRef<HTMLDivElement | null>(null);
+  const navTriggerRef = useRef<HTMLButtonElement | null>(null);
   const help = projectPhaseHelp(activePhase);
 
   useDismissOnOutsidePointerDown(navOpen, [navRef], useCallback(() => setNavOpen(false), []));
+  const closeNav = () => {
+    setNavOpen(false);
+    navTriggerRef.current?.focus();
+  };
+  const { onKeyDown: onNavMenuKeyDown, focusFirst: focusFirstNavItem } = menuKeyboardHandlers(navMenuRef, closeNav);
+  useEffect(() => {
+    if (navOpen) focusFirstNavItem();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navOpen]);
 
   const selectPhase = (phase: ProjectPhase) => {
     onPhaseChange(phase);
@@ -75,6 +86,7 @@ export function ProjectTopBar({
           <>
             <div className="project-top-bar-nav-wrap" ref={navRef}>
               <button
+                ref={navTriggerRef}
                 type="button"
                 className="project-top-bar-nav-trigger"
                 aria-haspopup="menu"
@@ -86,7 +98,7 @@ export function ProjectTopBar({
                 <span className="project-top-bar-nav-chevron" aria-hidden="true">▾</span>
               </button>
               {navOpen && (
-                <div className="project-top-bar-nav-menu" role="menu" aria-label="Project navigation">
+                <div ref={navMenuRef} className="project-top-bar-nav-menu" role="menu" aria-label="Project navigation" onKeyDown={onNavMenuKeyDown}>
                   <p className="project-top-bar-nav-heading">Workspace</p>
                   {workspaceNavItems.map((item) => (
                     <button

@@ -94,7 +94,7 @@
   --transition-base: 180ms ease;
   --focus-ring: 0 0 0 2px var(--bg-app), 0 0 0 4px var(--accent-strong);
 
-  /* Space scale (for new/edited rules; existing spacing not retrofitted) */
+  /* Space scale. On-scale padding/margin/gap values use these tokens; off-scale px values stay raw. */
   --space-1: 2px;
   --space-2: 4px;
   --space-3: 6px;

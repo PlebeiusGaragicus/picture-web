@@ -13,7 +13,7 @@
 
 .concept-art-styles-panel {
   flex: 0 0 auto;
-  padding: 12px 16px 0;
+  padding: var(--space-5) var(--space-6) 0;
 }
 
 .concept-art-styles-panel .visual-style-panel {
@@ -30,7 +30,7 @@
 
 .concept-art-screen .concept-art-style-hint {
   flex: 0 0 auto;
-  padding: 0 16px 8px;
+  padding: 0 var(--space-6) var(--space-4);
 }
 
 .concept-art-canvas-chrome {
@@ -44,7 +44,7 @@
 
 .concept-art-node-preview {
   display: -webkit-box;
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-4);
   overflow: hidden;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -65,13 +65,13 @@
 .concept-art-toolbar-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-3);
   min-width: 0;
 }
 
 .concept-art-toolbar-group + .concept-art-toolbar-group {
-  padding-left: 16px;
-  margin-left: 16px;
+  padding-left: var(--space-6);
+  margin-left: var(--space-6);
   border-left: 1px solid #262626;
 }
 
@@ -88,7 +88,7 @@
 .concept-art-toolbar-actions {
   display: flex;
   flex-wrap: nowrap;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .concept-art-toolbar-actions button {
@@ -98,7 +98,7 @@
 .concept-art-workspace {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-7);
 }
 
 .concept-art-section {
@@ -110,7 +110,7 @@
 .concept-art-section-header {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .concept-art-section-header h2 {
@@ -123,7 +123,7 @@
 }
 
 .concept-art-section-count {
-  padding: 1px 8px;
+  padding: 1px var(--space-4);
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-muted);
@@ -178,13 +178,13 @@
 .concept-art-card-badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .concept-art-archived-badge,
 .concept-art-count-badge {
   flex-shrink: 0;
-  padding: 2px 8px;
+  padding: var(--space-1) var(--space-4);
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -225,19 +225,19 @@
 .concept-art-edit-head-badges {
   display: flex;
   flex-shrink: 0;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .concept-art-edit-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: var(--space-5);
   align-items: end;
 }
 
 .concept-art-kind-toggle {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .concept-art-kind-toggle button.is-active {
@@ -256,7 +256,7 @@
 .concept-art-edit-image-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .concept-art-edit-image {
@@ -286,7 +286,7 @@
   position: absolute;
   right: 4px;
   bottom: 4px;
-  padding: 1px 6px;
+  padding: 1px var(--space-3);
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -315,7 +315,7 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .concept-art-card-head .character-hub-card-header {
@@ -324,7 +324,7 @@
 
 .concept-art-subject-badge {
   flex-shrink: 0;
-  padding: 2px 8px;
+  padding: var(--space-1) var(--space-4);
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -340,14 +340,14 @@
 }
 
 .concept-art-edit-subject {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-4);
 }
 
 .concept-art-screen .character-hub-thumb:not(.has-image) {
   display: flex;
   align-items: stretch;
   justify-content: flex-start;
-  padding: 12px;
+  padding: var(--space-5);
 }
 
 .concept-art-screen .character-hub-thumb-prompt {
@@ -397,7 +397,7 @@
 
 .visual-style-default-badge {
   margin-left: 0;
-  padding: 2px 8px;
+  padding: var(--space-1) var(--space-4);
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--green-300);
@@ -411,13 +411,13 @@
 .visual-style-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-5);
   min-width: 0;
 }
 
 .visual-style-panel-head {
   display: flex;
-  gap: 12px;
+  gap: var(--space-5);
   align-items: center;
   justify-content: space-between;
 }
@@ -459,7 +459,7 @@
   gap: 10px;
   min-width: 0;
   overflow-x: auto;
-  padding-bottom: 2px;
+  padding-bottom: var(--space-1);
   scrollbar-width: thin;
 }
 
@@ -489,7 +489,7 @@
 
 .visual-style-chip-head {
   display: flex;
-  gap: 8px;
+  gap: var(--space-4);
   align-items: center;
   min-width: 0;
 }

@@ -4,7 +4,7 @@
   z-index: 24;
   display: grid;
   gap: 10px;
-  padding: 12px;
+  padding: var(--space-5);
   color: var(--text-primary);
   background: rgb(var(--slate-900-rgb) / 0.96);
   border: 1px solid var(--border-strong);
@@ -17,7 +17,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .split-tag-popover-title {
@@ -35,12 +35,12 @@
 
 .split-tag-column {
   display: grid;
-  gap: 8px;
+  gap: var(--space-4);
   align-content: start;
   min-width: 0;
   max-height: min(52vh, 360px);
   overflow: auto;
-  padding: 8px;
+  padding: var(--space-4);
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
@@ -64,7 +64,7 @@
 .split-tag-popover-footer {
   display: flex;
   justify-content: flex-start;
-  padding-top: 4px;
+  padding-top: var(--space-2);
   border-top: 1px solid var(--border);
 }
 
@@ -96,14 +96,14 @@
 .node-tag-summary {
   display: flex;
   flex: 1;
-  gap: 4px;
+  gap: var(--space-2);
   align-items: center;
   min-width: 0;
   overflow: hidden;
 }
 
 .tag-organizer-footer-note {
-  margin: 12px 0 0;
+  margin: var(--space-5) 0 0;
   font-size: var(--text-sm);
   line-height: 1.45;
 }
@@ -133,7 +133,7 @@
   z-index: 20;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-3);
   width: min(460px, calc(100vw - 48px));
   padding: 10px;
   background: var(--bg-surface);
@@ -143,7 +143,7 @@
 }
 
 .tag-filter-popover button {
-  padding: 4px 8px;
+  padding: var(--space-2) var(--space-4);
   color: var(--text-secondary);
   background: #1f2937;
   border: 1px solid var(--border-strong);
@@ -178,7 +178,7 @@
 .tag-editor-popover {
   z-index: 24;
   display: grid;
-  gap: 12px;
+  gap: var(--space-5);
   width: 430px;
   max-width: calc(100vw - 36px);
   padding: 14px;
@@ -204,10 +204,10 @@
 .tag-editor-input {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-3);
   align-items: center;
   min-height: 42px;
-  padding: 7px 8px;
+  padding: 7px var(--space-4);
   background: var(--bg-app);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -216,7 +216,7 @@
 .tag-editor-input input {
   flex: 1;
   min-width: 110px;
-  padding: 4px 2px;
+  padding: var(--space-2) var(--space-1);
   color: var(--text-primary);
   background: transparent;
   border: 0;
@@ -241,7 +241,7 @@
 .entity-tag-pill::after,
 .tag-chip-locked::after {
   content: "⬢";
-  margin-left: 4px;
+  margin-left: var(--space-2);
   font-size: 9px;
   opacity: 0.85;
 }
@@ -256,7 +256,7 @@
 }
 
 .tag-organizer-entity-label {
-  margin-left: 8px;
+  margin-left: var(--space-4);
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 800;
@@ -271,7 +271,7 @@
 
 .tag-suggestion-list button {
   display: flex;
-  gap: 8px;
+  gap: var(--space-4);
   align-items: center;
   justify-content: flex-start;
   padding: 7px 9px;
@@ -340,7 +340,7 @@
 }
 
 .tag-create-row {
-  margin-top: 4px;
+  margin-top: var(--space-2);
 }
 
 .tag-create-row:disabled {
@@ -355,9 +355,9 @@
 
 .tag-color-row {
   display: flex;
-  gap: 16px;
+  gap: var(--space-6);
   align-items: center;
-  padding: 8px 12px 2px;
+  padding: var(--space-4) var(--space-5) var(--space-1);
 }
 
 .tag-color-row button {
@@ -375,7 +375,7 @@
 
 .tag-organizer-list {
   display: grid;
-  gap: 8px;
+  gap: var(--space-4);
   min-width: min(360px, calc(100vw - 64px));
 }
 
@@ -384,7 +384,7 @@
   grid-template-columns: auto minmax(120px, 1fr) auto;
   gap: 10px;
   align-items: center;
-  padding: 8px;
+  padding: var(--space-4);
   background: var(--bg-app);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -412,9 +412,9 @@
   position: fixed;
   z-index: var(--z-popover);
   display: grid;
-  gap: 2px;
+  gap: var(--space-1);
   min-width: 168px;
-  padding: 6px;
+  padding: var(--space-3);
   background: var(--bg-app);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
@@ -426,7 +426,7 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 8px 10px;
+  padding: var(--space-4) 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
@@ -449,7 +449,7 @@
 .tag-organizer-name {
   min-width: 0;
   width: 100%;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-surface);
@@ -459,7 +459,7 @@
 
 .tag-organizer-name-display {
   min-width: 0;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   color: var(--slate-200);
   font-weight: 700;
   cursor: text;
@@ -543,13 +543,13 @@
 
 .node-tag-row {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
   align-items: center;
   width: 100%;
   min-height: 28px;
   overflow: hidden;
   margin: 0;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   border: 0;
   border-radius: 0 0 7px 7px;
   background: transparent;
@@ -606,7 +606,7 @@
   z-index: var(--z-canvas-chrome);
   width: max-content;
   max-width: min(280px, 70vw);
-  padding: 8px 10px;
+  padding: var(--space-4) 10px;
   color: var(--text-primary);
   background: var(--bg-inset);
   border: 1px solid var(--border-strong);
@@ -667,7 +667,7 @@
   top: calc(100% + 6px);
   left: 0;
   z-index: 50;
-  gap: 8px;
+  gap: var(--space-4);
   width: min(300px, calc(100vw - 32px));
   padding: 10px;
   border-radius: 14px;
@@ -675,12 +675,12 @@
 
 .node-tag-rows-stack {
   display: grid;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .entity-tag-search {
   width: 100%;
-  padding: 7px 8px;
+  padding: 7px var(--space-4);
   color: var(--text-primary);
   background: var(--bg-app);
   border: 1px solid var(--border);
@@ -691,7 +691,7 @@
 
 .entity-tag-empty {
   margin: 0;
-  padding: 4px 8px;
+  padding: var(--space-2) var(--space-4);
   font-size: var(--text-sm);
 }
 
@@ -699,7 +699,7 @@
   position: relative;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .sidebar-tag-controls .tag-editor-popover,
@@ -726,7 +726,7 @@
 }
 
 .node-tag-menu .tag-suggestion-list button {
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   font-size: var(--text-md);
 }
 
@@ -747,7 +747,7 @@
   position: absolute;
   top: calc(100% + 12px);
   right: 0;
-  gap: 8px;
+  gap: var(--space-4);
   width: 300px;
   padding: 10px;
   border-radius: 14px;
@@ -768,7 +768,7 @@
 }
 
 .image-viewer-tag-menu .tag-suggestion-list button {
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   font-size: var(--text-md);
 }
 

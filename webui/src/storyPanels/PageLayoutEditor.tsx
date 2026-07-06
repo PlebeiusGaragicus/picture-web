@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isEditableShortcutTarget } from '../shared/dom';
 import { Icon } from '../Icon';
-import { useDismissOnOutsidePointerDown } from '../shared/popover';
+import { menuKeyboardHandlers, useDismissOnOutsidePointerDown } from '../shared/popover';
 import type { CSSProperties, ReactNode } from 'react';
 import { nonArchivedVariants } from '../canvas/shared';
 import type { Asset, CanvasDocument, StoryPanel, StoryPanelCaption, StoryPanelDocument, StoryPanelImageCrop, StoryPanelRect, StoryPanelTextStyle, TagDefinition } from '../types';
@@ -666,7 +666,17 @@ export function PageLayoutEditor({
     };
   }, [layoutMode, visibleSelectedPanel?.id, visibleSelectedPanel?.rect, clampedPageIndex, dragState, updateInfoPopoverAnchor]);
   const ratioPopoverWrapRef = useRef<HTMLDivElement | null>(null);
+  const ratioPopoverMenuRef = useRef<HTMLDivElement | null>(null);
   useDismissOnOutsidePointerDown(ratioPopoverOpen, [ratioPopoverWrapRef], useCallback(() => setRatioPopoverOpen(false), []));
+  const closeRatioPopover = useCallback(() => {
+    setRatioPopoverOpen(false);
+    ratioPopoverWrapRef.current?.querySelector('button')?.focus();
+  }, []);
+  const { onKeyDown: onRatioMenuKeyDown, focusFirst: focusFirstRatioItem } = menuKeyboardHandlers(ratioPopoverMenuRef, closeRatioPopover);
+  useEffect(() => {
+    if (ratioPopoverOpen) focusFirstRatioItem();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ratioPopoverOpen]);
   const sizePopoverWrapRef = useRef<HTMLDivElement | null>(null);
   useDismissOnOutsidePointerDown(sizePopoverOpen, [sizePopoverWrapRef], useCallback(() => setSizePopoverOpen(false), []));
   const captionStyleWrapRef = useRef<HTMLDivElement | null>(null);
@@ -2201,7 +2211,7 @@ export function PageLayoutEditor({
                             Snap to preset…
                           </button>
                           {ratioPopoverOpen && (
-                            <div className="story-panels-aspect-ratio-popover" role="menu" aria-label="Image aspect ratios">
+                            <div ref={ratioPopoverMenuRef} className="story-panels-aspect-ratio-popover" role="menu" aria-label="Image aspect ratios" onKeyDown={onRatioMenuKeyDown}>
                               {GEMINI_IMAGE_ASPECT_RATIOS.map((ratio) => (
                                 <button
                                   key={ratio}

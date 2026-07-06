@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
 import { formatRequestError } from '../formatError';
-import { useDismissOnOutsidePointerDown } from '../shared/popover';
+import { menuKeyboardHandlers, useDismissOnOutsidePointerDown } from '../shared/popover';
 import type { StoryPanel, StoryPanelCaption, StoryPanelImagePrompt, StoryPanelPage, StoryPanelPatchPayload } from '../types';
 import { defaultCaptionTextStyle } from './captionPanelStyle';
 import { panelIsPlacedOnLayout } from './panelPlacement';
@@ -203,71 +204,35 @@ function ChunkActionsMenu({
   isSaving: boolean;
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
-  const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
-  const [isPositioned, setIsPositioned] = useState(false);
+  const { refs, floatingStyles } = useFloating({
+    open: isOpen,
+    placement: 'bottom-end',
+    middleware: [offset(4), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
 
-  const updatePopoverPosition = useCallback(() => {
-    const trigger = triggerRef.current;
-    const popover = popoverRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    const popoverWidth = popover?.offsetWidth ?? 140;
-    const popoverHeight = popover?.offsetHeight ?? 88;
-    const gap = 4;
-    const padding = 8;
-    let top = rect.bottom + gap;
-    if (top + popoverHeight > window.innerHeight - padding) {
-      top = Math.max(padding, rect.top - popoverHeight - gap);
-    }
-    let left = rect.right - popoverWidth;
-    left = Math.max(padding, Math.min(left, window.innerWidth - popoverWidth - padding));
-    setPopoverPosition({ top, left });
-    setIsPositioned(true);
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!isOpen) {
-      setIsPositioned(false);
-      return;
-    }
-    updatePopoverPosition();
-  }, [isOpen, showInsert, showEditText, showPlaceOnLayout, updatePopoverPosition]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const reposition = () => updatePopoverPosition();
-    window.addEventListener('resize', reposition);
-    window.addEventListener('scroll', reposition, true);
-    const list = triggerRef.current?.closest('.story-panels-chunk-list');
-    list?.addEventListener('scroll', reposition);
-    return () => {
-      window.removeEventListener('resize', reposition);
-      window.removeEventListener('scroll', reposition, true);
-      list?.removeEventListener('scroll', reposition);
-    };
-  }, [isOpen, updatePopoverPosition]);
-
-  useEffect(() => {
-    if (!isOpen || !popoverRef.current) return;
-    const observer = new ResizeObserver(() => updatePopoverPosition());
-    observer.observe(popoverRef.current);
-    return () => observer.disconnect();
-  }, [isOpen, updatePopoverPosition]);
-
+  const close = () => {
+    onClose();
+    (refs.reference.current as HTMLElement | null)?.focus();
+  };
   useDismissOnOutsidePointerDown(isOpen, [menuRef, popoverRef], onClose);
+  const { onKeyDown, focusFirst } = menuKeyboardHandlers(popoverRef, close);
+  useEffect(() => {
+    if (isOpen) focusFirst();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   const popover = isOpen ? (
     <div
-      ref={popoverRef}
+      ref={(node) => {
+        popoverRef.current = node;
+        refs.setFloating(node);
+      }}
       className="story-panels-chunk-menu-popover is-portaled"
       role="menu"
-      style={{
-        top: popoverPosition.top,
-        left: popoverPosition.left,
-        visibility: isPositioned ? 'visible' : 'hidden',
-      }}
+      style={floatingStyles}
+      onKeyDown={onKeyDown}
     >
       {showInsert && onInsertAfter && (
         <button
@@ -359,7 +324,7 @@ function ChunkActionsMenu({
   return (
     <div className="story-panels-chunk-menu" ref={menuRef} onClick={(event) => event.stopPropagation()}>
       <button
-        ref={triggerRef}
+        ref={refs.setReference}
         type="button"
         className="story-panels-chunk-menu-trigger"
         aria-label="Panel actions"
