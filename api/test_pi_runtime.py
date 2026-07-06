@@ -495,6 +495,12 @@ def test_pi_task_routes_end_to_end(tmp_path, monkeypatch):
 # --- panel prompt profiles -----------------------------------------------------
 
 
+def seed_extracted_character(root) -> None:
+    """Panel-prompt drafting is gated on at least one canonical character existing."""
+    (root / "characters").mkdir(parents=True, exist_ok=True)
+    (root / "characters" / "hero.md").write_text(VALID_CHARACTER_FILE.format(stem="hero"))
+
+
 def make_story_panels(client, story_texts: list[str]) -> list[str]:
     panel_ids: list[str] = []
     last_id: str | None = None
@@ -546,7 +552,8 @@ def test_draft_panel_prompt_plan_context_and_guide(tmp_path, monkeypatch):
 
 
 def test_draft_panel_prompt_injects_user_guidance(tmp_path, monkeypatch):
-    client, _root = setup_project_with_book(tmp_path, monkeypatch)
+    client, root = setup_project_with_book(tmp_path, monkeypatch)
+    seed_extracted_character(root)
     (panel_id,) = make_story_panels(client, ["Hero feeds the chickens at dawn."])
     ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
     profile = pi_profiles.get_profile("draft-panel-prompt")
@@ -566,13 +573,21 @@ def test_draft_panel_prompt_injects_user_guidance(tmp_path, monkeypatch):
 
 
 def test_draft_panel_prompt_prechecks(tmp_path, monkeypatch):
-    client, _root = setup_project_with_book(tmp_path, monkeypatch)
+    client, root = setup_project_with_book(tmp_path, monkeypatch)
     ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
     profile = pi_profiles.get_profile("draft-panel-prompt")
 
     with pytest.raises(HTTPException) as exc_info:
         profile.precheck(ctx, pi_profiles.TaskArgs())
     assert exc_info.value.status_code == 400
+
+    # Process gate: no extracted characters yet.
+    with pytest.raises(HTTPException) as exc_info:
+        profile.precheck(ctx, pi_profiles.TaskArgs(target="panel-999"))
+    assert exc_info.value.status_code == 409
+    assert "Extract characters" in exc_info.value.detail
+
+    seed_extracted_character(root)
 
     with pytest.raises(HTTPException) as exc_info:
         profile.precheck(ctx, pi_profiles.TaskArgs(target="panel-999"))
@@ -594,10 +609,17 @@ def test_draft_panel_prompt_prechecks(tmp_path, monkeypatch):
 
 
 def test_refine_panel_prompt_prechecks(tmp_path, monkeypatch):
-    client, _root = setup_project_with_book(tmp_path, monkeypatch)
+    client, root = setup_project_with_book(tmp_path, monkeypatch)
     ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
     profile = pi_profiles.get_profile("refine-panel-prompt")
     (panel_id,) = make_story_panels(client, ["Hero rests."])
+
+    # Process gate: no extracted characters yet.
+    with pytest.raises(HTTPException) as exc_info:
+        profile.precheck(ctx, pi_profiles.TaskArgs(target=f"{panel_id}:prompt-001", instructions="darker"))
+    assert exc_info.value.status_code == 409
+
+    seed_extracted_character(root)
 
     with pytest.raises(HTTPException) as exc_info:
         profile.precheck(ctx, pi_profiles.TaskArgs(target=panel_id, instructions="darker"))
@@ -613,7 +635,12 @@ def test_refine_panel_prompt_prechecks(tmp_path, monkeypatch):
 
 
 def test_draft_panel_prompt_end_to_end(tmp_path, monkeypatch, live_api):
-    client, _root = setup_project_with_book(tmp_path, monkeypatch)
+    client, root = setup_project_with_book(tmp_path, monkeypatch)
+    seed_extracted_character(root)
+    assert client.post(
+        "/api/projects/farm-comic/adaptation/files/locations",
+        json={"key": "barnyard", "mode": "new-image", "styleRef": "", "body": "A muddy barnyard at dawn."},
+    ).status_code == 200
     (panel_id,) = make_story_panels(client, ["Hero feeds the chickens at dawn."])
     live_api()
     drafted = "A brave farmhand scattering feed to chickens at dawn, wide shot, golden-hour backlight."
@@ -624,7 +651,7 @@ def test_draft_panel_prompt_end_to_end(tmp_path, monkeypatch, live_api):
                 "tool": "set_panel_image_prompt",
                 "method": "POST",
                 "path": f"/api/projects/farm-comic/story-panels/panels/{panel_id}/image-prompts",
-                "body": {"text": drafted},
+                "body": {"text": drafted, "characterSlugs": ["hero"], "locationSlug": "barnyard"},
             }
         ),
     )
@@ -637,6 +664,8 @@ def test_draft_panel_prompt_end_to_end(tmp_path, monkeypatch, live_api):
     panel = next(item for item in document["panels"] if item["id"] == panel_id)
     assert len(panel["imagePrompts"]) == 1
     assert panel["imagePrompts"][0]["text"] == drafted
+    assert panel["characterSlugs"] == ["hero"]
+    assert panel["locationSlug"] == "barnyard"
 
     session = client.get(f"/api/projects/farm-comic/agent-sessions/{handle.id}").json()
     assert session["kind"] == "draft-panel-prompt"
@@ -645,7 +674,8 @@ def test_draft_panel_prompt_end_to_end(tmp_path, monkeypatch, live_api):
 
 
 def test_draft_panel_prompt_fails_when_tool_never_called(tmp_path, monkeypatch):
-    client, _root = setup_project_with_book(tmp_path, monkeypatch)
+    client, root = setup_project_with_book(tmp_path, monkeypatch)
+    seed_extracted_character(root)
     (panel_id,) = make_story_panels(client, ["Hero feeds the chickens at dawn."])
     manager = use_fake_pi(monkeypatch)  # default fake pi makes no tool call
 
@@ -655,7 +685,8 @@ def test_draft_panel_prompt_fails_when_tool_never_called(tmp_path, monkeypatch):
 
 
 def test_refine_panel_prompt_end_to_end(tmp_path, monkeypatch, live_api):
-    client, _root = setup_project_with_book(tmp_path, monkeypatch)
+    client, root = setup_project_with_book(tmp_path, monkeypatch)
+    seed_extracted_character(root)
     (panel_id,) = make_story_panels(client, ["Hero feeds the chickens at dawn."])
     patch = client.patch(
         f"/api/projects/farm-comic/story-panels/panels/{panel_id}",

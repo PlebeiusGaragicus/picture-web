@@ -551,6 +551,8 @@ class StoryPanelImagePrompt(BaseModel):
 
 class StoryPanelImagePromptWrite(BaseModel):
     text: str
+    characterSlugs: list[str] | None = None
+    locationSlug: str | None = None
 
 
 class StoryPanel(BaseModel):
@@ -579,6 +581,8 @@ class StoryPanel(BaseModel):
     imageCrop: StoryPanelImageCrop | None = None
     captions: list[StoryPanelCaption] = Field(default_factory=list)
     imagePrompts: list[StoryPanelImagePrompt] = Field(default_factory=list)
+    characterSlugs: list[str] = Field(default_factory=list)
+    locationSlug: str | None = None
     finalized: bool = False
 
     @model_validator(mode="after")
@@ -702,6 +706,8 @@ class StoryPanelPatch(BaseModel):
     imageCrop: StoryPanelImageCrop | None = None
     captions: list[StoryPanelCaption] | None = None
     imagePrompts: list[StoryPanelImagePrompt] | None = None
+    characterSlugs: list[str] | None = None
+    locationSlug: str | None = None
     finalized: bool | None = None
 
 
@@ -863,6 +869,7 @@ class ImageGroupCanvasNode(CanvasNodeLayout):
     assetIds: list[str] = Field(default_factory=list)
     activeAssetId: str | None = None
     sourceConceptCardId: str | None = None
+    sourcePanelId: str | None = None
 
     @model_validator(mode="after")
     def active_asset_defaults_to_first(self) -> "ImageGroupCanvasNode":

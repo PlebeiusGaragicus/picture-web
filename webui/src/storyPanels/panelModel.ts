@@ -37,6 +37,8 @@ export function captionAsPanel(parent: StoryPanel, caption: StoryPanelCaption): 
     imageCrop: null,
     captions: [],
     imagePrompts: [],
+    characterSlugs: [],
+    locationSlug: null,
     finalized: false,
   };
 }

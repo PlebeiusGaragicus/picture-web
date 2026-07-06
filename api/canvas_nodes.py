@@ -33,6 +33,7 @@ def create_image_group_node(
     asset_ids: list[str] | None = None,
     active_asset_id: str | None = None,
     source_concept_card_id: str | None = None,
+    source_panel_id: str | None = None,
 ) -> tuple[str, CanvasDocument]:
     canvas = library.read_stored_canvas(slug)
     node_id = f"node_{new_ulid()}"
@@ -53,6 +54,7 @@ def create_image_group_node(
         assetIds=ids,
         activeAssetId=active_asset_id if ids else None,
         sourceConceptCardId=source_concept_card_id,
+        sourcePanelId=source_panel_id,
     )
     saved = library.write_canvas(slug, canvas)
     return node_id, saved

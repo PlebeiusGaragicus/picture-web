@@ -2771,3 +2771,139 @@ def test_concept_card_upload_and_subject_patch(tmp_path, monkeypatch):
     assert archived.json()["archivedAt"] is not None
     assert client.get("/api/projects/farm-comic/concept-cards").json() == []
     assert len(client.get("/api/projects/farm-comic/concept-cards?includeArchived=true").json()) == 1
+
+
+def _seed_panel_entities_project(client, tmp_path) -> str:
+    """Create a panel plus canonical hero character and barn location; returns panel id."""
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the barn door.\n")
+    created = client.post(
+        "/api/projects/farm-comic/story-panels/panels",
+        json={"startOffset": 0, "endOffset": 26, "selectedText": "Alpha opens the barn door."},
+    )
+    assert created.status_code == 200
+    panel = next(item for item in created.json()["panels"] if item["sourceKind"] == "panel" and item["selectedText"])
+    write_unified_character_file(root / "characters" / "hero.md", "hero")
+    assert client.post(
+        "/api/projects/farm-comic/adaptation/files/locations",
+        json={"key": "barn", "mode": "new-image", "styleRef": "", "body": "Red barn establishing prompt."},
+    ).status_code == 200
+    return panel["id"]
+
+
+def test_panel_entity_slugs_validate_and_persist(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    panel_id = _seed_panel_entities_project(client, tmp_path)
+
+    unknown = client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{panel_id}",
+        json={"characterSlugs": ["nobody"]},
+    )
+    assert unknown.status_code == 422
+    assert "nobody" in unknown.json()["detail"]
+
+    unknown_location = client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{panel_id}",
+        json={"locationSlug": "nowhere"},
+    )
+    assert unknown_location.status_code == 422
+
+    patched = client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{panel_id}",
+        json={"characterSlugs": ["hero"], "locationSlug": "barn"},
+    )
+    assert patched.status_code == 200
+    panel = next(item for item in patched.json()["panels"] if item["id"] == panel_id)
+    assert panel["characterSlugs"] == ["hero"]
+    assert panel["locationSlug"] == "barn"
+
+    # The agent delivery path (image-prompts POST) also writes entities.
+    prompt_write = client.post(
+        f"/api/projects/farm-comic/story-panels/panels/{panel_id}/image-prompts",
+        json={"text": "Hero swings the barn door open.", "characterSlugs": ["hero"], "locationSlug": "barn"},
+    )
+    assert prompt_write.status_code == 200
+    bad_prompt_write = client.post(
+        f"/api/projects/farm-comic/story-panels/panels/{panel_id}/image-prompts",
+        json={"text": "Someone unknown.", "characterSlugs": ["ghost"]},
+    )
+    assert bad_prompt_write.status_code == 422
+
+
+def test_draft_panel_to_canvas_blocks_then_creates_node_and_auto_attaches(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    panel_id = _seed_panel_entities_project(client, tmp_path)
+
+    prompt_write = client.post(
+        f"/api/projects/farm-comic/story-panels/panels/{panel_id}/image-prompts",
+        json={"text": "Hero swings the barn door open.", "characterSlugs": ["hero"], "locationSlug": "barn"},
+    )
+    assert prompt_write.status_code == 200
+    prompt_id = prompt_write.json()["promptId"]
+
+    # Blocked: neither entity has a reference asset yet.
+    blocked = client.post(
+        f"/api/projects/farm-comic/story-panels/panels/{panel_id}/draft-to-canvas?promptId={prompt_id}",
+    )
+    assert blocked.status_code == 409
+    assert "hero" in blocked.json()["detail"]
+    assert "barn" in blocked.json()["detail"]
+
+    # Give both entities canonical assets.
+    hero_asset, barn_asset = "01HHEROSHEET", "01HBARNIMG"
+    for asset_id, color in ((hero_asset, "red"), (barn_asset, "green")):
+        make_png(library.asset_png_path("farm-comic", asset_id), color=color)
+        library.write_json(
+            library.asset_json_path("farm-comic", asset_id),
+            {
+                "id": asset_id,
+                "kind": "imported",
+                "title": asset_id,
+                "tags": [],
+                "createdAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:00Z",
+            },
+        )
+    metadata = adaptation.read_metadata("farm-comic")
+    metadata.characters["hero"].variants["base"].assetIds = [hero_asset]
+    metadata.characters["hero"].variants["base"].activeAssetId = hero_asset
+    metadata.locations["barn"].assetIds = [barn_asset]
+    metadata.locations["barn"].activeAssetId = barn_asset
+    adaptation.write_metadata("farm-comic", metadata)
+
+    drafted = client.post(
+        f"/api/projects/farm-comic/story-panels/panels/{panel_id}/draft-to-canvas?promptId={prompt_id}",
+    )
+    assert drafted.status_code == 200
+    node_id = drafted.json()["nodeId"]
+    node = drafted.json()["canvas"]["nodes"][node_id]
+    assert node["type"] == "imageGroup"
+    assert node["sourcePanelId"] == panel_id
+    assert node["refs"] == [hero_asset, barn_asset]
+    assert "Hero swings the barn door open." == node["prompt"]
+    assert {"comic-adaptation", panel_id, "hero", "barn"} <= set(node["tags"])
+
+    # A generation result attached to the node auto-attaches to the panel.
+    generated_asset = "01HPANELGEN"
+    make_png(library.asset_png_path("farm-comic", generated_asset), color="blue")
+    library.write_json(
+        library.asset_json_path("farm-comic", generated_asset),
+        {
+            "id": generated_asset,
+            "kind": "imported",
+            "title": "Generated panel",
+            "tags": [],
+            "createdAt": "2026-01-02T00:00:00Z",
+            "updatedAt": "2026-01-02T00:00:00Z",
+        },
+    )
+    summary = library.read_asset("farm-comic", generated_asset)
+    library.attach_generated_assets_to_canvas("farm-comic", node_id, [summary])
+    panel = next(
+        item for item in client.get("/api/projects/farm-comic/story-panels").json()["panels"] if item["id"] == panel_id
+    )
+    assert generated_asset in panel["assetIds"]
+    assert panel["activeAssetId"] == generated_asset

@@ -953,6 +953,10 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
         existing.activeAssetId = active_asset_id or existing.activeAssetId
         canvas.nodes[node_id] = existing
         write_canvas(slug, canvas)
+        if existing.sourcePanelId:
+            import story_panels
+
+            story_panels.attach_assets_to_panel(slug, existing.sourcePanelId, asset_ids)
         return
     target_node_id = matching_variant_group_node_id(slug, canvas, assets)
     logger.debug(

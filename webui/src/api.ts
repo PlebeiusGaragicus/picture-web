@@ -237,6 +237,11 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
+  draftPanelToCanvas: (slug: string, panelId: string, promptId: string) =>
+    request<ConceptNodeResponse>(
+      `/api/projects/${slug}/story-panels/panels/${panelId}/draft-to-canvas?promptId=${encodeURIComponent(promptId)}`,
+      { method: 'POST' },
+    ),
   autoPlaceStoryPanel: (slug: string, panelId: string) =>
     request<StoryPanelDocument>(`/api/projects/${slug}/story-panels/panels/${panelId}/auto-place`, {
       method: 'POST',

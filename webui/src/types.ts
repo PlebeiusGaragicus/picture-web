@@ -120,6 +120,7 @@ export interface ImageGroupCanvasNode extends CanvasNodeLayout {
   assetIds: string[];
   activeAssetId?: string | null;
   sourceConceptCardId?: string | null;
+  sourcePanelId?: string | null;
 }
 
 export type CanvasNode = DraftCanvasNode | ImageGroupCanvasNode;
@@ -280,6 +281,8 @@ export interface StoryPanel {
   imageCrop?: StoryPanelImageCrop | null;
   captions: StoryPanelCaption[];
   imagePrompts: StoryPanelImagePrompt[];
+  characterSlugs: string[];
+  locationSlug?: string | null;
   finalized: boolean;
 }
 
@@ -316,7 +319,7 @@ export interface StoryPanelBookmarkCreatePayload {
 }
 
 export type StoryPanelPatchPayload = Partial<
-  Pick<StoryPanel, 'order' | 'title' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'storyText' | 'visibleText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'captions' | 'imagePrompts' | 'finalized'>
+  Pick<StoryPanel, 'order' | 'title' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'storyText' | 'visibleText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'captions' | 'imagePrompts' | 'characterSlugs' | 'locationSlug' | 'finalized'>
 >;
 
 export interface AdaptationGenerateResponse {

@@ -1325,6 +1325,32 @@ function App() {
     window.setTimeout(() => focusNodeOnCanvas(nodeId), 0);
   }, [focusNodeOnCanvas, loadProject, openProjectSlug]);
 
+  // A panel prompt was drafted to the canvas: refresh canvas state, jump to
+  // the image canvas, and focus the new node.
+  const handlePanelDraftedToCanvas = useCallback((canvasDoc: CanvasDocument, nodeId: string) => {
+    setCanvas(canvasDoc);
+    const callbacks = toFlowNodesCallbacksRef.current;
+    setNodes(toFlowNodes(
+      canvasDoc,
+      assetsRef.current,
+      generatingNodeIdsRef.current,
+      callbacks.projectTags,
+      callbacks.changeVariant,
+      callbacks.openViewer,
+      callbacks.openDetails,
+      callbacks.openAssetInViewer,
+      callbacks.updateImageGroupDisplayName,
+      callbacks.openChatForAsset,
+      callbacks.createProjectTag,
+    ));
+    void loadProject(openProjectSlug);
+    setProjectPhase('image-canvas');
+    setPhaseViewMode('canvas');
+    setSelectedNodeIds([nodeId]);
+    setPopoverNodeId(nodeId);
+    window.setTimeout(() => focusNodeOnCanvas(nodeId), 0);
+  }, [focusNodeOnCanvas, loadProject, openProjectSlug]);
+
   const focusConceptNode = useCallback((nodeId: string) => {
     setPhaseViewMode('canvas');
     setSelectedNodeIds([nodeId]);
@@ -1684,6 +1710,7 @@ function App() {
               setProjectPhase('layout-editor');
             }}
             onImportBook={importAdaptationBook}
+            onPanelDraftedToCanvas={handlePanelDraftedToCanvas}
           />
         )}
         {isLayoutEditorActive && (
@@ -1693,6 +1720,7 @@ function App() {
             initialNavigation={layoutEditorNavigation}
             onNavigationComplete={() => setLayoutEditorNavigation(null)}
             onTopBarEndContentChange={setLayoutEditorTopBarEnd}
+            onPanelDraftedToCanvas={handlePanelDraftedToCanvas}
           />
         )}
         {isCanvasActive && (

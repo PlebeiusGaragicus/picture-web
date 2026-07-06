@@ -30,7 +30,7 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
 | `chat_sessions.py` | Gemini image-refinement chats (thought signatures preserved, archive-first). |
 | `agent_sessions.py` / `pi_session_trace.py` | Pi agent session registry and session-file trace parsing. |
 | `pi_runtime.py` / `pi_profiles.py` | In-process pi task runtime (one `pi --mode rpc` subprocess per step, `task_progress` between steps, SSE event ring buffer, abort, restart-safe snapshots) and the narrow task profiles it runs (`read-book`, `extract-character-list`, `extract-character` (targeted), `extract-all-characters` (multi-step), `suggest-concept-character/location`, `draft-panel-prompt`, `refine-panel-prompt`). Profiles with `tools` get the photo-web extension loaded with a scoped allow-list (see the pi agent seam). |
-| `story_panels.py` / `story_panels_print.py` | Panel chunks, page layout, booklet PDF (reportlab). |
+| `story_panels.py` / `story_panels_print.py` | Panel chunks, page layout, booklet PDF (reportlab). Panels carry entity links (`characterSlugs`/`locationSlug`, validated against `adaptation.status()`, written by the human patch path or the agent's `set_panel_image_prompt` delivery). `draft_panel_to_canvas` turns a saved image prompt into an `imageGroup` node whose `refs` are the tagged entities' canonical assets (409 if any entity has no asset yet) with `sourcePanelId` set; `library.attach_generated_assets_to_canvas` uses `sourcePanelId` to auto-attach generated assets back onto the panel. |
 | `adaptation_workflow/` | Pi plumbing for `pi_runtime`: `config.py` (context, pi/node discovery), `character_file.py`, `validate.py`, `events.py` (`project_event`), `diagnostics.py` (`TaskDiagnostics`). |
 
 ## Canvas model

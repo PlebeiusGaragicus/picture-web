@@ -784,6 +784,78 @@
   font-size: var(--text-xs);
 }
 
+.story-panels-prompt-canvas-row {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 6px;
+}
+
+.story-panels-prompt-canvas-row button {
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+}
+
+.story-panels-panel-entity-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.story-panels-panel-entity-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.story-panels-panel-entity-label {
+  min-width: 76px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.story-panels-panel-entity-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.story-panels-panel-entity-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full, 999px);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.story-panels-panel-entity-chip button {
+  --btn-bg: transparent;
+  --btn-border: transparent;
+  --btn-pad: 0 2px;
+  --btn-font: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.story-panels-panel-entity-chip button:hover {
+  color: var(--text-primary);
+}
+
+.story-panels-panel-entity-row select {
+  font-size: var(--text-xs);
+  padding: 4px 8px;
+}
+
+.story-panels-panel-entity-hint {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
 .story-panels-insert-kinds {
   display: flex;
   flex-wrap: wrap;

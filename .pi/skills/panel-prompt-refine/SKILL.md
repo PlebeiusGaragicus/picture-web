@@ -15,7 +15,7 @@ The user provides:
 2. The **current prompt** to revise.
 3. **User feedback** to apply.
 4. Runner context: panel story text, surrounding panels, canonical character
-   looks, and the **imagen prompt guide**.
+   looks and locations, and the **imagen prompt guide**.
 
 Rewrite the current prompt applying the feedback. This is a revision, not a
 redraft:

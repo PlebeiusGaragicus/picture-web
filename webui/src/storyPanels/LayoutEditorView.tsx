@@ -16,7 +16,7 @@ import { usePiTask } from '../sessions/usePiTask';
 import { formatRequestError } from '../formatError';
 import { HoverTooltip } from '../ui';
 import { api } from '../api';
-import type { StoryPanelPatchPayload, StoryPanelRect } from '../types';
+import type { AdaptationStatus, CanvasDocument, StoryPanelPatchPayload, StoryPanelRect } from '../types';
 import { isPanel, isUnplaced } from './panelModel';
 
 const SPREAD_PANEL_INFO_KEY = 'story-panels-spread-panel-info';
@@ -45,11 +45,13 @@ export function LayoutEditorView({
   initialNavigation,
   onNavigationComplete,
   onTopBarEndContentChange,
+  onPanelDraftedToCanvas,
 }: {
   projectSlug: string;
   initialNavigation: LayoutEditorNavigation | null;
   onNavigationComplete: () => void;
   onTopBarEndContentChange?: (content: ReactNode | null) => void;
+  onPanelDraftedToCanvas?: (canvas: CanvasDocument, nodeId: string) => void;
 }) {
   const {
     bookText,
@@ -89,6 +91,21 @@ export function LayoutEditorView({
   const draftPromptTask = usePiTask(projectSlug, 'draft-panel-prompt', onPromptTaskFinished);
   const refinePromptTask = usePiTask(projectSlug, 'refine-panel-prompt', onPromptTaskFinished);
   const promptTaskBusy = draftPromptTask.isActive || refinePromptTask.isActive;
+
+  // Canonical entity slugs for the panel editor's "who and where" chips.
+  const [adaptationStatus, setAdaptationStatus] = useState<AdaptationStatus | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.getAdaptation(projectSlug)
+      .then((status) => { if (!cancelled) setAdaptationStatus(status); })
+      .catch((err) => console.error('[photo-web] failed to load adaptation status', err));
+    return () => { cancelled = true; };
+  }, [projectSlug, promptRefreshKey]);
+
+  const draftToCanvas = async (panelId: string, promptId: string) => {
+    const result = await api.draftPanelToCanvas(projectSlug, panelId, promptId);
+    onPanelDraftedToCanvas?.(result.canvas, result.nodeId);
+  };
 
   const selectSingleSidePanel = (panel: SingleSidePanel) => {
     writeSingleSidePanel(panel);
@@ -302,6 +319,9 @@ export function LayoutEditorView({
       onDraftPrompt={(panelId, instructions) => void draftPromptTask.start({ target: panelId, instructions })}
       onRefinePrompt={(panelId, promptId, feedback) =>
         void refinePromptTask.start({ target: `${panelId}:${promptId}`, instructions: feedback })}
+      onDraftToCanvas={draftToCanvas}
+      characterOptions={Object.keys(adaptationStatus?.characters ?? {})}
+      locationOptions={Object.keys(adaptationStatus?.locations ?? {})}
       promptTaskBusy={promptTaskBusy}
       promptRefreshKey={promptRefreshKey}
       isSaving={isSaving || isPlacingPanel}

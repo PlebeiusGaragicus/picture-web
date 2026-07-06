@@ -7,6 +7,11 @@ concept suggest, panel prompt draft/refine), the imagen prompt guide, and §6 to
 prompt-authoring and concept-suggest profiles) are implemented. Book chat is removed
 (§5 done): `book_chat_sessions.py` + `pi_rpc.py` are deleted and the Agent view is a pi task
 dashboard (live SSE-attached task panels + the `agent_sessions` history/trace browser).
+Panel↔entity wiring is done: panels carry `characterSlugs`/`locationSlug` (agent-tagged via
+`set_panel_image_prompt`, human-editable chips in the panel editor), prompt drafting is
+blocked (409) until characters are extracted, and "Draft to canvas" turns a saved panel
+prompt into an imageGroup node whose refs are the tagged entities' canonical assets — the
+generated asset auto-attaches back onto the panel via `sourcePanelId`.
 Everything in §1 was verified against the installed pi (`@earendil-works/pi-coding-agent` **0.80.3**,
 Homebrew npm install at `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent`).
 

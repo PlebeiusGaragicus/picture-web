@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { formatRequestError } from '../formatError';
 import { useDismissOnOutsidePointerDown } from '../shared/popover';
 import type { StoryPanel, StoryPanelCaption, StoryPanelImagePrompt, StoryPanelPage, StoryPanelPatchPayload } from '../types';
 import { defaultCaptionTextStyle } from './captionPanelStyle';
@@ -394,6 +395,9 @@ export function PanelChunkList({
   onSavePanelEdit,
   onDraftPrompt,
   onRefinePrompt,
+  onDraftToCanvas,
+  characterOptions = [],
+  locationOptions = [],
   promptTaskBusy = false,
   promptRefreshKey = 0,
   isSaving,
@@ -415,6 +419,9 @@ export function PanelChunkList({
   onSavePanelEdit?: (panelId: string, patch: StoryPanelPatchPayload) => Promise<void>;
   onDraftPrompt?: (panelId: string, instructions?: string) => void;
   onRefinePrompt?: (panelId: string, promptId: string, feedback: string) => void;
+  onDraftToCanvas?: (panelId: string, promptId: string) => Promise<void>;
+  characterOptions?: string[];
+  locationOptions?: string[];
   promptTaskBusy?: boolean;
   promptRefreshKey?: number;
   isSaving: boolean;
@@ -440,7 +447,11 @@ export function PanelChunkList({
   const [panelEditorVisibleText, setPanelEditorVisibleText] = useState('');
   const [captionDrafts, setCaptionDrafts] = useState<StoryPanelCaption[]>([]);
   const [imagePromptDrafts, setImagePromptDrafts] = useState<StoryPanelImagePrompt[]>([]);
+  const [characterSlugDrafts, setCharacterSlugDrafts] = useState<string[]>([]);
+  const [locationSlugDraft, setLocationSlugDraft] = useState<string | null>(null);
   const [refineFeedbackDrafts, setRefineFeedbackDrafts] = useState<Record<string, string>>({});
+  const [panelEditorError, setPanelEditorError] = useState<string | null>(null);
+  const [draftingToCanvasPromptId, setDraftingToCanvasPromptId] = useState<string | null>(null);
   const [draftInputPanelId, setDraftInputPanelId] = useState<string | null>(null);
   const [draftInputValue, setDraftInputValue] = useState('');
   const hasBookText = bookLength > 0;
@@ -528,6 +539,9 @@ export function PanelChunkList({
     setPanelEditorVisibleText(usefulVisibleText(panel));
     setCaptionDrafts((panel.captions ?? []).map((caption) => ({ ...caption, textStyle: { ...caption.textStyle }, rect: { ...caption.rect } })));
     setImagePromptDrafts((panel.imagePrompts ?? []).map((prompt) => ({ ...prompt })));
+    setCharacterSlugDrafts([...(panel.characterSlugs ?? [])]);
+    setLocationSlugDraft(panel.locationSlug ?? null);
+    setPanelEditorError(null);
     setOpenMenuId(null);
   };
 
@@ -547,6 +561,8 @@ export function PanelChunkList({
     const panel = panels.find((item) => item.id === panelEditorPanelId);
     if (panel) {
       setImagePromptDrafts((panel.imagePrompts ?? []).map((prompt) => ({ ...prompt })));
+      setCharacterSlugDrafts([...(panel.characterSlugs ?? [])]);
+      setLocationSlugDraft(panel.locationSlug ?? null);
       setRefineFeedbackDrafts({});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -577,7 +593,11 @@ export function PanelChunkList({
     setPanelEditorVisibleText('');
     setCaptionDrafts([]);
     setImagePromptDrafts([]);
+    setCharacterSlugDrafts([]);
+    setLocationSlugDraft(null);
     setRefineFeedbackDrafts({});
+    setPanelEditorError(null);
+    setDraftingToCanvasPromptId(null);
   };
 
   const addImagePromptDraft = () => {
@@ -607,10 +627,26 @@ export function PanelChunkList({
         richText: plainTextToRichText(panelEditorVisibleText.trim()),
         captions: captionDrafts,
         imagePrompts: imagePromptDrafts,
+        characterSlugs: characterSlugDrafts,
+        locationSlug: locationSlugDraft,
       });
       closePanelEditor();
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const submitDraftToCanvas = async (panelId: string, promptId: string) => {
+    if (!onDraftToCanvas) return;
+    setDraftingToCanvasPromptId(promptId);
+    setPanelEditorError(null);
+    try {
+      await onDraftToCanvas(panelId, promptId);
+      closePanelEditor();
+    } catch (err) {
+      console.error('[photo-web] draft panel to canvas failed', err);
+      setPanelEditorError(formatRequestError(err));
+      setDraftingToCanvasPromptId(null);
     }
   };
 
@@ -880,6 +916,7 @@ export function PanelChunkList({
                 />
               </div>
             </header>
+            {panelEditorError && <p className="error">{panelEditorError}</p>}
             <div className="story-panels-panel-editor-grid">
               <label>
                 Panel name
@@ -944,6 +981,66 @@ export function PanelChunkList({
                 </label>
               )}
             </div>
+            {panelEditorKind === 'image' && (characterOptions.length > 0 || locationOptions.length > 0) && (
+              <div className="story-panels-panel-caption-editor-group">
+                <div className="story-panels-panel-editor-section-head">
+                  <strong>Who and where</strong>
+                </div>
+                <div className="story-panels-panel-entity-editor">
+                  {characterOptions.length > 0 && (
+                    <div className="story-panels-panel-entity-row">
+                      <span className="story-panels-panel-entity-label">Characters</span>
+                      <span className="story-panels-panel-entity-chips">
+                        {characterSlugDrafts.map((slug) => (
+                          <span key={slug} className="story-panels-panel-entity-chip">
+                            {slug}
+                            <button
+                              type="button"
+                              aria-label={`Remove ${slug}`}
+                              disabled={isCreating}
+                              onClick={() => setCharacterSlugDrafts((current) => current.filter((item) => item !== slug))}
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                        <select
+                          value=""
+                          disabled={isCreating || characterSlugDrafts.length >= characterOptions.length}
+                          onChange={(event) => {
+                            const slug = event.target.value;
+                            if (slug) setCharacterSlugDrafts((current) => (current.includes(slug) ? current : [...current, slug]));
+                          }}
+                        >
+                          <option value="">Add character…</option>
+                          {characterOptions.filter((slug) => !characterSlugDrafts.includes(slug)).map((slug) => (
+                            <option key={slug} value={slug}>{slug}</option>
+                          ))}
+                        </select>
+                      </span>
+                    </div>
+                  )}
+                  {locationOptions.length > 0 && (
+                    <div className="story-panels-panel-entity-row">
+                      <span className="story-panels-panel-entity-label">Location</span>
+                      <select
+                        value={locationSlugDraft ?? ''}
+                        disabled={isCreating}
+                        onChange={(event) => setLocationSlugDraft(event.target.value || null)}
+                      >
+                        <option value="">No location</option>
+                        {locationOptions.map((slug) => (
+                          <option key={slug} value={slug}>{slug}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <p className="muted story-panels-panel-entity-hint">
+                    Pi tags these when drafting a prompt; they pick the reference images used when this panel is drafted to the canvas.
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="story-panels-panel-caption-editor-group">
               <div className="story-panels-panel-editor-section-head">
                 <strong>Image prompts</strong>
@@ -994,6 +1091,19 @@ export function PanelChunkList({
                         onChange={(event) => updateImagePromptDraftText(prompt.id, event.target.value)}
                         onKeyDown={(event) => event.stopPropagation()}
                       />
+                      {onDraftToCanvas && savedOnServer && (
+                        <span className="story-panels-prompt-canvas-row">
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={isCreating || promptTaskBusy || draftingToCanvasPromptId !== null}
+                            title="Create a canvas node with this prompt and the tagged entities' reference images"
+                            onClick={() => void submitDraftToCanvas(panelEditorPanel.id, prompt.id)}
+                          >
+                            {draftingToCanvasPromptId === prompt.id ? 'Drafting to canvas…' : 'Draft to canvas'}
+                          </button>
+                        </span>
+                      )}
                       {onRefinePrompt && savedOnServer && (
                         <span className="story-panels-prompt-refine-row">
                           <input

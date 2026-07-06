@@ -340,8 +340,26 @@ def _panel_prompt_context_lines(ctx: AdaptationContext, panel: Any, document: An
         if look.strip():
             look_lines.append(f"- {slug}: {_clip(look, 400)}")
     if look_lines:
-        lines.append("Canonical character looks (use these descriptors verbatim for anyone visible):")
+        lines.append(
+            "Canonical characters (the slugs before the colon are the ONLY valid characterSlugs "
+            "values; any character visible in the panel must be described using these look "
+            "descriptors, never just their name):"
+        )
         lines.extend(look_lines)
+        lines.append("")
+
+    location_lines: list[str] = []
+    for slug, link in status.locations.items():
+        look = link.prompt or link.narration
+        entry = f"- {slug}: {_clip(look, 300)}" if look.strip() else f"- {slug}"
+        location_lines.append(entry)
+    if location_lines:
+        lines.append(
+            "Canonical locations (the slugs are the ONLY valid locationSlug values; pick the one "
+            "that matches this panel's setting, and use its description for the setting portion "
+            "of the prompt):"
+        )
+        lines.extend(location_lines)
         lines.append("")
 
     default_style = next(
@@ -360,9 +378,24 @@ def _panel_prompt_context_lines(ctx: AdaptationContext, panel: Any, document: An
     return lines
 
 
+def _require_extracted_characters(ctx: AdaptationContext) -> None:
+    """Process gate: panel prompts need a canonical cast to reference."""
+    status = adaptation.status(ctx.project_slug)
+    has_looks = any(
+        ((record.variants.get("base").prompt if record.variants.get("base") else "") or record.description).strip()
+        for record in status.characters.values()
+    )
+    if not has_looks:
+        raise HTTPException(
+            status_code=409,
+            detail="Extract characters (and locations) before drafting panel prompts — there is no canonical cast to reference.",
+        )
+
+
 def _draft_panel_prompt_precheck(ctx: AdaptationContext, args: TaskArgs) -> None:
     if not args.target:
         raise HTTPException(status_code=400, detail="draft-panel-prompt requires a target panel id")
+    _require_extracted_characters(ctx)
     _document, panel = _find_panel(ctx.project_slug, args.target)
     if panel is None:
         raise HTTPException(status_code=404, detail=f"Panel not found: {args.target}")
@@ -420,6 +453,7 @@ def _refine_panel_prompt_precheck(ctx: AdaptationContext, args: TaskArgs) -> Non
         )
     if not (args.instructions or "").strip():
         raise HTTPException(status_code=400, detail="refine-panel-prompt requires feedback instructions")
+    _require_extracted_characters(ctx)
     panel_id, prompt_id = _parse_refine_target(args.target)
     _document, panel = _find_panel(ctx.project_slug, panel_id)
     if panel is None:

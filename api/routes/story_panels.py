@@ -8,6 +8,7 @@ from fastapi.responses import Response
 import story_panels
 import story_panels_print
 from models import (
+    ConceptNodeResponse,
     StoryPanelBookmarkCreate,
     StoryPanelCreate,
     StoryPanelDocument,
@@ -62,7 +63,13 @@ def patch_story_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> Sto
 
 @router.post("/api/projects/{slug}/story-panels/panels/{panel_id}/image-prompts")
 def append_story_panel_image_prompt(slug: str, panel_id: str, payload: StoryPanelImagePromptWrite) -> dict[str, str]:
-    prompt_id = story_panels.append_image_prompt(slug, panel_id, payload.text)
+    prompt_id = story_panels.append_image_prompt(
+        slug,
+        panel_id,
+        payload.text,
+        character_slugs=payload.characterSlugs,
+        location_slug=payload.locationSlug,
+    )
     return {"promptId": prompt_id}
 
 
@@ -72,6 +79,11 @@ def replace_story_panel_image_prompt(
 ) -> dict[str, str]:
     story_panels.replace_image_prompt(slug, panel_id, prompt_id, payload.text)
     return {"promptId": prompt_id}
+
+
+@router.post("/api/projects/{slug}/story-panels/panels/{panel_id}/draft-to-canvas", response_model=ConceptNodeResponse)
+def draft_story_panel_to_canvas(slug: str, panel_id: str, promptId: str) -> ConceptNodeResponse:
+    return story_panels.draft_panel_to_canvas(slug, panel_id, promptId)
 
 
 @router.post("/api/projects/{slug}/story-panels/panels/{panel_id}/auto-place", response_model=StoryPanelDocument)

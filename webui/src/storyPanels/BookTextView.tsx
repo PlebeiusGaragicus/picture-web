@@ -13,7 +13,7 @@ import { sortedPanels, withSelectedText } from './storyPanelUtils';
 import { autoPlaceDraftPanel } from './autoPlace';
 import { useStoryPanelDocument } from './useStoryPanelDocument';
 import { isBookLinked, isPanel } from './panelModel';
-import type { StoryPanelPatchPayload } from '../types';
+import type { AdaptationStatus, CanvasDocument, StoryPanelPatchPayload } from '../types';
 
 export function BookTextView({
   projectSlug,
@@ -23,6 +23,7 @@ export function BookTextView({
   onHasBookTextChange,
   autoPlaceEnabled,
   onImportBook,
+  onPanelDraftedToCanvas,
 }: {
   projectSlug: string;
   onNavigateToLayoutEditor: (navigation: LayoutEditorNavigation) => void;
@@ -31,6 +32,7 @@ export function BookTextView({
   onHasBookTextChange: (hasBookText: boolean) => void;
   autoPlaceEnabled: boolean;
   onImportBook: (file: File) => Promise<void>;
+  onPanelDraftedToCanvas?: (canvas: CanvasDocument, nodeId: string) => void;
 }) {
   const {
     bookText,
@@ -66,6 +68,21 @@ export function BookTextView({
   const draftPromptTask = usePiTask(projectSlug, 'draft-panel-prompt', onPromptTaskFinished);
   const refinePromptTask = usePiTask(projectSlug, 'refine-panel-prompt', onPromptTaskFinished);
   const promptTaskBusy = draftPromptTask.isActive || refinePromptTask.isActive;
+
+  // Canonical entity slugs for the panel editor's "who and where" chips.
+  const [adaptationStatus, setAdaptationStatus] = useState<AdaptationStatus | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.getAdaptation(projectSlug)
+      .then((status) => { if (!cancelled) setAdaptationStatus(status); })
+      .catch((err) => console.error('[photo-web] failed to load adaptation status', err));
+    return () => { cancelled = true; };
+  }, [projectSlug, promptRefreshKey]);
+
+  const draftToCanvas = async (panelId: string, promptId: string) => {
+    const result = await api.draftPanelToCanvas(projectSlug, panelId, promptId);
+    onPanelDraftedToCanvas?.(result.canvas, result.nodeId);
+  };
 
   const hasBookText = bookText.length > 0;
   const showStorySetup = !hasBookText && sidebarPanels.length === 0;
@@ -306,6 +323,9 @@ export function BookTextView({
       onDraftPrompt={(panelId, instructions) => void draftPromptTask.start({ target: panelId, instructions })}
       onRefinePrompt={(panelId, promptId, feedback) =>
         void refinePromptTask.start({ target: `${panelId}:${promptId}`, instructions: feedback })}
+      onDraftToCanvas={draftToCanvas}
+      characterOptions={Object.keys(adaptationStatus?.characters ?? {})}
+      locationOptions={Object.keys(adaptationStatus?.locations ?? {})}
       promptTaskBusy={promptTaskBusy}
       promptRefreshKey={promptRefreshKey}
       isSaving={isSaving || isPlacingPanel}

@@ -565,6 +565,30 @@ def next_image_prompt_id(prompts: list[StoryPanelImagePrompt]) -> str:
     return f"prompt-{index:03d}"
 
 
+def validate_panel_entities(
+    slug: str,
+    character_slugs: list[str] | None,
+    location_slug: str | None,
+) -> None:
+    """422 on entity slugs that don't exist in the adaptation's canonical records."""
+    if not character_slugs and not location_slug:
+        return
+    status = adaptation.status(slug)
+    unknown_characters = [item for item in (character_slugs or []) if item not in status.characters]
+    if unknown_characters:
+        known = ", ".join(sorted(status.characters)) or "(none extracted yet)"
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown character slugs: {', '.join(unknown_characters)}. Known characters: {known}",
+        )
+    if location_slug and location_slug not in status.locations:
+        known = ", ".join(sorted(status.locations)) or "(none extracted yet)"
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown location slug: {location_slug}. Known locations: {known}",
+        )
+
+
 def _require_panel(document: StoryPanelDocument, panel_id: str) -> int:
     index = next((idx for idx, panel in enumerate(document.panels) if panel.id == panel_id), None)
     if index is None:
@@ -572,15 +596,32 @@ def _require_panel(document: StoryPanelDocument, panel_id: str) -> int:
     return index
 
 
-def append_image_prompt(slug: str, panel_id: str, text: str) -> str:
-    """Append a validated image prompt to a panel; returns the new prompt id."""
+def append_image_prompt(
+    slug: str,
+    panel_id: str,
+    text: str,
+    *,
+    character_slugs: list[str] | None = None,
+    location_slug: str | None = None,
+) -> str:
+    """Append a validated image prompt to a panel; returns the new prompt id.
+
+    Optional entity slugs (agent delivery) are validated against the canonical
+    character/location records and written onto the panel itself.
+    """
     cleaned = _validate_image_prompt_text(text)
+    validate_panel_entities(slug, character_slugs, location_slug)
     document = read_document(slug)
     index = _require_panel(document, panel_id)
     panel = document.panels[index]
     prompt_id = next_image_prompt_id(panel.imagePrompts)
     prompts = [*panel.imagePrompts, StoryPanelImagePrompt(id=prompt_id, text=cleaned)]
-    document.panels[index] = panel.model_copy(update={"imagePrompts": prompts})
+    updates: dict = {"imagePrompts": prompts}
+    if character_slugs is not None:
+        updates["characterSlugs"] = list(dict.fromkeys(character_slugs))
+    if location_slug is not None:
+        updates["locationSlug"] = location_slug
+    document.panels[index] = panel.model_copy(update=updates)
     save_document(slug, document)
     return prompt_id
 
@@ -601,6 +642,85 @@ def replace_image_prompt(slug: str, panel_id: str, prompt_id: str, text: str) ->
     save_document(slug, document)
 
 
+def draft_panel_to_canvas(slug: str, panel_id: str, prompt_id: str):
+    """Create a canvas imageGroup node for one panel image prompt.
+
+    The node's refs are the canonical reference assets of the panel's tagged
+    entities (character sheet base variants and the location's asset), so
+    generation keeps characters and setting consistent. Blocks (409) when a
+    tagged entity has no reference asset yet.
+    """
+    from canvas_nodes import create_image_group_node, next_canvas_position
+    from models import ConceptNodeResponse, GenerationParams
+
+    document = read_document(slug)
+    panel = document.panels[_require_panel(document, panel_id)]
+    prompt = next((item for item in panel.imagePrompts if item.id == prompt_id), None)
+    if prompt is None:
+        raise HTTPException(status_code=404, detail=f"Image prompt not found: {prompt_id}")
+    if not prompt.text.strip():
+        raise HTTPException(status_code=409, detail="Image prompt is empty")
+
+    status = adaptation.status(slug)
+    refs: list[str] = []
+    missing: list[str] = []
+    for character_slug in panel.characterSlugs:
+        record = status.characters.get(character_slug)
+        base = record.variants.get("base") if record else None
+        asset_id = (base.activeAssetId or (base.assetIds[0] if base.assetIds else None)) if base else None
+        if asset_id is None:
+            missing.append(f"character {character_slug}")
+        elif asset_id not in refs:
+            refs.append(asset_id)
+    if panel.locationSlug:
+        link = status.locations.get(panel.locationSlug)
+        asset_id = (link.activeAssetId or (link.assetIds[0] if link.assetIds else None)) if link else None
+        if asset_id is None:
+            missing.append(f"location {panel.locationSlug}")
+        elif asset_id not in refs:
+            refs.append(asset_id)
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail="Missing reference images — generate them first: " + ", ".join(missing),
+        )
+
+    canvas = library.read_stored_canvas(slug)
+    x, y = next_canvas_position(canvas)
+    tags = ["comic-adaptation", "story-panel", panel_id, *panel.characterSlugs]
+    if panel.locationSlug:
+        tags.append(panel.locationSlug)
+    display_name = panel.title.strip() or f"Panel {panel_id}"
+    node_id, saved = create_image_group_node(
+        slug,
+        display_name=display_name,
+        tags=library.node_tags(*tags),
+        prompt=prompt.text,
+        refs=refs,
+        params=GenerationParams(),
+        x=x,
+        y=y,
+        source_panel_id=panel_id,
+    )
+    return ConceptNodeResponse(nodeId=node_id, canvas=saved)
+
+
+def attach_assets_to_panel(slug: str, panel_id: str, asset_ids: list[str]) -> None:
+    """Attach generated assets to the panel (newest becomes active). Tolerates a deleted panel."""
+    if not asset_ids:
+        return
+    document = read_document(slug)
+    index = next((idx for idx, panel in enumerate(document.panels) if panel.id == panel_id), None)
+    if index is None:
+        return
+    panel = document.panels[index]
+    merged = list(dict.fromkeys([*panel.assetIds, *asset_ids]))
+    document.panels[index] = panel.model_copy(
+        update={"assetIds": merged, "activeAssetId": asset_ids[0], "imageCrop": None}
+    )
+    save_document(slug, document)
+
+
 def patch_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> StoryPanelDocument:
     document = read_document(slug)
     index = next((idx for idx, panel in enumerate(document.panels) if panel.id == panel_id), None)
@@ -608,6 +728,8 @@ def patch_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> StoryPane
         raise HTTPException(status_code=404, detail=f"Panel not found: {panel_id}")
     current = document.panels[index]
     updates = payload.model_dump(exclude_unset=True)
+    if "characterSlugs" in updates or "locationSlug" in updates:
+        validate_panel_entities(slug, updates.get("characterSlugs"), updates.get("locationSlug"))
     if "pageId" in updates:
         page_id = updates["pageId"]
         if page_id is not None and not any(page.id == page_id for page in document.pages):

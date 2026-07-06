@@ -47,17 +47,32 @@ const TOOLS: Record<string, ToolDefinition> = {
     name: "set_panel_image_prompt",
     label: "Set panel image prompt",
     description:
-      "Save a finished image-generation prompt onto a story panel as a new prompt. " +
+      "Save a finished image-generation prompt onto a story panel as a new prompt, " +
+      "tagging which canonical characters and location the panel depicts. " +
       "Call exactly once with the complete final prompt text.",
     parameters: Type.Object({
       panelId: Type.String({ description: "The target panel id, e.g. panel-004" }),
       prompt: Type.String({ description: "The complete imagen-ready prompt text (plain prose)" }),
+      characterSlugs: Type.Array(Type.String(), {
+        description:
+          "Slugs of every character visible in this panel, chosen only from the canonical character slugs in the context. Empty array if none.",
+      }),
+      locationSlug: Type.Optional(
+        Type.String({
+          description:
+            "Slug of the panel's setting, chosen only from the canonical location slugs in the context. Omit if no listed location fits.",
+        }),
+      ),
     }),
     async execute(_toolCallId, params) {
       const result = await callApi(
         "POST",
         `/api/projects/${PROJECT}/story-panels/panels/${params.panelId}/image-prompts`,
-        { text: params.prompt },
+        {
+          text: params.prompt,
+          characterSlugs: params.characterSlugs ?? [],
+          locationSlug: params.locationSlug ?? null,
+        },
       );
       return { content: [{ type: "text", text: `Saved: ${result}` }], details: {} };
     },
