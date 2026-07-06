@@ -155,9 +155,17 @@ export function CharactersHubView({
   const listTask = usePiTask(projectSlug, 'extract-character-list', async () => {
     await onReloadProject();
   });
-  const extractAllTask = usePiTask(projectSlug, 'extract-all-characters', async () => {
-    await onReloadProject();
-  });
+  const extractAllTask = usePiTask(
+    projectSlug,
+    'extract-all-characters',
+    async () => {
+      await onReloadProject();
+    },
+    // Characters land one tool call at a time; show each as it arrives.
+    async () => {
+      await onReloadProject();
+    },
+  );
   const extractOneTask = usePiTask(projectSlug, 'extract-character', async () => {
     await onReloadProject();
   });

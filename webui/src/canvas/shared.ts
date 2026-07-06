@@ -33,6 +33,16 @@ export function canonicalTagsForAsset(assetId: string | null | undefined, projec
   return projectTags.filter((tag) => tag.canonicalAssetId === assetId);
 }
 
+/** Entity tags on this node whose canonical image will be auto-attached as a
+ *  generation reference (deduped against the node's explicit refs). */
+export function autoCanonicalRefTags(tags: string[], refs: string[], projectTags: TagDefinition[]): TagDefinition[] {
+  const tagIds = new Set(tags);
+  const explicit = new Set(refs);
+  return projectTags.filter((tag) => (
+    tag.entityKind != null && tag.canonicalAssetId != null && tagIds.has(tag.id) && !explicit.has(tag.canonicalAssetId)
+  ));
+}
+
 /** A node is protected iff its active image is some entity tag's canonical image. */
 export function canDeleteNode(
   node: { data: { activeAsset?: { id: string } | null } } | null | undefined,

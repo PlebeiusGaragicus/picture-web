@@ -13,6 +13,7 @@ import { nodeTagActionsRef } from './nodeTagActions';
 import {
   SYSTEM_TAGS,
   canDeleteNode,
+  canonicalTagsForAsset,
   countEntityTagsOnAssets,
   countUserTagAssignments,
   countUserTagsOnAssets,
@@ -182,6 +183,20 @@ export function useCanvasWorkspace({
       });
       // Archived mode is a browse view: flipping takes must not rewrite the
       // stored active pointer (the reload on toggle discards the local swap).
+      if (!showArchived) void persistNodesRef.current(next);
+      return next;
+    });
+  }, [showArchived]);
+
+  /** Stack manager: make one take the active (displayed, referenced) image.
+   *  Archived mode stays a browse view — the swap is local, not persisted. */
+  const setActiveTake = useCallback((nodeId: string, assetId: string) => {
+    setNodes((current) => {
+      const next = current.map((node) => {
+        if (node.id !== nodeId || !node.data.assetIds.includes(assetId)) return node;
+        const activeAsset = node.data.assets.find((asset) => asset.id === assetId) ?? null;
+        return { ...node, data: { ...node.data, activeAssetId: assetId, activeAsset } };
+      });
       if (!showArchived) void persistNodesRef.current(next);
       return next;
     });
@@ -412,25 +427,16 @@ export function useCanvasWorkspace({
 
   const reload = async () => loadProject(openProjectSlug);
 
+  // Deleting a node always means the same thing regardless of where it came
+  // from: with takes, delete the given (or active) take; the node goes when
+  // its stack empties. Concept cards are separate domain objects deleted from
+  // their own view.
   const performDeleteNodeById = useCallback((nodeId: string, assetId?: string) => {
     const nodeToDelete = nodes.find((node) => node.id === nodeId);
     if (!canDeleteNode(nodeToDelete, projectTags)) return;
-    const isConceptCardDraft = nodeToDelete?.data.origin?.kind === 'conceptCard';
-    if (isConceptCardDraft && !assetId) {
-      setNodes((current) => {
-        const next = current.filter((node) => node.id !== nodeId);
-        void persistNodesRef.current(next);
-        return next;
-      });
-      setSelectedNodeIds((current) => current.filter((id) => id !== nodeId));
-      setPopoverNodeId((current) => (current === nodeId ? null : current));
-      return;
-    }
     const hasTakes = (nodeToDelete?.data.assetIds.length ?? 0) > 0;
     const assetIdsToDelete = nodeToDelete && hasTakes
-      ? isConceptCardDraft
-        ? []
-        : [assetId ?? nodeToDelete.data.activeAsset?.id ?? nodeToDelete.data.activeAssetId ?? nodeToDelete.data.assetIds[0]].filter((id): id is string => Boolean(id))
+      ? [assetId ?? nodeToDelete.data.activeAsset?.id ?? nodeToDelete.data.activeAssetId ?? nodeToDelete.data.assetIds[0]].filter((id): id is string => Boolean(id))
       : [];
     if (hasTakes) {
       void Promise.all(assetIdsToDelete.map((assetId) => api.deleteAsset(openProjectSlug, assetId)))
@@ -445,9 +451,7 @@ export function useCanvasWorkspace({
         ? current
             .map((node) => {
               if (node.id !== nodeId) return node;
-              const nextAssetIds = isConceptCardDraft && assetId
-                ? node.data.assetIds.filter((id) => id !== assetId)
-                : node.data.assetIds.filter((id) => !assetIdsToDelete.includes(id));
+              const nextAssetIds = node.data.assetIds.filter((id) => !assetIdsToDelete.includes(id));
               if (!nextAssetIds.length) return null;
               const nextActiveAssetId = nextAssetIds.includes(node.data.activeAssetId ?? '') ? node.data.activeAssetId : nextAssetIds[0];
               const nextAssets = node.data.assets.filter((asset) => nextAssetIds.includes(asset.id));
@@ -465,7 +469,13 @@ export function useCanvasWorkspace({
 
   const deleteNodeById = useCallback((nodeId: string, assetId?: string) => {
     const nodeToDelete = nodes.find((node) => node.id === nodeId);
-    if (!canDeleteNode(nodeToDelete, projectTags)) return;
+    if (!canDeleteNode(nodeToDelete, projectTags)) {
+      const tagNames = canonicalTagsForAsset(nodeToDelete?.data.activeAsset?.id, projectTags)
+        .map((tag) => tag.name)
+        .join(', ');
+      toast.error(`This is the canonical image for ${tagNames} — pick a new canonical first.`);
+      return;
+    }
     setPendingDelete({ nodeId, assetId });
   }, [nodes, projectTags]);
 
@@ -817,7 +827,10 @@ export function useCanvasWorkspace({
   const requestDeleteSelectedNodes = useCallback(() => {
     if (!selectedNodeIds.length) return;
     const deletableNodes = deletableSelectedNodes(nodes, selectedNodeIds, projectTags);
-    if (!deletableNodes.length) return;
+    if (!deletableNodes.length) {
+      toast.error('The selection holds canonical images — pick new canonicals first.');
+      return;
+    }
     const imageNodeCount = deletableNodes.filter((node) => node.data.assetIds.length > 0).length;
     setPendingBulkDelete(deleteSelectedNodesMessage(selectedNodeIds.length, deletableNodes.length, imageNodeCount));
   }, [nodes, projectTags, selectedNodeIds]);
@@ -955,6 +968,11 @@ export function useCanvasWorkspace({
     // for nodes created before recipes were stored on the node.
     const prompt = node.prompt.trim() ? node.prompt : node.activeAsset?.prompt?.text ?? '';
     const refs = node.refs.length ? node.refs : node.activeAsset?.generation?.refs ?? [];
+    // A new take shares the current take's identity: carry its entity tags so
+    // the backend auto-attaches those entities' canonical references.
+    const activeEntityTags = (node.activeAsset?.tags ?? []).filter((tagId) => (
+      projectTags.some((tag) => tag.id === tagId && tag.locked)
+    ));
     try {
       clearGenerationFailure();
       setError(null);
@@ -969,7 +987,7 @@ export function useCanvasWorkspace({
         seed: params.seed,
         batchCount: params.batchCount,
         title: visibleDisplayName(node.displayName) || null,
-        tags: node.tags ?? [],
+        tags: Array.from(new Set([...(node.tags ?? []), ...activeEntityTags])),
         canvasNodeId: id,
         visualStyleId: overrides.visualStyleId !== undefined
           ? overrides.visualStyleId ?? null
@@ -1003,6 +1021,7 @@ export function useCanvasWorkspace({
     if (!openProjectSlug) return;
     setProjectTags(await api.setTagCanonical(openProjectSlug, tagId, assetId));
   };
+  nodeTagActionsRef.setTagCanonical = (tagId, assetId) => void setTagCanonical(tagId, assetId);
 
   const setProjectCover = async (assetId: string) => {
     if (!openProjectSlug) return;
@@ -1200,6 +1219,7 @@ export function useCanvasWorkspace({
     generationError,
     duplicateAsDraft,
     changeVariant,
+    setActiveTake,
     deleteNodeById,
     performDeleteNodeById,
     pendingDelete,

@@ -112,6 +112,8 @@ export function CanvasPanels({
           onSetProjectCover={ws.setProjectCover}
           onFindOnCanvas={ws.focusNodeOnCanvas}
           onVariant={ws.changeVariant}
+          onSetActiveTake={ws.setActiveTake}
+          onShowArchived={() => ws.setShowArchived(true)}
           onDuplicate={ws.duplicateAsDraft}
           onDelete={ws.deleteNodeById}
           onArchiveImage={ws.requestArchiveImageAsset}

@@ -10,8 +10,11 @@ dashboard (live SSE-attached task panels + the `agent_sessions` history/trace br
 Panel↔entity wiring is done: panels carry `characterSlugs`/`locationSlug` (agent-tagged via
 `set_panel_image_prompt`, human-editable chips in the panel editor), prompt drafting is
 blocked (409) until characters are extracted, and "Draft to canvas" turns a saved panel
-prompt into an imageGroup node whose refs are the tagged entities' canonical assets — the
-generated asset auto-attaches back onto the panel via `sourcePanelId`.
+prompt into a canvas node whose refs are the tagged entities' canonical assets — the
+generated asset auto-attaches back onto the panel via the node's `origin`.
+Batch profiles and batch generation are dropped as non-features (2026-07): everything
+drafts and generates one at a time, human-reviewed. §6.2's finer-grained invalidation
+is implemented (`usePiTask` `onMutation` refreshes the launching view per tool result).
 Everything in §1 was verified against the installed pi (`@earendil-works/pi-coding-agent` **0.80.3**,
 Homebrew npm install at `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent`).
 
@@ -94,7 +97,9 @@ so a button maps to a profile id, nothing more.
 | `draft-panel-prompt` | Panel editor → "Draft prompt" | this panel's story text, ±N surrounding panels, characters appearing (records + canonical look prompts), scene record, **imagen prompt guide** (§0.5), active visual style | `get_panel_context`, `set_panel_image_prompt` | verbose imagen-ready prompt on the panel |
 | `refine-panel-prompt` | Panel editor → "Refine" + one-line feedback | current prompt, the feedback, prompt guide, same panel context | `set_panel_image_prompt` | revised prompt |
 | `draft-concept-prompt` | Concept art view → "Draft" | character/location record, prompt guide, visual style | `create_concept_card` | concept card prompt |
-| `batch-draft-prompts` | Story view → "Draft all missing prompts" | per-panel, same as `draft-panel-prompt`, run sequentially in one job | same | prompts across panels, SSE progress |
+
+Batch profiles are a **non-feature**: drafting and generating stay one-at-a-time,
+human-reviewed. No `batch-draft-prompts`, no batch generation (decision 2026-07).
 
 Notes:
 - Extraction profiles fork the read-book session (`new_session { parentSession }`) so the
@@ -302,8 +307,7 @@ class PiSessionManager:
     def run_task(slug, *, profile: str, target_ids: list[str],
                  feedback: str | None = None) -> TaskHandle
         # assembles profile context, opens/forks a session, prompts,
-        # closes the process at agent_end; multi-target profiles
-        # (batch-draft-prompts) loop sequentially in one handle
+        # closes the process at agent_end
     def abort(task_id) -> bool
     def events_since(task_id, since_seq) -> list[PiEvent]
     def subscribe(task_id) -> queue.Queue          # for SSE generator
@@ -438,12 +442,12 @@ tiny surfaces.
 
 ### 6.2 How results reach the UI live
 
-Two complementary channels:
+Two complementary channels (both implemented):
 1. The SSE stream already shows `tool_start/tool_end` — the task panel displays
   "upsert_character ✓ Ishmael".
-2. The affected views refresh their data on terminal task state (v1), with a per-project
-   `rev` bump on mutating endpoints available as the finer-grained invalidation signal
-   if refresh-on-done proves too coarse.
+2. The affected views refresh their data on terminal task state, and `usePiTask`
+   additionally fires `onMutation` on each successful `tool_end` so multi-target
+   tasks (extract-all-characters) refresh the launching view as each result lands.
 
 ### 6.3 What this replaces
 
@@ -504,10 +508,8 @@ human-triggered, no agent involvement:
   group for its active asset), remix there (multi-select refs → generate, refine chat), then
   "Send back to panel" (set `activeAssetId`). The canvas side exists; the two navigation
   actions are new.
-- **Batch generate:** "Generate all missing panel images" as a manager job with SSE progress
-  — the same runtime as Phase 1, no new machinery. (Distinct from `batch-draft-prompts`,
-  which authors the prompts; this spends the credits, so it stays behind an explicit
-  human confirmation.)
+Batch generation is a **non-feature** (see §0.4): every generation is a single
+human click on a single panel or node.
 
 ---
 

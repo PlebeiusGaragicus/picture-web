@@ -233,6 +233,32 @@
   font-weight: 800;
 }
 
+.tag-chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.tag-canonical-star {
+  padding: 1px 4px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tag-canonical-star:hover {
+  color: var(--accent);
+  background: rgb(var(--blue-300-rgb) / 0.12);
+}
+
+.tag-canonical-star.is-canonical {
+  color: #facc15;
+}
+
 .tag-chip-locked {
   opacity: 0.92;
   cursor: default;

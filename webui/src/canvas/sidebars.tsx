@@ -4,7 +4,7 @@ import type { AdaptationStatus, Asset, CanvasNode, GenerationParams, TagDefiniti
 import { VisualStyleSelect } from '../visualStyles/VisualStyleSelect';
 import { TagControlButton } from './assetTagRow';
 
-import { assetLabel, canonicalTagsForAsset, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, styleEntityTagsOnNode, uniqueOptions, visibleDisplayName, visibleVariants } from './shared';
+import { assetLabel, autoCanonicalRefTags, canonicalTagsForAsset, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, styleEntityTagsOnNode, uniqueOptions, visibleDisplayName, visibleVariants } from './shared';
 import type { CanvasNodeData } from './types';
 
 function GenerationErrorNotice({ message }: { message: string | null | undefined }) {
@@ -30,6 +30,8 @@ export function NodeSidebar({
   onSetProjectCover,
   onFindOnCanvas,
   onVariant,
+  onSetActiveTake,
+  onShowArchived,
   onDuplicate,
   onDelete,
   onArchiveImage,
@@ -52,6 +54,8 @@ export function NodeSidebar({
   onSetProjectCover: (assetId: string) => void;
   onFindOnCanvas: (nodeId: string) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
+  onSetActiveTake: (nodeId: string, assetId: string) => void;
+  onShowArchived: () => void;
   onDuplicate: (node: CanvasNodeData, sourceAsset: Asset) => void;
   onDelete: (id: string, assetId?: string) => void;
   onArchiveImage: (nodeId: string, assetId: string) => void;
@@ -100,6 +104,8 @@ export function NodeSidebar({
       onCreateTag={onCreateTag}
       onNodeChange={onNodeChange}
       onVariant={onVariant}
+      onSetActiveTake={onSetActiveTake}
+      onShowArchived={onShowArchived}
       onDuplicate={onDuplicate}
       onGenerate={onGenerate}
       generationError={generationError}
@@ -142,6 +148,7 @@ function DraftSidebar({
   const draftModel = draft.params.model ?? defaultDraftParams.model;
   const draftCapabilities = capabilitiesForModel(draftModel);
   const styleTags = styleEntityTagsOnNode(draft.tags, projectTags);
+  const autoRefTags = autoCanonicalRefTags(draft.tags, draft.refs, projectTags);
   const [isEditingName, setIsEditingName] = useState(false);
   const [draftName, setDraftName] = useState(visibleDisplayName(draft.displayName));
   useEffect(() => {
@@ -217,6 +224,19 @@ function DraftSidebar({
               </button>
             </div>
           ))}
+          {autoRefTags.map((tag) => {
+            const canonical = assets.find((asset) => asset.id === tag.canonicalAssetId) ?? null;
+            return (
+              <div
+                className="parent-item auto-canonical-ref"
+                key={`auto-${tag.id}`}
+                title={`Attached automatically at generation time — canonical image for ${tag.name}. Remove the ${tag.name} tag to detach.`}
+              >
+                {canonical?.thumbnailUrl ? <img src={canonical.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
+                <span><span className="auto-canonical-star">★</span> {tag.name}</span>
+              </div>
+            );
+          })}
         </div>
         <button className="add-parent-button" onClick={() => setIsParentPickerOpen((current) => !current)}>+</button>
         {isParentPickerOpen && (
@@ -325,6 +345,8 @@ function ImageSidebar({
   onCreateTag,
   onNodeChange,
   onVariant,
+  onSetActiveTake,
+  onShowArchived,
   onDuplicate,
   onGenerate,
   generationError,
@@ -347,6 +369,8 @@ function ImageSidebar({
   onCreateTag: (tag: TagDefinition) => void;
   onNodeChange: (id: string, patch: Partial<CanvasNode>) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
+  onSetActiveTake: (nodeId: string, assetId: string) => void;
+  onShowArchived: () => void;
   onDuplicate: (node: CanvasNodeData, sourceAsset: Asset) => void;
   onGenerate: (id: string, node: CanvasNodeData, overrides?: { params?: GenerationParams; visualStyleId?: string | null }) => void;
   generationError?: string | null;
@@ -362,6 +386,8 @@ function ImageSidebar({
   const prompt = asset.prompt?.text ?? '';
   const refs = asset.generation?.refs ?? [];
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
+  // Takes whose assets aren't loaded are archived (normal mode loads live assets only).
+  const hiddenArchivedCount = node.data.assetIds.filter((takeId) => !assetById.has(takeId)).length;
   const visibleVariantsList = visibleVariants(assets, node.data.assetIds, archivedOnly);
   const activeVariantIndex = Math.max(0, visibleVariantsList.findIndex((variant) => variant.id === asset.id));
   const hasMultipleVariants = visibleVariantsList.length > 1;
@@ -420,6 +446,8 @@ function ImageSidebar({
           onPartitionedAssetTagsChange(node.id, asset.id, userTags, characterTags, locationTags)
         )}
         onCreateTag={onCreateTag}
+        canonicalAssetId={asset.id}
+        onSetCanonical={onSetTagCanonical}
         className="sidebar-tag-controls"
         popoverClassName="split-tag-popover-sidebar"
         portaled
@@ -473,6 +501,46 @@ function ImageSidebar({
           </>
         )}
       </div>
+      {node.data.assetIds.length > 1 && (
+        <section className="sidebar-section stack-section">
+          <h3>Takes <span className="stack-count">{node.data.assetIds.length}</span></h3>
+          <div className="stack-take-list">
+            {node.data.assetIds.map((takeId, index) => {
+              const take = assetById.get(takeId);
+              if (!take) return null;
+              const isTakeArchived = Boolean(take.archivedAt);
+              const isActiveTake = take.id === asset.id;
+              const takeCanonicalFor = canonicalTagsForAsset(take.id, projectTags);
+              return (
+                <div key={takeId} className={`stack-take ${isActiveTake ? 'is-active' : ''} ${isTakeArchived ? 'is-archived' : ''}`}>
+                  <button
+                    type="button"
+                    className="stack-take-thumb"
+                    title={`Take ${index + 1}${isTakeArchived ? ' (archived)' : ''}${takeCanonicalFor.length ? ` — canonical for ${takeCanonicalFor.map((tag) => tag.name).join(', ')}` : ''}`}
+                    onClick={() => onSetActiveTake(node.id, take.id)}
+                  >
+                    {take.thumbnailUrl ? <img src={take.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
+                    {takeCanonicalFor.length > 0 && <span className="stack-take-star">★</span>}
+                    {isTakeArchived && <span className="stack-take-badge">archived</span>}
+                  </button>
+                  <button
+                    type="button"
+                    className="stack-take-action"
+                    onClick={() => (isTakeArchived ? onRestoreImage(node.id, take.id) : onArchiveImage(node.id, take.id))}
+                  >
+                    {isTakeArchived ? 'Restore' : 'Archive'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {hiddenArchivedCount > 0 && (
+            <button type="button" className="stack-archived-chip" onClick={onShowArchived}>
+              +{hiddenArchivedCount} archived take{hiddenArchivedCount === 1 ? '' : 's'} — show
+            </button>
+          )}
+        </section>
+      )}
       {showCanonicalSection && <section className="sidebar-section canonical-reference-section">
         <h3>Canonical Reference</h3>
         {projectTags.filter((tag) => tag.entityKind === 'style').map((tag) => {

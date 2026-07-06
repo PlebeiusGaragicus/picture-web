@@ -12,12 +12,15 @@ export function isTerminalTaskState(state: PiTaskState | null): boolean {
 /**
  * Drives one narrow pi task profile: starts it, attaches to its SSE event
  * stream (reattaching to an already-running task on mount), and reports
- * live events + terminal state. `onFinished` fires once per completed run.
+ * live events + terminal state. `onFinished` fires once per completed run;
+ * `onMutation` fires on each successful tool_end so multi-target tasks can
+ * refresh the launching view as results land, not just at the end.
  */
 export function usePiTask(
   projectSlug: string | null,
   profile: PiTaskProfile,
   onFinished?: (state: PiTaskState) => void | Promise<void>,
+  onMutation?: (toolName: string) => void | Promise<void>,
 ) {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
@@ -28,6 +31,8 @@ export function usePiTask(
   const finishedRef = useRef(false);
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
+  const onMutationRef = useRef(onMutation);
+  onMutationRef.current = onMutation;
 
   const closeStream = useCallback(() => {
     sourceRef.current?.close();
@@ -50,6 +55,9 @@ export function usePiTask(
           return;
         }
         setEvents((current) => [...current, record]);
+        if (record.event.type === 'tool_end' && !record.event.isError) {
+          void onMutationRef.current?.(String(record.event.toolName ?? ''));
+        }
         if (record.event.type === 'task_state') {
           const nextState = record.event.state as PiTaskState;
           setState(nextState);

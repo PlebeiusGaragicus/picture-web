@@ -55,6 +55,8 @@ export function TagControlButton({
   projectTags,
   onPartitionedTagsChange,
   onCreateTag,
+  canonicalAssetId,
+  onSetCanonical,
   buttonLabel = 'Tags',
   className = '',
   popoverClassName = '',
@@ -65,6 +67,8 @@ export function TagControlButton({
   projectTags: TagDefinition[];
   onPartitionedTagsChange: (userTags: string[], characterTags: string[], locationTags: string[]) => void;
   onCreateTag: (tag: TagDefinition) => void;
+  canonicalAssetId?: string | null;
+  onSetCanonical?: (tagId: string, assetId: string | null) => void;
   buttonLabel?: string;
   className?: string;
   popoverClassName?: string;
@@ -183,6 +187,8 @@ export function TagControlButton({
             characterAvailableTags={characterAvailable}
             locationAvailableTags={locationAvailable}
             onEntityTagsChange={applyEntityTags}
+            canonicalAssetId={canonicalAssetId}
+            onSetCanonical={onSetCanonical}
           />
         );
         if (portaled) {
@@ -204,11 +210,15 @@ export function NodeTagButton({
   projectTags,
   onPartitionedTagsChange,
   onCreateTag,
+  canonicalAssetId,
+  onSetCanonical,
 }: {
   tagIds: string[];
   projectTags: TagDefinition[];
   onPartitionedTagsChange: (userTags: string[], characterTags: string[], locationTags: string[]) => void;
   onCreateTag: (tag: TagDefinition) => void;
+  canonicalAssetId?: string | null;
+  onSetCanonical?: (tagId: string, assetId: string | null) => void;
 }) {
   return (
     <div
@@ -222,6 +232,8 @@ export function NodeTagButton({
         projectTags={projectTags}
         onPartitionedTagsChange={onPartitionedTagsChange}
         onCreateTag={onCreateTag}
+        canonicalAssetId={canonicalAssetId}
+        onSetCanonical={onSetCanonical}
         buttonLabel="tags:"
         popoverClassName="split-tag-popover-node"
         portaled

@@ -2774,4 +2774,60 @@ def test_generate_on_style_node_fills_stack_and_defaults_canonical(tmp_path, mon
     assert len(node["assetIds"]) == 2
     tags = {tag["id"]: tag for tag in client.get("/api/projects/farm-comic/tags").json()}
     assert tags["character-style"]["canonicalAssetId"] == generated_id
+    # the tag's canonical was auto-attached as a reference to the second take
+    second_id = second.json()["assets"][0]["id"]
+    receipt = client.get(f"/api/projects/farm-comic/assets/{second_id}").json()
+    assert generated_id in receipt["generation"]["refs"]
+
+
+def test_generate_auto_attaches_entity_tag_canonicals(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    def fake_generate(**kwargs):
+        make_png(kwargs["output_png"], color="purple")
+
+        class Result:
+            provider_response = {"imageFile": kwargs["output_png"].name, "response": {"candidates": [{"finishReason": "STOP"}]}}
+
+        return Result()
+
+    monkeypatch.setattr(gemini, "generate_image", fake_generate)
+    created = client.post(
+        "/api/projects/farm-comic/adaptation/files/characters",
+        json={"key": "hero", "body": "# Hero\n\nBrave.\n"},
+    )
+    assert created.status_code == 200
+    canonical_id = "01HHEROCANON"
+    make_png(library.asset_png_path("farm-comic", canonical_id), color="blue")
+    library.write_json(
+        library.asset_json_path("farm-comic", canonical_id),
+        {
+            "id": canonical_id,
+            "kind": "imported",
+            "title": "Hero sheet",
+            "tags": ["hero"],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    assert client.put(
+        "/api/projects/farm-comic/tags/hero/canonical",
+        json={"assetId": canonical_id},
+    ).status_code == 200
+
+    response = client.post(
+        "/api/projects/farm-comic/generate",
+        json={
+            "prompt": "hero rides at dawn",
+            "refs": [],
+            "batchCount": 1,
+            "tags": ["hero"],
+            "canvasNodeId": "node_hero_dawn",
+        },
+    )
+    assert response.status_code == 200
+    generated_id = response.json()["assets"][0]["id"]
+    receipt = client.get(f"/api/projects/farm-comic/assets/{generated_id}").json()
+    assert receipt["generation"]["refs"] == [canonical_id]
 

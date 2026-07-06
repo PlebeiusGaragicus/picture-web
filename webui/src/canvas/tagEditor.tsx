@@ -84,6 +84,8 @@ export function EntityTagSection({
   availableTags,
   tagCounts = {},
   onChange,
+  canonicalAssetId,
+  onSetCanonical,
 }: {
   kind: EntityKind;
   label: string;
@@ -91,6 +93,9 @@ export function EntityTagSection({
   availableTags: TagDefinition[];
   tagCounts?: Record<string, number>;
   onChange: (tags: string[]) => void;
+  /** When set (with onSetCanonical), assigned tags offer "★ make canonical for X" against this asset. */
+  canonicalAssetId?: string | null;
+  onSetCanonical?: (tagId: string, assetId: string | null) => void;
 }) {
   const [query, setQuery] = useState('');
   const selected = new Set(selectedTags);
@@ -117,16 +122,34 @@ export function EntityTagSection({
         <div className="tag-editor-input tag-editor-input-compact">
           {selectedInSection.map((tagId) => {
             const tag = availableById.get(tagId);
+            const canStarTag = Boolean(canonicalAssetId && onSetCanonical);
+            const isCanonical = Boolean(canonicalAssetId && tag?.canonicalAssetId === canonicalAssetId);
             return (
-              <button
-                key={tagId}
-                type="button"
-                className="tag-chip"
-                onClick={() => toggleTag(tagId)}
-                style={{ backgroundColor: tag?.color ?? '#64748b' }}
-              >
-                {tag?.name ?? tagId}
-              </button>
+              <span key={tagId} className="tag-chip-group">
+                <button
+                  type="button"
+                  className="tag-chip"
+                  onClick={() => toggleTag(tagId)}
+                  style={{ backgroundColor: tag?.color ?? '#64748b' }}
+                >
+                  {tag?.name ?? tagId}
+                </button>
+                {canStarTag && (
+                  <button
+                    type="button"
+                    className={`tag-canonical-star ${isCanonical ? 'is-canonical' : ''}`}
+                    title={isCanonical
+                      ? `Canonical image for ${tag?.name ?? tagId} — click to clear`
+                      : `Make this image canonical for ${tag?.name ?? tagId}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSetCanonical?.(tagId, isCanonical ? null : canonicalAssetId ?? null);
+                    }}
+                  >
+                    {isCanonical ? '★' : '☆'}
+                  </button>
+                )}
+              </span>
             );
           })}
         </div>

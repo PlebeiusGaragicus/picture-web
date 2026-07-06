@@ -344,13 +344,26 @@ def sync_entity_tags(slug: str, *, character_keys: list[str], location_keys: lis
     )
 
 
-def update_entity_tag_canonicals(slug: str, canonical_by_tag_id: dict[str, str | None]) -> None:
-    """Point entity tags at their canonical reference image; writes only on change."""
+def update_entity_tag_canonicals(
+    slug: str,
+    canonical_by_tag_id: dict[str, str | None],
+    *,
+    default_only: bool = False,
+) -> None:
+    """Point entity tags at their canonical reference image; writes only on change.
+
+    With default_only, a tag that already has a canonical keeps it — the user's
+    explicit ★ choice wins over record-derived defaults."""
     registry = read_tag_registry(slug)
     changed = False
     next_tags: list[TagDefinition] = []
     for tag in registry.tags:
-        if tag.entityKind is not None and tag.id in canonical_by_tag_id and tag.canonicalAssetId != canonical_by_tag_id[tag.id]:
+        if (
+            tag.entityKind is not None
+            and tag.id in canonical_by_tag_id
+            and tag.canonicalAssetId != canonical_by_tag_id[tag.id]
+            and not (default_only and tag.canonicalAssetId is not None)
+        ):
             next_tags.append(tag.model_copy(update={"canonicalAssetId": canonical_by_tag_id[tag.id]}))
             changed = True
         else:
@@ -719,6 +732,20 @@ def set_tag_canonical(slug: str, tag_id: str, asset_id: str | None) -> list[TagD
     return list_project_tags(slug)
 
 
+def canonical_refs_for_tags(slug: str, tags: list[str]) -> list[str]:
+    """The consistency machinery: each entity tag pulls its canonical image
+    in as a generation reference automatically (canvas model, ARCHITECTURE.md)."""
+    by_id = {tag.id: tag for tag in list_project_tags(slug)}
+    refs: list[str] = []
+    for tag_id in tags:
+        tag = by_id.get(normalize_tag_id(tag_id))
+        if tag is None or tag.entityKind is None or not tag.canonicalAssetId:
+            continue
+        if asset_png_path(slug, tag.canonicalAssetId).is_file():
+            refs.append(tag.canonicalAssetId)
+    return list(dict.fromkeys(refs))
+
+
 def normalize_variant_groups(slug: str, canvas: CanvasDocument) -> CanvasDocument:
     """Collapse generated image groups that are variants of the same prompt/refs."""
     next_canvas = canvas.model_copy(deep=True)
@@ -887,6 +914,11 @@ def create_generated_assets(
     import gemini
 
     require_project(slug)
+    # Entity tags auto-attach their canonical image as a reference; the merged
+    # list is what lands in each take's generation receipt.
+    auto_refs = [ref for ref in canonical_refs_for_tags(slug, payload.tags) if ref not in payload.refs]
+    if auto_refs:
+        payload = payload.model_copy(update={"refs": [*payload.refs, *auto_refs]})
     parent_paths = parent_png_paths(slug, payload.refs)
     run_id = new_ulid()
     created: list[AssetSummary] = []

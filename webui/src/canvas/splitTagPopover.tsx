@@ -16,6 +16,8 @@ export function SplitTagPopover({
   locationAvailableTags,
   entityTagCounts = {},
   onEntityTagsChange,
+  canonicalAssetId,
+  onSetCanonical,
   footer,
   className = '',
   style,
@@ -31,6 +33,9 @@ export function SplitTagPopover({
   locationAvailableTags: TagDefinition[];
   entityTagCounts?: Record<string, number>;
   onEntityTagsChange: (tags: string[]) => void;
+  /** Assign mode against one asset: assigned entity tags offer ★ make-canonical. */
+  canonicalAssetId?: string | null;
+  onSetCanonical?: (tagId: string, assetId: string | null) => void;
   footer?: ReactNode;
   className?: string;
   style?: CSSProperties;
@@ -84,6 +89,8 @@ export function SplitTagPopover({
             availableTags={characterAvailableTags}
             tagCounts={entityTagCounts}
             onChange={onEntityTagsChange}
+            canonicalAssetId={canonicalAssetId}
+            onSetCanonical={onSetCanonical}
           />
           <EntityTagSection
             kind="location"
@@ -92,6 +99,8 @@ export function SplitTagPopover({
             availableTags={locationAvailableTags}
             tagCounts={entityTagCounts}
             onChange={onEntityTagsChange}
+            canonicalAssetId={canonicalAssetId}
+            onSetCanonical={onSetCanonical}
           />
         </div>
       </div>

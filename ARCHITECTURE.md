@@ -46,9 +46,12 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
   node-id convention.
 - **Canonical pointers live on entity tags.** Each entity tag in `tags.json`
   carries `canonicalAssetId` — the image that keeps that character/location/
-  style consistent. `adaptation.status()` keeps character/location pointers
-  synced from their records; panel draft-to-canvas resolves its reference
-  images from the registry; `PUT /tags/{id}/canonical` sets one explicitly.
+  style consistent. `PUT /tags/{id}/canonical` sets one explicitly (the ★ in
+  the UI); `adaptation.status()` seeds character/location pointers from their
+  records as defaults only — a starred choice always wins. At generation time
+  the one generate path auto-attaches each tagged entity's canonical as a
+  reference (`canonical_refs_for_tags`), deduped against explicit refs and
+  recorded in the take's receipt; drafts show these as ★ chips.
 - **Style anchors are ordinary nodes.** New projects seed two draft nodes
   tagged with the `character-style` / `scene-style` entity tags
   (`library.ensure_style_entity_tags` seeds the tags). They generate through

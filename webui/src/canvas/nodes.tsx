@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { nodeTagActionsRef } from './nodeTagActions';
 import { NodeTagButton } from './assetTagRow';
-import { conceptSubjectFromTags, styleEntityTagsOnNode, visibleDisplayName, visibleVariants } from './shared';
+import { canonicalTagsForAsset, conceptSubjectFromTags, styleEntityTagsOnNode, visibleDisplayName, visibleVariants } from './shared';
 import type { CanvasNodeData } from './types';
 
 export function truncateDraftPreview(text: string, max = 120) {
@@ -86,6 +86,7 @@ function CanvasNodeCard({ data }: NodeProps<CanvasNodeData>) {
   const hasMultipleVariants = visibleVariantsList.length > 1;
   const params = asset.generation;
   const styleRole = styleTags.length ? `${styleTags[0].name} anchor` : null;
+  const canonicalFor = canonicalTagsForAsset(asset.id, data.projectTags);
   const tooltip = [
     asset.prompt?.text,
     params ? `model: ${params.model}` : null,
@@ -122,6 +123,9 @@ function CanvasNodeCard({ data }: NodeProps<CanvasNodeData>) {
       <div className="node-image-frame" style={{ aspectRatio: imageRatio ? `${imageRatio}` : undefined }}>
         {styleRole && <span className="node-role-badge">{styleRole}</span>}
         {isArchived && <span className="node-role-badge archived-badge">Archived</span>}
+        {canonicalFor.length > 0 && (
+          <span className="node-canonical-star" title={`Canonical image for ${canonicalFor.map((tag) => tag.name).join(', ')}`}>★</span>
+        )}
         {asset.thumbnailUrl && (
           <img
             src={asset.thumbnailUrl}
@@ -186,6 +190,8 @@ function CanvasNodeCard({ data }: NodeProps<CanvasNodeData>) {
           nodeTagActionsRef.updatePartitionedAssetTags(data.nodeId, asset.id, userTags, characterTags, locationTags)
         )}
         onCreateTag={(tag) => nodeTagActionsRef.createProjectTag(tag)}
+        canonicalAssetId={asset.id}
+        onSetCanonical={(tagId, assetId) => nodeTagActionsRef.setTagCanonical(tagId, assetId)}
       />
       <Handle type="source" position={Position.Right} className="output-handle" />
     </div>

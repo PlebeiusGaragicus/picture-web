@@ -609,19 +609,20 @@ def status(slug: str) -> AdaptationStatus:
     if artifact_changed:
         metadata = write_metadata(slug, metadata)
 
-    # Keep entity tags pointing at their canonical reference images: the tag
-    # registry is the read path for consistency refs (canvas-simplify.md §2.4).
+    # Seed entity-tag canonicals from character/location records: the registry
+    # is the read path for consistency refs, and a manually starred canonical
+    # always wins over the record-derived default.
     canonical_by_tag_id: dict[str, str | None] = {}
     for character_slug, record in metadata.characters.items():
         base = record.variants.get("base")
-        canonical_by_tag_id[library.normalize_tag_id(character_slug)] = (
-            (base.activeAssetId or (base.assetIds[0] if base.assetIds else None)) if base else None
-        )
+        asset_id = (base.activeAssetId or (base.assetIds[0] if base.assetIds else None)) if base else None
+        if asset_id:
+            canonical_by_tag_id[library.normalize_tag_id(character_slug)] = asset_id
     for location_key, link in metadata.locations.items():
-        canonical_by_tag_id[library.normalize_tag_id(location_key)] = (
-            link.activeAssetId or (link.assetIds[0] if link.assetIds else None)
-        )
-    library.update_entity_tag_canonicals(slug, canonical_by_tag_id)
+        asset_id = link.activeAssetId or (link.assetIds[0] if link.assetIds else None)
+        if asset_id:
+            canonical_by_tag_id[library.normalize_tag_id(location_key)] = asset_id
+    library.update_entity_tag_canonicals(slug, canonical_by_tag_id, default_only=True)
 
     return AdaptationStatus(
         projectSlug=slug,
