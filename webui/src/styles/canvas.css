@@ -17,24 +17,6 @@
   width: 100%;
 }
 
-.book-chat-sidebar-toolbar .generate-button {
-  width: 100%;
-  min-height: 36px;
-  padding: 8px 10px;
-  font-size: 0.86rem;
-}
-
-.book-chat-composer .prompt-textarea {
-  min-height: 84px;
-  max-height: 180px;
-  resize: vertical;
-}
-
-.book-chat-composer .generate-button {
-  min-width: 88px;
-  min-height: 42px;
-}
-
 .archetype-card {
   display: grid;
   gap: 12px;

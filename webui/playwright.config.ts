@@ -25,7 +25,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `bash -c 'rm -rf "${libraryDir}" "${trashDir}" && mkdir -p "${trashDir}" && cd ../api && ../.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port ${API_PORT}'`,
+      command: `bash -c 'rm -rf "${libraryDir}" "${trashDir}" && mkdir -p "${trashDir}" && cd ../api && API_PORT=${API_PORT} ../.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port ${API_PORT}'`,
       url: `http://127.0.0.1:${API_PORT}/api/health`,
       reuseExistingServer: false,
       env: {

@@ -47,7 +47,7 @@ import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData } from './canvas/
 import { styleRefDraftNodeId, styleRefImageNodeId, styleRefKindForTags, styleRefStatusFromAdaptation } from './styleRefs';
 import { ConfirmDialog, HelpTip, HoverTooltip, Modal } from './ui';
 import type { AdaptationStatus, ArtifactKind, Asset, CanvasDocument, CanvasRole, ChatSession, ChatTurnSettings, DraftCanvasNode, GeneratePayload, GenerationParams, ImageGroupCanvasNode, Project, StyleRefKind, TagDefinition } from './types';
-import { AgentSessionsView } from './sessions/BookChatView';
+import { AgentDashboardView } from './sessions/AgentDashboardView';
 import { ConceptArtView } from './conceptArt/ConceptArtView';
 import { usePiTask } from './sessions/usePiTask';
 import { PiTaskPanel } from './sessions/PiTaskPanel';
@@ -1378,7 +1378,7 @@ function App() {
   }
 
   const isCanvasActive = phaseHasCanvas(projectPhase) && phaseViewMode === 'canvas';
-  const isBookChatActive = projectPhase === 'chat';
+  const isAgentDashboardActive = projectPhase === 'chat';
   const isConceptArtActive = projectPhase === 'concept-art';
   const isLayoutEditorActive = projectPhase === 'layout-editor';
   const isStoryActive = projectPhase === 'story';
@@ -1401,7 +1401,7 @@ function App() {
       </HoverTooltip>
     ) : button;
   })() : null;
-  const isWorkspaceHubActive = isBookChatActive || isConceptArtActive || projectPhase === 'characters-hub';
+  const isWorkspaceHubActive = isAgentDashboardActive || isConceptArtActive || projectPhase === 'characters-hub';
   const showProjectTopBar = Boolean(openProjectSlug && (isPhaseSidebarCollapsed || isCanvasActive || isStoryPanelPhaseActive || isWorkspaceHubActive));
 
   const charactersHubViewToggle = projectPhase === 'characters-hub' ? (
@@ -1627,10 +1627,9 @@ function App() {
             />
           </div>
         )}
-        {isBookChatActive && adaptation && (
-          <AgentSessionsView
+        {isAgentDashboardActive && adaptation && (
+          <AgentDashboardView
             projectSlug={openProjectSlug}
-            adaptation={adaptation}
             onReloadAdaptation={loadAdaptation}
           />
         )}

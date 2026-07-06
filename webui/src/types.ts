@@ -436,31 +436,6 @@ export interface ChatTurnResponse {
   assets: Asset[];
 }
 
-export interface BookChatTurn {
-  id: string;
-  role: 'user' | 'assistant';
-  createdAt: string;
-  text: string;
-  piSessionId?: string | null;
-  events: Array<Record<string, unknown>>;
-  error?: string | null;
-}
-
-export interface BookChatSession {
-  version: 1;
-  id: string;
-  projectSlug: string;
-  status: 'active' | 'archived';
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-  archivedAt?: string | null;
-  forkRootSessionId: string;
-  piSessionId?: string | null;
-  piSessionFile?: string | null;
-  turns: BookChatTurn[];
-}
-
 export interface ConceptCard {
   version: 1;
   id: string;
@@ -483,8 +458,7 @@ export type AgentSessionKind =
   | 'suggest-concept-character'
   | 'suggest-concept-location'
   | 'draft-panel-prompt'
-  | 'refine-panel-prompt'
-  | 'book-chat';
+  | 'refine-panel-prompt';
 
 export type PiTaskProfile =
   | 'read-book'

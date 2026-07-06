@@ -7,7 +7,6 @@ import base64
 import library
 import gemini
 import chat_sessions
-import book_chat_sessions
 import adaptation
 import adaptation_workflow.config as workflow_config
 import story_panels
@@ -2016,177 +2015,6 @@ def test_chat_session_create_list_archive_and_protect_source(tmp_path, monkeypat
     assert len(client.get("/api/projects/farm-comic/chat-sessions?includeArchived=true").json()) == 1
 
 
-def test_book_chat_requires_read_book_session(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    monkeypatch.setattr(workflow_config, "LIBRARY_ROOT", library.LIBRARY_ROOT)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "book.txt").write_text("Once upon a time.\n")
-
-    response = client.post("/api/projects/farm-comic/adaptation/book-chats", json={"title": "Ask the book"})
-
-    assert response.status_code == 409
-    assert "No read-book session" in response.text
-
-
-def test_book_chat_turn_forks_read_book_session_and_persists_reply(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    monkeypatch.setattr(workflow_config, "LIBRARY_ROOT", library.LIBRARY_ROOT)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "book.txt").write_text("Once upon a time.\n")
-    pi_session_file = root / "sessions" / "pi" / "root-session.json"
-    pi_session_file.parent.mkdir(parents=True, exist_ok=True)
-    pi_session_file.write_text("{}\n")
-    library.write_json(
-        root / "sessions" / "book-session.json",
-        {
-            "sessionFile": str(pi_session_file),
-            "sessionId": "root-session",
-            "createdAt": "2026-01-01T00:00:00Z",
-            "bookPath": str(root / "book.txt"),
-        },
-    )
-
-    calls = []
-
-    class FakePiRpcClient:
-        def __init__(self, ctx):
-            self.ctx = ctx
-
-        def run_task(self, **kwargs):
-            calls.append(kwargs)
-            kwargs["on_event"](
-                {
-                    "type": "message_end",
-                    "message": {
-                        "role": "assistant",
-                        "content": [{"type": "text", "text": "The fox is the central trickster."}],
-                    },
-                }
-            )
-            class Result:
-                session_id = "chat-session-1"
-                session_file = str(pi_session_file)
-                stats = None
-
-            return Result()
-
-    monkeypatch.setattr(book_chat_sessions, "PiRpcClient", FakePiRpcClient)
-
-    created = client.post("/api/projects/farm-comic/adaptation/book-chats", json={"title": "Ask the book"})
-    assert created.status_code == 200
-    session_id = created.json()["id"]
-    response = client.post(
-        f"/api/projects/farm-comic/adaptation/book-chats/{session_id}/turns",
-        json={"text": "Who is the fox?"},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert calls[0]["fork_session_id"] == "root-session"
-    assert calls[0]["prompt"] == "Who is the fox?"
-    assert payload["piSessionId"] == "chat-session-1"
-    assert payload["piSessionFile"] == str(pi_session_file.resolve())
-    assert payload["turns"][0]["role"] == "user"
-    assert payload["turns"][1]["role"] == "assistant"
-    assert payload["turns"][1]["text"] == "The fox is the central trickster."
-    assert client.get("/api/projects/farm-comic/adaptation/book-chats").json()[0]["id"] == session_id
-
-
-def test_book_chat_trace_returns_parsed_pi_session(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    monkeypatch.setattr(workflow_config, "LIBRARY_ROOT", library.LIBRARY_ROOT)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "book.txt").write_text("Once upon a time.\n")
-    pi_session_file = root / "sessions" / "pi" / "chat-trace.jsonl"
-    pi_session_file.parent.mkdir(parents=True, exist_ok=True)
-    pi_session_file.write_text(
-        "\n".join(
-            [
-                '{"type":"session","version":3,"id":"chat-session-trace","timestamp":"2026-03-12T18:59:01.267Z","cwd":"/tmp"}',
-                '{"type":"message","id":"u1","parentId":null,"timestamp":"2026-03-12T19:03:58.674Z","message":{"role":"user","content":[{"type":"text","text":"Who is the fox?"}]}}',
-                '{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-03-12T19:04:05.888Z","message":{"role":"assistant","provider":"openai","model":"gpt-test","usage":{"input":10,"output":5,"cacheRead":0},"content":[{"type":"text","text":"The fox."}]}}',
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    library.write_json(
-        root / "sessions" / "book-session.json",
-        {
-            "sessionFile": str(pi_session_file),
-            "sessionId": "root-session",
-            "createdAt": "2026-01-01T00:00:00Z",
-            "bookPath": str(root / "book.txt"),
-        },
-    )
-
-    created = client.post("/api/projects/farm-comic/adaptation/book-chats", json={"title": "Book chat 1"})
-    assert created.status_code == 200
-    session_id = created.json()["id"]
-    chat_session_path = root / "sessions" / "book-chats" / session_id / "session.json"
-    library.write_json(
-        chat_session_path,
-        {
-            **library.read_json(chat_session_path),
-            "piSessionId": "chat-session-trace",
-            "piSessionFile": str(pi_session_file.resolve()),
-            "turns": [
-                {
-                    "id": "turn-user",
-                    "role": "user",
-                    "createdAt": "2026-03-12T19:03:58.674Z",
-                    "text": "Who is the fox?",
-                    "events": [],
-                }
-            ],
-        },
-    )
-
-    trace = client.get(f"/api/projects/farm-comic/adaptation/book-chats/{session_id}/trace")
-    assert trace.status_code == 200
-    payload = trace.json()
-    assert payload["sessionId"] == "chat-session-trace"
-    assert payload["stats"]["userCount"] == 1
-    assert payload["stats"]["assistantCount"] == 1
-    assert payload["steps"][0]["kind"] == "user"
-    assert payload["steps"][0]["text"] == "Who is the fox?"
-    assert payload["steps"][1]["kind"] == "assistant"
-    assert payload["steps"][1]["text"] == "The fox."
-
-
-def test_book_chat_trace_empty_before_first_turn(tmp_path, monkeypatch):
-    client = setup_tmp_library(tmp_path, monkeypatch)
-    monkeypatch.setattr(workflow_config, "LIBRARY_ROOT", library.LIBRARY_ROOT)
-    create_project(client)
-    root = library.project_dir("farm-comic") / "adaptation"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "book.txt").write_text("Once upon a time.\n")
-    pi_session_file = root / "sessions" / "pi" / "root-session.json"
-    pi_session_file.parent.mkdir(parents=True, exist_ok=True)
-    pi_session_file.write_text("{}\n")
-    library.write_json(
-        root / "sessions" / "book-session.json",
-        {
-            "sessionFile": str(pi_session_file),
-            "sessionId": "root-session",
-            "createdAt": "2026-01-01T00:00:00Z",
-            "bookPath": str(root / "book.txt"),
-        },
-    )
-
-    created = client.post("/api/projects/farm-comic/adaptation/book-chats", json={"title": "Book chat 1"})
-    session_id = created.json()["id"]
-    trace = client.get(f"/api/projects/farm-comic/adaptation/book-chats/{session_id}/trace")
-    assert trace.status_code == 200
-    assert trace.json()["steps"] == []
-
-
 def test_agent_sessions_empty_without_book(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
@@ -2197,19 +2025,21 @@ def test_agent_sessions_empty_without_book(tmp_path, monkeypatch):
     assert response.json() == []
 
 
-def test_agent_sessions_bridge_book_chat_trace_and_archive(tmp_path, monkeypatch):
+def test_agent_sessions_trace_and_archive(tmp_path, monkeypatch):
+    import agent_sessions
+
     client = setup_tmp_library(tmp_path, monkeypatch)
     monkeypatch.setattr(workflow_config, "LIBRARY_ROOT", library.LIBRARY_ROOT)
     create_project(client)
     root = library.project_dir("farm-comic") / "adaptation"
     root.mkdir(parents=True, exist_ok=True)
     (root / "book.txt").write_text("Once upon a time.\n")
-    pi_session_file = root / "sessions" / "pi" / "agent-chat-trace.jsonl"
+    pi_session_file = root / "sessions" / "pi" / "agent-trace.jsonl"
     pi_session_file.parent.mkdir(parents=True, exist_ok=True)
     pi_session_file.write_text(
         "\n".join(
             [
-                '{"type":"session","version":3,"id":"agent-chat-session","timestamp":"2026-03-12T18:59:01.267Z","cwd":"/tmp"}',
+                '{"type":"session","version":3,"id":"agent-trace-session","timestamp":"2026-03-12T18:59:01.267Z","cwd":"/tmp"}',
                 '{"type":"message","id":"u1","parentId":null,"timestamp":"2026-03-12T19:03:58.674Z","message":{"role":"user","content":[{"type":"text","text":"Who is the fox?"}]}}',
                 '{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-03-12T19:04:05.888Z","message":{"role":"assistant","provider":"openai","model":"gpt-test","usage":{"input":10,"output":5},"content":[{"type":"text","text":"The fox."}]}}',
             ]
@@ -2217,55 +2047,34 @@ def test_agent_sessions_bridge_book_chat_trace_and_archive(tmp_path, monkeypatch
         + "\n",
         encoding="utf-8",
     )
-    library.write_json(
-        root / "sessions" / "book-session.json",
-        {
-            "sessionFile": str(pi_session_file),
-            "sessionId": "root-session",
-            "createdAt": "2026-01-01T00:00:00Z",
-            "bookPath": str(root / "book.txt"),
-        },
-    )
 
-    created = client.post("/api/projects/farm-comic/adaptation/book-chats", json={"title": "Ask the book"})
-    assert created.status_code == 200
-    session_id = created.json()["id"]
-    chat_session_path = root / "sessions" / "book-chats" / session_id / "session.json"
-    library.write_json(
-        chat_session_path,
-        {
-            **library.read_json(chat_session_path),
-            "piSessionId": "agent-chat-session",
-            "piSessionFile": str(pi_session_file.resolve()),
-            "turns": [
-                {
-                    "id": "turn-user",
-                    "role": "user",
-                    "createdAt": "2026-03-12T19:03:58.674Z",
-                    "text": "Who is the fox?",
-                    "events": [],
-                }
-            ],
-        },
+    created = agent_sessions.create_session(
+        "farm-comic", kind="read-book", title="Read book", status="succeeded"
+    )
+    agent_sessions.update_session(
+        "farm-comic",
+        created.id,
+        pi_session_id="agent-trace-session",
+        pi_session_file=str(pi_session_file.resolve()),
     )
 
     sessions = client.get("/api/projects/farm-comic/agent-sessions")
     assert sessions.status_code == 200
     session = sessions.json()[0]
-    assert session["id"] == session_id
-    assert session["kind"] == "book-chat"
-    assert session["piSessionId"] == "agent-chat-session"
-    assert session["source"]["bookChatSessionId"] == session_id
+    assert session["id"] == created.id
+    assert session["kind"] == "read-book"
+    assert session["piSessionId"] == "agent-trace-session"
 
-    trace = client.get(f"/api/projects/farm-comic/agent-sessions/{session_id}/trace")
+    trace = client.get(f"/api/projects/farm-comic/agent-sessions/{created.id}/trace")
     assert trace.status_code == 200
-    assert trace.json()["sessionId"] == "agent-chat-session"
+    assert trace.json()["sessionId"] == "agent-trace-session"
     assert trace.json()["steps"][1]["text"] == "The fox."
 
-    archived = client.patch(f"/api/projects/farm-comic/agent-sessions/{session_id}", json={"archived": True})
+    archived = client.patch(f"/api/projects/farm-comic/agent-sessions/{created.id}", json={"archived": True})
     assert archived.status_code == 200
     assert archived.json()["status"] == "archived"
-    assert client.get("/api/projects/farm-comic/adaptation/book-chats").json() == []
+    assert client.get("/api/projects/farm-comic/agent-sessions").json() == []
+    assert len(client.get("/api/projects/farm-comic/agent-sessions?includeArchived=true").json()) == 1
 
 
 def test_asset_archive_hides_from_default_lists_and_canvas(tmp_path, monkeypatch):
@@ -2887,21 +2696,78 @@ def test_concept_cards_draft_to_canvas(tmp_path, monkeypatch):
     status = client.get("/api/projects/farm-comic/adaptation").json()
     assert status["counts"]["conceptArt"] == 2
 
+
+def test_concept_card_upload_and_subject_patch(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    created = client.post(
+        "/api/projects/farm-comic/concept-cards",
+        json={"subjectKind": "character", "displayName": "Night Watch", "prompt": "A night watch pony."},
+    )
+    assert created.status_code == 200
+    card_id = created.json()["id"]
+    card_tag = f"concept-card-{card_id.lower()}"
+
+    # Upload attaches an image to the existing card.
     uploaded = client.post(
-        "/api/projects/farm-comic/adaptation/concept-art/upload",
+        f"/api/projects/farm-comic/concept-cards/{card_id}/upload",
         files={"file": ("upload.png", png_bytes("purple"), "image/png")},
     )
     assert uploaded.status_code == 200
     upload_payload = uploaded.json()
-    upload_tag = f"concept-card-{upload_payload['id'].lower()}"
+    assert upload_payload["id"] == card_id
     assert len(upload_payload["assetIds"]) == 1
+    assert upload_payload["activeAssetId"] == upload_payload["assetIds"][0]
     upload_asset = client.get(f"/api/projects/farm-comic/assets/{upload_payload['assetIds'][0]}").json()
-    assert upload_tag in upload_asset["tags"]
-    upload_draft = client.post(f"/api/projects/farm-comic/concept-cards/{upload_payload['id']}/draft")
-    upload_node = upload_draft.json()["canvas"]["nodes"][upload_draft.json()["nodeId"]]
-    assert upload_node["type"] == "imageGroup"
-    assert "concept" in upload_node["tags"]
-    assert upload_tag in upload_node["tags"]
-    assert len(upload_node["assetIds"]) == 1
+    assert card_tag in upload_asset["tags"]
+    assert "concept-character" in upload_asset["tags"]
 
-    assert client.get("/api/projects/farm-comic/adaptation").json()["counts"]["conceptArt"] == 3
+    # A second upload appends and becomes the active image.
+    second = client.post(
+        f"/api/projects/farm-comic/concept-cards/{card_id}/upload",
+        files={"file": ("upload2.png", png_bytes("green"), "image/png")},
+    )
+    assert second.status_code == 200
+    assert len(second.json()["assetIds"]) == 2
+    assert second.json()["activeAssetId"] == second.json()["assetIds"][1]
+
+    # Upload to an unknown card 404s.
+    missing = client.post(
+        "/api/projects/farm-comic/concept-cards/nope/upload",
+        files={"file": ("upload.png", png_bytes("red"), "image/png")},
+    )
+    assert missing.status_code == 404
+
+    # The old global upload endpoint is gone.
+    assert client.post(
+        "/api/projects/farm-comic/adaptation/concept-art/upload",
+        files={"file": ("upload.png", png_bytes("red"), "image/png")},
+    ).status_code in {404, 405}
+
+    # subjectKind patch retags linked assets and canvas nodes.
+    draft = client.post(f"/api/projects/farm-comic/concept-cards/{card_id}/draft")
+    assert draft.status_code == 200
+    node_id = draft.json()["nodeId"]
+    patched = client.patch(
+        f"/api/projects/farm-comic/concept-cards/{card_id}",
+        json={"subjectKind": "location"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["subjectKind"] == "location"
+    retagged_asset = client.get(f"/api/projects/farm-comic/assets/{upload_payload['assetIds'][0]}").json()
+    assert "concept-location" in retagged_asset["tags"]
+    assert "concept-character" not in retagged_asset["tags"]
+    canvas = client.get("/api/projects/farm-comic/canvas").json()
+    assert "concept-location" in canvas["nodes"][node_id]["tags"]
+    assert "concept-character" not in canvas["nodes"][node_id]["tags"]
+
+    # Archive hides the card from the default list.
+    archived = client.patch(
+        f"/api/projects/farm-comic/concept-cards/{card_id}",
+        json={"archived": True},
+    )
+    assert archived.status_code == 200
+    assert archived.json()["archivedAt"] is not None
+    assert client.get("/api/projects/farm-comic/concept-cards").json() == []
+    assert len(client.get("/api/projects/farm-comic/concept-cards?includeArchived=true").json()) == 1

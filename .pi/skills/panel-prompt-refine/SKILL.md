@@ -2,8 +2,8 @@
 name: panel-prompt-refine
 description: >-
   Revise an existing panel image prompt by applying one line of user feedback
-  while keeping everything that was not mentioned. Writes the revised prompt
-  to an exact output path.
+  while keeping everything that was not mentioned. Delivers via the
+  replace_panel_image_prompt tool.
 disable-model-invocation: false
 ---
 
@@ -11,7 +11,7 @@ disable-model-invocation: false
 
 The user provides:
 
-1. An exact output path (first line of the request).
+1. The target **panel id and prompt id** (first line of the request).
 2. The **current prompt** to revise.
 3. **User feedback** to apply.
 4. Runner context: panel story text, surrounding panels, canonical character
@@ -30,19 +30,21 @@ redraft:
 
 ## Delivery
 
-Use the **`write` tool** to save the revised prompt text to exactly the
-provided output path. The file must contain only the prompt body.
+Call the **`replace_panel_image_prompt` tool exactly once** with the provided
+panel id, prompt id, and the complete revised prompt text. Do not write any
+files.
 
-After writing, reply with exactly `Wrote <output-path>.` and nothing else.
+After the tool succeeds, reply with exactly `Revised <prompt-id>.` and
+nothing else. If the tool returns an error, fix the prompt and call it again.
 
 ## Forbidden In Assistant Reply
 
-- Pasting the prompt after `write`
+- Pasting the prompt after the tool call
 - Summaries, explanations, bullets, or code fences
 
 # User Request
 
-Read the current prompt and feedback, then write the revised imagen-ready
-prompt to the exact provided output path.
+Read the current prompt and feedback, then deliver the revised imagen-ready
+prompt via replace_panel_image_prompt.
 
 **User:** `@$`

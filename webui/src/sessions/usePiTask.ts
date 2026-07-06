@@ -140,3 +140,61 @@ export function usePiTask(
 
   return { taskId, target, state, events, error, isActive, start, abort, dismiss };
 }
+
+/**
+ * Attaches to one already-running pi task by id (Agent dashboard): streams
+ * its SSE events and reports live state. Does not start tasks.
+ */
+export function useAttachedPiTask(
+  projectSlug: string,
+  taskId: string,
+  initialState: PiTaskState,
+  onFinished?: (state: PiTaskState) => void | Promise<void>,
+) {
+  const [state, setState] = useState<PiTaskState>(initialState);
+  const [events, setEvents] = useState<PiTaskEvent[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const onFinishedRef = useRef(onFinished);
+  onFinishedRef.current = onFinished;
+
+  useEffect(() => {
+    let finished = false;
+    const source = new EventSource(api.piTaskEventsUrl(projectSlug, taskId));
+    source.onmessage = (message) => {
+      let record: PiTaskEvent;
+      try {
+        record = JSON.parse(message.data) as PiTaskEvent;
+      } catch {
+        return;
+      }
+      setEvents((current) => [...current, record]);
+      if (record.event.type === 'task_state') {
+        const nextState = record.event.state as PiTaskState;
+        setState(nextState);
+        if (record.event.error) setError(String(record.event.error));
+        if (isTerminalTaskState(nextState) && !finished) {
+          finished = true;
+          source.close();
+          void onFinishedRef.current?.(nextState);
+        }
+      }
+    };
+    source.onerror = () => {
+      if (finished) source.close();
+    };
+    return () => {
+      finished = true;
+      source.close();
+    };
+  }, [projectSlug, taskId]);
+
+  const abort = useCallback(async () => {
+    try {
+      await api.abortPiTask(projectSlug, taskId);
+    } catch (err) {
+      setError(formatRequestError(err));
+    }
+  }, [projectSlug, taskId]);
+
+  return { state, events, error, abort };
+}

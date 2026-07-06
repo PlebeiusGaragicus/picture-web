@@ -11,6 +11,12 @@ Behavior knobs (env vars):
                        from the prompt's first line (last whitespace token,
                        e.g. "/skill:character-file <root> <out>"); the
                        "{stem}" placeholder is replaced by the out path stem
+- FAKE_PI_CALL_TOOL    JSON {"tool", "method", "path", "body"} — when prompted,
+                       emit tool_execution_start/end for the named tool and
+                       perform the HTTP request against PHOTO_WEB_API, exactly
+                       as the photo-web extension would. "{target}" in path
+                       segments is replaced by the last token of the prompt's
+                       first line.
 """
 
 from __future__ import annotations
@@ -18,7 +24,28 @@ from __future__ import annotations
 import json
 import os
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
+
+
+def call_photo_web_tool(spec: dict, prompt_message: str) -> tuple[bool, str]:
+    api = os.environ.get("PHOTO_WEB_API", "").rstrip("/")
+    first_line = prompt_message.splitlines()[0] if prompt_message else ""
+    target = first_line.split()[-1] if first_line.split() else ""
+    path = spec.get("path", "").replace("{target}", target)
+    body = json.dumps(spec.get("body", {})).encode("utf-8")
+    request = urllib.request.Request(
+        f"{api}{path}",
+        data=body,
+        method=spec.get("method", "POST"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            return False, response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        return True, f"photo-web API {exc.code}: {exc.read().decode('utf-8')}"
 
 
 def emit(obj: dict) -> None:
@@ -37,12 +64,15 @@ def main() -> int:
     session_file = str(Path(session_dir) / f"{session_id}.jsonl")
     Path(session_file).parent.mkdir(parents=True, exist_ok=True)
     Path(session_file).write_text("")
-    # Record argv so tests can assert flags like --fork were passed.
+    # Record argv and PHOTO_WEB_* env so tests can assert flags and tool scoping.
     (Path(session_dir) / "fake-pi-argv.json").write_text(json.dumps(args))
+    photo_web_env = {key: value for key, value in os.environ.items() if key.startswith("PHOTO_WEB_")}
+    (Path(session_dir) / "fake-pi-env.json").write_text(json.dumps(photo_web_env))
 
     hang = os.environ.get("FAKE_PI_HANG") == "1"
     write_file = os.environ.get("FAKE_PI_WRITE_FILE", "")
     write_from_prompt = os.environ.get("FAKE_PI_WRITE_FROM_PROMPT", "")
+    call_tool_raw = os.environ.get("FAKE_PI_CALL_TOOL", "")
 
     for raw_line in sys.stdin:
         line = raw_line.strip()
@@ -75,6 +105,15 @@ def main() -> int:
                     },
                 }
             )
+            if call_tool_raw:
+                spec = json.loads(call_tool_raw)
+                tool_name = spec.get("tool", "photo_web_tool")
+                emit({"type": "tool_execution_start", "toolName": tool_name, "args": spec.get("body", {})})
+                is_error, result = call_photo_web_tool(spec, str(message.get("message", "")))
+                emit({"type": "tool_execution_end", "toolName": tool_name, "isError": is_error, "result": result})
+                if not hang:
+                    emit({"type": "agent_end"})
+                continue
             emit({"type": "tool_execution_start", "toolName": "write", "args": {"path": "out.txt"}})
             if write_file:
                 path_text, _, content = write_file.partition("::")

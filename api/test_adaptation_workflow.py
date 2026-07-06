@@ -109,8 +109,8 @@ def test_extract_character_step_uses_list_line(tmp_path: Path) -> None:
 
 
 def test_suggest_concept_character_plan(tmp_path: Path, monkeypatch) -> None:
-    from adaptation_workflow.character_file import CHARACTER_SHEET_LAYOUT_BLOCK
-    from adaptation_workflow.concept_art import concept_scratch_path
+    from types import SimpleNamespace
+
     from pi_profiles import _suggest_concept_plan
 
     ctx = _make_ctx(tmp_path)
@@ -118,18 +118,9 @@ def test_suggest_concept_character_plan(tmp_path: Path, monkeypatch) -> None:
     characters.mkdir(parents=True)
     (characters / "list.txt").write_text("Pinkie Pie: Party pony.\n")
 
-    created: dict[str, str] = {}
-
-    def fake_create_from_pi(slug: str, subject_kind: str, path: Path, *, expected_key: str) -> str:
-        assert slug == "proj"
-        assert subject_kind == "character"
-        assert path.is_file()
-        created["key"] = expected_key
-        path.unlink()
-        return f"draft_{expected_key}"
-
-    monkeypatch.setattr("concept_cards.create_concept_card_from_pi_file", fake_create_from_pi)
+    cards: list[SimpleNamespace] = []
     monkeypatch.setattr("concept_cards.existing_concept_summaries", lambda _slug: [])
+    monkeypatch.setattr("concept_cards.list_cards", lambda _slug, include_archived=False: list(cards))
 
     steps = list(_suggest_concept_plan(ctx, "character"))
     assert len(steps) == 1
@@ -137,26 +128,20 @@ def test_suggest_concept_character_plan(tmp_path: Path, monkeypatch) -> None:
     assert prompt is not None
     assert "/skill:concept-character" in prompt
     assert "Pinkie Pie: Party pony." in prompt
-    key = prompt.split("File key: ", 1)[1].split("\n", 1)[0].strip()
-    assert f"File key: {key}" in prompt
 
-    concept_scratch_path(ctx.book_root_abs, key).write_text(
-        f"## {key}\n"
-        "subject: character\n"
-        "mode: new-image\n"
-        "style_ref:\n\n"
-        "Character reference sheet\n"
-        "A weathered night watch pony with a brass lantern and navy cloak.\n"
-        f"{CHARACTER_SHEET_LAYOUT_BLOCK}\n"
-        "Expressions: alert, tired, stern, amused.\n"
-    )
+    # Agent never calls create_concept_card -> on_success fails.
+    with pytest.raises(RuntimeError, match="create_concept_card"):
+        steps[0].on_success(None)
+
+    # Simulate the tool creating a card during the run.
+    cards.append(SimpleNamespace(id="card-abc", createdAt="2026-01-01T00:00:00Z"))
     update = steps[0].on_success(None)
-    assert update == {"outputCardId": f"draft_{key}", "subjectKind": "character"}
-    assert created["key"] == key
+    assert update == {"outputCardId": "card-abc", "subjectKind": "character"}
 
 
 def test_suggest_concept_location_plan(tmp_path: Path, monkeypatch) -> None:
-    from adaptation_workflow.concept_art import concept_scratch_path
+    from types import SimpleNamespace
+
     from pi_profiles import _suggest_concept_plan
 
     ctx = _make_ctx(tmp_path)
@@ -164,13 +149,9 @@ def test_suggest_concept_location_plan(tmp_path: Path, monkeypatch) -> None:
     locations_dir.mkdir(parents=True)
     (locations_dir / "index.md").write_text("## sunny-barn\nName: Sunny Barn\n")
 
-    def fake_create_from_pi(slug: str, subject_kind: str, path: Path, *, expected_key: str) -> str:
-        assert subject_kind == "location"
-        path.unlink()
-        return f"draft_{expected_key}"
-
-    monkeypatch.setattr("concept_cards.create_concept_card_from_pi_file", fake_create_from_pi)
+    cards: list[SimpleNamespace] = []
     monkeypatch.setattr("concept_cards.existing_concept_summaries", lambda _slug: [])
+    monkeypatch.setattr("concept_cards.list_cards", lambda _slug, include_archived=False: list(cards))
 
     steps = list(_suggest_concept_plan(ctx, "location"))
     assert len(steps) == 1
@@ -178,18 +159,10 @@ def test_suggest_concept_location_plan(tmp_path: Path, monkeypatch) -> None:
     assert prompt is not None
     assert "/skill:concept-location" in prompt
     assert "sunny-barn" in prompt
-    key = prompt.split("File key: ", 1)[1].split("\n", 1)[0].strip()
 
-    concept_scratch_path(ctx.book_root_abs, key).write_text(
-        f"## {key}\n"
-        "subject: location\n"
-        "mode: new-image\n"
-        "style_ref:\n\n"
-        "A weathered hillside stone bridge over a shallow creek at dusk. "
-        "No characters, no text, no labels, no watermarks.\n"
-    )
+    cards.append(SimpleNamespace(id="card-loc", createdAt="2026-01-01T00:00:00Z"))
     update = steps[0].on_success(None)
-    assert update == {"outputCardId": f"draft_{key}", "subjectKind": "location"}
+    assert update == {"outputCardId": "card-loc", "subjectKind": "location"}
 
 
 def test_validate_character_file_stub_and_full(tmp_path: Path) -> None:

@@ -255,7 +255,6 @@ AgentSessionKind = Literal[
     "suggest-concept-location",
     "draft-panel-prompt",
     "refine-panel-prompt",
-    "book-chat",
 ]
 AgentSessionStatus = Literal["running", "succeeded", "failed", "archived"]
 
@@ -311,31 +310,6 @@ class AgentSessionDocument(BaseModel):
 class AgentSessionPatch(BaseModel):
     title: str | None = Field(default=None, min_length=1)
     archived: bool | None = None
-
-
-class BookChatTurn(BaseModel):
-    id: str
-    role: Literal["user", "assistant"]
-    createdAt: str
-    text: str = ""
-    piSessionId: str | None = None
-    events: list[dict[str, Any]] = Field(default_factory=list)
-    error: str | None = None
-
-
-class BookChatSessionDocument(BaseModel):
-    version: int = 1
-    id: str
-    projectSlug: str
-    status: Literal["active", "archived"] = "active"
-    title: str
-    createdAt: str
-    updatedAt: str
-    archivedAt: str | None = None
-    forkRootSessionId: str
-    piSessionId: str | None = None
-    piSessionFile: str | None = None
-    turns: list[BookChatTurn] = Field(default_factory=list)
 
 
 class PiTraceUsage(BaseModel):
@@ -396,19 +370,6 @@ class PiTraceDocument(BaseModel):
     stats: PiTraceStats = Field(default_factory=PiTraceStats)
 
 
-class BookChatSessionCreate(BaseModel):
-    title: str | None = Field(default=None, min_length=1)
-
-
-class BookChatSessionPatch(BaseModel):
-    title: str | None = Field(default=None, min_length=1)
-    archived: bool | None = None
-
-
-class BookChatTurnRequest(BaseModel):
-    text: str = Field(min_length=1)
-
-
 class AdaptationCanvasImportResponse(BaseModel):
     canvas: CanvasDocument
     importedNodeCount: int
@@ -438,6 +399,7 @@ class ConceptNodeCreate(BaseModel):
 class ConceptCardPatch(BaseModel):
     displayName: str | None = None
     prompt: str | None = None
+    subjectKind: ConceptArtSubjectKind | None = None
     archived: bool | None = None
 
 
@@ -585,6 +547,10 @@ class StoryPanelCaption(BaseModel):
 class StoryPanelImagePrompt(BaseModel):
     id: str = Field(pattern=TAG_RE)
     text: str = ""
+
+
+class StoryPanelImagePromptWrite(BaseModel):
+    text: str
 
 
 class StoryPanel(BaseModel):

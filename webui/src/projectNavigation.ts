@@ -26,7 +26,7 @@ export function projectPhaseIcon(phase: ProjectPhase) {
 export function projectPhaseHelp(phase: ProjectPhase) {
   switch (phase) {
     case 'chat':
-      return 'Browse Pi coding-agent sessions, traces, running work, and book-context conversations.';
+      return 'Watch running Pi tasks live and browse every agent session and its trace.';
     case 'story':
       return 'Write panels one at a time, or upload book.txt to highlight passages into panel chunks. Use Reading to manage order and open Layout to place panels.';
     case 'concept-art':

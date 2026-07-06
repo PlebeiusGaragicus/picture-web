@@ -26,11 +26,12 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
 | `visual_styles.py` | Reusable style snippets appended to generation prompts. |
 | `style_refs.py` | Archetype style references: prompt files, canonical asset ids, canvas projection (`sync_style_ref_canvas_nodes`). |
 | `canvas_nodes.py` | Canvas node factories (image groups, character/location spawns). |
+| `concept_cards.py` | Concept art cards: CRUD, per-card image upload (`POST /concept-cards/{id}/upload` attaches an imported asset to the card), subject-kind retagging, draft-to-canvas. |
 | `chat_sessions.py` | Gemini image-refinement chats (thought signatures preserved, archive-first). |
-| `agent_sessions.py` / `book_chat_sessions.py` / `pi_session_trace.py` | Pi agent session registry, book chats, session-file trace parsing. |
-| `pi_runtime.py` / `pi_profiles.py` | In-process pi task runtime (one `pi --mode rpc` subprocess per step, `task_progress` between steps, SSE event ring buffer, abort, restart-safe snapshots) and the narrow task profiles it runs (`read-book`, `extract-character-list`, `extract-character` (targeted), `extract-all-characters` (multi-step), `suggest-concept-character/location`). |
+| `agent_sessions.py` / `pi_session_trace.py` | Pi agent session registry and session-file trace parsing. |
+| `pi_runtime.py` / `pi_profiles.py` | In-process pi task runtime (one `pi --mode rpc` subprocess per step, `task_progress` between steps, SSE event ring buffer, abort, restart-safe snapshots) and the narrow task profiles it runs (`read-book`, `extract-character-list`, `extract-character` (targeted), `extract-all-characters` (multi-step), `suggest-concept-character/location`, `draft-panel-prompt`, `refine-panel-prompt`). Profiles with `tools` get the photo-web extension loaded with a scoped allow-list (see the pi agent seam). |
 | `story_panels.py` / `story_panels_print.py` | Panel chunks, page layout, booklet PDF (reportlab). |
-| `adaptation_workflow/` | Pi plumbing shared by `pi_runtime` and book chat: `config.py` (context, pi/node discovery), `pi_rpc.py` (`PiRpcClient`, book chat only), `character_file.py`, `concept_art.py`, `validate.py`, `events.py` (`project_event`), `diagnostics.py` (`TaskDiagnostics`). |
+| `adaptation_workflow/` | Pi plumbing for `pi_runtime`: `config.py` (context, pi/node discovery), `character_file.py`, `validate.py`, `events.py` (`project_event`), `diagnostics.py` (`TaskDiagnostics`). |
 
 ## Canvas model
 
@@ -50,10 +51,10 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
 
 ## The pi agent seam
 
-Two invocation paths (the first is the target; book chat is legacy — see
-pi-idea.md):
+One invocation path:
 
-1. **Pi tasks** (read-book, character list/extract, concept suggest): endpoint
+1. **Pi tasks** (read-book, character list/extract, concept suggest, panel
+   prompt draft/refine): endpoint
    → `pi_runtime.PiSessionManager` runs the profile's step plan, one
    `pi --mode rpc` subprocess per step (threads, in-process), emitting a
    `task_progress {index, label}` event before each step. Events stream over
@@ -65,19 +66,36 @@ pi-idea.md):
    manager assumes a single uvicorn worker (`./run` runs one). Targeted
    profiles (extract-character) take a `target`; duplicates are keyed on
    `(profile, target)` and answered with 409.
-2. **Sync book-chat turns**: `book_chat_sessions.append_turn` runs `PiRpcClient`
-   inside the request (blocks a worker for the duration of the pi turn).
+
+   **Tools-as-API (pi-idea §6):** profiles whose output is a domain object
+   (`draft-panel-prompt`, `refine-panel-prompt`, `suggest-concept-*`) declare
+   `TaskProfile.tools`. The runtime then adds
+   `--extension .pi/extensions/photo-web.ts` and sets `PHOTO_WEB_API`
+   (origin: `PHOTO_WEB_API` env override, else `http://127.0.0.1:{API_PORT}`),
+   `PHOTO_WEB_PROJECT`, `PHOTO_WEB_TASK`, and `PHOTO_WEB_ALLOWED_TOOLS`. The
+   extension registers only the allow-listed tools
+   (`set_panel_image_prompt`, `replace_panel_image_prompt`,
+   `create_concept_card`), each a typed `fetch()` back into the local API
+   with server-side validation, so the agent delivers its result with one
+   tool call and no scratch files. `on_success` verifies delivery (a new
+   prompt/card exists) and fails the task if the agent never called the tool.
+   Character extraction stays file-based — `characters/*.md` are the actual
+   editable data model.
 
 `pi_session_trace.py` parses pi's on-disk session `.jsonl` files for the trace
 view and is transport-independent.
 
 ### Planned direction
 
-See [pi-idea.md](pi-idea.md) for the full verified design (pi SDK/RPC/extension findings, PiSessionManager, narrow single-purpose task profiles, domain tools). The product direction is button-driven AI augmentation — many narrow pi agents (character/scene/prop extraction, panel image-prompt drafting/refinement), no general chat agent; book chat is slated for removal.
+See [pi-idea.md](pi-idea.md) for the full verified design (pi SDK/RPC/extension findings, PiSessionManager, narrow single-purpose task profiles, domain tools). The product direction is button-driven AI augmentation — many narrow pi agents (character/scene/prop extraction, panel image-prompt drafting/refinement), no general chat agent.
 
-The detached-bash layer is gone; all one-shot pi work runs on the in-process
-**PiSessionManager**. Remaining planned work: panel image-prompt drafting and
-refinement profiles, the imagen prompt guide injection, and removing book chat.
+The detached-bash layer and the legacy book-chat feature (with its
+`PiRpcClient` sync-turn path) are gone; all pi work runs on the in-process
+**PiSessionManager**. Panel prompt drafting/refinement, the imagen prompt
+guide injection, and tools-as-API delivery (pi-idea §6) are implemented.
+The Agent view is a pi task dashboard: it polls `GET /pi-tasks?active=true`,
+attaches to each running task's SSE stream, and browses the
+`agent_sessions` registry + parsed traces.
 
 ## Frontend map
 
@@ -88,7 +106,7 @@ refinement profiles, the imagen prompt guide injection, and removing book chat.
   `projectPhase` string, no router.
 - `canvas/` — node data types, edge derivation, node sidebars, tag editing.
 - `storyPanels/` — Story + Layout views and their pure layout/print logic.
-- `sessions/` — Agent view: book chats, pi trace timeline.
+- `sessions/` — Agent dashboard: live pi task strip, session list, pi trace timeline.
 - `conceptArt/`, `characters/`, `visualStyles/` — the other workspace views.
 - `shared/` — cross-feature helpers (`dom.ts`, `canvasDefaults.ts`, `popover.ts`).
 - `api.ts` — the single REST client; `types.ts` — the domain/API types.

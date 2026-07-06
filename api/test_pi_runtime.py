@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
+import uvicorn
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -44,6 +46,37 @@ def use_fake_pi(monkeypatch) -> pi_runtime.PiSessionManager:
     manager = pi_runtime.PiSessionManager()
     monkeypatch.setattr(pi_runtime, "MANAGER", manager)
     return manager
+
+
+@pytest.fixture
+def live_api(monkeypatch):
+    """Start the (already library-monkeypatched) app over real HTTP.
+
+    Tool-delivery tests need a live port because the fake pi performs the HTTP
+    request the photo-web extension would make. Returns a starter callable so
+    tests can boot the server after their library setup.
+    """
+    servers: list[uvicorn.Server] = []
+
+    def start() -> str:
+        config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
+        server = uvicorn.Server(config)
+        servers.append(server)
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        deadline = time.monotonic() + 15
+        while not server.started:
+            if time.monotonic() > deadline:
+                raise AssertionError("uvicorn never started")
+            time.sleep(0.02)
+        port = server.servers[0].sockets[0].getsockname()[1]
+        origin = f"http://127.0.0.1:{port}"
+        monkeypatch.setenv("PHOTO_WEB_API", origin)
+        return origin
+
+    yield start
+    for server in servers:
+        server.should_exit = True
 
 
 def wait_for_state(handle: pi_runtime.TaskHandle, states: set[str], timeout: float = 15.0) -> str:
@@ -348,22 +381,25 @@ def test_target_rejected_for_untargeted_profile(tmp_path, monkeypatch):
     assert exc_info.value.status_code == 400
 
 
-def test_suggest_concept_character_creates_card(tmp_path, monkeypatch):
-    from adaptation_workflow.character_file import CHARACTER_SHEET_LAYOUT_BLOCK
-
+def test_suggest_concept_character_creates_card(tmp_path, monkeypatch, live_api):
     client, root = setup_project_with_book(tmp_path, monkeypatch)
     write_book_session_manifest(root)
-    scratch_content = (
-        "## {stem}\n"
-        "subject: character\n"
-        "mode: new-image\n"
-        "style_ref:\n\n"
-        "Character reference sheet\n"
-        "A weathered night watch pony with a brass lantern.\n"
-        f"{CHARACTER_SHEET_LAYOUT_BLOCK}\n"
-        "Expressions: alert, tired, stern, amused.\n"
+    live_api()
+    monkeypatch.setenv(
+        "FAKE_PI_CALL_TOOL",
+        json.dumps(
+            {
+                "tool": "create_concept_card",
+                "method": "POST",
+                "path": "/api/projects/farm-comic/concept-cards",
+                "body": {
+                    "subjectKind": "character",
+                    "displayName": "Night Watch Pony",
+                    "prompt": "Character reference sheet\nA weathered night watch pony with a brass lantern.",
+                },
+            }
+        ),
     )
-    monkeypatch.setenv("FAKE_PI_WRITE_FROM_PROMPT", scratch_content)
     manager = use_fake_pi(monkeypatch)
 
     handle = manager.start_task("farm-comic", "suggest-concept-character")
@@ -373,12 +409,44 @@ def test_suggest_concept_character_creates_card(tmp_path, monkeypatch):
     assert len(cards) == 1
     assert cards[0]["subjectKind"] == "character"
     assert "night watch pony" in cards[0]["prompt"]
-    # Scratch file is consumed on card creation.
-    assert not list((root / ".concept-scratch").glob("*.md"))
 
     session = client.get(f"/api/projects/farm-comic/agent-sessions/{handle.id}").json()
     assert session["kind"] == "suggest-concept-character"
     assert session["source"]["outputCardId"] == cards[0]["id"]
+
+    # The tool call surfaced as events in the task stream.
+    event_types = [record["event"]["type"] for record in handle.events_since(0)]
+    assert "tool_start" in event_types
+
+    # Tool profiles load the photo-web extension with a scoped allow-list.
+    argv = json.loads((root / "sessions" / "pi" / "fake-pi-argv.json").read_text())
+    assert "--extension" in argv
+    assert argv[argv.index("--extension") + 1].endswith(".pi/extensions/photo-web.ts")
+    env = json.loads((root / "sessions" / "pi" / "fake-pi-env.json").read_text())
+    assert env["PHOTO_WEB_ALLOWED_TOOLS"] == "create_concept_card"
+    assert env["PHOTO_WEB_PROJECT"] == "farm-comic"
+    assert env["PHOTO_WEB_API"].startswith("http://127.0.0.1:")
+
+
+def test_suggest_concept_fails_when_tool_never_called(tmp_path, monkeypatch):
+    client, root = setup_project_with_book(tmp_path, monkeypatch)
+    write_book_session_manifest(root)
+    manager = use_fake_pi(monkeypatch)  # default fake pi run makes no tool call
+
+    handle = manager.start_task("farm-comic", "suggest-concept-character")
+    assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "failed"
+    assert "create_concept_card" in (handle.error or "")
+    assert client.get("/api/projects/farm-comic/concept-cards").json() == []
+
+
+def test_non_tool_profiles_do_not_load_extension(tmp_path, monkeypatch):
+    _client, root = setup_project_with_book(tmp_path, monkeypatch)
+    manager = use_fake_pi(monkeypatch)
+
+    handle = manager.start_task("farm-comic", "read-book")
+    assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "done"
+    argv = json.loads((root / "sessions" / "pi" / "fake-pi-argv.json").read_text())
+    assert "--extension" not in argv
 
 
 # --- routes -------------------------------------------------------------------
@@ -467,7 +535,7 @@ def test_draft_panel_prompt_plan_context_and_guide(tmp_path, monkeypatch):
     assert steps[0].fork_from_book_session is False
     prompt = steps[0].build_prompt()
     assert prompt is not None
-    assert prompt.startswith(f"/skill:panel-prompt {root / '.prompt-scratch' / panel_ids[2]}.md")
+    assert prompt.startswith(f"/skill:panel-prompt {panel_ids[2]}")
     assert "A fox watches from the fence." in prompt
     assert "The barn at dawn." in prompt  # two panels before
     assert "Rain begins." in prompt  # panel after
@@ -544,11 +612,22 @@ def test_refine_panel_prompt_prechecks(tmp_path, monkeypatch):
     assert exc_info.value.status_code == 404  # prompt does not exist
 
 
-def test_draft_panel_prompt_end_to_end(tmp_path, monkeypatch):
-    client, root = setup_project_with_book(tmp_path, monkeypatch)
+def test_draft_panel_prompt_end_to_end(tmp_path, monkeypatch, live_api):
+    client, _root = setup_project_with_book(tmp_path, monkeypatch)
     (panel_id,) = make_story_panels(client, ["Hero feeds the chickens at dawn."])
-    drafted = "A brave farmhand scattering feed to chickens at dawn, wide shot, golden-hour backlight.\n"
-    monkeypatch.setenv("FAKE_PI_WRITE_FROM_PROMPT", drafted)
+    live_api()
+    drafted = "A brave farmhand scattering feed to chickens at dawn, wide shot, golden-hour backlight."
+    monkeypatch.setenv(
+        "FAKE_PI_CALL_TOOL",
+        json.dumps(
+            {
+                "tool": "set_panel_image_prompt",
+                "method": "POST",
+                "path": f"/api/projects/farm-comic/story-panels/panels/{panel_id}/image-prompts",
+                "body": {"text": drafted},
+            }
+        ),
+    )
     manager = use_fake_pi(monkeypatch)
 
     handle = manager.start_task("farm-comic", "draft-panel-prompt", target=panel_id)
@@ -557,9 +636,7 @@ def test_draft_panel_prompt_end_to_end(tmp_path, monkeypatch):
     document = client.get("/api/projects/farm-comic/story-panels").json()
     panel = next(item for item in document["panels"] if item["id"] == panel_id)
     assert len(panel["imagePrompts"]) == 1
-    assert panel["imagePrompts"][0]["text"] == drafted.strip()
-    # Scratch file consumed on success.
-    assert not list((root / ".prompt-scratch").glob("*.md"))
+    assert panel["imagePrompts"][0]["text"] == drafted
 
     session = client.get(f"/api/projects/farm-comic/agent-sessions/{handle.id}").json()
     assert session["kind"] == "draft-panel-prompt"
@@ -567,8 +644,18 @@ def test_draft_panel_prompt_end_to_end(tmp_path, monkeypatch):
     assert session["source"]["promptId"] == panel["imagePrompts"][0]["id"]
 
 
-def test_refine_panel_prompt_end_to_end(tmp_path, monkeypatch):
-    client, root = setup_project_with_book(tmp_path, monkeypatch)
+def test_draft_panel_prompt_fails_when_tool_never_called(tmp_path, monkeypatch):
+    client, _root = setup_project_with_book(tmp_path, monkeypatch)
+    (panel_id,) = make_story_panels(client, ["Hero feeds the chickens at dawn."])
+    manager = use_fake_pi(monkeypatch)  # default fake pi makes no tool call
+
+    handle = manager.start_task("farm-comic", "draft-panel-prompt", target=panel_id)
+    assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "failed"
+    assert "set_panel_image_prompt" in (handle.error or "")
+
+
+def test_refine_panel_prompt_end_to_end(tmp_path, monkeypatch, live_api):
+    client, _root = setup_project_with_book(tmp_path, monkeypatch)
     (panel_id,) = make_story_panels(client, ["Hero feeds the chickens at dawn."])
     patch = client.patch(
         f"/api/projects/farm-comic/story-panels/panels/{panel_id}",
@@ -578,8 +665,19 @@ def test_refine_panel_prompt_end_to_end(tmp_path, monkeypatch):
         ]},
     )
     assert patch.status_code == 200
-    refined = "A brave farmhand scattering feed to eager chickens, low-angle, soft dawn fog.\n"
-    monkeypatch.setenv("FAKE_PI_WRITE_FROM_PROMPT", refined)
+    live_api()
+    refined = "A brave farmhand scattering feed to eager chickens, low-angle, soft dawn fog."
+    monkeypatch.setenv(
+        "FAKE_PI_CALL_TOOL",
+        json.dumps(
+            {
+                "tool": "replace_panel_image_prompt",
+                "method": "PUT",
+                "path": f"/api/projects/farm-comic/story-panels/panels/{panel_id}/image-prompts/prompt-001",
+                "body": {"text": refined},
+            }
+        ),
+    )
     manager = use_fake_pi(monkeypatch)
 
     handle = manager.start_task(
@@ -593,9 +691,44 @@ def test_refine_panel_prompt_end_to_end(tmp_path, monkeypatch):
     document = client.get("/api/projects/farm-comic/story-panels").json()
     panel = next(item for item in document["panels"] if item["id"] == panel_id)
     texts = {prompt["id"]: prompt["text"] for prompt in panel["imagePrompts"]}
-    assert texts["prompt-001"] == refined.strip()
+    assert texts["prompt-001"] == refined
     assert texts["prompt-002"] == "Keep me unchanged."
-    assert not list((root / ".prompt-scratch").glob("*.md"))
+
+
+# --- image prompt endpoints ------------------------------------------------------
+
+
+def test_image_prompt_endpoints_validation(tmp_path, monkeypatch):
+    client, _root = setup_project_with_book(tmp_path, monkeypatch)
+    (panel_id,) = make_story_panels(client, ["Hero rests in the hay."])
+    base = f"/api/projects/farm-comic/story-panels/panels/{panel_id}/image-prompts"
+
+    # Append assigns sequential ids.
+    first = client.post(base, json={"text": "A farmhand resting in golden hay."})
+    assert first.status_code == 200
+    assert first.json() == {"promptId": "prompt-001"}
+    second = client.post(base, json={"text": "Close-up of a straw hat."})
+    assert second.json() == {"promptId": "prompt-002"}
+
+    # Empty and chat-wrapper text are rejected.
+    assert client.post(base, json={"text": "   "}).status_code == 400
+    assert client.post(base, json={"text": "Sure! Here's the prompt you asked for."}).status_code == 400
+
+    # Unknown panel / prompt are 404.
+    assert client.post(
+        "/api/projects/farm-comic/story-panels/panels/panel-999/image-prompts",
+        json={"text": "x"},
+    ).status_code == 404
+    assert client.put(f"{base}/prompt-999", json={"text": "revised"}).status_code == 404
+
+    # Replace updates in place.
+    replaced = client.put(f"{base}/prompt-001", json={"text": "A farmhand asleep in the hay at dusk."})
+    assert replaced.status_code == 200
+    document = client.get("/api/projects/farm-comic/story-panels").json()
+    panel = next(item for item in document["panels"] if item["id"] == panel_id)
+    texts = {prompt["id"]: prompt["text"] for prompt in panel["imagePrompts"]}
+    assert texts["prompt-001"] == "A farmhand asleep in the hay at dusk."
+    assert texts["prompt-002"] == "Close-up of a straw hat."
 
 
 def test_instructions_rejected_for_profile_without_instructions(tmp_path, monkeypatch):

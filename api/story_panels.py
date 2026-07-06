@@ -24,6 +24,7 @@ from models import (
     StoryPanelCreate,
     StoryPanelDocument,
     StoryPanelPage,
+    StoryPanelImagePrompt,
     StoryPanelPatch,
     StoryPanelRect,
 )
@@ -543,6 +544,61 @@ def create_bookmark(slug: str, payload: StoryPanelBookmarkCreate) -> StoryPanelD
     )
     document.panels.append(panel)
     return save_document(slug, document)
+
+
+def _validate_image_prompt_text(text: str) -> str:
+    from adaptation_workflow.validate import CHAT_WRAPPER_RE
+
+    cleaned = text.strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="Image prompt text must not be empty")
+    if CHAT_WRAPPER_RE.search(cleaned):
+        raise HTTPException(status_code=400, detail="Image prompt text must be plain prose without chat wrapper phrases")
+    return cleaned
+
+
+def next_image_prompt_id(prompts: list[StoryPanelImagePrompt]) -> str:
+    existing = {prompt.id for prompt in prompts}
+    index = len(prompts) + 1
+    while f"prompt-{index:03d}" in existing:
+        index += 1
+    return f"prompt-{index:03d}"
+
+
+def _require_panel(document: StoryPanelDocument, panel_id: str) -> int:
+    index = next((idx for idx, panel in enumerate(document.panels) if panel.id == panel_id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail=f"Panel not found: {panel_id}")
+    return index
+
+
+def append_image_prompt(slug: str, panel_id: str, text: str) -> str:
+    """Append a validated image prompt to a panel; returns the new prompt id."""
+    cleaned = _validate_image_prompt_text(text)
+    document = read_document(slug)
+    index = _require_panel(document, panel_id)
+    panel = document.panels[index]
+    prompt_id = next_image_prompt_id(panel.imagePrompts)
+    prompts = [*panel.imagePrompts, StoryPanelImagePrompt(id=prompt_id, text=cleaned)]
+    document.panels[index] = panel.model_copy(update={"imagePrompts": prompts})
+    save_document(slug, document)
+    return prompt_id
+
+
+def replace_image_prompt(slug: str, panel_id: str, prompt_id: str, text: str) -> None:
+    """Replace one existing image prompt's text in place."""
+    cleaned = _validate_image_prompt_text(text)
+    document = read_document(slug)
+    index = _require_panel(document, panel_id)
+    panel = document.panels[index]
+    if not any(prompt.id == prompt_id for prompt in panel.imagePrompts):
+        raise HTTPException(status_code=404, detail=f"Image prompt not found: {prompt_id}")
+    prompts = [
+        prompt.model_copy(update={"text": cleaned}) if prompt.id == prompt_id else prompt
+        for prompt in panel.imagePrompts
+    ]
+    document.panels[index] = panel.model_copy(update={"imagePrompts": prompts})
+    save_document(slug, document)
 
 
 def patch_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> StoryPanelDocument:

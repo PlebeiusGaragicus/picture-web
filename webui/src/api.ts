@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStatus, AgentSession, ArtifactKind, Asset, BookChatSession, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, GenerateStyleRefPayload, ImageGroupNodeResponse, PiTaskProfile, PiTaskStatus, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStatus, AgentSession, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, GenerateStyleRefPayload, ImageGroupNodeResponse, PiTaskProfile, PiTaskStatus, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = import.meta.env.DEV;
 
@@ -136,7 +136,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  updateConceptCard: (slug: string, cardId: string, payload: { displayName?: string; prompt?: string; archived?: boolean | null }) =>
+  updateConceptCard: (slug: string, cardId: string, payload: { displayName?: string; prompt?: string; subjectKind?: ConceptArtSubjectKind; archived?: boolean | null }) =>
     request<ConceptCard>(`/api/projects/${slug}/concept-cards/${cardId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -152,10 +152,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  uploadConceptArt: (slug: string, file: File) => {
+  uploadConceptCardImage: (slug: string, cardId: string, file: File) => {
     const data = new FormData();
     data.append('file', file);
-    return request<ConceptCard>(`/api/projects/${slug}/adaptation/concept-art/upload`, {
+    return request<ConceptCard>(`/api/projects/${slug}/concept-cards/${cardId}/upload`, {
       method: 'POST',
       body: data,
     });
@@ -196,27 +196,6 @@ export const api = {
     request<{ cancelled: boolean }>(`/api/projects/${slug}/pi-tasks/${taskId}/abort`, { method: 'POST' }),
   piTaskEventsUrl: (slug: string, taskId: string) =>
     `/api/projects/${slug}/pi-tasks/${taskId}/events`,
-  listBookChatSessions: (slug: string, includeArchived = false) =>
-    request<BookChatSession[]>(`/api/projects/${slug}/adaptation/book-chats${includeArchived ? '?includeArchived=true' : ''}`),
-  getBookChatSession: (slug: string, sessionId: string) =>
-    request<BookChatSession>(`/api/projects/${slug}/adaptation/book-chats/${sessionId}`),
-  createBookChatSession: (slug: string, payload: { title?: string | null } = {}) =>
-    request<BookChatSession>(`/api/projects/${slug}/adaptation/book-chats`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  patchBookChatSession: (slug: string, sessionId: string, payload: { title?: string | null; archived?: boolean | null }) =>
-    request<BookChatSession>(`/api/projects/${slug}/adaptation/book-chats/${sessionId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    }),
-  sendBookChatTurn: (slug: string, sessionId: string, text: string) =>
-    request<BookChatSession>(`/api/projects/${slug}/adaptation/book-chats/${sessionId}/turns`, {
-      method: 'POST',
-      body: JSON.stringify({ text }),
-    }),
-  getBookChatTrace: (slug: string, sessionId: string) =>
-    request<PiTraceDocument>(`/api/projects/${slug}/adaptation/book-chats/${sessionId}/trace`),
   listAgentSessions: (slug: string, includeArchived = false) =>
     request<AgentSession[]>(`/api/projects/${slug}/agent-sessions${includeArchived ? '?includeArchived=true' : ''}`),
   getAgentSession: (slug: string, sessionId: string) =>

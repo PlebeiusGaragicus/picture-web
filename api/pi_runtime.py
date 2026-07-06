@@ -53,6 +53,19 @@ def _pi_command() -> list[str]:
     return [find_pi_binary()]
 
 
+def _api_origin() -> str:
+    """Origin the photo-web extension calls back into."""
+    override = os.environ.get("PHOTO_WEB_API")
+    if override:
+        return override
+    port = os.environ.get("API_PORT", "8787")
+    return f"http://127.0.0.1:{port}"
+
+
+def _extension_path() -> Path:
+    return Path(__file__).resolve().parent.parent / ".pi" / "extensions" / "photo-web.ts"
+
+
 def _snapshot_dir(slug: str) -> Path:
     return adaptation.ensure_adaptation(slug) / "sessions" / "pi-tasks"
 
@@ -88,12 +101,22 @@ def process_is_running(pid: int, expected_start_time: str | None = None) -> bool
 class PiStepProcess:
     """One pi RPC subprocess for a single task step."""
 
-    def __init__(self, handle: "TaskHandle", argv: list[str], cwd: str, events_file: Any) -> None:
+    def __init__(
+        self,
+        handle: "TaskHandle",
+        argv: list[str],
+        cwd: str,
+        events_file: Any,
+        extra_env: dict[str, str] | None = None,
+    ) -> None:
         self.handle = handle
         self.stderr_lines: list[str] = []
         self.agent_end = threading.Event()
         self._pending: dict[str, Queue] = {}
         self._stdin_lock = threading.Lock()
+        env = pi_runtime_env()
+        if extra_env:
+            env.update(extra_env)
         self.proc = subprocess.Popen(
             argv,
             cwd=cwd,
@@ -102,7 +125,7 @@ class PiStepProcess:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
-            env=pi_runtime_env(),
+            env=env,
         )
         threading.Thread(target=self._read_stdout, args=(events_file,), daemon=True).start()
         threading.Thread(target=self._read_stderr, daemon=True).start()
@@ -534,9 +557,20 @@ class PiSessionManager:
         if fork_session_id:
             argv.extend(["--fork", fork_session_id])
 
+        extra_env: dict[str, str] | None = None
+        tools = handle.profile.tools
+        if tools:
+            argv.extend(["--extension", str(_extension_path())])
+            extra_env = {
+                "PHOTO_WEB_API": _api_origin(),
+                "PHOTO_WEB_PROJECT": ctx.project_slug,
+                "PHOTO_WEB_TASK": handle.id,
+                "PHOTO_WEB_ALLOWED_TOOLS": ",".join(tools),
+            }
+
         events_path = _snapshot_dir(handle.slug) / f"{handle.id}.events.jsonl"
         with events_path.open("a", encoding="utf-8") as events_file:
-            process = PiStepProcess(handle, argv, str(ctx.pi_workspace), events_file)
+            process = PiStepProcess(handle, argv, str(ctx.pi_workspace), events_file, extra_env)
             handle.active_process = process
             # An abort requested before the process existed had nothing to
             # signal; deliver it now so hanging prompts still get cancelled.

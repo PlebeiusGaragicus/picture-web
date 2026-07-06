@@ -1,4 +1,4 @@
-"""Pi tasks, agent sessions, book chats, and image refinement chat routes."""
+"""Pi tasks, agent sessions, and image refinement chat routes."""
 
 from __future__ import annotations
 
@@ -10,16 +10,11 @@ from fastapi import APIRouter, Header, Query
 from fastapi.responses import StreamingResponse
 
 import agent_sessions
-import book_chat_sessions
 import chat_sessions
 import pi_runtime
 from models import (
     AgentSessionDocument,
     AgentSessionPatch,
-    BookChatSessionCreate,
-    BookChatSessionDocument,
-    BookChatSessionPatch,
-    BookChatTurnRequest,
     ChatSessionCreate,
     ChatSessionDocument,
     ChatSessionPatch,
@@ -121,36 +116,6 @@ def stream_pi_task_events(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-
-@router.get("/api/projects/{slug}/adaptation/book-chats", response_model=list[BookChatSessionDocument])
-def list_book_chats(slug: str, includeArchived: bool = Query(default=False)) -> list[BookChatSessionDocument]:
-    return book_chat_sessions.list_sessions(slug, include_archived=includeArchived)
-
-
-@router.post("/api/projects/{slug}/adaptation/book-chats", response_model=BookChatSessionDocument)
-def create_book_chat(slug: str, payload: BookChatSessionCreate = BookChatSessionCreate()) -> BookChatSessionDocument:
-    return book_chat_sessions.create_session(slug, payload)
-
-
-@router.get("/api/projects/{slug}/adaptation/book-chats/{session_id}", response_model=BookChatSessionDocument)
-def get_book_chat(slug: str, session_id: str) -> BookChatSessionDocument:
-    return book_chat_sessions.read_session(slug, session_id)
-
-
-@router.patch("/api/projects/{slug}/adaptation/book-chats/{session_id}", response_model=BookChatSessionDocument)
-def patch_book_chat(slug: str, session_id: str, payload: BookChatSessionPatch) -> BookChatSessionDocument:
-    return book_chat_sessions.patch_session(slug, session_id, payload)
-
-
-@router.post("/api/projects/{slug}/adaptation/book-chats/{session_id}/turns", response_model=BookChatSessionDocument)
-def send_book_chat_turn(slug: str, session_id: str, payload: BookChatTurnRequest) -> BookChatSessionDocument:
-    return book_chat_sessions.append_turn(slug, session_id, payload)
-
-
-@router.get("/api/projects/{slug}/adaptation/book-chats/{session_id}/trace", response_model=PiTraceDocument)
-def get_book_chat_trace(slug: str, session_id: str) -> PiTraceDocument:
-    return book_chat_sessions.read_trace(slug, session_id)
 
 
 @router.get("/api/projects/{slug}/agent-sessions", response_model=list[AgentSessionDocument])

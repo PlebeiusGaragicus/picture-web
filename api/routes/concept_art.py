@@ -40,6 +40,6 @@ def draft_concept_card(slug: str, card_id: str) -> ConceptNodeResponse:
     return concept_cards.draft_card_to_canvas(slug, card_id)
 
 
-@router.post("/api/projects/{slug}/adaptation/concept-art/upload", response_model=ConceptCardDocument)
-async def upload_concept_art(slug: str, file: UploadFile = File(...)) -> ConceptCardDocument:
-    return await concept_cards.upload_card_image(slug, file)
+@router.post("/api/projects/{slug}/concept-cards/{card_id}/upload", response_model=ConceptCardDocument)
+async def upload_concept_card_image(slug: str, card_id: str, file: UploadFile = File(...)) -> ConceptCardDocument:
+    return await concept_cards.upload_card_image(slug, card_id, file)

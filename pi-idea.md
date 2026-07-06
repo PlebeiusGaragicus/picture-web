@@ -1,6 +1,12 @@
 # pi-idea.md — Narrow pi agents as the engine of photo-web
 
 Status: proposal (2026-07). Companion to [ARCHITECTURE.md](ARCHITECTURE.md) ("The pi agent seam").
+Progress: the PiSessionManager runtime, all task profiles (read-book, character list/extract,
+concept suggest, panel prompt draft/refine), the imagen prompt guide, and §6 tools-as-API
+(`.pi/extensions/photo-web.ts`, env-scoped tool allow-lists, one-tool-call delivery for the
+prompt-authoring and concept-suggest profiles) are implemented. Book chat is removed
+(§5 done): `book_chat_sessions.py` + `pi_rpc.py` are deleted and the Agent view is a pi task
+dashboard (live SSE-attached task panels + the `agent_sessions` history/trace browser).
 Everything in §1 was verified against the installed pi (`@earendil-works/pi-coding-agent` **0.80.3**,
 Homebrew npm install at `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent`).
 

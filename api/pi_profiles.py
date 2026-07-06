@@ -74,6 +74,9 @@ class TaskProfile:
     plan: Callable[[AdaptationContext, TaskArgs], Iterator[TaskStep]]
     accepts_target: bool = False
     accepts_instructions: bool = False
+    # Domain tools this profile's agent may call. Non-empty means the runtime
+    # loads .pi/extensions/photo-web.ts scoped to exactly these tools.
+    tools: tuple[str, ...] = ()
 
 
 def write_multiline_prompt(skill_call: str, payload: str) -> str:
@@ -219,30 +222,20 @@ def _concept_context_lines(slug: str) -> list[str]:
     return lines
 
 
-def _suggest_concept_plan(ctx: AdaptationContext, subject_kind: str) -> Iterator[TaskStep]:
-    from adaptation_workflow.concept_art import (
-        concept_scratch_path,
-        next_character_concept_key,
-        next_location_concept_key,
-        validate_concept_character_art,
-        validate_concept_location_art,
-    )
+def _existing_card_ids(slug: str) -> set[str]:
+    import concept_cards
 
-    if subject_kind == "character":
-        key = next_character_concept_key(ctx.book_root_abs)
-        validate = validate_concept_character_art
-        skill = "concept-character"
-    else:
-        key = next_location_concept_key(ctx.book_root_abs)
-        validate = validate_concept_location_art
-        skill = "concept-location"
-    out = concept_scratch_path(ctx.book_root_abs, key)
+    return {card.id for card in concept_cards.list_cards(slug, include_archived=True)}
+
+
+def _suggest_concept_plan(ctx: AdaptationContext, subject_kind: str) -> Iterator[TaskStep]:
+    skill = "concept-character" if subject_kind == "character" else "concept-location"
+    cards_before: set[str] = set()
 
     def build_prompt() -> str:
+        cards_before.update(_existing_card_ids(ctx.project_slug))
         context_lines = [
-            f"/skill:{skill} {ctx.book_root_abs} {out}",
-            "",
-            f"File key: {key}",
+            f"/skill:{skill} {ctx.book_root_abs}",
             "",
             *_concept_context_lines(ctx.project_slug),
         ]
@@ -263,32 +256,18 @@ def _suggest_concept_plan(ctx: AdaptationContext, subject_kind: str) -> Iterator
 
     def on_success(result: PiTaskResultInfo | None) -> dict[str, Any]:
         import concept_cards
-        from adaptation_workflow.validate import ValidationError
 
-        if not out.is_file():
-            raise RuntimeError(f"Missing {out}")
-        try:
-            validate(out, key)
-        except ValidationError as exc:
-            raise RuntimeError(str(exc)) from exc
-        card_id = concept_cards.create_concept_card_from_pi_file(
-            ctx.project_slug,
-            subject_kind,
-            out,
-            expected_key=key,
-        )
-        return {"outputCardId": card_id, "subjectKind": subject_kind}
+        new_ids = _existing_card_ids(ctx.project_slug) - cards_before
+        if not new_ids:
+            raise RuntimeError("Agent finished without calling create_concept_card")
+        cards = {card.id: card for card in concept_cards.list_cards(ctx.project_slug, include_archived=True)}
+        newest = max(new_ids, key=lambda card_id: cards[card_id].createdAt)
+        return {"outputCardId": newest, "subjectKind": subject_kind}
 
-    yield TaskStep(name=f"concept {subject_kind} {key}", build_prompt=build_prompt, on_success=on_success)
+    yield TaskStep(name=f"concept {subject_kind}", build_prompt=build_prompt, on_success=on_success)
 
 
 # --- panel prompt drafting ------------------------------------------------------
-
-
-def _prompt_scratch_path(ctx: AdaptationContext, panel_id: str) -> Path:
-    root = ctx.book_root_abs / ".prompt-scratch"
-    root.mkdir(parents=True, exist_ok=True)
-    return root / f"{panel_id}.md"
 
 
 def _panel_story_text(panel: Any) -> str:
@@ -381,32 +360,6 @@ def _panel_prompt_context_lines(ctx: AdaptationContext, panel: Any, document: An
     return lines
 
 
-def _validate_prompt_scratch(path: Path) -> str:
-    from adaptation_workflow.validate import (
-        ValidationError,
-        validate_no_chat_wrappers,
-        validate_nonempty_file,
-    )
-
-    try:
-        validate_nonempty_file(path)
-        validate_no_chat_wrappers(path)
-    except ValidationError as exc:
-        raise RuntimeError(str(exc)) from exc
-    text = path.read_text().strip()
-    if not text:
-        raise RuntimeError(f"Prompt scratch file is empty: {path}")
-    return text
-
-
-def _next_image_prompt_id(prompts: list[Any]) -> str:
-    existing = {prompt.id for prompt in prompts}
-    index = len(prompts) + 1
-    while f"prompt-{index:03d}" in existing:
-        index += 1
-    return f"prompt-{index:03d}"
-
-
 def _draft_panel_prompt_precheck(ctx: AdaptationContext, args: TaskArgs) -> None:
     if not args.target:
         raise HTTPException(status_code=400, detail="draft-panel-prompt requires a target panel id")
@@ -421,15 +374,14 @@ def _draft_panel_prompt_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator
     assert args.target is not None
     panel_id = args.target
     guidance = (args.instructions or "").strip()
-    out = _prompt_scratch_path(ctx, panel_id)
+    prompt_ids_before: set[str] = set()
 
     def build_prompt() -> str:
         document, panel = _find_panel(ctx.project_slug, panel_id)
         if panel is None:
             raise RuntimeError(f"Panel not found: {panel_id}")
-        if out.is_file():
-            out.unlink()
-        context_lines = [f"/skill:panel-prompt {out}", ""]
+        prompt_ids_before.update(prompt.id for prompt in panel.imagePrompts)
+        context_lines = [f"/skill:panel-prompt {panel_id}", ""]
         if guidance:
             context_lines.extend([
                 "User guidance — an idea or direction for this image (build the prompt around it):",
@@ -440,18 +392,13 @@ def _draft_panel_prompt_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator
         return "\n".join(context_lines).rstrip() + "\n"
 
     def on_success(result: PiTaskResultInfo | None) -> dict[str, Any]:
-        import story_panels
-        from models import StoryPanelImagePrompt, StoryPanelPatch
-
-        text = _validate_prompt_scratch(out)
         _document, panel = _find_panel(ctx.project_slug, panel_id)
         if panel is None:
             raise RuntimeError(f"Panel disappeared while drafting: {panel_id}")
-        prompt_id = _next_image_prompt_id(panel.imagePrompts)
-        prompts = [*panel.imagePrompts, StoryPanelImagePrompt(id=prompt_id, text=text)]
-        story_panels.patch_panel(ctx.project_slug, panel_id, StoryPanelPatch(imagePrompts=prompts))
-        out.unlink(missing_ok=True)
-        return {"panelId": panel_id, "promptId": prompt_id}
+        new_prompts = [prompt for prompt in panel.imagePrompts if prompt.id not in prompt_ids_before]
+        if not new_prompts:
+            raise RuntimeError("Agent finished without calling set_panel_image_prompt")
+        return {"panelId": panel_id, "promptId": new_prompts[-1].id}
 
     yield TaskStep(
         name=f"draft prompt {panel_id}",
@@ -485,7 +432,6 @@ def _refine_panel_prompt_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterato
     assert args.target is not None
     panel_id, prompt_id = _parse_refine_target(args.target)
     feedback = (args.instructions or "").strip()
-    out = _prompt_scratch_path(ctx, f"{panel_id}-{prompt_id}")
 
     def build_prompt() -> str:
         document, panel = _find_panel(ctx.project_slug, panel_id)
@@ -494,10 +440,8 @@ def _refine_panel_prompt_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterato
         current = next((prompt for prompt in panel.imagePrompts if prompt.id == prompt_id), None)
         if current is None:
             raise RuntimeError(f"Image prompt not found: {prompt_id}")
-        if out.is_file():
-            out.unlink()
         context_lines = [
-            f"/skill:panel-prompt-refine {out}",
+            f"/skill:panel-prompt-refine {panel_id} {prompt_id}",
             "",
             "Current prompt (revise this):",
             current.text.strip(),
@@ -510,19 +454,12 @@ def _refine_panel_prompt_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterato
         return "\n".join(context_lines).rstrip() + "\n"
 
     def on_success(result: PiTaskResultInfo | None) -> dict[str, Any]:
-        import story_panels
-        from models import StoryPanelPatch
-
-        text = _validate_prompt_scratch(out)
         _document, panel = _find_panel(ctx.project_slug, panel_id)
         if panel is None:
             raise RuntimeError(f"Panel disappeared while refining: {panel_id}")
-        prompts = [
-            prompt.model_copy(update={"text": text}) if prompt.id == prompt_id else prompt
-            for prompt in panel.imagePrompts
-        ]
-        story_panels.patch_panel(ctx.project_slug, panel_id, StoryPanelPatch(imagePrompts=prompts))
-        out.unlink(missing_ok=True)
+        current = next((prompt for prompt in panel.imagePrompts if prompt.id == prompt_id), None)
+        if current is None or not current.text.strip():
+            raise RuntimeError("Refined prompt is missing or empty after the run")
         return {"panelId": panel_id, "promptId": prompt_id}
 
     yield TaskStep(
@@ -567,6 +504,7 @@ SUGGEST_CONCEPT_CHARACTER = TaskProfile(
     title=lambda target: "Suggest character concept",
     precheck=_require_book_session,
     plan=lambda ctx, args: _suggest_concept_plan(ctx, "character"),
+    tools=("create_concept_card",),
 )
 
 SUGGEST_CONCEPT_LOCATION = TaskProfile(
@@ -574,6 +512,7 @@ SUGGEST_CONCEPT_LOCATION = TaskProfile(
     title=lambda target: "Suggest location concept",
     precheck=_require_book_session,
     plan=lambda ctx, args: _suggest_concept_plan(ctx, "location"),
+    tools=("create_concept_card",),
 )
 
 DRAFT_PANEL_PROMPT = TaskProfile(
@@ -583,6 +522,7 @@ DRAFT_PANEL_PROMPT = TaskProfile(
     plan=_draft_panel_prompt_plan,
     accepts_target=True,
     accepts_instructions=True,
+    tools=("set_panel_image_prompt",),
 )
 
 REFINE_PANEL_PROMPT = TaskProfile(
@@ -592,6 +532,7 @@ REFINE_PANEL_PROMPT = TaskProfile(
     plan=_refine_panel_prompt_plan,
     accepts_target=True,
     accepts_instructions=True,
+    tools=("replace_panel_image_prompt",),
 )
 
 PROFILES: dict[str, TaskProfile] = {

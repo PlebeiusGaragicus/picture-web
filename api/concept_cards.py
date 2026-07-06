@@ -134,20 +134,53 @@ def create_card(slug: str, payload: ConceptNodeCreate) -> ConceptCardDocument:
     return card
 
 
+def _retag_card_subject(slug: str, card: ConceptCardDocument, previous: ConceptArtSubjectKind) -> None:
+    """Swap concept-character/concept-location tags on the card's assets and canvas nodes."""
+    old_tag = f"concept-{previous}"
+    new_tag = f"concept-{card.subjectKind}"
+    card_tag = concept_card_tag(card.id)
+    for asset_id in card.assetIds:
+        try:
+            asset = library.read_asset(slug, asset_id)
+        except HTTPException:
+            continue
+        if card_tag not in asset.tags and old_tag not in asset.tags:
+            continue
+        tags = [new_tag if tag == old_tag else tag for tag in asset.tags]
+        library.patch_display(slug, asset_id, DisplayPatch(tags=list(dict.fromkeys(tags))))
+    canvas = library.read_stored_canvas(slug)
+    changed = False
+    for node in canvas.nodes.values():
+        if not isinstance(node, ImageGroupCanvasNode):
+            continue
+        if node.sourceConceptCardId != card.id and card_tag not in node.tags:
+            continue
+        if old_tag in node.tags:
+            node.tags = list(dict.fromkeys(new_tag if tag == old_tag else tag for tag in node.tags))
+            changed = True
+    if changed:
+        library.write_canvas(slug, canvas)
+
+
 def update_card(slug: str, card_id: str, payload: ConceptCardPatch) -> ConceptCardDocument:
     cards = list_cards(slug, include_archived=True)
     for index, card in enumerate(cards):
         if card.id != card_id:
             continue
+        previous_subject = card.subjectKind
         if payload.displayName is not None:
             card.displayName = payload.displayName
         if payload.prompt is not None:
             card.prompt = payload.prompt
+        if payload.subjectKind is not None:
+            card.subjectKind = payload.subjectKind
         if payload.archived is not None:
             card.archivedAt = utc_now() if payload.archived else None
         card.updatedAt = utc_now()
         cards[index] = card
         _write_cards(slug, cards)
+        if payload.subjectKind is not None and payload.subjectKind != previous_subject:
+            _retag_card_subject(slug, card, previous_subject)
         return card
     raise HTTPException(status_code=404, detail=f"Concept card not found: {card_id}")
 
@@ -160,30 +193,33 @@ def delete_card(slug: str, card_id: str) -> None:
     _write_cards(slug, next_cards)
 
 
-async def upload_card_image(slug: str, upload: UploadFile) -> ConceptCardDocument:
-    title = upload.filename or "Concept upload"
+async def upload_card_image(slug: str, card_id: str, upload: UploadFile) -> ConceptCardDocument:
+    """Import an image and attach it to an existing card as its active image."""
+    card = read_card(slug, card_id)
+    title = upload.filename or f"{card.displayName or 'Concept'} upload"
     asset = await library.import_asset(slug, upload, title=title)
-    card_id = new_ulid()
     library.patch_display(
         slug,
         asset.id,
-        DisplayPatch(tags=list(dict.fromkeys(["comic-adaptation", CONCEPT_TAG, concept_card_tag(card_id)]))),
+        DisplayPatch(
+            tags=list(
+                dict.fromkeys(
+                    ["comic-adaptation", CONCEPT_TAG, f"concept-{card.subjectKind}", concept_card_tag(card.id)]
+                )
+            )
+        ),
     )
-    now = utc_now()
-    card = ConceptCardDocument(
-        id=card_id,
-        projectSlug=slug,
-        subjectKind="character",
-        displayName=title,
-        assetIds=[asset.id],
-        activeAssetId=asset.id,
-        createdAt=now,
-        updatedAt=now,
-    )
-    cards = _read_cards_raw(slug)
-    cards.append(card)
-    _write_cards(slug, cards)
-    return card
+    cards = list_cards(slug, include_archived=True)
+    for index, existing in enumerate(cards):
+        if existing.id != card_id:
+            continue
+        existing.assetIds = list(dict.fromkeys([*existing.assetIds, asset.id]))
+        existing.activeAssetId = asset.id
+        existing.updatedAt = utc_now()
+        cards[index] = existing
+        _write_cards(slug, cards)
+        return existing
+    raise HTTPException(status_code=404, detail=f"Concept card not found: {card_id}")
 
 
 def draft_card_to_canvas(slug: str, card_id: str) -> ConceptNodeResponse:
@@ -223,33 +259,3 @@ def existing_concept_summaries(slug: str) -> list[str]:
             preview = card.displayName or card.id
         summaries.append(f"{card.subjectKind}: {preview}")
     return summaries
-
-
-def create_concept_card_from_pi_file(
-    slug: str,
-    subject_kind: ConceptArtSubjectKind,
-    path: Path,
-    *,
-    expected_key: str,
-) -> str:
-    from adaptation_workflow.concept_art import parse_concept_art_sections
-
-    if not path.is_file():
-        raise HTTPException(status_code=500, detail=f"Missing concept scratch file: {path}")
-    sections = parse_concept_art_sections(path)
-    section = sections.get(expected_key)
-    if section is None:
-        raise HTTPException(status_code=500, detail=f"Missing ## {expected_key} section in {path}")
-    prompt = section.get("prompt", "").strip()
-    if not prompt:
-        raise HTTPException(status_code=500, detail=f"Concept prompt is empty: {path}")
-    card = create_card(
-        slug,
-        ConceptNodeCreate(
-            subjectKind=subject_kind,
-            displayName=expected_key.replace("-", " ").title(),
-            prompt=prompt,
-        ),
-    )
-    path.unlink(missing_ok=True)
-    return card.id

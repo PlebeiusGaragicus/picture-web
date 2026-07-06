@@ -11,6 +11,7 @@ from models import (
     StoryPanelBookmarkCreate,
     StoryPanelCreate,
     StoryPanelDocument,
+    StoryPanelImagePromptWrite,
     StoryPanelPatch,
 )
 
@@ -57,6 +58,20 @@ def create_story_panel_bookmark(slug: str, payload: StoryPanelBookmarkCreate) ->
 @router.patch("/api/projects/{slug}/story-panels/panels/{panel_id}", response_model=StoryPanelDocument)
 def patch_story_panel(slug: str, panel_id: str, payload: StoryPanelPatch) -> StoryPanelDocument:
     return story_panels.patch_panel(slug, panel_id, payload)
+
+
+@router.post("/api/projects/{slug}/story-panels/panels/{panel_id}/image-prompts")
+def append_story_panel_image_prompt(slug: str, panel_id: str, payload: StoryPanelImagePromptWrite) -> dict[str, str]:
+    prompt_id = story_panels.append_image_prompt(slug, panel_id, payload.text)
+    return {"promptId": prompt_id}
+
+
+@router.put("/api/projects/{slug}/story-panels/panels/{panel_id}/image-prompts/{prompt_id}")
+def replace_story_panel_image_prompt(
+    slug: str, panel_id: str, prompt_id: str, payload: StoryPanelImagePromptWrite
+) -> dict[str, str]:
+    story_panels.replace_image_prompt(slug, panel_id, prompt_id, payload.text)
+    return {"promptId": prompt_id}
 
 
 @router.post("/api/projects/{slug}/story-panels/panels/{panel_id}/auto-place", response_model=StoryPanelDocument)

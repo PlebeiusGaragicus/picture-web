@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import clsx from 'clsx';
 import { api } from '../api';
 import { formatRequestError } from '../formatError';
-import type { AdaptationStatus, AgentSession, AgentSessionKind, AgentSessionStatus, BookChatSession, PiTraceDocument } from '../types';
-import { usePiTask } from './usePiTask';
+import type { AgentSession, AgentSessionKind, AgentSessionStatus, PiTaskState, PiTaskStatus, PiTraceDocument } from '../types';
+import { useAttachedPiTask } from './usePiTask';
+import { PiTaskPanel } from './PiTaskPanel';
 import { cleanSessionPreview, formatSessionSubtitle, PiTraceTimeline, summarizeTrace } from './PiTraceView';
 
 const emptyTrace: PiTraceDocument = {
@@ -14,8 +16,6 @@ function kindLabel(kind: AgentSessionKind) {
   switch (kind) {
     case 'read-book':
       return 'Read book';
-    case 'book-chat':
-      return 'Book chat';
     case 'extract-character-list':
       return 'List characters';
     case 'extract-character':
@@ -26,6 +26,10 @@ function kindLabel(kind: AgentSessionKind) {
       return 'Character suggest';
     case 'suggest-concept-location':
       return 'Location suggest';
+    case 'draft-panel-prompt':
+      return 'Draft panel prompt';
+    case 'refine-panel-prompt':
+      return 'Refine panel prompt';
     default:
       return kind;
   }
@@ -51,11 +55,6 @@ function sourceValue(source: Record<string, unknown>, key: string) {
   return typeof value === 'string' ? value : null;
 }
 
-function bookChatSessionId(session: AgentSession | null) {
-  if (!session || session.kind !== 'book-chat') return null;
-  return sourceValue(session.source, 'bookChatSessionId') ?? session.id;
-}
-
 function sessionPreviewText(session: AgentSession, trace: PiTraceDocument | null | undefined) {
   const traceSummary = summarizeTrace(trace ?? null);
   if (traceSummary.preview) {
@@ -76,42 +75,63 @@ function sessionSubtitle(session: AgentSession, trace: PiTraceDocument | null | 
 }
 
 function sessionSourceText(session: AgentSession) {
-  if (session.kind === 'book-chat') return 'Conversation forked from the read-book session.';
   if (session.kind === 'read-book') return 'Root book-context session used by later Pi tasks.';
   const outputCardId = sourceValue(session.source, 'outputCardId');
   if (outputCardId) return `Created concept card ${outputCardId}.`;
   const outputNodeId = sourceValue(session.source, 'outputNodeId');
   if (outputNodeId) return `Created canvas node ${outputNodeId}.`;
+  const panelId = sourceValue(session.source, 'panelId');
+  const promptId = sourceValue(session.source, 'promptId');
+  if (panelId && promptId) return `Wrote image prompt ${promptId} on ${panelId}.`;
   const subjectKind = sourceValue(session.source, 'subjectKind');
   if (subjectKind) return `Concept Art ${subjectKind} suggestion.`;
   return 'Pi coding-agent session.';
 }
 
-export function AgentSessionsView({
+/** One live task in the dashboard strip: attaches to the SSE stream by id. */
+function ActiveTaskCard({
   projectSlug,
-  adaptation,
+  task,
+  onFinished,
+  onDismiss,
+}: {
+  projectSlug: string;
+  task: PiTaskStatus;
+  onFinished: (state: PiTaskState) => void | Promise<void>;
+  onDismiss: () => void;
+}) {
+  const { state, events, error, abort } = useAttachedPiTask(projectSlug, task.taskId, task.state, onFinished);
+  return (
+    <PiTaskPanel
+      title={task.title}
+      state={state}
+      events={events}
+      error={error}
+      onAbort={() => void abort()}
+      onDismiss={onDismiss}
+    />
+  );
+}
+
+export function AgentDashboardView({
+  projectSlug,
   onReloadAdaptation,
 }: {
   projectSlug: string;
-  adaptation: AdaptationStatus;
   onReloadAdaptation: () => Promise<void>;
 }) {
   const [sessions, setSessions] = useState<AgentSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [activeBookChat, setActiveBookChat] = useState<BookChatSession | null>(null);
   const [trace, setTrace] = useState<PiTraceDocument | null>(null);
   const [traceCache, setTraceCache] = useState<Record<string, PiTraceDocument>>({});
-  const [draft, setDraft] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isTraceLoading, setIsTraceLoading] = useState(false);
-  const [isSending, setIsSending] = useState(false);
   const [traceCollapsed, setTraceCollapsed] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { isActive: isReadingBook } = usePiTask(projectSlug, 'read-book', onReloadAdaptation);
+  // Tracked live tasks stay visible after they finish until dismissed.
+  const [trackedTasks, setTrackedTasks] = useState<PiTaskStatus[]>([]);
+  const trackedIdsRef = useRef<Set<string>>(new Set());
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0] ?? null;
-  const activeBookChatId = bookChatSessionId(activeSession);
-  const canCreateChat = adaptation.hasBookSession && !isReadingBook;
-  const canSendChat = canCreateChat && activeSession?.kind === 'book-chat' && activeSession.status !== 'archived';
 
   const loadSessions = useCallback(async () => {
     setIsLoading(true);
@@ -130,6 +150,40 @@ export function AgentSessionsView({
   useEffect(() => {
     void loadSessions();
   }, [loadSessions]);
+
+  // Discover running tasks and keep watching for new ones.
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const active = await api.listPiTasks(projectSlug, { active: true });
+        if (cancelled) return;
+        const fresh = active.filter((task) => !trackedIdsRef.current.has(task.taskId));
+        if (fresh.length) {
+          for (const task of fresh) trackedIdsRef.current.add(task.taskId);
+          setTrackedTasks((current) => [...current, ...fresh]);
+        }
+      } catch (err) {
+        console.error('[photo-web] failed to poll pi tasks', err);
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [projectSlug]);
+
+  const dismissTask = useCallback((taskId: string) => {
+    trackedIdsRef.current.delete(taskId);
+    setTrackedTasks((current) => current.filter((task) => task.taskId !== taskId));
+  }, []);
+
+  const onTaskFinished = useCallback(async () => {
+    await loadSessions();
+    await onReloadAdaptation();
+  }, [loadSessions, onReloadAdaptation]);
 
   const loadTrace = useCallback(async (sessionId: string) => {
     setIsTraceLoading(true);
@@ -164,24 +218,6 @@ export function AgentSessionsView({
   }, [activeSession?.id, activeSession?.piSessionFile, activeSession?.piSessionId, activeSession?.status, loadTrace, traceCache]);
 
   useEffect(() => {
-    if (!activeBookChatId) {
-      setActiveBookChat(null);
-      return;
-    }
-    let cancelled = false;
-    api.getBookChatSession(projectSlug, activeBookChatId)
-      .then((session) => {
-        if (!cancelled) setActiveBookChat(session);
-      })
-      .catch(() => {
-        if (!cancelled) setActiveBookChat(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeBookChatId, projectSlug]);
-
-  useEffect(() => {
     if (!sessions.some((session) => session.status === 'running')) return;
     const timer = window.setInterval(async () => {
       const next = await api.listAgentSessions(projectSlug);
@@ -193,20 +229,6 @@ export function AgentSessionsView({
     }, 1500);
     return () => window.clearInterval(timer);
   }, [activeSessionId, loadTrace, projectSlug, sessions]);
-
-  const createSession = async () => {
-    if (!canCreateChat) return;
-    setError(null);
-    try {
-      const created = await api.createBookChatSession(projectSlug, { title: `Book chat ${sessions.length + 1}` });
-      await loadSessions();
-      setActiveSessionId(created.id);
-      setDraft('');
-      setTrace(emptyTrace);
-    } catch (err) {
-      setError(formatRequestError(err));
-    }
-  };
 
   const archiveSession = async (session: AgentSession) => {
     setError(null);
@@ -224,25 +246,6 @@ export function AgentSessionsView({
     }
   };
 
-  const send = async () => {
-    const text = draft.trim();
-    if (!text || !activeSession || !activeBookChatId || isSending || !canSendChat) return;
-    setDraft('');
-    setIsSending(true);
-    setError(null);
-    try {
-      const updated = await api.sendBookChatTurn(projectSlug, activeBookChatId, text);
-      setActiveBookChat(updated);
-      await loadSessions();
-      await loadTrace(updated.id);
-    } catch (err) {
-      setError(formatRequestError(err));
-      await loadSessions();
-    } finally {
-      setIsSending(false);
-    }
-  };
-
   const sessionCards = useMemo(() => sessions.map((session) => {
     const cachedTrace = traceCache[session.id];
     return {
@@ -254,62 +257,61 @@ export function AgentSessionsView({
 
   return (
     <div className="story-adaptation-screen">
-      <div className="story-adaptation-grid is-book-chat is-agent-sessions">
-        <section className="story-card book-chat-sidebar">
-          <header className="book-chat-sidebar-header">
+      {trackedTasks.length > 0 && (
+        <div className="agent-dashboard-tasks">
+          <header className="agent-dashboard-tasks-header">
+            <h2>Live tasks</h2>
+            <p className="muted">Pi agents working right now. Panels stay after they finish until dismissed.</p>
+          </header>
+          {trackedTasks.map((task) => (
+            <ActiveTaskCard
+              key={task.taskId}
+              projectSlug={projectSlug}
+              task={task}
+              onFinished={onTaskFinished}
+              onDismiss={() => dismissTask(task.taskId)}
+            />
+          ))}
+        </div>
+      )}
+      <div className="story-adaptation-grid is-agent-sessions">
+        <section className="story-card agent-dashboard-sidebar">
+          <header className="agent-dashboard-sidebar-header">
             <div>
               <h2>Agent Sessions</h2>
-              <p className="muted">Browse Pi traces from Read book, Suggest, and book chats.</p>
+              <p className="muted">Every narrow pi task run in this project, with its full trace.</p>
             </div>
-            <button className="secondary book-chat-icon-button" type="button" onClick={() => void loadSessions()} disabled={isLoading} aria-label="Refresh chats">
+            <button className="secondary agent-dashboard-icon-button" type="button" onClick={() => void loadSessions()} disabled={isLoading} aria-label="Refresh sessions">
               ↻
             </button>
           </header>
 
-          {!canCreateChat && (
-            <div className="book-chat-alert" role="status">
-              {isReadingBook
-                ? 'Reading book in Pi…'
-                : adaptation.hasBook
-                  ? 'Read the book on the Story page before starting a book chat.'
-                  : 'Upload book.txt on the Story page before starting a book chat.'}
-            </div>
-          )}
-
-          <div className="book-chat-sidebar-toolbar">
-            {canCreateChat && (
-              <button className="generate-button" type="button" onClick={() => void createSession()}>
-                New chat
-              </button>
-            )}
-          </div>
-
-          <div className="book-chat-session-list">
+          <div className="agent-dashboard-session-list">
             {sessionCards.map(({ session, preview, subtitle }) => (
               <button
                 key={session.id}
                 type="button"
-                className={`book-chat-session-item ${activeSession?.id === session.id ? 'is-selected' : ''}`}
+                className={clsx('agent-dashboard-session-item', activeSession?.id === session.id && 'is-selected')}
                 onClick={() => setActiveSessionId(session.id)}
               >
-                <span className="book-chat-session-title-row">
-                  <span className="book-chat-session-title">{session.title}</span>
-                  <span className={`agent-session-status is-${session.status}`}>{statusLabel(session.status)}</span>
+                <span className="agent-dashboard-session-title-row">
+                  <span className="agent-dashboard-session-title">{session.title}</span>
+                  <span className={clsx('agent-session-status', `is-${session.status}`)}>{statusLabel(session.status)}</span>
                 </span>
-                <span className="book-chat-session-kind">{kindLabel(session.kind)}</span>
-                <span className="book-chat-session-preview">{preview}</span>
+                <span className="agent-dashboard-session-kind">{kindLabel(session.kind)}</span>
+                <span className="agent-dashboard-session-preview">{preview}</span>
                 <small>{subtitle}</small>
               </button>
             ))}
             {!sessions.length && (
-              <div className="book-chat-empty-panel is-compact">
-                <p className="muted">No agent sessions yet. Use Read book or Suggest to create one.</p>
+              <div className="agent-dashboard-empty-panel is-compact">
+                <p className="muted">No agent sessions yet. Run Read book, Suggest, or Draft prompt from the other views.</p>
               </div>
             )}
           </div>
         </section>
 
-        <section className="story-card book-chat-main">
+        <section className="story-card agent-dashboard-main">
           {error && <p className="error">{error}</p>}
           {activeSession ? (
             <>
@@ -317,11 +319,11 @@ export function AgentSessionsView({
                 <div>
                   <div className="agent-session-heading">
                     <h2>{activeSession.title}</h2>
-                    <span className={`agent-session-status is-${activeSession.status}`}>{statusLabel(activeSession.status)}</span>
+                    <span className={clsx('agent-session-status', `is-${activeSession.status}`)}>{statusLabel(activeSession.status)}</span>
                   </div>
                   <p className="muted">{sessionSourceText(activeSession)}</p>
                 </div>
-                <div className="book-chat-main-actions">
+                <div className="agent-dashboard-main-actions">
                   <button
                     className="secondary"
                     type="button"
@@ -331,7 +333,7 @@ export function AgentSessionsView({
                     {traceCollapsed ? 'Expand trace' : 'Collapse trace'}
                   </button>
                   <button className="secondary" type="button" onClick={() => void loadSessions()} disabled={isLoading}>Refresh</button>
-                  <button className="secondary" type="button" onClick={() => void archiveSession(activeSession)} disabled={isSending}>Archive</button>
+                  <button className="secondary" type="button" onClick={() => void archiveSession(activeSession)}>Archive</button>
                 </div>
               </div>
               {activeSession.error && <p className="error">{activeSession.error}</p>}
@@ -340,36 +342,10 @@ export function AgentSessionsView({
                 collapsed={traceCollapsed}
                 isLoading={isTraceLoading}
                 emptyMessage={activeSession.status === 'running' ? 'Waiting for Pi trace events…' : 'No Pi trace yet.'}
-                footer={isSending ? (
-                  <div className="chat-generation-status" role="status">
-                    <span className="spinner" aria-hidden="true" />
-                    Pi is reading the book context...
-                  </div>
-                ) : null}
               />
-              {activeSession.kind === 'book-chat' && (
-                <div className="book-chat-composer">
-                  <textarea
-                    className="prompt-textarea"
-                    value={draft}
-                    disabled={isSending || !canSendChat}
-                    onChange={(event) => setDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey) {
-                        event.preventDefault();
-                        void send();
-                      }
-                    }}
-                    placeholder={activeBookChat ? 'Ask about the book, characters, scenes, themes, or adaptation choices...' : 'Loading book chat...'}
-                  />
-                  <button className="generate-button" type="button" onClick={() => void send()} disabled={!draft.trim() || isSending || !activeBookChat || !canSendChat}>
-                    {isSending ? 'Sending…' : 'Send'}
-                  </button>
-                </div>
-              )}
             </>
           ) : (
-            <div className="book-chat-empty-panel">
+            <div className="agent-dashboard-empty-panel">
               <p className="muted">Select an agent session to browse its trace.</p>
             </div>
           )}
@@ -378,5 +354,3 @@ export function AgentSessionsView({
     </div>
   );
 }
-
-export const BookChatView = AgentSessionsView;

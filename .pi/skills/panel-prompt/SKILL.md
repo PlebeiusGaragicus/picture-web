@@ -3,7 +3,8 @@ name: panel-prompt
 description: >-
   Draft one verbose, imagen-ready image prompt for a single comic panel from
   the panel's story text, surrounding panels, canonical character looks, and
-  the injected imagen prompt guide. Writes the prompt to an exact output path.
+  the injected imagen prompt guide. Delivers via the set_panel_image_prompt
+  tool.
 disable-model-invocation: false
 ---
 
@@ -11,7 +12,7 @@ disable-model-invocation: false
 
 The user provides:
 
-1. An exact output path (first line of the request).
+1. The target **panel id** (first line of the request).
 2. Runner context containing: optional **user guidance** (an idea, concept,
    or direction for the image), story context for the panels before/after,
    **THIS PANEL's story text** (the moment to draw), canonical character
@@ -38,19 +39,21 @@ choices but never overrides canonical character looks or the guide's rules.
 
 ## Delivery
 
-Use the **`write` tool** to save the prompt text to exactly the provided
-output path. The file must contain only the prompt body.
+Call the **`set_panel_image_prompt` tool exactly once** with the provided
+panel id and the complete finished prompt text. Do not write any files.
 
-After writing, reply with exactly `Wrote <output-path>.` and nothing else.
+After the tool succeeds, reply with exactly `Saved prompt for <panel-id>.`
+and nothing else. If the tool returns an error, fix the prompt and call it
+again.
 
 ## Forbidden In Assistant Reply
 
-- Pasting the prompt after `write`
+- Pasting the prompt after the tool call
 - Summaries, explanations, bullets, or code fences
 
 # User Request
 
-Read the runner context and write one imagen-ready prompt for THIS PANEL to
-the exact provided output path.
+Read the runner context and deliver one imagen-ready prompt for THIS PANEL
+via set_panel_image_prompt.
 
 **User:** `@$`

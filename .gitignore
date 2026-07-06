@@ -5,7 +5,6 @@ photo-library/
 node_modules/
 dist/
 *.tsbuildinfo
-webui/e2e/
 
 .DS_Store
 .env

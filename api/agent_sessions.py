@@ -1,11 +1,4 @@
-"""Persistent Pi agent-session registry and trace access.
-
-Book chats are bridged into this registry ON PURPOSE under the same id:
-a stored session with kind "book-chat" is hydrated from the book-chat
-store, and book chats without a stored session are listed virtually.
-All ids are ULIDs; create_session refuses to overwrite an existing id so
-the two stores can never silently shadow each other.
-"""
+"""Persistent Pi agent-session registry and trace access."""
 
 from __future__ import annotations
 
@@ -68,7 +61,7 @@ def create_session(
     log_files: dict[str, str] | None = None,
 ) -> AgentSessionDocument:
     root = adaptation.ensure_adaptation(slug)
-    if session_id is not None and kind != "book-chat" and _read_stored_session(slug, session_id) is not None:
+    if session_id is not None and _read_stored_session(slug, session_id) is not None:
         raise HTTPException(status_code=409, detail=f"Agent session id already exists: {session_id}")
     now = utc_now()
     session = AgentSessionDocument(
@@ -135,112 +128,28 @@ def update_session(
     return write_session(slug, session)
 
 
-def _session_from_book_chat(slug: str, chat: Any) -> AgentSessionDocument:
-    source = {"type": "book-chat", "bookChatSessionId": chat.id}
-    status: AgentSessionStatus = "archived" if chat.archivedAt is not None else "succeeded"
-    return AgentSessionDocument(
-        id=chat.id,
-        projectSlug=chat.projectSlug,
-        title=chat.title,
-        kind="book-chat",
-        status=status,
-        createdAt=chat.createdAt,
-        updatedAt=chat.updatedAt,
-        completedAt=chat.updatedAt if chat.turns else None,
-        archivedAt=chat.archivedAt,
-        piSessionId=chat.piSessionId,
-        piSessionFile=chat.piSessionFile,
-        parentSessionId=chat.forkRootSessionId,
-        source=source,
-        stats={"messageCount": len(chat.turns)},
-    )
-
-
-def _hydrate_book_chat_session(slug: str, session: AgentSessionDocument) -> AgentSessionDocument:
-    if session.kind != "book-chat":
-        return session
-    import book_chat_sessions
-
-    try:
-        chat = book_chat_sessions.read_session(slug, session.id)
-    except HTTPException:
-        return session
-    bridged = _session_from_book_chat(slug, chat)
-    return bridged.model_copy(
-        update={
-            "source": {**session.source, **bridged.source},
-            "logFiles": session.logFiles,
-            "error": session.error,
-        }
-    )
-
-
-def _book_chat_sessions(slug: str, include_archived: bool) -> list[AgentSessionDocument]:
-    import book_chat_sessions
-
-    bridged: list[AgentSessionDocument] = []
-    try:
-        chats = book_chat_sessions.list_sessions(slug, include_archived=include_archived)
-    except HTTPException:
-        return bridged
-    for chat in chats:
-        if _read_stored_session(slug, chat.id) is None:
-            bridged.append(_session_from_book_chat(slug, chat))
-    return bridged
-
-
 def list_sessions(slug: str, include_archived: bool = False) -> list[AgentSessionDocument]:
     root = _root(slug)
     sessions: list[AgentSessionDocument] = []
     if root.is_dir():
         for path in sorted(root.glob("*/session.json")):
             session = AgentSessionDocument.model_validate(library.read_json(path))
-            session = _hydrate_book_chat_session(slug, session)
             if include_archived or session.archivedAt is None:
                 sessions.append(session)
-    sessions.extend(_book_chat_sessions(slug, include_archived))
     return sorted(sessions, key=lambda session: session.updatedAt, reverse=True)
 
 
 def read_session(slug: str, session_id: str) -> AgentSessionDocument:
     session = _read_stored_session(slug, session_id)
-    if session is not None:
-        return _hydrate_book_chat_session(slug, session)
-    for bridged in _book_chat_sessions(slug, include_archived=True):
-        if bridged.id == session_id:
-            return bridged
-    raise HTTPException(status_code=404, detail=f"Agent session not found: {session_id}")
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Agent session not found: {session_id}")
+    return session
 
 
 def patch_session(slug: str, session_id: str, payload: AgentSessionPatch) -> AgentSessionDocument:
     session = _read_stored_session(slug, session_id)
     if session is None:
-        source = read_session(slug, session_id)
-        if source.kind == "book-chat" and payload.archived is not None:
-            import book_chat_sessions
-            from models import BookChatSessionPatch
-
-            patched = book_chat_sessions.patch_session(
-                slug,
-                session_id,
-                BookChatSessionPatch(title=payload.title, archived=payload.archived),
-            )
-            return _session_from_book_chat(slug, patched)
         raise HTTPException(status_code=404, detail=f"Agent session not found: {session_id}")
-    if session.kind == "book-chat" and (payload.archived is not None or payload.title is not None):
-        import book_chat_sessions
-        from models import BookChatSessionPatch
-
-        patched = book_chat_sessions.patch_session(
-            slug,
-            session_id,
-            BookChatSessionPatch(title=payload.title, archived=payload.archived),
-        )
-        hydrated = _session_from_book_chat(slug, patched).model_copy(
-            update={"logFiles": session.logFiles, "error": session.error}
-        )
-        write_session(slug, hydrated)
-        return hydrated
     if payload.title is not None:
         session.title = payload.title
     if payload.archived is not None:
