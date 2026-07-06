@@ -99,12 +99,18 @@ attaches to each running task's SSE stream, and browses the
 
 ## Frontend map
 
-- `main.tsx` — app root: project landing, workspace shell, the canvas view, and
-  cross-view state (assets, canvas, adaptation status). Still the largest file;
-  extract further views as they grow.
+- `main.tsx` — thin app shell (~530 lines): view routing, phase/sidebar state,
+  adaptation status, PDF export. Project data and all canvas behavior live in
+  `canvas/useCanvasWorkspace.ts` (assets, tags, canvas doc, chat sessions,
+  nodes, selection, generation, import, delete/archive); `canvas/CanvasView.tsx`
+  renders the React Flow surface and the sidebar/viewer/dialog panels from it.
+  `ProjectLanding.tsx` / `ProjectPhaseSidebar.tsx` are the shell's other pieces.
 - `projectNavigation.ts` — the six workspace views; navigation is a
   `projectPhase` string, no router.
-- `canvas/` — node data types, edge derivation, node sidebars, tag editing.
+- `canvas/` — the whole canvas feature: `useCanvasWorkspace` (state + handlers),
+  `CanvasView` (surface + panels), `nodes.tsx` (React Flow node types),
+  `flowDocument.ts` (canvas.json ⇄ flow-node conversion), `ImageViewer`,
+  `ChatRefinementPanel`, edge derivation, node sidebars, tag editing.
 - `storyPanels/` — Story + Layout views and their pure layout/print logic.
 - `sessions/` — Agent dashboard: live pi task strip, session list, pi trace timeline.
 - `conceptArt/`, `characters/`, `visualStyles/` — the other workspace views.
