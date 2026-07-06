@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { api } from '../api';
 import { formatRequestError } from '../formatError';
+import { Icon } from '../Icon';
+import type { ProjectPhase } from '../projectNavigation';
 import type { AgentSession, AgentSessionKind, AgentSessionStatus, PiTaskState, PiTaskStatus, PiTraceDocument } from '../types';
 import { useAttachedPiTask } from './usePiTask';
 import { PiTaskPanel } from './PiTaskPanel';
@@ -11,6 +13,25 @@ const emptyTrace: PiTraceDocument = {
   steps: [],
   stats: { messageCount: 0, toolCount: 0, userCount: 0, assistantCount: 0 },
 };
+
+/** Kinds that run project-wide with no per-target argument — safe to re-run as-is. */
+const RERUNNABLE_KINDS = new Set<AgentSessionKind>([
+  'read-book',
+  'extract-character-list',
+  'extract-all-characters',
+  'suggest-concept-character',
+  'suggest-concept-location',
+]);
+
+type StatusFilter = 'all' | AgentSessionStatus;
+
+const STATUS_TABS: Array<{ id: StatusFilter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'running', label: 'Running' },
+  { id: 'succeeded', label: 'Done' },
+  { id: 'failed', label: 'Failed' },
+  { id: 'archived', label: 'Archived' },
+];
 
 function kindLabel(kind: AgentSessionKind) {
   switch (kind) {
@@ -88,6 +109,42 @@ function sessionSourceText(session: AgentSession) {
   return 'Pi coding-agent session.';
 }
 
+/** Where "Open" should navigate for a session — its produced artifact, else the kind's home view. */
+function sessionDestination(session: AgentSession): { phase: ProjectPhase; label: string } {
+  if (sourceValue(session.source, 'outputCardId')) return { phase: 'concept-art', label: 'Open concept art' };
+  if (sourceValue(session.source, 'outputNodeId')) return { phase: 'image-canvas', label: 'Open canvas' };
+  if (sourceValue(session.source, 'panelId')) return { phase: 'layout-editor', label: 'Open layout' };
+  switch (session.kind) {
+    case 'read-book':
+      return { phase: 'story', label: 'Open story' };
+    case 'extract-character-list':
+    case 'extract-character':
+    case 'extract-all-characters':
+      return { phase: 'characters-hub', label: 'Open characters' };
+    case 'suggest-concept-character':
+    case 'suggest-concept-location':
+      return { phase: 'concept-art', label: 'Open concept art' };
+    case 'draft-panel-prompt':
+    case 'refine-panel-prompt':
+      return { phase: 'layout-editor', label: 'Open layout' };
+    default:
+      return { phase: 'story', label: 'Open story' };
+  }
+}
+
+function formatDuration(session: AgentSession): string | null {
+  const start = new Date(session.createdAt).getTime();
+  const endSource = session.completedAt ?? (session.status === 'running' ? null : session.updatedAt);
+  const end = endSource ? new Date(endSource).getTime() : Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+  const secs = Math.round((end - start) / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ${secs % 60}s`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ${mins % 60}m`;
+}
+
 /** One live task in the dashboard strip: attaches to the SSE stream by id. */
 function ActiveTaskCard({
   projectSlug,
@@ -116,9 +173,11 @@ function ActiveTaskCard({
 export function AgentDashboardView({
   projectSlug,
   onReloadAdaptation,
+  onOpenPhase,
 }: {
   projectSlug: string;
   onReloadAdaptation: () => Promise<void>;
+  onOpenPhase: (phase: ProjectPhase) => void;
 }) {
   const [sessions, setSessions] = useState<AgentSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -126,8 +185,11 @@ export function AgentDashboardView({
   const [traceCache, setTraceCache] = useState<Record<string, PiTraceDocument>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isTraceLoading, setIsTraceLoading] = useState(false);
-  const [traceCollapsed, setTraceCollapsed] = useState(true);
+  const [traceCollapsed, setTraceCollapsed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [search, setSearch] = useState('');
+  const [rerunning, setRerunning] = useState(false);
   // Tracked live tasks stay visible after they finish until dismissed.
   const [trackedTasks, setTrackedTasks] = useState<PiTaskStatus[]>([]);
   const trackedIdsRef = useRef<Set<string>>(new Set());
@@ -137,7 +199,7 @@ export function AgentDashboardView({
     setIsLoading(true);
     setError(null);
     try {
-      const next = await api.listAgentSessions(projectSlug);
+      const next = await api.listAgentSessions(projectSlug, true);
       setSessions(next);
       setActiveSessionId((current) => current && next.some((session) => session.id === current) ? current : next[0]?.id ?? null);
     } catch (err) {
@@ -220,7 +282,7 @@ export function AgentDashboardView({
   useEffect(() => {
     if (!sessions.some((session) => session.status === 'running')) return;
     const timer = window.setInterval(async () => {
-      const next = await api.listAgentSessions(projectSlug);
+      const next = await api.listAgentSessions(projectSlug, true);
       setSessions(next);
       const selected = activeSessionId ? next.find((session) => session.id === activeSessionId) : null;
       if (selected?.status === 'running' && (selected.piSessionId || selected.piSessionFile)) {
@@ -234,8 +296,7 @@ export function AgentDashboardView({
     setError(null);
     try {
       const archived = await api.patchAgentSession(projectSlug, session.id, { archived: true });
-      setSessions((current) => current.filter((item) => item.id !== archived.id));
-      setActiveSessionId((current) => current === archived.id ? null : current);
+      setSessions((current) => current.map((item) => item.id === archived.id ? archived : item));
       setTraceCache((current) => {
         const next = { ...current };
         delete next[archived.id];
@@ -243,6 +304,19 @@ export function AgentDashboardView({
       });
     } catch (err) {
       setError(formatRequestError(err));
+    }
+  };
+
+  const rerunSession = async (session: AgentSession) => {
+    setError(null);
+    setRerunning(true);
+    try {
+      await api.startPiTask(projectSlug, session.kind, { force: true });
+      // The 3s live-task poll surfaces the new run in the Live lane automatically.
+    } catch (err) {
+      setError(formatRequestError(err));
+    } finally {
+      setRerunning(false);
     }
   };
 
@@ -255,39 +329,149 @@ export function AgentDashboardView({
     };
   }), [sessions, traceCache]);
 
-  return (
-    <div className="story-adaptation-screen">
-      {trackedTasks.length > 0 && (
-        <div className="agent-dashboard-tasks">
-          <header className="agent-dashboard-tasks-header">
-            <h2>Live tasks</h2>
-            <p className="muted">Pi agents working right now. Panels stay after they finish until dismissed.</p>
-          </header>
-          {trackedTasks.map((task) => (
-            <ActiveTaskCard
-              key={task.taskId}
-              projectSlug={projectSlug}
-              task={task}
-              onFinished={onTaskFinished}
-              onDismiss={() => dismissTask(task.taskId)}
-            />
-          ))}
-        </div>
-      )}
-      <div className="story-adaptation-grid is-agent-sessions">
-        <section className="story-card agent-dashboard-sidebar">
-          <header className="agent-dashboard-sidebar-header">
-            <div>
-              <h2>Agent Sessions</h2>
-              <p className="muted">Every narrow pi task run in this project, with its full trace.</p>
-            </div>
-            <button className="secondary agent-dashboard-icon-button" type="button" onClick={() => void loadSessions()} disabled={isLoading} aria-label="Refresh sessions">
-              ↻
-            </button>
-          </header>
+  const stats = useMemo(() => {
+    const counts = { runs: 0, running: 0, succeeded: 0, failed: 0, archived: 0 };
+    for (const session of sessions) {
+      if (session.status === 'archived') {
+        counts.archived += 1;
+        continue;
+      }
+      counts.runs += 1;
+      if (session.status === 'running') counts.running += 1;
+      else if (session.status === 'succeeded') counts.succeeded += 1;
+      else if (session.status === 'failed') counts.failed += 1;
+    }
+    return counts;
+  }, [sessions]);
 
-          <div className="agent-dashboard-session-list">
-            {sessionCards.map(({ session, preview, subtitle }) => (
+  const tabCount = (id: StatusFilter) => {
+    switch (id) {
+      case 'all':
+        return stats.runs;
+      case 'running':
+        return stats.running;
+      case 'succeeded':
+        return stats.succeeded;
+      case 'failed':
+        return stats.failed;
+      case 'archived':
+        return stats.archived;
+      default:
+        return 0;
+    }
+  };
+
+  const filteredCards = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return sessionCards.filter(({ session, preview }) => {
+      if (statusFilter === 'all' ? session.status === 'archived' : session.status !== statusFilter) {
+        return false;
+      }
+      if (!needle) return true;
+      const haystack = `${session.title} ${kindLabel(session.kind)} ${preview}`.toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [sessionCards, statusFilter, search]);
+
+  const activeTrace = trace ?? (activeSession ? traceCache[activeSession.id] ?? null : null);
+  const activeStats = activeTrace?.stats ?? {
+    messageCount: Number(activeSession?.stats?.messageCount ?? 0),
+    toolCount: Number(activeSession?.stats?.toolCount ?? 0),
+  };
+  const parentSession = activeSession?.parentSessionId
+    ? sessions.find((session) => session.id === activeSession.parentSessionId) ?? null
+    : null;
+  const destination = activeSession ? sessionDestination(activeSession) : null;
+  const duration = activeSession ? formatDuration(activeSession) : null;
+
+  return (
+    <div className="agent-hub">
+      <header className="agent-hub-header">
+        <div>
+          <h1 className="agent-hub-title">Agents</h1>
+          <p className="muted">Monitor, browse, and re-run every Pi agent in this project.</p>
+        </div>
+        <button
+          className="secondary agent-hub-refresh"
+          type="button"
+          onClick={() => void loadSessions()}
+          disabled={isLoading}
+          aria-label="Refresh sessions"
+        >
+          <Icon name="refresh" />
+          <span>Refresh</span>
+        </button>
+      </header>
+
+      <section className="agent-hub-stats" aria-label="Agent run summary">
+        <div className="agent-hub-stat">
+          <span className="agent-hub-stat-value">{stats.runs}</span>
+          <span className="agent-hub-stat-label">Runs</span>
+        </div>
+        <div className="agent-hub-stat is-running">
+          <span className="agent-hub-stat-value">{stats.running}</span>
+          <span className="agent-hub-stat-label">Running</span>
+        </div>
+        <div className="agent-hub-stat is-succeeded">
+          <span className="agent-hub-stat-value">{stats.succeeded}</span>
+          <span className="agent-hub-stat-label">Done</span>
+        </div>
+        <div className="agent-hub-stat is-failed">
+          <span className="agent-hub-stat-value">{stats.failed}</span>
+          <span className="agent-hub-stat-label">Failed</span>
+        </div>
+      </section>
+
+      <section className="agent-hub-live" aria-label="Live agents">
+        <header className="agent-hub-section-head">
+          <h2>Live now</h2>
+          {trackedTasks.length > 0 && <span className="agent-hub-live-count">{trackedTasks.length}</span>}
+        </header>
+        {trackedTasks.length > 0 ? (
+          <div className="agent-hub-live-cards">
+            {trackedTasks.map((task) => (
+              <ActiveTaskCard
+                key={task.taskId}
+                projectSlug={projectSlug}
+                task={task}
+                onFinished={onTaskFinished}
+                onDismiss={() => dismissTask(task.taskId)}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="agent-hub-live-empty muted">No agents running right now.</p>
+        )}
+      </section>
+
+      <div className="agent-hub-browser">
+        <aside className="agent-hub-list-pane">
+          <div className="agent-hub-filters">
+            <input
+              className="agent-hub-search"
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search sessions…"
+              aria-label="Search sessions"
+            />
+            <div className="agent-hub-filter-tabs" role="group" aria-label="Filter by status">
+              {STATUS_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={clsx('secondary agent-hub-filter-tab', statusFilter === tab.id && 'is-active')}
+                  onClick={() => setStatusFilter(tab.id)}
+                >
+                  {tab.label}
+                  <span className="agent-hub-filter-count">{tabCount(tab.id)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="agent-hub-session-list">
+            {filteredCards.map(({ session, preview, subtitle }) => (
               <button
                 key={session.id}
                 type="button"
@@ -304,48 +488,85 @@ export function AgentDashboardView({
               </button>
             ))}
             {!sessions.length && (
-              <div className="agent-dashboard-empty-panel is-compact">
+              <div className="agent-hub-empty">
                 <p className="muted">No agent sessions yet. Run Read book, Suggest, or Draft prompt from the other views.</p>
               </div>
             )}
+            {sessions.length > 0 && !filteredCards.length && (
+              <div className="agent-hub-empty">
+                <p className="muted">No sessions match this filter.</p>
+              </div>
+            )}
           </div>
-        </section>
+        </aside>
 
-        <section className="story-card agent-dashboard-main">
+        <section className="agent-hub-detail">
           {error && <p className="error">{error}</p>}
           {activeSession ? (
             <>
-              <div className="archetype-card-head">
-                <div>
+              <header className="agent-hub-detail-head">
+                <div className="agent-hub-detail-heading">
                   <div className="agent-session-heading">
                     <h2>{activeSession.title}</h2>
                     <span className={clsx('agent-session-status', `is-${activeSession.status}`)}>{statusLabel(activeSession.status)}</span>
                   </div>
-                  <p className="muted">{sessionSourceText(activeSession)}</p>
+                  <p className="muted">
+                    <span className="agent-dashboard-session-kind">{kindLabel(activeSession.kind)}</span>
+                    {' · '}
+                    {sessionSourceText(activeSession)}
+                  </p>
+                  {parentSession && (
+                    <button
+                      type="button"
+                      className="agent-hub-breadcrumb"
+                      onClick={() => setActiveSessionId(parentSession.id)}
+                    >
+                      ↰ Forked from {parentSession.title}
+                    </button>
+                  )}
                 </div>
-                <div className="agent-dashboard-main-actions">
+                <div className="agent-hub-detail-actions">
+                  {destination && (
+                    <button className="secondary" type="button" onClick={() => onOpenPhase(destination.phase)}>
+                      {destination.label}
+                    </button>
+                  )}
+                  {RERUNNABLE_KINDS.has(activeSession.kind) && (
+                    <button className="secondary" type="button" disabled={rerunning} onClick={() => void rerunSession(activeSession)}>
+                      {rerunning ? 'Starting…' : 'Re-run'}
+                    </button>
+                  )}
                   <button
                     className="secondary"
                     type="button"
                     onClick={() => setTraceCollapsed((value) => !value)}
-                    disabled={!trace?.steps.length}
+                    disabled={!activeTrace?.steps.length}
                   >
                     {traceCollapsed ? 'Expand trace' : 'Collapse trace'}
                   </button>
-                  <button className="secondary" type="button" onClick={() => void loadSessions()} disabled={isLoading}>Refresh</button>
-                  <button className="secondary" type="button" onClick={() => void archiveSession(activeSession)}>Archive</button>
+                  {activeSession.status !== 'archived' && (
+                    <button className="secondary" type="button" onClick={() => void archiveSession(activeSession)}>Archive</button>
+                  )}
                 </div>
+              </header>
+
+              <div className="agent-hub-detail-metrics">
+                {duration && <span className="agent-hub-metric">⏱ {duration}</span>}
+                <span className="agent-hub-metric">{activeStats.messageCount} message{activeStats.messageCount === 1 ? '' : 's'}</span>
+                <span className="agent-hub-metric">{activeStats.toolCount} tool{activeStats.toolCount === 1 ? '' : 's'}</span>
               </div>
+
               {activeSession.error && <p className="error">{activeSession.error}</p>}
               <PiTraceTimeline
-                trace={trace}
+                trace={activeTrace}
                 collapsed={traceCollapsed}
                 isLoading={isTraceLoading}
                 emptyMessage={activeSession.status === 'running' ? 'Waiting for Pi trace events…' : 'No Pi trace yet.'}
               />
             </>
           ) : (
-            <div className="agent-dashboard-empty-panel">
+            <div className="agent-hub-detail-empty">
+              <span className="agent-hub-detail-empty-icon" aria-hidden="true" />
               <p className="muted">Select an agent session to browse its trace.</p>
             </div>
           )}

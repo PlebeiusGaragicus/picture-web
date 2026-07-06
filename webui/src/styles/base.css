@@ -21,9 +21,6 @@
   font-weight: 700;
 }
 
-.file-button:hover {
-  background: var(--blue-700);
-}
 
 .file-button.secondary {
   color: var(--text-primary);
@@ -98,17 +95,18 @@ button {
   border-radius: var(--btn-radius, var(--radius-md));
   font-weight: var(--btn-weight, 700);
   font-size: var(--btn-font, inherit);
-  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), filter var(--transition-fast);
 }
 
+/* Uniform hover feedback via brightness — non-destructive, so component buttons
+   that set their own background (nav items, session rows, tiles) aren't hijacked. */
 button:hover:not(:disabled) {
-  background: var(--btn-bg-hover, var(--blue-700));
+  filter: brightness(1.14);
 }
 
 button.secondary {
   --btn-fg: var(--text-primary);
   --btn-bg: var(--border);
-  --btn-bg-hover: var(--border-strong);
 }
 
 /* Tertiary: outlined, transparent — for low-emphasis actions. */
@@ -116,13 +114,11 @@ button.ghost {
   --btn-fg: var(--text-secondary);
   --btn-bg: transparent;
   --btn-border: 1px solid var(--border);
-  --btn-bg-hover: rgb(var(--white-rgb) / 0.06);
 }
 
 button.danger {
   --btn-fg: var(--white);
   --btn-bg: #dc2626;
-  --btn-bg-hover: #b91c1c;
 }
 
 /* Low-emphasis destructive: reads as danger only on hover, so it doesn't
@@ -130,7 +126,9 @@ button.danger {
 button.danger-ghost {
   --btn-fg: var(--danger);
   --btn-bg: transparent;
-  --btn-bg-hover: rgb(220 38 38 / 0.12);
+}
+button.danger-ghost:hover:not(:disabled) {
+  background: rgb(220 38 38 / 0.12);
 }
 
 .small-button {

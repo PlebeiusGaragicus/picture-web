@@ -195,12 +195,15 @@
   border-radius: var(--radius-full);
 }
 
-.concept-art-edit-dialog {
+/* Compound selector so this wins over `.confirm-dialog` (overlays.css loads
+   later and would otherwise clamp this editor to the 380px confirm width). */
+.confirm-dialog.concept-art-edit-dialog {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: min(680px, calc(100vw - 48px));
+  width: min(720px, calc(100vw - 48px));
   max-height: calc(100vh - 64px);
+  padding: var(--space-7);
   overflow: auto;
 }
 

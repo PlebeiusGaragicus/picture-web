@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { api } from '../api';
 import { PiTaskPanel } from '../sessions/PiTaskPanel';
 import { usePiTask } from '../sessions/usePiTask';
-import { HubCardMenu } from '../conceptArt/HubCardMenu';
 import { VisualStyleList } from '../visualStyles/VisualStyleList';
 import { formatRequestError } from '../formatError';
 import { HelpTip, HoverTooltip, Modal } from '../ui';
@@ -114,7 +113,6 @@ export function CharactersHubView({
   projectTags,
   viewMode,
   onDraftArtifactToCanvas,
-  onFocusNode,
   onOpenChatForAsset,
   onViewAsset,
   onCreateTag,
@@ -129,7 +127,6 @@ export function CharactersHubView({
   projectTags: TagDefinition[];
   viewMode: 'list' | 'canvas';
   onDraftArtifactToCanvas: (key: string) => Promise<void>;
-  onFocusNode: (nodeId: string) => void;
   onOpenChatForAsset: (nodeId: string, assetId: string) => void;
   onViewAsset: (assetId: string) => void;
   onCreateTag: (tag: TagDefinition) => void;
@@ -279,13 +276,13 @@ export function CharactersHubView({
         mode: 'new-image',
         styleRef: '',
       });
-      const created = await api.createImageGroup(projectSlug, {
+      await api.createImageGroup(projectSlug, {
         displayName: characterDisplayName(key),
         tags: ['comic-adaptation', 'character-sheet', key],
         prompt: '',
       });
       await onReloadProject();
-      onFocusNode(created.nodeId);
+      // Stay on the Characters list and open the edit modal in place.
       setEditingKey(key);
       setDraftName(characterDisplayName(key));
       setDraftDescription('');
@@ -363,8 +360,20 @@ export function CharactersHubView({
                   : characterDisplayName(characterSlug);
                 const canPlaceOnCanvas = Boolean(characterSlug && link?.prompt.trim());
                 return (
-                  <article key={characterSlug} className="story-card character-hub-card">
-                    <div className={`character-hub-thumb ${asset ? 'has-image' : ''}`} onClick={() => asset && onViewAsset(asset.id)} role={asset ? 'button' : undefined}>
+                  <article
+                    key={characterSlug}
+                    className={`story-card character-hub-card${record ? ' is-clickable' : ''}`}
+                    onClick={record ? () => openEdit(characterSlug, record) : undefined}
+                  >
+                    <div
+                      className={`character-hub-thumb ${asset ? 'has-image' : ''}`}
+                      onClick={(event) => {
+                        if (!asset) return;
+                        event.stopPropagation();
+                        onViewAsset(asset.id);
+                      }}
+                      role={asset ? 'button' : undefined}
+                    >
                       {asset ? (
                         <div className="character-hub-thumb-frame">
                           <img src={asset.thumbnailUrl ?? `/api/projects/${projectSlug}/assets/${asset.id}/thumb`} alt="" />
@@ -407,23 +416,15 @@ export function CharactersHubView({
                     <div className="character-hub-body">
                       <div className="character-hub-card-header">
                         <h3>{title}</h3>
-                        <HubCardMenu
-                          disabled={busy || deletingCharacter}
-                          ariaLabel="Character actions"
-                          onDelete={() => setPendingDeleteKey(characterSlug)}
-                        />
                       </div>
                       {!asset && link?.prompt.trim() && (
                         <p className="muted concept-art-node-preview">{link.prompt.trim().split('\n').slice(0, 2).join(' ')}</p>
                       )}
-                      <div className="character-hub-actions">
+                      <div className="character-hub-actions" onClick={(event) => event.stopPropagation()}>
                         {characterSlug && canExtract && (
                           <button className="secondary" type="button" disabled={busy || !adaptation.hasBookSession} onClick={() => void extractOneTask.start({ target: characterSlug })}>
                             {extractingSlug === characterSlug ? 'Extracting…' : 'Extract'}
                           </button>
-                        )}
-                        {characterSlug && record && (
-                          <button className="secondary" type="button" onClick={() => openEdit(characterSlug, record)}>Edit</button>
                         )}
                         {characterSlug && (
                           <button
@@ -455,7 +456,6 @@ export function CharactersHubView({
         <Modal
           title={draftName || characterLabel(editingKey, projectTags)}
           dialogClassName="editor-dialog--character-edit"
-          hideHeader
           onClose={() => setEditingKey(null)}
         >
           <div className="adaptation-file-form character-edit-form">
@@ -517,10 +517,19 @@ export function CharactersHubView({
               <p className="muted">No image prompts yet. Run Extract to generate variant prompts.</p>
             )}
           </div>
-          <div className="modal-actions">
-            <button className="secondary" onClick={() => setEditingKey(null)} disabled={busyKey === editingKey}>Cancel</button>
-            <button className="generate-button" onClick={() => void saveEdit()} disabled={busyKey === editingKey || !draftName.trim()}>
+          <div className="modal-actions character-edit-modal-actions">
+            <button onClick={() => void saveEdit()} disabled={busyKey === editingKey || !draftName.trim()}>
               {busyKey === editingKey ? 'Saving...' : 'Save'}
+            </button>
+            <button className="secondary" onClick={() => setEditingKey(null)} disabled={busyKey === editingKey}>Cancel</button>
+            <span className="character-edit-actions-spacer" />
+            <button
+              className="danger"
+              type="button"
+              disabled={busyKey === editingKey || deletingCharacter}
+              onClick={() => setPendingDeleteKey(editingKey)}
+            >
+              Delete
             </button>
           </div>
         </Modal>

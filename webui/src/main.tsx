@@ -1657,6 +1657,7 @@ function App() {
           <AgentDashboardView
             projectSlug={openProjectSlug}
             onReloadAdaptation={loadAdaptation}
+            onOpenPhase={handleProjectPhaseChange}
           />
         )}
         {isConceptArtActive && adaptation && (
@@ -1685,7 +1686,6 @@ function App() {
             projectTags={projectTags}
             viewMode={phaseViewMode === 'canvas' ? 'canvas' : 'list'}
             onDraftArtifactToCanvas={(key) => draftArtifactToCanvas('character-sheet', key)}
-            onFocusNode={focusConceptNode}
             onOpenChatForAsset={openChatForAsset}
             onViewAsset={openAssetInViewer}
             onCreateTag={createProjectTag}

@@ -6,7 +6,6 @@ import { formatRequestError } from '../formatError';
 import { PiTaskPanel } from '../sessions/PiTaskPanel';
 import { usePiTask } from '../sessions/usePiTask';
 import { VisualStyleList } from '../visualStyles/VisualStyleList';
-import { HubCardMenu } from './HubCardMenu';
 import type { Asset, AdaptationStatus, CanvasDocument, ConceptArtSubjectKind, ConceptCard } from '../types';
 
 function conceptCardTag(cardId: string) {
@@ -363,14 +362,6 @@ export function ConceptArtView({
             </div>
             <div className="character-hub-card-header">
               <h3>{title}</h3>
-              <span onClick={(event) => event.stopPropagation()}>
-                <HubCardMenu
-                  disabled={busy || deletingConcept}
-                  ariaLabel="Concept actions"
-                  onEdit={() => openEditModal(card)}
-                  onDelete={() => setPendingDeleteId(card.id)}
-                />
-              </span>
             </div>
           </div>
           <div className="character-hub-actions">

@@ -34,6 +34,18 @@
   transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
+.character-hub-card.is-clickable {
+  cursor: pointer;
+}
+
+.character-edit-modal-actions {
+  justify-content: flex-start;
+}
+
+.character-edit-actions-spacer {
+  flex: 1 1 auto;
+}
+
 .character-hub-card:hover {
   transform: translateY(-2px);
   border-color: var(--border-strong);
