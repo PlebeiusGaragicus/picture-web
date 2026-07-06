@@ -609,22 +609,6 @@
   border-color: #e879f9;
 }
 
-.text-result-node {
-  color: #dcfce7;
-  background: #14532d;
-  border-color: var(--green-300);
-  border-style: solid;
-}
-
-.text-result-node .draft-placeholder {
-  background:
-    linear-gradient(135deg, rgb(134 239 172 / 0.16) 25%, transparent 25%) -8px 0 / 16px 16px,
-    linear-gradient(225deg, rgb(134 239 172 / 0.16) 25%, transparent 25%) -8px 0 / 16px 16px,
-    linear-gradient(315deg, rgb(134 239 172 / 0.16) 25%, transparent 25%) 0 0 / 16px 16px,
-    linear-gradient(45deg, rgb(134 239 172 / 0.16) 25%, #052e16 25%) 0 0 / 16px 16px;
-  border-color: #bbf7d0;
-}
-
 .node-role-badge {
   position: absolute;
   top: 6px;
@@ -682,11 +666,6 @@
 .archetype-draft-node .draft-prompt-preview {
   color: rgb(250 232 255 / 0.92);
   background: linear-gradient(180deg, rgb(59 7 100 / 0.1) 0%, rgb(59 7 100 / 0.55) 100%);
-}
-
-.text-result-node .draft-prompt-preview {
-  color: rgb(220 252 231 / 0.92);
-  background: linear-gradient(180deg, rgb(20 83 45 / 0.1) 0%, rgb(20 83 45 / 0.55) 100%);
 }
 
 .image-group-node {

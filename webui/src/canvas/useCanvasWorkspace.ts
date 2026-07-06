@@ -942,20 +942,6 @@ export function useCanvasWorkspace({
     await createDraftAt(refs, position, { prompt: sourceAsset.prompt?.text ?? '', params });
   };
 
-  const createChildTextArtifact = async (sourceNode: Node<DraftNodeData>) => {
-    const position = { x: sourceNode.position.x + 320, y: sourceNode.position.y + 80 };
-    const prompt = sourceNode.data.prompt;
-    const displayName = `${visibleDisplayName(sourceNode.data.displayName) || 'Source'} child`;
-    const params = sourceNode.data.params ?? defaultDraftParams;
-    await createDraftAt([], position, {
-      displayName,
-      prompt,
-      params,
-      role: { type: 'text-result', sourceNodeId: sourceNode.id },
-      tags: ['text-result'],
-    });
-  };
-
   const reportGenerationFailure = (nodeId: string, err: unknown) => {
     const message = formatRequestError(err);
     setError(message);
@@ -1286,7 +1272,6 @@ export function useCanvasWorkspace({
     generateDraft,
     generateImageVariants,
     generationError,
-    createChildTextArtifact,
     createSiblingDraft,
     changeVariant,
     deleteNodeById,

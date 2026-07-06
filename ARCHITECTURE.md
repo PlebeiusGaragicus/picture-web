@@ -39,8 +39,9 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
 
 - **Node types:** `draft` (prompt + refs + params, no pixels yet) and `imageGroup`
   (one or more asset ids, variant stack, `activeAssetId`).
-- **Roles** (`node.role`): `style-ref-source`, `text-result`, `generated-result`,
-  `refinement`. Durable source nodes (style refs) can't be deleted from the UI;
+- **Roles** (`node.role`): `style-ref-source`, `generated-result`, `refinement`
+  (slated for removal — see [canvas-simplify.md](canvas-simplify.md)).
+  Durable source nodes (style refs) can't be deleted from the UI;
   they are re-projected from files/metadata by `style_refs.sync_style_ref_canvas_nodes`.
 - **Lineage edges** are derived at render time from each child asset's immutable
   `generation.refs`; generated asset metadata is a historical receipt and is never

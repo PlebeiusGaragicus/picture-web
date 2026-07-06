@@ -29,7 +29,6 @@ export function NodeSidebar({
   onGenerate,
   onGenerateVariants,
   generationError,
-  onCreateChildText,
   onSaveStyleRefPrompt,
   onSetStyleRefAsset,
   onSetProjectCover,
@@ -55,7 +54,6 @@ export function NodeSidebar({
   onGenerate: (id: string, draft: DraftNodeData | ImageGroupNodeData) => void;
   onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams, visualStyleId?: string | null) => void;
   generationError?: string | null;
-  onCreateChildText: (node: Node<DraftNodeData>) => void;
   onSaveStyleRefPrompt: (kind: StyleRefKind, prompt: string) => Promise<void>;
   onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
   onSetProjectCover: (assetId: string) => void;
@@ -81,7 +79,6 @@ export function NodeSidebar({
         defaultVisualStyleId={adaptation?.defaultVisualStyleId}
         onDraftChange={onDraftChange}
         onGenerate={onGenerate}
-        onCreateChildText={onCreateChildText}
         onSaveStyleRefPrompt={onSaveStyleRefPrompt}
         onDelete={onDelete}
         generationError={generationError}
@@ -127,7 +124,6 @@ export function NodeSidebar({
           visualStyleId: patch.visualStyleId,
         })}
         onGenerate={(id) => onGenerate(id, imageNode.data)}
-        onCreateChildText={() => undefined}
         onSaveStyleRefPrompt={onSaveStyleRefPrompt}
         onDelete={onDelete}
         generationError={generationError}
@@ -176,7 +172,6 @@ function DraftSidebar({
   defaultVisualStyleId,
   onDraftChange,
   onGenerate,
-  onCreateChildText,
   onSaveStyleRefPrompt,
   onDelete,
   generationError,
@@ -187,7 +182,6 @@ function DraftSidebar({
   defaultVisualStyleId?: string | null;
   onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
   onGenerate: (id: string, draft: DraftNodeData) => void;
-  onCreateChildText: (node: Node<DraftNodeData>) => void;
   onSaveStyleRefPrompt: (kind: StyleRefKind, prompt: string) => Promise<void>;
   onDelete: (id: string, assetId?: string) => void;
   generationError?: string | null;
@@ -262,7 +256,6 @@ function DraftSidebar({
           This {sourceLabel ?? 'source'} prompt is backed by an adaptation file. Pick a visual style below, then generate the canonical reference image.
         </p>
       )}
-      {isDurableSource && <button className="secondary" onClick={() => onCreateChildText(node)}>Create child text artifact</button>}
       {!isFileBackedPrompt && (
         <section className="sidebar-section parent-section">
           <h3>Parents</h3>

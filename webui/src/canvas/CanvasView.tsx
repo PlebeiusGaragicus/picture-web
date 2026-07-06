@@ -110,7 +110,6 @@ export function CanvasPanels({
           onGenerate={ws.generateDraft}
           onGenerateVariants={ws.generateImageVariants}
           generationError={ws.generationError?.nodeId === ws.selectedNode.id ? ws.generationError.message : null}
-          onCreateChildText={ws.createChildTextArtifact}
           onSaveStyleRefPrompt={ws.saveAdaptationStyleRefPrompt}
           onSetStyleRefAsset={ws.setAdaptationStyleRefAsset}
           onSetProjectCover={ws.setProjectCover}

@@ -40,7 +40,6 @@ export const SYSTEM_TAGS = new Set([
   'page',
   'panel',
   'scene-style',
-  'text-result',
   'visual-style',
 ]);
 export const tagColorOptions = [

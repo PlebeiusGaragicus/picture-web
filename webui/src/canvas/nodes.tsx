@@ -168,18 +168,13 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
 function DraftNode({ data }: NodeProps<DraftNodeData>) {
   const styleRefKind = styleRefKindForTags(data.tags);
   const styleRole = styleRefKind === 'archetype-character' ? 'Character archetype prompt' : styleRefKind === 'archetype-scene' ? 'Scene archetype prompt' : null;
-  const roleClass = data.role?.type === 'text-result' ? 'text-result-node' : '';
   const isArchetype = data.tags.includes('archetype');
   const nodeTitle = styleRefKind
     ? visibleDisplayName(data.displayName) || (styleRefKind === 'archetype-character' ? 'Character Archetype' : 'Scene Archetype')
-    : data.role?.type === 'text-result'
-      ? 'Child Text'
-      : 'Draft';
-  const nodeSubtitle = data.role?.type === 'text-result'
-    ? 'Editable child artifact'
-    : styleRefKind && data.tags.includes('generated')
-      ? 'Generated child available'
-      : '';
+    : 'Draft';
+  const nodeSubtitle = styleRefKind && data.tags.includes('generated')
+    ? 'Generated child available'
+    : '';
   const promptPreview = data.prompt.trim()
     ? (isArchetype ? truncateDraftPreview(data.prompt) : data.prompt.replace(/\s+/g, ' ').trim())
     : '';
@@ -190,11 +185,11 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
     `ratio: ${data.params.aspectRatio ?? 'default'}, size: ${data.params.imageSize ?? 'default'}, seed: ${data.params.seed ?? 'auto'}`,
   ].join('\n');
   return (
-    <div className={`node draft-node ${data.tags.includes('archetype') ? 'archetype-draft-node' : ''} ${roleClass} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
+    <div className={`node draft-node ${data.tags.includes('archetype') ? 'archetype-draft-node' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
       <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
       <div className="draft-placeholder" aria-hidden="true">
         {promptPreview && <p className="draft-prompt-preview">{promptPreview}</p>}
-        {(styleRole || data.role?.type === 'text-result') && <span className="node-role-badge">{styleRole ?? nodeTitle}</span>}
+        {styleRole && <span className="node-role-badge">{styleRole}</span>}
         {data.isGenerating && (
           <div className="node-generating-overlay">
             <span className="spinner" aria-hidden="true" />
@@ -204,7 +199,7 @@ function DraftNode({ data }: NodeProps<DraftNodeData>) {
       </div>
       <strong>{nodeTitle}</strong>
       {nodeSubtitle && <small>{nodeSubtitle}</small>}
-      {(data.role?.type === 'style-ref-source' || data.role?.type === 'text-result') && <Handle type="source" position={Position.Right} className="output-handle" />}
+      {data.role?.type === 'style-ref-source' && <Handle type="source" position={Position.Right} className="output-handle" />}
     </div>
   );
 }

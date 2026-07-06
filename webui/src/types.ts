@@ -95,7 +95,6 @@ export interface CanvasNodeLayout {
 
 export type CanvasRole =
   | { type: 'style-ref-source'; kind: StyleRefKind }
-  | { type: 'text-result'; sourceNodeId: string }
   | { type: 'generated-result'; sourceNodeId: string }
   | { type: 'refinement'; sourceNodeId: string; sourceAssetId?: string | null };
 

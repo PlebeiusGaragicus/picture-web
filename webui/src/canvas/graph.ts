@@ -51,18 +51,7 @@ export function deriveStoryGraphEdges(filteredNodes: Node<PhotoNodeData>[]): Edg
       className: 'lineage-edge-visible',
     }];
   });
-  const textResultEdges = filteredNodes.flatMap((node) => {
-    const sourceNodeId = node.data.role?.type === 'text-result' ? node.data.role.sourceNodeId : null;
-    if (!sourceNodeId || !visibleNodeIds.has(sourceNodeId)) return [];
-    return [{
-      id: `${sourceNodeId}-${node.id}-text-result`,
-      source: sourceNodeId,
-      target: node.id,
-      animated: false,
-      className: 'lineage-edge-visible',
-    }];
-  });
-  return [...assetEdges, ...draftEdges, ...generatedResultEdges, ...textResultEdges];
+  return [...assetEdges, ...draftEdges, ...generatedResultEdges];
 }
 
 export function deletableSelectedNodes(nodes: Node<PhotoNodeData>[], selectedNodeIds: string[]): Node<PhotoNodeData>[] {

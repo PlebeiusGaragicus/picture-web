@@ -739,11 +739,6 @@ class StyleRefSourceRole(BaseModel):
     kind: StyleRefKind
 
 
-class TextResultRole(BaseModel):
-    type: Literal["text-result"] = "text-result"
-    sourceNodeId: str
-
-
 class GeneratedResultRole(BaseModel):
     type: Literal["generated-result"] = "generated-result"
     sourceNodeId: str
@@ -755,7 +750,7 @@ class RefinementRole(BaseModel):
     sourceAssetId: str | None = None
 
 
-CanvasRole = Annotated[StyleRefSourceRole | TextResultRole | GeneratedResultRole | RefinementRole, Field(discriminator="type")]
+CanvasRole = Annotated[StyleRefSourceRole | GeneratedResultRole | RefinementRole, Field(discriminator="type")]
 
 
 class CanvasNodeLayout(BaseModel):
