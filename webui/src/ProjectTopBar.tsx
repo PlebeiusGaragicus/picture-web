@@ -6,11 +6,11 @@ import { SidebarToggleIcon, SidebarCollapseButton } from './SidebarToggle';
 import { HelpTip } from './ui';
 import {
   projectPhaseHelp,
-  projectPhaseIcon,
   projectPhaseLabel,
   workspaceNavItems,
   type ProjectPhase,
 } from './projectNavigation';
+import { PhaseIcon } from './PhaseIcon';
 
 export function ProjectTopBar({
   activePhase,
@@ -81,7 +81,7 @@ export function ProjectTopBar({
                 aria-expanded={navOpen}
                 onClick={() => setNavOpen((open) => !open)}
               >
-                <span className="project-top-bar-nav-icon" aria-hidden="true">{projectPhaseIcon(activePhase)}</span>
+                <span className="project-top-bar-nav-icon" aria-hidden="true"><PhaseIcon phase={activePhase} /></span>
                 <span className="project-top-bar-nav-label">{projectPhaseLabel(activePhase)}</span>
                 <span className="project-top-bar-nav-chevron" aria-hidden="true">▾</span>
               </button>
@@ -96,7 +96,7 @@ export function ProjectTopBar({
                       className={`project-top-bar-nav-item ${activePhase === item.id ? 'is-selected' : ''}`}
                       onClick={() => selectPhase(item.id)}
                     >
-                      <span className="project-top-bar-nav-icon" aria-hidden="true">{item.icon}</span>
+                      <span className="project-top-bar-nav-icon" aria-hidden="true"><PhaseIcon phase={item.id} /></span>
                       <strong>{item.label}</strong>
                     </button>
                   ))}

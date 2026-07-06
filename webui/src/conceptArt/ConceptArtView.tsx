@@ -245,7 +245,6 @@ export function ConceptArtView({
             <span className="concept-art-toolbar-label">Character</span>
             <div className="concept-art-toolbar-actions">
               <button
-                className="secondary"
                 type="button"
                 onClick={() => void createConcept('character')}
                 disabled={busyKey === '__create-character__' || conceptWorkflowBusy}
@@ -266,7 +265,6 @@ export function ConceptArtView({
             <span className="concept-art-toolbar-label">Location</span>
             <div className="concept-art-toolbar-actions">
               <button
-                className="secondary"
                 type="button"
                 onClick={() => void createConcept('location')}
                 disabled={busyKey === '__create-location__' || conceptWorkflowBusy}

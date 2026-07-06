@@ -91,7 +91,7 @@ export function VisualStyleList({
           <h2>Visual Styles</h2>
           <HelpTip text="Reusable style snippets appended to canvas image prompts when you pick a style on a draft or image." />
         </div>
-        <button className="secondary" type="button" onClick={openCreate}>Add style</button>
+        <button type="button" onClick={openCreate}>Add style</button>
       </header>
       {styles.length === 0 ? (
         <p className="muted visual-style-empty">No visual styles yet. Add one to reuse a consistent look across generated images.</p>

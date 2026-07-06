@@ -18,7 +18,6 @@ import 'reactflow/dist/style.css';
 import '@fontsource-variable/inter';
 import './styles/index.css';
 import { formatRequestError } from './formatError';
-import { MouseTrail } from './MouseTrail';
 import { api } from './api';
 import { exportProjectAssetsToFolder, saveAssetImageToDisk } from './exportAssets';
 import { CharactersHubView } from './characters/CharactersHubView';
@@ -28,6 +27,7 @@ import { LayoutEditorView } from './storyPanels/LayoutEditorView';
 import { ProjectTopBar } from './ProjectTopBar';
 import { SidebarCollapseButton } from './SidebarToggle';
 import { workspaceNavItems, type ProjectPhase } from './projectNavigation';
+import { PhaseIcon } from './PhaseIcon';
 import { isEditableShortcutTarget } from './shared/dom';
 import { useDismissOnOutsidePointerDown } from './shared/popover';
 import { ToastProvider, useToast } from './shared/toast';
@@ -1999,9 +1999,20 @@ function ProjectLanding({
   };
   return (
     <div className="landing">
-      <MouseTrail />
       <div className="landing-content">
-        <h1 className="landing-title">Comic Canvas</h1>
+        <header className="landing-masthead">
+          <span className="landing-logo" aria-hidden="true">
+            <svg viewBox="0 0 32 32" width="44" height="44" fill="none">
+              <rect x="2" y="2" width="28" height="28" rx="7" fill="var(--accent-strong)" />
+              <rect x="7" y="7" width="8" height="7" rx="1.5" fill="#fff" opacity="0.95" />
+              <rect x="17" y="7" width="8" height="10" rx="1.5" fill="#fff" opacity="0.6" />
+              <rect x="7" y="17" width="8" height="8" rx="1.5" fill="#fff" opacity="0.6" />
+              <rect x="17" y="20" width="8" height="5" rx="1.5" fill="#fff" opacity="0.95" />
+            </svg>
+          </span>
+          <h1 className="landing-title">Comic Canvas</h1>
+          <p className="landing-tagline">Turn a manuscript into a laid-out, illustrated comic.</p>
+        </header>
         {error && <p className="error error-banner landing-error">{error}</p>}
         <div className="project-list">
           {projects.map((project) => (
@@ -2010,7 +2021,13 @@ function ProjectLanding({
                 {project.coverThumbnailUrl ? (
                   <img src={project.coverThumbnailUrl} alt="" />
                 ) : (
-                  <div className="project-tile-cover-placeholder" aria-hidden="true">🖼️</div>
+                  <div className="project-tile-cover-placeholder" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="5" width="18" height="14" rx="2" />
+                      <circle cx="8.5" cy="10" r="1.5" />
+                      <path d="M21 16l-4.5-4.5L7 21" />
+                    </svg>
+                  </div>
                 )}
               </div>
               <strong className="project-tile-name">{project.name}</strong>
@@ -2266,7 +2283,7 @@ function ProjectPhaseSidebar({
             aria-current={activePhase === item.id ? 'page' : undefined}
             onClick={() => onPhaseChange(item.id)}
           >
-            <span className="phase-number" aria-hidden="true">{item.icon}</span>
+            <span className="phase-number" aria-hidden="true"><PhaseIcon phase={item.id} /></span>
             <strong>{item.label}</strong>
           </button>
         ))}
@@ -2296,7 +2313,7 @@ function ProjectPhaseSidebar({
         >
           {exportingAssets ? 'Exporting...' : 'Export assets'}
         </button>
-        <button className="danger" disabled={deleting || exportingAssets || exportingPdf} onClick={() => setPendingDelete(true)}>
+        <button className="danger-ghost" disabled={deleting || exportingAssets || exportingPdf} onClick={() => setPendingDelete(true)}>
           Delete project
         </button>
       </div>

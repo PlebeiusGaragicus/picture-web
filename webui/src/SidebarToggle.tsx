@@ -1,12 +1,13 @@
 export function SidebarToggleIcon({ variant }: { variant: 'collapse' | 'expand' }) {
   return (
     <svg className="phase-sidebar-toggle-icon" viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="none" stroke="currentColor" strokeWidth="1.25" />
-      <line x1="5.5" y1="2.5" x2="5.5" y2="13.5" stroke="currentColor" strokeWidth="1.25" />
+      <rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      <rect x="2.25" y="3.25" width="3.5" height="9.5" rx="1" fill="currentColor" opacity="0.35" stroke="none" />
+      <line x1="6" y1="3" x2="6" y2="13" stroke="currentColor" strokeWidth="1.25" />
       {variant === 'collapse' ? (
-        <path d="M7 8 L10 5.5 M7 8 L10 10.5" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M11 6 L8.5 8 L11 10" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
       ) : (
-        <path d="M11 8 L8 5.5 M11 8 L8 10.5" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M9 6 L11.5 8 L9 10" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
       )}
     </svg>
   );

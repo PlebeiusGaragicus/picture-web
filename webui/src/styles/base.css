@@ -15,10 +15,14 @@
   align-items: center;
   justify-content: center;
   padding: 8px 10px;
-  color: var(--slate-900);
-  background: var(--blue-300);
+  color: var(--white);
+  background: var(--accent-strong);
   border-radius: var(--radius-md);
   font-weight: 700;
+}
+
+.file-button:hover {
+  background: var(--blue-700);
 }
 
 .file-button.secondary {
@@ -84,12 +88,12 @@ textarea {
   min-height: 100px;
 }
 
-/* The de-facto base button. Variants and one-off button families override
-   the --btn-* hooks instead of restating the whole visual. */
+/* The de-facto base button — the primary action. Variants and one-off button
+   families override the --btn-* hooks instead of restating the whole visual. */
 button {
   padding: var(--btn-pad, 8px 10px);
-  color: var(--btn-fg, var(--slate-900));
-  background: var(--btn-bg, var(--blue-300));
+  color: var(--btn-fg, var(--white));
+  background: var(--btn-bg, var(--accent-strong));
   border: var(--btn-border, 0);
   border-radius: var(--btn-radius, var(--radius-md));
   font-weight: var(--btn-weight, 700);
@@ -97,14 +101,36 @@ button {
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
 }
 
+button:hover:not(:disabled) {
+  background: var(--btn-bg-hover, var(--blue-700));
+}
+
 button.secondary {
   --btn-fg: var(--text-primary);
   --btn-bg: var(--border);
+  --btn-bg-hover: var(--border-strong);
+}
+
+/* Tertiary: outlined, transparent — for low-emphasis actions. */
+button.ghost {
+  --btn-fg: var(--text-secondary);
+  --btn-bg: transparent;
+  --btn-border: 1px solid var(--border);
+  --btn-bg-hover: rgb(var(--white-rgb) / 0.06);
 }
 
 button.danger {
   --btn-fg: var(--white);
   --btn-bg: #dc2626;
+  --btn-bg-hover: #b91c1c;
+}
+
+/* Low-emphasis destructive: reads as danger only on hover, so it doesn't
+   dominate the sidebar the way a solid red slab does. */
+button.danger-ghost {
+  --btn-fg: var(--danger);
+  --btn-bg: transparent;
+  --btn-bg-hover: rgb(220 38 38 / 0.12);
 }
 
 .small-button {

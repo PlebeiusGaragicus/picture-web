@@ -15,6 +15,7 @@ import { PiTaskPanel } from '../sessions/PiTaskPanel';
 import { usePiTask } from '../sessions/usePiTask';
 import { formatRequestError } from '../formatError';
 import { HoverTooltip } from '../ui';
+import { Icon } from '../Icon';
 import { api } from '../api';
 import type { AdaptationStatus, CanvasDocument, StoryPanelPatchPayload, StoryPanelRect } from '../types';
 import { isPanel, isUnplaced } from './panelModel';
@@ -347,7 +348,7 @@ export function LayoutEditorView({
               aria-label={singlePagePreviewMode === 'print' ? 'Hide print preview' : 'Show print preview'}
               onClick={togglePrintPreview}
             >
-              <span aria-hidden="true">🖨️</span>
+              <Icon name="print" />
             </button>
           </HoverTooltip>
           {layoutMode === 'spread' && (
@@ -360,7 +361,7 @@ export function LayoutEditorView({
               title={spreadPanelInfoEnabled ? 'Hide panel info when a panel is selected' : 'Show panel info when a panel is selected'}
               onClick={toggleSpreadPanelInfo}
             >
-              i
+              <Icon name="info" />
             </button>
           )}
         </div>

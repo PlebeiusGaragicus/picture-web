@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isEditableShortcutTarget } from '../shared/dom';
+import { Icon } from '../Icon';
 import { useDismissOnOutsidePointerDown } from '../shared/popover';
 import type { CSSProperties, ReactNode } from 'react';
 import { nonArchivedVariants } from '../canvas/shared';
@@ -817,12 +818,12 @@ export function PageLayoutEditor({
       <>
         <HoverTooltip text={undoEntry ? `Undo: ${undoEntry.label}` : 'Undo'} placement="bottom">
           <button type="button" className="secondary small-button" disabled={isSaving || undoStack.length === 0} onClick={undo} aria-label={undoEntry ? `Undo ${undoEntry.label}` : 'Undo'}>
-            <span aria-hidden="true">↩</span>
+            <Icon name="undo" />
           </button>
         </HoverTooltip>
         <HoverTooltip text={redoEntry ? `Redo: ${redoEntry.label}` : 'Redo'} placement="bottom">
           <button type="button" className="secondary small-button" disabled={isSaving || redoStack.length === 0} onClick={redo} aria-label={redoEntry ? `Redo ${redoEntry.label}` : 'Redo'}>
-            <span aria-hidden="true">↪</span>
+            <Icon name="redo" />
           </button>
         </HoverTooltip>
       </>,

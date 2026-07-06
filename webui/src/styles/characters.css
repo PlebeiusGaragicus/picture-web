@@ -31,6 +31,13 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.character-hub-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-2);
 }
 
 .character-hub-card h3 {

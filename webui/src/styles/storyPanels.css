@@ -59,10 +59,11 @@
 
 .story-card {
   margin: 0;
-  padding: 16px;
+  padding: var(--space-6);
   background: rgb(var(--slate-900-rgb) / 0.88);
   border: 1px solid var(--border);
   border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-1);
 }
 
 .story-card h2,

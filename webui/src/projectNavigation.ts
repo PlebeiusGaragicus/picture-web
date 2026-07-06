@@ -6,21 +6,17 @@ export type ProjectPhase =
   | 'concept-art'
   | 'characters-hub';
 
-export const workspaceNavItems: Array<{ id: ProjectPhase; icon: string; label: string }> = [
-  { id: 'story', icon: '▥', label: 'Story' },
-  { id: 'layout-editor', icon: '▤', label: 'Layout' },
-  { id: 'image-canvas', icon: '▦', label: 'Canvas' },
-  { id: 'concept-art', icon: '▧', label: 'Concept Art' },
-  { id: 'characters-hub', icon: '▨', label: 'Characters' },
-  { id: 'chat', icon: '◌', label: 'Agent' },
+export const workspaceNavItems: Array<{ id: ProjectPhase; label: string }> = [
+  { id: 'story', label: 'Story' },
+  { id: 'layout-editor', label: 'Layout' },
+  { id: 'image-canvas', label: 'Canvas' },
+  { id: 'concept-art', label: 'Concept Art' },
+  { id: 'characters-hub', label: 'Characters' },
+  { id: 'chat', label: 'Agent' },
 ];
 
 export function projectPhaseLabel(phase: ProjectPhase) {
   return workspaceNavItems.find((item) => item.id === phase)?.label ?? phase;
-}
-
-export function projectPhaseIcon(phase: ProjectPhase) {
-  return workspaceNavItems.find((item) => item.id === phase)?.icon ?? '•';
 }
 
 export function projectPhaseHelp(phase: ProjectPhase) {
