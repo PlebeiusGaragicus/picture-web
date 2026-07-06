@@ -9,10 +9,10 @@ import {
 } from 'reactflow';
 import { imageGroupAssetsInNode, nodesToCanvas, omitUndefined, toFlowNodes, withArchivedOnlyAsset, zoomToPercent } from './flowDocument';
 import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId, mergeFlowNodes } from './graph';
-import { canDeleteNode } from './roles';
 import { nodeTagActionsRef } from './nodeTagActions';
 import {
   SYSTEM_TAGS,
+  canDeleteNode,
   countEntityTagsOnAssets,
   countUserTagAssignments,
   countUserTagsOnAssets,
@@ -39,7 +39,6 @@ import type {
   ArtifactKind,
   Asset,
   CanvasDocument,
-  CanvasRole,
   ChatSession,
   CanvasNode,
   ChatTurnSettings,
@@ -867,7 +866,7 @@ export function useCanvasWorkspace({
   const createDraftAt = async (
     refs: string[],
     position: { x: number; y: number },
-    options: { prompt?: string; params?: GenerationParams; displayName?: string; role?: CanvasRole | null; tags?: string[] } = {},
+    options: { prompt?: string; params?: GenerationParams; displayName?: string; tags?: string[] } = {},
   ) => {
     const nodeId = `draft_${Date.now()}`;
     const callbacks = toFlowNodesCallbacksRef.current;
@@ -881,7 +880,6 @@ export function useCanvasWorkspace({
         x: position.x,
         y: position.y,
         tags: options.tags ?? [],
-        role: options.role ?? null,
         refs: Array.from(new Set(refs)),
         prompt: options.prompt ?? '',
         params: options.params ?? defaultDraftParams,

@@ -143,6 +143,9 @@ class TagDefinition(BaseModel):
     color: str = Field(pattern=TAG_COLOR_RE)
     locked: bool = False
     entityKind: EntityKind | None = None
+    # Entity tags only: the image that keeps this entity consistent — attached
+    # as a generation reference wherever the entity appears.
+    canonicalAssetId: str | None = None
 
 
 class TagRegistryDocument(BaseModel):
@@ -734,32 +737,12 @@ class DisplayPatch(BaseModel):
         return tags
 
 
-class StyleRefSourceRole(BaseModel):
-    type: Literal["style-ref-source"] = "style-ref-source"
-    kind: StyleRefKind
-
-
-class GeneratedResultRole(BaseModel):
-    type: Literal["generated-result"] = "generated-result"
-    sourceNodeId: str
-
-
-class RefinementRole(BaseModel):
-    type: Literal["refinement"] = "refinement"
-    sourceNodeId: str
-    sourceAssetId: str | None = None
-
-
-CanvasRole = Annotated[StyleRefSourceRole | GeneratedResultRole | RefinementRole, Field(discriminator="type")]
-
-
 class CanvasNodeLayout(BaseModel):
     displayName: str
     x: float
     y: float
     width: float | None = None
     tags: list[str] = Field(default_factory=list)
-    role: CanvasRole | None = None
 
 
 class GenerationParams(BaseModel):

@@ -611,6 +611,20 @@ def status(slug: str) -> AdaptationStatus:
         metadata = write_metadata(slug, metadata)
     statuses = style_refs.style_ref_statuses(slug, metadata)
 
+    # Keep entity tags pointing at their canonical reference images: the tag
+    # registry is the read path for consistency refs (canvas-simplify.md §2.4).
+    canonical_by_tag_id: dict[str, str | None] = {}
+    for character_slug, record in metadata.characters.items():
+        base = record.variants.get("base")
+        canonical_by_tag_id[library.normalize_tag_id(character_slug)] = (
+            (base.activeAssetId or (base.assetIds[0] if base.assetIds else None)) if base else None
+        )
+    for location_key, link in metadata.locations.items():
+        canonical_by_tag_id[library.normalize_tag_id(location_key)] = (
+            link.activeAssetId or (link.assetIds[0] if link.assetIds else None)
+        )
+    library.update_entity_tag_canonicals(slug, canonical_by_tag_id)
+
     return AdaptationStatus(
         projectSlug=slug,
         hasBook=(root / "book.txt").is_file(),

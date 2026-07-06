@@ -16,11 +16,9 @@ from models import (
     AdaptationStyleRefAssetRequest,
     CanvasDocument,
     CanvasNode,
-    GeneratedResultRole,
     GenerateRequest,
     GenerationParams,
     StyleRefKind,
-    StyleRefSourceRole,
     StyleRefStatus,
 )
 
@@ -58,7 +56,6 @@ def sync_style_ref_canvas_nodes(slug: str, canvas: CanvasDocument, kind: str | N
             y=source_y,
             width=source_width,
             tags=library.node_tags(*tags, "generated" if has_asset else "missing"),
-            role=StyleRefSourceRole(kind=ref_kind),
             refs=[],
             prompt=status.promptText,
             visualStyleId=preserved_visual_style_id,
@@ -80,7 +77,6 @@ def sync_style_ref_canvas_nodes(slug: str, canvas: CanvasDocument, kind: str | N
                     y=source_y,
                     width=240,
                     tags=library.node_tags(*tags, "imported-image"),
-                    role=GeneratedResultRole(sourceNodeId=node_id),
                     assetIds=[asset_id],
                     activeAssetId=asset_id,
                 )
@@ -88,7 +84,6 @@ def sync_style_ref_canvas_nodes(slug: str, canvas: CanvasDocument, kind: str | N
                 image_node.assetIds = [asset_id, *image_node.assetIds]
             image_node.activeAssetId = asset_id
             image_node.tags = library.node_tags(*tags, "imported-image")
-            image_node.role = GeneratedResultRole(sourceNodeId=node_id)
             next_canvas.nodes[image_node_id] = image_node
             next_canvas.nodes.pop(legacy_image_node_id, None)
         else:

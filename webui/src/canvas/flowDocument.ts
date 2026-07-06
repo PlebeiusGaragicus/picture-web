@@ -33,7 +33,6 @@ export function nodesToCanvas(canvas: CanvasDocument, nodes: Node<CanvasNodeData
             y: finiteCanvasNumber(node.position?.y, existing?.y ?? 0),
             width: existing?.width ?? null,
             tags: node.data.tags ?? [],
-            role: node.data.role ?? null,
             refs: node.data.refs ?? [],
             prompt: node.data.prompt ?? '',
             params: node.data.params ?? defaultDraftParams,

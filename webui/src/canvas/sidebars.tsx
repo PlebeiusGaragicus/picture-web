@@ -4,8 +4,8 @@ import { isCanonicalStyleRefAsset, styleRefKindForTags } from '../styleRefs';
 import type { AdaptationStatus, Asset, CanvasNode, GenerationParams, StyleRefKind, TagDefinition, VisualStyleDefinition } from '../types';
 import { VisualStyleSelect } from '../visualStyles/VisualStyleSelect';
 import { TagControlButton } from './assetTagRow';
-import { canDeleteNode } from './roles';
-import { assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, uniqueOptions, visibleDisplayName, visibleVariants } from './shared';
+
+import { assetLabel, canDeleteNode, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, uniqueOptions, visibleDisplayName, visibleVariants } from './shared';
 import type { CanvasNodeData } from './types';
 
 function GenerationErrorNotice({ message }: { message: string | null | undefined }) {
@@ -138,8 +138,7 @@ function DraftSidebar({
 }) {
   const draft = node.data;
   const canDelete = canDeleteNode(node);
-  const isDurableSource = draft.role?.type === 'style-ref-source';
-  const isFileBackedPrompt = draft.role?.type === 'style-ref-source';
+
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const [isParentPickerOpen, setIsParentPickerOpen] = useState(false);
   const parents = draft.refs.map((ref) => assets.find((asset) => asset.id === ref) ?? null);
@@ -147,6 +146,8 @@ function DraftSidebar({
   const draftModel = draft.params.model ?? defaultDraftParams.model;
   const draftCapabilities = capabilitiesForModel(draftModel);
   const styleRefKind = styleRefKindForTags(draft.tags);
+  const isDurableSource = styleRefKind !== null;
+  const isFileBackedPrompt = styleRefKind !== null;
   const styleRefLabel = styleRefKind === 'archetype-character' ? 'character' : styleRefKind === 'archetype-scene' ? 'scene' : null;
   const sourceLabel = styleRefLabel ? `${styleRefLabel} archetype` : null;
   const showArchetypeControls = Boolean(styleRefKind);
@@ -405,7 +406,7 @@ function ImageSidebar({
   const visibleVariantsList = visibleVariants(assets, node.data.assetIds, archivedOnly);
   const activeVariantIndex = Math.max(0, visibleVariantsList.findIndex((variant) => variant.id === asset.id));
   const hasMultipleVariants = visibleVariantsList.length > 1;
-  const isGeneratedResult = node.data.role?.type === 'generated-result';
+  const isGeneratedResult = node.id.startsWith('generated_');
   const styleRefKind = styleRefKindForTags(node.data.tags);
   const isCharacterArchetype = adaptation?.styleRefStatuses?.['archetype-character']?.assetId === asset.id;
   const isSceneArchetype = adaptation?.styleRefStatuses?.['archetype-scene']?.assetId === asset.id;

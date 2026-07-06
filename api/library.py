@@ -30,7 +30,6 @@ from models import (
     GenerateResponse,
     GenerationParams,
     GenerationReceipt,
-    GeneratedResultRole,
     Prompt,
     ProviderCapture,
     ProjectCreate,
@@ -262,6 +261,7 @@ def write_tag_registry(
             color=tag.color,
             locked=tag.locked,
             entityKind=tag.entityKind,
+            canonicalAssetId=tag.canonicalAssetId,
         )
         for tag in registry.tags
     ]
@@ -307,15 +307,35 @@ def sync_entity_tags(slug: str, *, character_keys: list[str], location_keys: lis
     registry = read_tag_registry(slug)
     entity_ids = {normalize_tag_id(key) for key in character_keys} | {normalize_tag_id(key) for key in location_keys}
     user_tags = [tag for tag in registry.tags if not tag.locked and tag.id not in entity_ids]
+    canonical_by_id = {tag.id: tag.canonicalAssetId for tag in registry.tags if tag.canonicalAssetId}
     entity_tags = [
         *[entity_tag_for_key(key, "character") for key in sorted(character_keys)],
         *[entity_tag_for_key(key, "location") for key in sorted(location_keys)],
+    ]
+    entity_tags = [
+        tag.model_copy(update={"canonicalAssetId": canonical_by_id.get(tag.id)}) if tag.id in canonical_by_id else tag
+        for tag in entity_tags
     ]
     return write_tag_registry(
         slug,
         TagRegistryDocument(tags=[*user_tags, *entity_tags]),
         preserve_orphan_locked_entity_tags=False,
     )
+
+
+def update_entity_tag_canonicals(slug: str, canonical_by_tag_id: dict[str, str | None]) -> None:
+    """Point entity tags at their canonical reference image; writes only on change."""
+    registry = read_tag_registry(slug)
+    changed = False
+    next_tags: list[TagDefinition] = []
+    for tag in registry.tags:
+        if tag.entityKind is not None and tag.id in canonical_by_tag_id and tag.canonicalAssetId != canonical_by_tag_id[tag.id]:
+            next_tags.append(tag.model_copy(update={"canonicalAssetId": canonical_by_tag_id[tag.id]}))
+            changed = True
+        else:
+            next_tags.append(tag)
+    if changed:
+        write_tag_registry(slug, TagRegistryDocument(tags=next_tags))
 
 
 def locked_entity_tag_ids(slug: str) -> set[str]:
@@ -359,6 +379,7 @@ def upsert_tag(slug: str, tag: TagDefinition) -> TagRegistryDocument:
             color=tag.color,
             locked=tag.locked,
             entityKind=tag.entityKind,
+            canonicalAssetId=tag.canonicalAssetId,
         )
     )
     return write_tag_registry(slug, TagRegistryDocument(tags=sorted(next_tags, key=lambda item: item.name)))
@@ -642,13 +663,12 @@ def variant_key_for_node(slug: str, node: CanvasNode) -> tuple[str, tuple[str, .
     return None
 
 
-def canvas_role_type(node: CanvasNode) -> str | None:
-    role = node.role
-    if role is None:
-        return None
-    if isinstance(role, dict):
-        return role.get("type")
-    return getattr(role, "type", None)
+STYLE_REF_SOURCE_TAGS = ("character-style", "scene-style")
+
+
+def is_style_ref_source_node(node: CanvasNode) -> bool:
+    """Style archetype prompt nodes: file-backed, draft-state, style-tagged."""
+    return not node.assetIds and any(tag in node.tags for tag in STYLE_REF_SOURCE_TAGS)
 
 
 def normalize_variant_groups(slug: str, canvas: CanvasDocument) -> CanvasDocument:
@@ -656,7 +676,7 @@ def normalize_variant_groups(slug: str, canvas: CanvasDocument) -> CanvasDocumen
     next_canvas = canvas.model_copy(deep=True)
     node_by_key: dict[tuple[str, tuple[str, ...]], str] = {}
     for node_id, node in list(next_canvas.nodes.items()):
-        if canvas_role_type(node) in {"generated-result", "refinement"}:
+        if node_id.startswith("generated_"):
             continue
         key = variant_key_for_node(slug, node)
         if key is None:
@@ -915,14 +935,13 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
     existing = canvas.nodes.get(node_id)
     asset_ids = [asset.id for asset in assets]
     active_asset_id = asset_ids[0] if asset_ids else None
-    if existing is not None and canvas_role_type(existing) == "style-ref-source":
+    if existing is not None and is_style_ref_source_node(existing):
         child_node_id = generated_result_node_id(node_id)
         child = canvas.nodes.get(child_node_id)
         if child is not None:
             child.assetIds = list(dict.fromkeys([*asset_ids, *child.assetIds]))
             child.activeAssetId = active_asset_id or child.activeAssetId
             child.tags = node_tags(*child.tags, "generated-image")
-            child.role = GeneratedResultRole(sourceNodeId=node_id)
             canvas.nodes[child_node_id] = child
         else:
             canvas.nodes[child_node_id] = CanvasNode(
@@ -931,7 +950,6 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
                 y=existing.y,
                 width=240,
                 tags=node_tags(*existing.tags, "generated-image"),
-                role=GeneratedResultRole(sourceNodeId=node_id),
                 assetIds=asset_ids,
                 activeAssetId=active_asset_id,
             )
@@ -1022,7 +1040,7 @@ def matching_variant_group_node_id(
     prompt_text = first.prompt.text
     refs = first.generation.refs
     for node_id, node in canvas.nodes.items():
-        if canvas_role_type(node) in {"generated-result", "refinement"}:
+        if node_id.startswith("generated_"):
             continue
         for asset_id in node.assetIds:
             metadata = read_asset_metadata(slug, asset_id)

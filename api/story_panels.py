@@ -661,20 +661,20 @@ def draft_panel_to_canvas(slug: str, panel_id: str, prompt_id: str):
     if not prompt.text.strip():
         raise HTTPException(status_code=409, detail="Image prompt is empty")
 
-    status = adaptation.status(slug)
+    adaptation.status(slug)  # refresh entity links and canonical tag pointers
+    entity_tags = {tag.id: tag for tag in library.list_project_tags(slug) if tag.entityKind is not None}
     refs: list[str] = []
     missing: list[str] = []
     for character_slug in panel.characterSlugs:
-        record = status.characters.get(character_slug)
-        base = record.variants.get("base") if record else None
-        asset_id = (base.activeAssetId or (base.assetIds[0] if base.assetIds else None)) if base else None
+        tag = entity_tags.get(library.normalize_tag_id(character_slug))
+        asset_id = tag.canonicalAssetId if tag else None
         if asset_id is None:
             missing.append(f"character {character_slug}")
         elif asset_id not in refs:
             refs.append(asset_id)
     if panel.locationSlug:
-        link = status.locations.get(panel.locationSlug)
-        asset_id = (link.activeAssetId or (link.assetIds[0] if link.assetIds else None)) if link else None
+        tag = entity_tags.get(library.normalize_tag_id(panel.locationSlug))
+        asset_id = tag.canonicalAssetId if tag else None
         if asset_id is None:
             missing.append(f"location {panel.locationSlug}")
         elif asset_id not in refs:

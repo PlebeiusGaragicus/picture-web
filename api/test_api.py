@@ -1654,7 +1654,7 @@ def test_style_ref_status_clears_stale_asset_and_repairs_canvas(tmp_path, monkey
     nodes = client.get("/api/projects/farm-comic/canvas").json()["nodes"]
     draft = nodes["archetype_archetype_character"]
     assert draft["assetIds"] == []
-    assert draft["role"] == {"type": "style-ref-source", "kind": "archetype-character"}
+    assert "character-style" in draft["tags"]
     assert draft["prompt"] == "Character archetype prompt.\n"
     assert "missing" in draft["tags"]
     assert "archetype_archetype_character_image" not in nodes
@@ -1793,10 +1793,10 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
     assert imported.json()["styleRefStatuses"]["archetype-character"]["canvasDraftNodeId"] == "archetype_archetype_character"
     assert imported.json()["styleRefStatuses"]["archetype-character"]["canvasImageNodeId"] == "generated_archetype_archetype_character"
     assert canvas_nodes["archetype_archetype_character"]["assetIds"] == []
-    assert canvas_nodes["archetype_archetype_character"]["role"] == {"type": "style-ref-source", "kind": "archetype-character"}
+    assert "character-style" in canvas_nodes["archetype_archetype_character"]["tags"]
     assert canvas_nodes["generated_archetype_archetype_character"]["assetIds"]
     assert canvas_nodes["generated_archetype_archetype_character"]["activeAssetId"] == imported_asset_id
-    assert canvas_nodes["generated_archetype_archetype_character"]["role"] == {"type": "generated-result", "sourceNodeId": "archetype_archetype_character"}
+    assert "character-style" in canvas_nodes["generated_archetype_archetype_character"]["tags"]
     assert "archetype_archetype_character_image" not in canvas_nodes
 
     replacement_asset_id = "01HREPLACE"
@@ -1876,7 +1876,7 @@ def test_style_ref_import_set_generate_share_metadata_and_canvas_contract(tmp_pa
     assert client.put("/api/projects/farm-comic/canvas", json=missing_source_canvas).status_code == 200
     repaired_nodes = sync_via_prompt_put()
     assert repaired_nodes["archetype_archetype_character"]["assetIds"] == []
-    assert repaired_nodes["archetype_archetype_character"]["role"] == {"type": "style-ref-source", "kind": "archetype-character"}
+    assert "character-style" in repaired_nodes["archetype_archetype_character"]["tags"]
 
     delete_child = client.delete(f"/api/projects/farm-comic/assets/{generated_asset_id}")
     assert delete_child.status_code == 204
@@ -2547,7 +2547,6 @@ def test_read_canvas_preserves_generated_result_child_nodes_when_normalizing_var
     assert response.status_code == 200
     nodes = response.json()["nodes"]
     assert nodes["generated_source_prompt"]["assetIds"] == [first_id]
-    assert nodes["generated_source_prompt"]["role"] == {"type": "generated-result", "sourceNodeId": "source_prompt"}
     assert nodes["node_b"]["assetIds"] == [second_id]
 
 

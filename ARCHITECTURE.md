@@ -41,10 +41,16 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
   `params` (the recipe for its next generation) plus an `assetIds` take stack
   with `activeAssetId`. An empty stack **is** the draft state — generating
   fills the stack in place; there is no separate draft node type.
-- **Roles** (`node.role`): `style-ref-source`, `generated-result`, `refinement`
-  (slated for removal — see [canvas-simplify.md](canvas-simplify.md)).
-  Durable source nodes (style refs) can't be deleted from the UI;
-  they are re-projected from files/metadata by `style_refs.sync_style_ref_canvas_nodes`.
+- **No roles.** Special behavior is derived, never stored: style-archetype
+  prompt nodes are recognized by their style tags + draft state (and are
+  protected from deletion; they're re-projected from files/metadata by
+  `style_refs.sync_style_ref_canvas_nodes`), and their generated children by
+  the `generated_<sourceId>` node-id convention.
+- **Canonical pointers live on entity tags.** Each entity tag in `tags.json`
+  carries `canonicalAssetId` — the image that keeps that character/location
+  consistent. `adaptation.status()` keeps the pointers synced from the
+  character/location records; panel draft-to-canvas resolves its reference
+  images from the registry.
 - **Lineage edges** are derived at render time from each child asset's immutable
   `generation.refs`; generated asset metadata is a historical receipt and is never
   edited in place.

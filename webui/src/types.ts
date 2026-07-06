@@ -56,6 +56,8 @@ export interface TagDefinition {
   color: string;
   locked?: boolean;
   entityKind?: EntityKind | null;
+  /** Entity tags only: the image that keeps this entity consistent across generations. */
+  canonicalAssetId?: string | null;
 }
 
 export interface TagRegistryDocument {
@@ -90,13 +92,7 @@ export interface CanvasNodeLayout {
   y: number;
   width?: number | null;
   tags: string[];
-  role?: CanvasRole | null;
 }
-
-export type CanvasRole =
-  | { type: 'style-ref-source'; kind: StyleRefKind }
-  | { type: 'generated-result'; sourceNodeId: string }
-  | { type: 'refinement'; sourceNodeId: string; sourceAssetId?: string | null };
 
 export type ArtifactKind = 'character-sheet' | 'location-prompt' | 'concept-art';
 export type AdaptationFileKind = 'characters' | 'locations';

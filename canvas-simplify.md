@@ -227,9 +227,17 @@ the stray `type` key is ignored on read and dropped on the next save.
 Connection drops now target any node still drafting, not just `draft_`-id
 nodes.
 
-**Phase 3 — Kill roles; canonical pointer in the tag registry.** Add
-`canonicalAssetId` to entity tags, port adaptation/style-ref *reads* to it,
-derive deletion protection from it, delete the `role` field and `roles.ts`.
+**Phase 3 — Kill roles; canonical pointer in the tag registry.** ✅ Done.
+`role` is deleted end to end (field, models, `roles.ts`); old data's `role`
+keys are ignored on read and dropped on save. Derived replacements:
+style-archetype sources = style tags + draft state (deletion protection,
+sidebar file-backed UI); generated children = the `generated_<sourceId>` id
+convention (edges, variant-fold skip, badges). Entity tags now carry
+`canonicalAssetId`, kept in sync by `adaptation.status()` from
+character/location records, and panel draft-to-canvas resolves reference
+images from the registry. Remaining for later phases: adaptation records
+still *write* canonicals (registry is the read path); UI ★ canonical
+affordances are §3 work.
 
 **Phase 4 — Origin + naming + stack rule.** `origin` field replaces the two
 source ids; "Duplicate as draft" rename; archived-view honesty; chat

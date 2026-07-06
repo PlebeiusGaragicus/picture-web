@@ -1,6 +1,6 @@
 import type { Edge, Node } from 'reactflow';
 import type { CanvasNodeData } from './types';
-import { canDeleteNode } from './roles';
+import { canDeleteNode } from './shared';
 
 export function generatedResultNodeId(sourceNodeId: string): string {
   return `generated_${sourceNodeId}`;
@@ -38,7 +38,8 @@ export function deriveStoryGraphEdges(filteredNodes: Node<CanvasNodeData>[]): Ed
     return node.data.refs.flatMap((ref) => edgeForAssetRef(node, null, ref) ?? []);
   });
   const generatedResultEdges = filteredNodes.flatMap((node) => {
-    const sourceNodeId = node.data.role?.type === 'generated-result' ? node.data.role.sourceNodeId : null;
+    // Generated style-archetype children carry their source in the node id.
+    const sourceNodeId = node.id.startsWith('generated_') ? node.id.slice('generated_'.length) : null;
     if (!sourceNodeId || !visibleNodeIds.has(sourceNodeId)) return [];
     return [{
       id: `${sourceNodeId}-${node.id}-generated-result`,
