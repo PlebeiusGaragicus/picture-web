@@ -32,7 +32,7 @@ export function NodeSidebar({
   onSetProjectCover,
   onFindOnCanvas,
   onVariant,
-  onCreateSibling,
+  onDuplicate,
   onDelete,
   onArchiveImage,
   onRestoreImage,
@@ -55,7 +55,7 @@ export function NodeSidebar({
   onSetProjectCover: (assetId: string) => void;
   onFindOnCanvas: (nodeId: string) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
-  onCreateSibling: (group: CanvasNodeData, sourceAsset: Asset) => void;
+  onDuplicate: (node: CanvasNodeData, sourceAsset: Asset) => void;
   onDelete: (id: string, assetId?: string) => void;
   onArchiveImage: (nodeId: string, assetId: string) => void;
   onRestoreImage: (nodeId: string, assetId: string) => void;
@@ -103,7 +103,7 @@ export function NodeSidebar({
       onCreateTag={onCreateTag}
       onNodeChange={onNodeChange}
       onVariant={onVariant}
-      onCreateSibling={onCreateSibling}
+      onDuplicate={onDuplicate}
       onGenerate={onGenerate}
       generationError={generationError}
       onSetStyleRefAsset={onSetStyleRefAsset}
@@ -366,7 +366,7 @@ function ImageSidebar({
   onCreateTag,
   onNodeChange,
   onVariant,
-  onCreateSibling,
+  onDuplicate,
   onGenerate,
   generationError,
   onSetStyleRefAsset,
@@ -388,7 +388,7 @@ function ImageSidebar({
   onCreateTag: (tag: TagDefinition) => void;
   onNodeChange: (id: string, patch: Partial<CanvasNode>) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
-  onCreateSibling: (group: CanvasNodeData, sourceAsset: Asset) => void;
+  onDuplicate: (node: CanvasNodeData, sourceAsset: Asset) => void;
   onGenerate: (id: string, node: CanvasNodeData, overrides?: { params?: GenerationParams; visualStyleId?: string | null }) => void;
   generationError?: string | null;
   onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
@@ -574,7 +574,7 @@ function ImageSidebar({
           </label>
           {styleRefKind && <p className="muted">Chat refinements create exploratory assets. Assign entity tags from the tag editor to link images to characters or locations.</p>}
           <button className="generate-button" onClick={() => onRefineChat(node.id, asset.id)}>{styleRefKind ? 'Explore refinement in chat' : 'Refine in chat'}</button>
-          {!styleRefKind && <button className="secondary" onClick={() => onCreateSibling(node.data, asset)}>Create sibling</button>}
+          {!styleRefKind && <button className="secondary" onClick={() => onDuplicate(node.data, asset)}>Duplicate as draft</button>}
         </section>
       )}
       {asset.generation && (

@@ -32,7 +32,7 @@ function assetsForCard(card: ConceptCard, assets: Asset[], assetsById: Map<strin
   };
 
   Object.values(canvas.nodes).forEach((node) => {
-    if (node.sourceConceptCardId !== card.id && !node.tags.includes(cardTag)) return;
+    if ((node.origin?.kind !== 'conceptCard' || node.origin.id !== card.id) && !node.tags.includes(cardTag)) return;
     addId(node.activeAssetId);
     node.assetIds.forEach(addId);
   });

@@ -18,8 +18,9 @@ from models import (
     ConceptNodeCreate,
     ConceptNodeResponse,
     DisplayPatch,
-    GenerationParams,
     CanvasNode,
+    CanvasNodeOrigin,
+    GenerationParams,
 )
 
 CONCEPT_TAG = "concept"
@@ -85,7 +86,7 @@ def _sync_legacy_canvas_cards(slug: str, cards: list[ConceptCardDocument]) -> li
     for node_id, node in canvas.nodes.items():
         if (
             CONCEPT_TAG not in node.tags
-            or node.sourceConceptCardId is not None
+            or node.origin is not None
             or node_id in existing_ids
         ):
             continue
@@ -150,7 +151,7 @@ def _retag_card_subject(slug: str, card: ConceptCardDocument, previous: ConceptA
     canvas = library.read_stored_canvas(slug)
     changed = False
     for node in canvas.nodes.values():
-        if node.sourceConceptCardId != card.id and card_tag not in node.tags:
+        if (node.origin is None or node.origin.kind != "conceptCard" or node.origin.id != card.id) and card_tag not in node.tags:
             continue
         if old_tag in node.tags:
             node.tags = list(dict.fromkeys(new_tag if tag == old_tag else tag for tag in node.tags))
@@ -234,7 +235,7 @@ def draft_card_to_canvas(slug: str, card_id: str) -> ConceptNodeResponse:
         y=y,
         asset_ids=card.assetIds,
         active_asset_id=card.activeAssetId,
-        source_concept_card_id=card.id,
+        origin=CanvasNodeOrigin(kind="conceptCard", id=card.id),
     )
     return ConceptNodeResponse(nodeId=node_id, canvas=saved)
 

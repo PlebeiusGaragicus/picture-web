@@ -39,8 +39,7 @@ export function nodesToCanvas(canvas: CanvasDocument, nodes: Node<CanvasNodeData
             visualStyleId: node.data.visualStyleId ?? null,
             assetIds: node.data.assetIds ?? [],
             activeAssetId: node.data.activeAssetId ?? node.data.assetIds[0] ?? null,
-            sourceConceptCardId: node.data.sourceConceptCardId ?? existing?.sourceConceptCardId ?? null,
-            sourcePanelId: node.data.sourcePanelId ?? existing?.sourcePanelId ?? null,
+            origin: node.data.origin ?? existing?.origin ?? null,
           },
         ];
       }),

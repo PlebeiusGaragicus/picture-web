@@ -651,7 +651,7 @@ def draft_panel_to_canvas(slug: str, panel_id: str, prompt_id: str):
     tagged entity has no reference asset yet.
     """
     from canvas_nodes import create_image_group_node, next_canvas_position
-    from models import ConceptNodeResponse, GenerationParams
+    from models import CanvasNodeOrigin, ConceptNodeResponse, GenerationParams
 
     document = read_document(slug)
     panel = document.panels[_require_panel(document, panel_id)]
@@ -700,7 +700,7 @@ def draft_panel_to_canvas(slug: str, panel_id: str, prompt_id: str):
         params=GenerationParams(),
         x=x,
         y=y,
-        source_panel_id=panel_id,
+        origin=CanvasNodeOrigin(kind="panel", id=panel_id),
     )
     return ConceptNodeResponse(nodeId=node_id, canvas=saved)
 

@@ -113,7 +113,7 @@ export function CanvasPanels({
           onSetProjectCover={ws.setProjectCover}
           onFindOnCanvas={ws.focusNodeOnCanvas}
           onVariant={ws.changeVariant}
-          onCreateSibling={ws.createSiblingDraft}
+          onDuplicate={ws.duplicateAsDraft}
           onDelete={ws.deleteNodeById}
           onArchiveImage={ws.requestArchiveImageAsset}
           onRestoreImage={ws.restoreImageAsset}

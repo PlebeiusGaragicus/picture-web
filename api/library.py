@@ -955,16 +955,16 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
             )
         write_canvas(slug, canvas)
         return
-    if existing is not None and (existing.assetIds or existing.sourcePanelId or existing.sourceConceptCardId):
+    if existing is not None and (existing.assetIds or existing.origin is not None):
         # Results join the node's stack; domain-linked prompt nodes keep their identity.
         existing.assetIds = list(dict.fromkeys([*existing.assetIds, *asset_ids]))
         existing.activeAssetId = active_asset_id or existing.activeAssetId
         canvas.nodes[node_id] = existing
         write_canvas(slug, canvas)
-        if existing.sourcePanelId:
+        if existing.origin is not None and existing.origin.kind == "panel":
             import story_panels
 
-            story_panels.attach_assets_to_panel(slug, existing.sourcePanelId, asset_ids)
+            story_panels.attach_assets_to_panel(slug, existing.origin.id, asset_ids)
         return
     target_node_id = matching_variant_group_node_id(slug, canvas, assets)
     logger.debug(
@@ -1007,8 +1007,13 @@ def attach_chat_assets_to_canvas(
     canvas = read_stored_canvas(slug)
     source_node_id = session.source.canvasNodeId
     source_node = canvas.nodes.get(source_node_id or "") if source_node_id else None
-    source_x = source_node.x if source_node is not None else 120
-    source_y = source_node.y if source_node is not None else 120
+    if source_node is not None and source_node_id is not None:
+        # Refinements are attempts at the same image: they join the stack.
+        source_node.assetIds = list(dict.fromkeys([*source_node.assetIds, *[asset.id for asset in assets]]))
+        source_node.activeAssetId = assets[0].id
+        canvas.nodes[source_node_id] = source_node
+        write_canvas(slug, canvas)
+        return
     turn_index = max(
         0,
         len([current for current in session.turns if current.role == "model"]) - 1,
@@ -1018,8 +1023,8 @@ def attach_chat_assets_to_canvas(
         node_id = f"{node_id}_{new_ulid()}"
     canvas.nodes[node_id] = CanvasNode(
         displayName=f"{session.title} turn {turn_index + 1}",
-        x=source_x + 260,
-        y=source_y + 220 + turn_index * 260,
+        x=120,
+        y=120 + turn_index * 260,
         width=None,
         assetIds=[asset.id for asset in assets],
         activeAssetId=assets[0].id,

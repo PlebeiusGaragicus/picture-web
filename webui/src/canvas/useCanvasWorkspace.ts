@@ -182,7 +182,9 @@ export function useCanvasWorkspace({
         const activeAsset = variants[nextIndex];
         return { ...node, data: { ...node.data, activeAssetId: activeAsset.id, activeAsset } };
       });
-      void persistNodesRef.current(next);
+      // Archived mode is a browse view: flipping takes must not rewrite the
+      // stored active pointer (the reload on toggle discards the local swap).
+      if (!showArchived) void persistNodesRef.current(next);
       return next;
     });
   }, [showArchived]);
@@ -415,7 +417,7 @@ export function useCanvasWorkspace({
   const performDeleteNodeById = useCallback((nodeId: string, assetId?: string) => {
     const nodeToDelete = nodes.find((node) => node.id === nodeId);
     if (!canDeleteNode(nodeToDelete)) return;
-    const isConceptCardDraft = Boolean(nodeToDelete?.data.sourceConceptCardId);
+    const isConceptCardDraft = nodeToDelete?.data.origin?.kind === 'conceptCard';
     if (isConceptCardDraft && !assetId) {
       setNodes((current) => {
         const next = current.filter((node) => node.id !== nodeId);
@@ -913,7 +915,8 @@ export function useCanvasWorkspace({
     setContextMenu(null);
   };
 
-  const createSiblingDraft = async (group: CanvasNodeData, sourceAsset: Asset) => {
+  /** "Duplicate as draft": a new node prefilled with the take's recipe. No relationship is recorded. */
+  const duplicateAsDraft = async (group: CanvasNodeData, sourceAsset: Asset) => {
     const refs = sourceAsset.generation?.refs ?? [];
     const params = sourceAsset.generation
       ? {
@@ -1229,7 +1232,7 @@ export function useCanvasWorkspace({
     updateNode,
     generateFromNode,
     generationError,
-    createSiblingDraft,
+    duplicateAsDraft,
     changeVariant,
     deleteNodeById,
     performDeleteNodeById,

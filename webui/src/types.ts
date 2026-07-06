@@ -108,8 +108,13 @@ export interface CanvasNode extends CanvasNodeLayout {
   visualStyleId?: string | null;
   assetIds: string[];
   activeAssetId?: string | null;
-  sourceConceptCardId?: string | null;
-  sourcePanelId?: string | null;
+  origin?: CanvasNodeOrigin | null;
+}
+
+/** The domain object that spawned this node (results attach back to it). */
+export interface CanvasNodeOrigin {
+  kind: 'panel' | 'conceptCard';
+  id: string;
 }
 
 export interface GeneratePayload {

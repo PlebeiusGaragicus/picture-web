@@ -2643,7 +2643,7 @@ def test_concept_cards_draft_to_canvas(tmp_path, monkeypatch):
     assert character_tag in character_node["tags"]
     assert character_node["displayName"] == "Farm Hero"
     assert character_node["prompt"] == "Updated character prompt"
-    assert character_node["sourceConceptCardId"] == character_id
+    assert character_node["origin"] == {"kind": "conceptCard", "id": character_id}
 
     node_deleted_canvas = draft_payload["canvas"]
     node_deleted_canvas["nodes"].pop(draft_payload["nodeId"])
@@ -2659,7 +2659,7 @@ def test_concept_cards_draft_to_canvas(tmp_path, monkeypatch):
     assert not any(card["id"] == character_id for card in cards_after_card_delete)
     canvas_after_card_delete = client.get("/api/projects/farm-comic/canvas").json()
     assert redraft_node_id in canvas_after_card_delete["nodes"]
-    assert canvas_after_card_delete["nodes"][redraft_node_id]["sourceConceptCardId"] == character_id
+    assert canvas_after_card_delete["nodes"][redraft_node_id]["origin"] == {"kind": "conceptCard", "id": character_id}
 
     location = client.post(
         "/api/projects/farm-comic/concept-cards",
@@ -2865,7 +2865,7 @@ def test_draft_panel_to_canvas_blocks_then_creates_node_and_auto_attaches(tmp_pa
     node_id = drafted.json()["nodeId"]
     node = drafted.json()["canvas"]["nodes"][node_id]
     assert node["assetIds"] == []
-    assert node["sourcePanelId"] == panel_id
+    assert node["origin"] == {"kind": "panel", "id": panel_id}
     assert node["refs"] == [hero_asset, barn_asset]
     assert "Hero swings the barn door open." == node["prompt"]
     assert {"comic-adaptation", panel_id, "hero", "barn"} <= set(node["tags"])

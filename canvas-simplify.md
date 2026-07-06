@@ -239,9 +239,16 @@ images from the registry. Remaining for later phases: adaptation records
 still *write* canonicals (registry is the read path); UI ★ canonical
 affordances are §3 work.
 
-**Phase 4 — Origin + naming + stack rule.** `origin` field replaces the two
-source ids; "Duplicate as draft" rename; archived-view honesty; chat
-refinements verified to join the stack; normalize delete semantics.
+**Phase 4 — Origin + naming + stack rule.** ✅ Done (with two explicit
+deferrals). `origin: {kind, id}` replaces `sourcePanelId`/`sourceConceptCardId`
+(old keys in local data are ignored/dropped — re-draft a panel/concept if an
+existing prompt node loses its link). "Create sibling" is now "Duplicate as
+draft" in UI and code. Chat refinements join the source node's stack instead
+of minting `chat_*` nodes (the standalone-node path remains only for sessions
+with no canvas source). Archived mode no longer persists active-pointer swaps
+while browsing takes. Deferred to the §3 UI work: the full stack-manager
+treatment of archived takes (badged, in-stack) and normalizing the
+concept-card delete special case.
 
 **Phase 5 (stretch, separate decision) — Fold style archetypes into ordinary
 tagged nodes.** Retire `sync_style_ref_canvas_nodes`, the dedicated style-ref

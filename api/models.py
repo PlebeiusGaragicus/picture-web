@@ -830,6 +830,13 @@ class ArchivePatch(BaseModel):
     archived: bool = True
 
 
+class CanvasNodeOrigin(BaseModel):
+    """The domain object that spawned this node (results attach back to it)."""
+
+    kind: Literal["panel", "conceptCard"]
+    id: str
+
+
 class CanvasNode(CanvasNodeLayout):
     """The one canvas node: an image made from a prompt.
 
@@ -844,8 +851,7 @@ class CanvasNode(CanvasNodeLayout):
     visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
     assetIds: list[str] = Field(default_factory=list)
     activeAssetId: str | None = None
-    sourceConceptCardId: str | None = None
-    sourcePanelId: str | None = None
+    origin: CanvasNodeOrigin | None = None
 
     @model_validator(mode="after")
     def active_asset_defaults_to_first(self) -> "CanvasNode":

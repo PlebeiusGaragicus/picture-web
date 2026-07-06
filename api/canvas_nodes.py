@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import library
 from ids import new_ulid
-from models import CanvasDocument, GenerationParams, CanvasNode, ImageGroupNodeCreate, ImageGroupNodeResponse
+from models import CanvasDocument, CanvasNode, CanvasNodeOrigin, GenerationParams, ImageGroupNodeCreate, ImageGroupNodeResponse
 
 NODE_LAYOUT = {"columns": 5, "start_x": 80, "start_y": 320, "x_gap": 310, "y_gap": 230}
 
@@ -32,8 +32,7 @@ def create_image_group_node(
     width: float | None = 240,
     asset_ids: list[str] | None = None,
     active_asset_id: str | None = None,
-    source_concept_card_id: str | None = None,
-    source_panel_id: str | None = None,
+    origin: CanvasNodeOrigin | None = None,
 ) -> tuple[str, CanvasDocument]:
     canvas = library.read_stored_canvas(slug)
     node_id = f"node_{new_ulid()}"
@@ -46,15 +45,13 @@ def create_image_group_node(
         y=y,
         width=width,
         tags=library.node_tags(*tags),
-        role=None,
         refs=list(refs or []),
         prompt=prompt,
         params=params or GenerationParams(),
         visualStyleId=visual_style_id,
         assetIds=ids,
         activeAssetId=active_asset_id if ids else None,
-        sourceConceptCardId=source_concept_card_id,
-        sourcePanelId=source_panel_id,
+        origin=origin,
     )
     saved = library.write_canvas(slug, canvas)
     return node_id, saved
