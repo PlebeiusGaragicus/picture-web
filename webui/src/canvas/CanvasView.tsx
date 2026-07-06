@@ -5,7 +5,7 @@ import { maxZoom, minZoom, withArchivedOnlyAsset } from './flowDocument';
 import { ImageViewer } from './ImageViewer';
 import { nodeTypes } from './nodes';
 import { NodeSidebar } from './sidebars';
-import type { ImageGroupNodeData } from './types';
+import type { CanvasNodeData } from './types';
 import type { CanvasWorkspace } from './useCanvasWorkspace';
 import { ConfirmDialog } from '../ui';
 import type { AdaptationStatus, Project } from '../types';
@@ -61,7 +61,7 @@ export function CanvasFlowSurface({ workspace }: { workspace: CanvasWorkspace })
         }}
         onSelectionChange={({ nodes: selected }) => {
           ws.setSelectedNodeIds(selected.map((node) => node.id));
-          ws.setSelectedIds(selected.flatMap((node) => (node.data.kind === 'imageGroup' && node.data.activeAsset ? [node.data.activeAsset.id] : [])));
+          ws.setSelectedIds(selected.flatMap((node) => (node.data.activeAsset ? [node.data.activeAsset.id] : [])));
         }}
         proOptions={{ hideAttribution: true }}
         fitView
@@ -105,10 +105,8 @@ export function CanvasPanels({
           adaptation={adaptation}
           projectTags={ws.projectTags}
           coverAssetId={currentProject?.coverAssetId ?? null}
-          onDraftChange={ws.updateDraft}
-          onImageGroupChange={ws.updateImageGroup}
-          onGenerate={ws.generateDraft}
-          onGenerateVariants={ws.generateImageVariants}
+          onNodeChange={ws.updateNode}
+          onGenerate={ws.generateFromNode}
           generationError={ws.generationError?.nodeId === ws.selectedNode.id ? ws.generationError.message : null}
           onSaveStyleRefPrompt={ws.saveAdaptationStyleRefPrompt}
           onSetStyleRefAsset={ws.setAdaptationStyleRefAsset}
@@ -140,12 +138,10 @@ export function CanvasPanels({
       {(ws.viewerNodeId || ws.viewerAssetId) && (
         <ImageViewer
           node={(() => {
-            const match = ws.nodes.find((item) => item.id === ws.viewerNodeId && item.data.kind === 'imageGroup');
-            if (!match || match.data.kind !== 'imageGroup') return undefined;
-            const imageNode = match as Node<ImageGroupNodeData>;
-            if (!ws.showArchived) return imageNode;
-            const patched = withArchivedOnlyAsset(imageNode);
-            return patched.data.kind === 'imageGroup' ? patched as Node<ImageGroupNodeData> : imageNode;
+            const match = ws.nodes.find((item) => item.id === ws.viewerNodeId && item.data.assetIds.length > 0);
+            if (!match) return undefined;
+            if (!ws.showArchived) return match;
+            return withArchivedOnlyAsset(match);
           })()}
           fallbackAsset={ws.assets.find((asset) => asset.id === ws.viewerAssetId)}
           assets={ws.assets}
@@ -195,7 +191,7 @@ export function CanvasPanels({
       {ws.pendingDelete && (
         <ConfirmDialog
           title="Confirm delete"
-          body={ws.nodes.find((node) => node.id === ws.pendingDelete!.nodeId)?.data.kind === 'imageGroup'
+          body={(ws.nodes.find((node) => node.id === ws.pendingDelete!.nodeId)?.data.assetIds.length ?? 0) > 0
             ? 'Remove this empty image node from the canvas?'
             : 'Delete this draft?'}
           confirmLabel="Delete"

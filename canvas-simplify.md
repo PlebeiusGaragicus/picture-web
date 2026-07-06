@@ -217,13 +217,15 @@ removal: the create action, sidebar button, `text-result` role (frontend union
 and CSS. Existing `text-result` nodes in local canvases will be rejected by
 validation on next save — delete them from `canvas.json` by hand if any exist.
 
-**Phase 2 — One node shape.** The big breaking change to `canvas.json`,
-`api/models.py`, `webui/src/canvas/types.ts`, `flowDocument.ts`, `nodes.tsx`.
-Draft = empty stack. Merge the two generate handlers. Backend validation
-rejects the old shape outright (no migration; note in commit message that
-existing canvases need regeneration or a one-off `python` rescue script the
-commit may include as a throwaway under `scratch/` — not a compatibility
-layer).
+**Phase 2 — One node shape.** ✅ Done. One `CanvasNode` model on both sides
+(no `type` field; draft = empty stack), one React Flow card with two visual
+states, one `updateNode` patch path, and one Generate action
+(`generateFromNode`, with optional param overrides from the takes panel;
+the node's `prompt`/`refs`/`params` are the recipe, falling back to the
+active take's receipt for pre-unification nodes). Old canvases load as-is —
+the stray `type` key is ignored on read and dropped on the next save.
+Connection drops now target any node still drafting, not just `draft_`-id
+nodes.
 
 **Phase 3 — Kill roles; canonical pointer in the tag registry.** Add
 `canonicalAssetId` to entity tags, port adaptation/style-ref *reads* to it,

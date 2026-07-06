@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Node } from 'reactflow';
 import { isCanonicalStyleRefAsset, styleRefKindForTags } from '../styleRefs';
-import type { AdaptationStatus, Asset, DraftCanvasNode, GenerationParams, ImageGroupCanvasNode, StyleRefKind, TagDefinition, VisualStyleDefinition } from '../types';
+import type { AdaptationStatus, Asset, CanvasNode, GenerationParams, StyleRefKind, TagDefinition, VisualStyleDefinition } from '../types';
 import { VisualStyleSelect } from '../visualStyles/VisualStyleSelect';
 import { TagControlButton } from './assetTagRow';
 import { canDeleteNode } from './roles';
 import { assetLabel, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, uniqueOptions, visibleDisplayName, visibleVariants } from './shared';
-import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData } from './types';
+import type { CanvasNodeData } from './types';
 
 function GenerationErrorNotice({ message }: { message: string | null | undefined }) {
   if (!message) return null;
@@ -24,10 +24,8 @@ export function NodeSidebar({
   adaptation,
   projectTags,
   coverAssetId,
-  onDraftChange,
-  onImageGroupChange,
+  onNodeChange,
   onGenerate,
-  onGenerateVariants,
   generationError,
   onSaveStyleRefPrompt,
   onSetStyleRefAsset,
@@ -44,22 +42,20 @@ export function NodeSidebar({
   onRefineChat,
   archivedOnly = false,
 }: {
-  node: Node<PhotoNodeData>;
+  node: Node<CanvasNodeData>;
   assets: Asset[];
   adaptation: AdaptationStatus | null;
   projectTags: TagDefinition[];
   coverAssetId?: string | null;
-  onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
-  onImageGroupChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
-  onGenerate: (id: string, draft: DraftNodeData | ImageGroupNodeData) => void;
-  onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams, visualStyleId?: string | null) => void;
+  onNodeChange: (id: string, patch: Partial<CanvasNode>) => void;
+  onGenerate: (id: string, node: CanvasNodeData, overrides?: { params?: GenerationParams; visualStyleId?: string | null }) => void;
   generationError?: string | null;
   onSaveStyleRefPrompt: (kind: StyleRefKind, prompt: string) => Promise<void>;
   onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
   onSetProjectCover: (assetId: string) => void;
   onFindOnCanvas: (nodeId: string) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
-  onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
+  onCreateSibling: (group: CanvasNodeData, sourceAsset: Asset) => void;
   onDelete: (id: string, assetId?: string) => void;
   onArchiveImage: (nodeId: string, assetId: string) => void;
   onRestoreImage: (nodeId: string, assetId: string) => void;
@@ -69,61 +65,15 @@ export function NodeSidebar({
   onRefineChat: (nodeId: string, assetId: string) => void;
   archivedOnly?: boolean;
 }) {
-  if (node.data.kind === 'draft') {
-    const draftNode: Node<DraftNodeData> = { ...node, data: node.data };
+  if (!node.data.assetIds.length) {
     return (
       <DraftSidebar
-        node={draftNode}
+        node={node}
         assets={assets}
         visualStyles={adaptation?.visualStyles ?? []}
         defaultVisualStyleId={adaptation?.defaultVisualStyleId}
-        onDraftChange={onDraftChange}
+        onDraftChange={onNodeChange}
         onGenerate={onGenerate}
-        onSaveStyleRefPrompt={onSaveStyleRefPrompt}
-        onDelete={onDelete}
-        generationError={generationError}
-      />
-    );
-  }
-
-  const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
-  if (!node.data.activeAsset && !node.data.assetIds.length) {
-    const promptNode: Node<DraftNodeData> = {
-      ...node,
-      type: 'draft',
-      data: {
-        kind: 'draft',
-        type: 'draft',
-        nodeId: node.data.nodeId,
-        displayName: node.data.displayName,
-        x: node.data.x,
-        y: node.data.y,
-        width: node.data.width ?? null,
-        tags: node.data.tags,
-        role: node.data.role ?? null,
-        refs: node.data.refs ?? [],
-        prompt: node.data.prompt ?? '',
-        params: node.data.params ?? defaultDraftParams,
-        visualStyleId: node.data.visualStyleId ?? null,
-        onDetails: node.data.onDetails,
-      },
-    };
-    return (
-      <DraftSidebar
-        node={promptNode}
-        assets={assets}
-        visualStyles={adaptation?.visualStyles ?? []}
-        defaultVisualStyleId={adaptation?.defaultVisualStyleId}
-        onDraftChange={(id, patch) => onImageGroupChange(id, {
-          displayName: patch.displayName,
-          tags: patch.tags,
-          role: patch.role,
-          refs: patch.refs,
-          prompt: patch.prompt,
-          params: patch.params,
-          visualStyleId: patch.visualStyleId,
-        })}
-        onGenerate={(id) => onGenerate(id, imageNode.data)}
         onSaveStyleRefPrompt={onSaveStyleRefPrompt}
         onDelete={onDelete}
         generationError={generationError}
@@ -140,7 +90,7 @@ export function NodeSidebar({
   }
   return (
     <ImageSidebar
-      node={imageNode}
+      node={node}
       asset={node.data.activeAsset}
       assets={assets}
       adaptation={adaptation}
@@ -151,10 +101,10 @@ export function NodeSidebar({
       onOpenAsset={onOpenAsset}
       onPartitionedAssetTagsChange={onPartitionedAssetTagsChange}
       onCreateTag={onCreateTag}
-      onNodeChange={onImageGroupChange}
+      onNodeChange={onNodeChange}
       onVariant={onVariant}
       onCreateSibling={onCreateSibling}
-      onGenerateVariants={onGenerateVariants}
+      onGenerate={onGenerate}
       generationError={generationError}
       onSetStyleRefAsset={onSetStyleRefAsset}
       onSetProjectCover={onSetProjectCover}
@@ -176,12 +126,12 @@ function DraftSidebar({
   onDelete,
   generationError,
 }: {
-  node: Node<DraftNodeData>;
+  node: Node<CanvasNodeData>;
   assets: Asset[];
   visualStyles: VisualStyleDefinition[];
   defaultVisualStyleId?: string | null;
-  onDraftChange: (id: string, patch: Partial<DraftCanvasNode>) => void;
-  onGenerate: (id: string, draft: DraftNodeData) => void;
+  onDraftChange: (id: string, patch: Partial<CanvasNode>) => void;
+  onGenerate: (id: string, node: CanvasNodeData) => void;
   onSaveStyleRefPrompt: (kind: StyleRefKind, prompt: string) => Promise<void>;
   onDelete: (id: string, assetId?: string) => void;
   generationError?: string | null;
@@ -416,7 +366,7 @@ function ImageSidebar({
   onNodeChange,
   onVariant,
   onCreateSibling,
-  onGenerateVariants,
+  onGenerate,
   generationError,
   onSetStyleRefAsset,
   onSetProjectCover,
@@ -424,7 +374,7 @@ function ImageSidebar({
   onRefineChat,
   archivedOnly = false,
 }: {
-  node: Node<ImageGroupNodeData>;
+  node: Node<CanvasNodeData>;
   asset: Asset;
   assets: Asset[];
   adaptation: AdaptationStatus | null;
@@ -435,10 +385,10 @@ function ImageSidebar({
   onOpenAsset: (assetId: string) => void;
   onPartitionedAssetTagsChange: (nodeId: string, assetId: string, userTags: string[], characterTags: string[], locationTags: string[]) => void;
   onCreateTag: (tag: TagDefinition) => void;
-  onNodeChange: (id: string, patch: Partial<ImageGroupCanvasNode>) => void;
+  onNodeChange: (id: string, patch: Partial<CanvasNode>) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
-  onCreateSibling: (group: ImageGroupNodeData, sourceAsset: Asset) => void;
-  onGenerateVariants: (id: string, group: ImageGroupNodeData, params: GenerationParams, visualStyleId?: string | null) => void;
+  onCreateSibling: (group: CanvasNodeData, sourceAsset: Asset) => void;
+  onGenerate: (id: string, node: CanvasNodeData, overrides?: { params?: GenerationParams; visualStyleId?: string | null }) => void;
   generationError?: string | null;
   onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
   onSetProjectCover: (assetId: string) => void;
@@ -679,7 +629,7 @@ function ImageSidebar({
             <p className="muted">Generate style reference replacements from the adaptation style reference action so canonical metadata stays in sync.</p>
           ) : isVariantPanelOpen ? (
             <div className="generate-control">
-              <button className="generate-button" onClick={() => onGenerateVariants(node.id, node.data, variantParams, variantVisualStyleId)} disabled={!prompt.trim() || node.data.isGenerating}>
+              <button className="generate-button" onClick={() => onGenerate(node.id, node.data, { params: variantParams, visualStyleId: variantVisualStyleId })} disabled={!prompt.trim() || node.data.isGenerating}>
                 {node.data.isGenerating && <span className="spinner" aria-hidden="true" />}
                 {node.data.isGenerating ? 'Generating...' : 'Generate variants'}
               </button>

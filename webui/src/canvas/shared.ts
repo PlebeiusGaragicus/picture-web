@@ -19,8 +19,8 @@ export function isCharacterCanvasNode(tags: string[] | undefined, projectTags: T
   return tags.some((tagId) => entityCharacterTagIds.has(tagId));
 }
 
-export function isPromptOnlyImageGroup(node: { type?: string; assetIds?: string[] }): boolean {
-  return node.type === 'imageGroup' && !(node.assetIds?.length);
+export function isPromptOnlyImageGroup(node: { assetIds?: string[] }): boolean {
+  return !(node.assetIds?.length);
 }
 
 export const defaultDraftParams: GenerationParams = { model: 'gemini-3.1-flash-image', aspectRatio: '16:9', imageSize: '1K', seed: null, batchCount: 1 };

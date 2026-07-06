@@ -1,26 +1,21 @@
-import type { Asset, DraftCanvasNode, ImageGroupCanvasNode, TagDefinition } from '../types';
+import type { Asset, CanvasNode, TagDefinition } from '../types';
 
-export interface DraftNodeData extends DraftCanvasNode {
-  kind: 'draft';
-  nodeId: string;
-  parentDisplayNames?: Map<string, string>;
-  isGenerating?: boolean;
-  onDetails: (nodeId: string) => void;
-}
-
-export interface ImageGroupNodeData extends ImageGroupCanvasNode {
-  kind: 'imageGroup';
+/** Flow-node data: the canvas node plus resolved assets and interaction callbacks. */
+export interface CanvasNodeData extends CanvasNode {
   nodeId: string;
   assets: Asset[];
   activeAsset: Asset | null;
+  parentDisplayNames?: Map<string, string>;
+  projectTags: TagDefinition[];
+  isGenerating?: boolean;
+  archivedOnlyView?: boolean;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
   onView: (nodeId: string) => void;
   onDetails: (nodeId: string) => void;
   onDisplayNameChange: (nodeId: string, displayName: string) => void;
   onCreateTag: (tag: TagDefinition) => void;
-  projectTags: TagDefinition[];
-  isGenerating?: boolean;
-  archivedOnlyView?: boolean;
 }
 
-export type PhotoNodeData = DraftNodeData | ImageGroupNodeData;
+export function nodeHasTakes(data: Pick<CanvasNodeData, 'assetIds'>): boolean {
+  return data.assetIds.length > 0;
+}

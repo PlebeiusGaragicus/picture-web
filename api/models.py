@@ -847,16 +847,14 @@ class ArchivePatch(BaseModel):
     archived: bool = True
 
 
-class DraftCanvasNode(CanvasNodeLayout):
-    type: Literal["draft"] = "draft"
-    refs: list[str] = Field(default_factory=list)
-    prompt: str = ""
-    params: GenerationParams = Field(default_factory=GenerationParams)
-    visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
+class CanvasNode(CanvasNodeLayout):
+    """The one canvas node: an image made from a prompt.
 
+    An empty ``assetIds`` stack is the draft state (no pixels yet); generation
+    fills the stack in place. ``refs``/``prompt``/``params`` always hold the
+    recipe for the node's next generation.
+    """
 
-class ImageGroupCanvasNode(CanvasNodeLayout):
-    type: Literal["imageGroup"] = "imageGroup"
     refs: list[str] = Field(default_factory=list)
     prompt: str = ""
     params: GenerationParams = Field(default_factory=GenerationParams)
@@ -867,19 +865,16 @@ class ImageGroupCanvasNode(CanvasNodeLayout):
     sourcePanelId: str | None = None
 
     @model_validator(mode="after")
-    def active_asset_defaults_to_first(self) -> "ImageGroupCanvasNode":
+    def active_asset_defaults_to_first(self) -> "CanvasNode":
         if not self.assetIds:
             self.activeAssetId = None
         elif self.activeAssetId is None or self.activeAssetId not in self.assetIds:
             self.activeAssetId = self.assetIds[0]
         return self
 
-
-def is_prompt_only_image_group(node: ImageGroupCanvasNode) -> bool:
-    return not node.assetIds
-
-
-CanvasNode = Annotated[DraftCanvasNode | ImageGroupCanvasNode, Field(discriminator="type")]
+    @property
+    def is_draft(self) -> bool:
+        return not self.assetIds
 
 
 class CanvasDocument(BaseModel):

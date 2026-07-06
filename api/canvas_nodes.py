@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import library
 from ids import new_ulid
-from models import CanvasDocument, GenerationParams, ImageGroupCanvasNode, ImageGroupNodeCreate, ImageGroupNodeResponse
+from models import CanvasDocument, GenerationParams, CanvasNode, ImageGroupNodeCreate, ImageGroupNodeResponse
 
 NODE_LAYOUT = {"columns": 5, "start_x": 80, "start_y": 320, "x_gap": 310, "y_gap": 230}
 
 
 def next_canvas_position(canvas: CanvasDocument) -> tuple[float, float]:
-    index = sum(1 for node in canvas.nodes.values() if isinstance(node, ImageGroupCanvasNode))
+    index = len(canvas.nodes)
     columns = NODE_LAYOUT["columns"]
     return (
         NODE_LAYOUT["start_x"] + (index % columns) * NODE_LAYOUT["x_gap"],
@@ -40,7 +40,7 @@ def create_image_group_node(
     while node_id in canvas.nodes:
         node_id = f"node_{new_ulid()}"
     ids = list(asset_ids or [])
-    canvas.nodes[node_id] = ImageGroupCanvasNode(
+    canvas.nodes[node_id] = CanvasNode(
         displayName=display_name,
         x=x,
         y=y,

@@ -8,7 +8,7 @@ import { formatRequestError } from '../formatError';
 import { HelpTip, HoverTooltip, Modal } from '../ui';
 import { SYSTEM_TAGS, characterEntityTags, isCharacterCanvasNode, locationEntityTags, partitionAssetTagIds, userProjectTags, visibleDisplayName } from '../canvas/shared';
 import { TagControlButton } from '../canvas/assetTagRow';
-import type { AdaptationAssetLink, AdaptationStatus, Asset, CanvasDocument, CharacterRecord, ImageGroupCanvasNode, TagDefinition } from '../types';
+import type { AdaptationAssetLink, AdaptationStatus, Asset, CanvasDocument, CharacterRecord, CanvasNode, TagDefinition } from '../types';
 
 function characterEntityTagForKey(key: string, projectTags: TagDefinition[]) {
   const tagId = slugifyFileKey(key);
@@ -83,7 +83,7 @@ function sortedVariantKeyList(keys: string[]): string[] {
 
 function characterImageAssetsForSlug(
   characterSlug: string,
-  canvasEntries: Array<[string, ImageGroupCanvasNode]>,
+  canvasEntries: Array<[string, CanvasNode]>,
   assetsById: Map<string, Asset>,
 ) {
   const assets: Array<{ asset: Asset; nodeId: string }> = [];
@@ -138,9 +138,9 @@ export function CharactersHubView({
   const characterKeys = useMemo(() => new Set(Object.keys(adaptation.characters)), [adaptation.characters]);
   const canvasEntries = useMemo(
     () => Object.entries(canvas.nodes)
-      .filter((entry): entry is [string, ImageGroupCanvasNode] => {
+      .filter((entry): entry is [string, CanvasNode] => {
         const node = entry[1];
-        return node.type === 'imageGroup' && isCharacterCanvasNode(node.tags, projectTags);
+        return isCharacterCanvasNode(node.tags, projectTags);
       })
       .sort(([left], [right]) => left.localeCompare(right)),
     [canvas.nodes, projectTags],

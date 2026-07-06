@@ -5,14 +5,10 @@ import {
   locationEntityTags,
   userProjectTags,
 } from '../canvas/shared';
-import type { Asset, CanvasDocument, ImageGroupCanvasNode, TagDefinition } from '../types';
+import type { Asset, CanvasDocument, TagDefinition } from '../types';
 
 export function canvasRepresentedAssetIds(canvas: CanvasDocument): Set<string> {
-  return new Set(
-    Object.values(canvas.nodes)
-      .filter((node): node is ImageGroupCanvasNode => node.type === 'imageGroup')
-      .flatMap((node) => node.assetIds),
-  );
+  return new Set(Object.values(canvas.nodes).flatMap((node) => node.assetIds));
 }
 
 export function basePickableAssets(

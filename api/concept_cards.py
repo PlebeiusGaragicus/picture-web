@@ -19,7 +19,7 @@ from models import (
     ConceptNodeResponse,
     DisplayPatch,
     GenerationParams,
-    ImageGroupCanvasNode,
+    CanvasNode,
 )
 
 CONCEPT_TAG = "concept"
@@ -60,7 +60,7 @@ def _subject_from_tags(tags: list[str]) -> ConceptArtSubjectKind | None:
     return None
 
 
-def _legacy_card_from_node(slug: str, node_id: str, node: ImageGroupCanvasNode) -> ConceptCardDocument | None:
+def _legacy_card_from_node(slug: str, node_id: str, node: CanvasNode) -> ConceptCardDocument | None:
     subject = _subject_from_tags(node.tags)
     if subject is None:
         return None
@@ -84,8 +84,7 @@ def _sync_legacy_canvas_cards(slug: str, cards: list[ConceptCardDocument]) -> li
     changed = False
     for node_id, node in canvas.nodes.items():
         if (
-            not isinstance(node, ImageGroupCanvasNode)
-            or CONCEPT_TAG not in node.tags
+            CONCEPT_TAG not in node.tags
             or node.sourceConceptCardId is not None
             or node_id in existing_ids
         ):
@@ -151,8 +150,6 @@ def _retag_card_subject(slug: str, card: ConceptCardDocument, previous: ConceptA
     canvas = library.read_stored_canvas(slug)
     changed = False
     for node in canvas.nodes.values():
-        if not isinstance(node, ImageGroupCanvasNode):
-            continue
         if node.sourceConceptCardId != card.id and card_tag not in node.tags:
             continue
         if old_tag in node.tags:

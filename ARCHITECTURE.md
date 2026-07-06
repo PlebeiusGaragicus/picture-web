@@ -37,8 +37,10 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
 
 `canvas.json` stores layout + persistent nodes; lineage is derived, never stored.
 
-- **Node types:** `draft` (prompt + refs + params, no pixels yet) and `imageGroup`
-  (one or more asset ids, variant stack, `activeAssetId`).
+- **One node type.** A node is an image made from a prompt: `refs` + `prompt` +
+  `params` (the recipe for its next generation) plus an `assetIds` take stack
+  with `activeAssetId`. An empty stack **is** the draft state — generating
+  fills the stack in place; there is no separate draft node type.
 - **Roles** (`node.role`): `style-ref-source`, `generated-result`, `refinement`
   (slated for removal — see [canvas-simplify.md](canvas-simplify.md)).
   Durable source nodes (style refs) can't be deleted from the UI;

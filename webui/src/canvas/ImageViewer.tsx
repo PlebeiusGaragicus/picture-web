@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import type { Node } from 'reactflow';
 import { TagControlButton } from './assetTagRow';
 import { assetLabel, visibleDisplayName, visibleVariants } from './shared';
-import type { ImageGroupNodeData } from './types';
+import type { CanvasNodeData } from './types';
 import { formatRequestError } from '../formatError';
 import { saveAssetImageToDisk } from '../exportAssets';
 import { useToast } from '../shared/toast';
@@ -124,7 +124,7 @@ export function ImageViewer({
   onSetProjectCover,
   archivedOnly = false,
 }: {
-  node?: Node<ImageGroupNodeData>;
+  node?: Node<CanvasNodeData>;
   fallbackAsset?: Asset;
   assets: Asset[];
   projectSlug: string;

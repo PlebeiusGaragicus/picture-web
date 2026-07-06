@@ -24,14 +24,13 @@ from models import (
     CanvasDocument,
     ChatSessionDocument,
     ChatTurn,
-    DraftCanvasNode,
+    CanvasNode,
     DisplayPatch,
     GenerateRequest,
     GenerateResponse,
     GenerationParams,
     GenerationReceipt,
     GeneratedResultRole,
-    ImageGroupCanvasNode,
     Prompt,
     ProviderCapture,
     ProjectCreate,
@@ -79,7 +78,7 @@ def default_canvas_for_new_project() -> CanvasDocument:
     display_name, prompt = seed
     return CanvasDocument(
         nodes={
-            DEFAULT_STARTER_DRAFT_NODE_ID: DraftCanvasNode(
+            DEFAULT_STARTER_DRAFT_NODE_ID: CanvasNode(
                 displayName=display_name,
                 x=120,
                 y=120,
@@ -439,13 +438,12 @@ def detach_asset_from_project(slug: str, asset_id: str) -> None:
     canvas = read_stored_canvas(slug)
     changed = False
     for node_id, node in list(canvas.nodes.items()):
-        if isinstance(node, DraftCanvasNode):
-            next_refs = [ref for ref in node.refs if ref != asset_id]
-            if next_refs != node.refs:
-                node.refs = next_refs
-                canvas.nodes[node_id] = node
-                changed = True
-        elif isinstance(node, ImageGroupCanvasNode) and asset_id in node.assetIds:
+        next_refs = [ref for ref in node.refs if ref != asset_id]
+        if next_refs != node.refs:
+            node.refs = next_refs
+            canvas.nodes[node_id] = node
+            changed = True
+        if asset_id in node.assetIds:
             node.assetIds = [current_id for current_id in node.assetIds if current_id != asset_id]
             if node.assetIds:
                 if node.activeAssetId == asset_id or node.activeAssetId not in node.assetIds:
@@ -535,12 +533,10 @@ def write_canvas(slug: str, canvas: CanvasDocument) -> CanvasDocument:
 def validate_canvas(slug: str, canvas: CanvasDocument) -> None:
     require_project(slug)
     for node_id, node in canvas.nodes.items():
-        if isinstance(node, DraftCanvasNode):
-            validate_refs(slug, node.refs)
-        elif isinstance(node, ImageGroupCanvasNode):
-            for asset_id in node.assetIds:
-                if not asset_json_path(slug, asset_id).is_file() or not asset_png_path(slug, asset_id).is_file():
-                    raise HTTPException(status_code=400, detail=f"Invalid asset in canvas node {node_id}: {asset_id}")
+        validate_refs(slug, node.refs)
+        for asset_id in node.assetIds:
+            if not asset_json_path(slug, asset_id).is_file() or not asset_png_path(slug, asset_id).is_file():
+                raise HTTPException(status_code=400, detail=f"Invalid asset in canvas node {node_id}: {asset_id}")
 
 
 def canvas_node_id(asset_id: str) -> str:
@@ -570,7 +566,6 @@ def restore_asset_to_canvas(slug: str, asset_id: str) -> None:
     represented = {
         current_id
         for node in canvas.nodes.values()
-        if isinstance(node, ImageGroupCanvasNode)
         for current_id in node.assetIds
     }
     if asset_id in represented:
@@ -580,14 +575,14 @@ def restore_asset_to_canvas(slug: str, asset_id: str) -> None:
     index = len(canvas.nodes)
     max_story_x = 80.0
     for node in canvas.nodes.values():
-        if isinstance(node, DraftCanvasNode):
+        if not node.assetIds:
             max_story_x = max(max_story_x, node.x + (node.width or 240) + 80)
     asset_start_x = max(1500.0, max_story_x)
     node_id = canvas_node_id(asset.id)
     while node_id in canvas.nodes:
         node_id = f"{canvas_node_id(asset.id)}_{index}"
         index += 1
-    canvas.nodes[node_id] = ImageGroupCanvasNode(
+    canvas.nodes[node_id] = CanvasNode(
         displayName=asset.title,
         x=asset_start_x + (index % 3) * 280,
         y=80 + (index // 3) * 240,
@@ -605,13 +600,12 @@ def default_canvas_for_assets(slug: str, canvas: CanvasDocument, include_archive
     represented = {
         asset_id
         for node in next_canvas.nodes.values()
-        if isinstance(node, ImageGroupCanvasNode)
         for asset_id in node.assetIds
     }
     index = len(next_canvas.nodes)
     max_story_x = 80.0
     for node in next_canvas.nodes.values():
-        if isinstance(node, DraftCanvasNode):
+        if not node.assetIds:
             max_story_x = max(max_story_x, node.x + (node.width or 240) + 80)
     asset_start_x = max(1500.0, max_story_x)
     for asset in list_assets(slug, include_archived=include_archived):
@@ -621,7 +615,7 @@ def default_canvas_for_assets(slug: str, canvas: CanvasDocument, include_archive
         while node_id in next_canvas.nodes:
             node_id = f"{canvas_node_id(asset.id)}_{index}"
             index += 1
-        next_canvas.nodes[node_id] = ImageGroupCanvasNode(
+        next_canvas.nodes[node_id] = CanvasNode(
             displayName=asset.title,
             x=asset_start_x + (index % 3) * 280,
             y=80 + (index // 3) * 240,
@@ -640,7 +634,7 @@ def variant_key_for_asset(slug: str, asset_id: str) -> tuple[str, tuple[str, ...
     return (metadata.prompt.text, tuple(metadata.generation.refs))
 
 
-def variant_key_for_node(slug: str, node: ImageGroupCanvasNode) -> tuple[str, tuple[str, ...]] | None:
+def variant_key_for_node(slug: str, node: CanvasNode) -> tuple[str, tuple[str, ...]] | None:
     for asset_id in node.assetIds:
         key = variant_key_for_asset(slug, asset_id)
         if key is not None:
@@ -648,7 +642,7 @@ def variant_key_for_node(slug: str, node: ImageGroupCanvasNode) -> tuple[str, tu
     return None
 
 
-def canvas_role_type(node: DraftCanvasNode | ImageGroupCanvasNode) -> str | None:
+def canvas_role_type(node: CanvasNode) -> str | None:
     role = node.role
     if role is None:
         return None
@@ -662,8 +656,6 @@ def normalize_variant_groups(slug: str, canvas: CanvasDocument) -> CanvasDocumen
     next_canvas = canvas.model_copy(deep=True)
     node_by_key: dict[tuple[str, tuple[str, ...]], str] = {}
     for node_id, node in list(next_canvas.nodes.items()):
-        if not isinstance(node, ImageGroupCanvasNode):
-            continue
         if canvas_role_type(node) in {"generated-result", "refinement"}:
             continue
         key = variant_key_for_node(slug, node)
@@ -674,8 +666,6 @@ def normalize_variant_groups(slug: str, canvas: CanvasDocument) -> CanvasDocumen
             node_by_key[key] = node_id
             continue
         target = next_canvas.nodes[target_id]
-        if not isinstance(target, ImageGroupCanvasNode):
-            continue
         target.assetIds = list(dict.fromkeys([*target.assetIds, *node.assetIds]))
         if target.activeAssetId not in target.assetIds:
             target.activeAssetId = target.assetIds[0]
@@ -750,7 +740,7 @@ async def import_asset(
     if canvas_x is not None and canvas_y is not None:
         canvas = read_stored_canvas(slug)
         node_id = canvas_node_id(asset_id)
-        canvas.nodes[node_id] = ImageGroupCanvasNode(
+        canvas.nodes[node_id] = CanvasNode(
             displayName=summary.title,
             x=canvas_x,
             y=canvas_y,
@@ -928,14 +918,14 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
     if existing is not None and canvas_role_type(existing) == "style-ref-source":
         child_node_id = generated_result_node_id(node_id)
         child = canvas.nodes.get(child_node_id)
-        if isinstance(child, ImageGroupCanvasNode):
+        if child is not None:
             child.assetIds = list(dict.fromkeys([*asset_ids, *child.assetIds]))
             child.activeAssetId = active_asset_id or child.activeAssetId
             child.tags = node_tags(*child.tags, "generated-image")
             child.role = GeneratedResultRole(sourceNodeId=node_id)
             canvas.nodes[child_node_id] = child
         else:
-            canvas.nodes[child_node_id] = ImageGroupCanvasNode(
+            canvas.nodes[child_node_id] = CanvasNode(
                 displayName=assets[0].title if assets else existing.displayName,
                 x=existing.x + 320,
                 y=existing.y,
@@ -947,9 +937,9 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
             )
         write_canvas(slug, canvas)
         return
-    if isinstance(existing, ImageGroupCanvasNode):
-        merged = list(dict.fromkeys([*existing.assetIds, *asset_ids]))
-        existing.assetIds = merged
+    if existing is not None and (existing.assetIds or existing.sourcePanelId or existing.sourceConceptCardId):
+        # Results join the node's stack; domain-linked prompt nodes keep their identity.
+        existing.assetIds = list(dict.fromkeys([*existing.assetIds, *asset_ids]))
         existing.activeAssetId = active_asset_id or existing.activeAssetId
         canvas.nodes[node_id] = existing
         write_canvas(slug, canvas)
@@ -960,40 +950,28 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
         return
     target_node_id = matching_variant_group_node_id(slug, canvas, assets)
     logger.debug(
-        "attach generated assets slug=%s requested_node=%s existing_type=%s target_node=%s asset_ids=%s",
+        "attach generated assets slug=%s requested_node=%s target_node=%s asset_ids=%s",
         slug,
         node_id,
-        type(existing).__name__ if existing is not None else None,
         target_node_id,
         asset_ids,
     )
     if target_node_id and target_node_id != node_id:
         target = canvas.nodes[target_node_id]
-        if isinstance(target, ImageGroupCanvasNode):
-            target.assetIds = list(dict.fromkeys([*target.assetIds, *asset_ids]))
-            target.activeAssetId = active_asset_id or target.activeAssetId
-            canvas.nodes[target_node_id] = target
-            canvas.nodes.pop(node_id, None)
-    elif existing is None or isinstance(existing, DraftCanvasNode):
-        x = existing.x if isinstance(existing, DraftCanvasNode) else 120
-        y = existing.y if isinstance(existing, DraftCanvasNode) else 120
-        width = existing.width if isinstance(existing, DraftCanvasNode) else None
-        display_name = existing.displayName if isinstance(existing, DraftCanvasNode) else None
-        refs = existing.refs if isinstance(existing, DraftCanvasNode) else []
-        prompt = existing.prompt if isinstance(existing, DraftCanvasNode) else ""
-        params = existing.params if isinstance(existing, DraftCanvasNode) else GenerationParams()
-        visual_style_id = existing.visualStyleId if isinstance(existing, DraftCanvasNode) else None
-        tags = existing.tags if isinstance(existing, DraftCanvasNode) else []
-        canvas.nodes[node_id] = ImageGroupCanvasNode(
-            displayName=display_name if display_name is not None else (assets[0].title if assets else ""),
-            x=x,
-            y=y,
-            width=width,
-            tags=tags,
-            refs=refs,
-            prompt=prompt,
-            params=params,
-            visualStyleId=visual_style_id,
+        target.assetIds = list(dict.fromkeys([*target.assetIds, *asset_ids]))
+        target.activeAssetId = active_asset_id or target.activeAssetId
+        canvas.nodes[target_node_id] = target
+        canvas.nodes.pop(node_id, None)
+    elif existing is not None:
+        # A draft-state node generated: the stack fills in place.
+        existing.assetIds = asset_ids
+        existing.activeAssetId = active_asset_id
+        canvas.nodes[node_id] = existing
+    else:
+        canvas.nodes[node_id] = CanvasNode(
+            displayName=assets[0].title if assets else "",
+            x=120,
+            y=120,
             assetIds=asset_ids,
             activeAssetId=active_asset_id,
         )
@@ -1020,7 +998,7 @@ def attach_chat_assets_to_canvas(
     node_id = f"chat_{session.id}_{turn.id}"
     while node_id in canvas.nodes:
         node_id = f"{node_id}_{new_ulid()}"
-    canvas.nodes[node_id] = ImageGroupCanvasNode(
+    canvas.nodes[node_id] = CanvasNode(
         displayName=f"{session.title} turn {turn_index + 1}",
         x=source_x + 260,
         y=source_y + 220 + turn_index * 260,
@@ -1044,8 +1022,6 @@ def matching_variant_group_node_id(
     prompt_text = first.prompt.text
     refs = first.generation.refs
     for node_id, node in canvas.nodes.items():
-        if not isinstance(node, ImageGroupCanvasNode):
-            continue
         if canvas_role_type(node) in {"generated-result", "refinement"}:
             continue
         for asset_id in node.assetIds:

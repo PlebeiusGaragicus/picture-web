@@ -98,20 +98,14 @@ export type CanvasRole =
   | { type: 'generated-result'; sourceNodeId: string }
   | { type: 'refinement'; sourceNodeId: string; sourceAssetId?: string | null };
 
-export interface DraftCanvasNode extends CanvasNodeLayout {
-  type: 'draft';
-  refs: string[];
-  prompt: string;
-  params: GenerationParams;
-  visualStyleId?: string | null;
-}
-
 export type ArtifactKind = 'character-sheet' | 'location-prompt' | 'concept-art';
 export type AdaptationFileKind = 'characters' | 'locations';
 export type ConceptArtSubjectKind = 'character' | 'location';
 
-export interface ImageGroupCanvasNode extends CanvasNodeLayout {
-  type: 'imageGroup';
+/** The one canvas node: an image made from a prompt. An empty `assetIds`
+ *  stack is the draft state; `refs`/`prompt`/`params` are the recipe for the
+ *  node's next generation. */
+export interface CanvasNode extends CanvasNodeLayout {
   refs: string[];
   prompt: string;
   params: GenerationParams;
@@ -121,8 +115,6 @@ export interface ImageGroupCanvasNode extends CanvasNodeLayout {
   sourceConceptCardId?: string | null;
   sourcePanelId?: string | null;
 }
-
-export type CanvasNode = DraftCanvasNode | ImageGroupCanvasNode;
 
 export interface GeneratePayload {
   prompt: string;

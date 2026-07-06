@@ -24,7 +24,7 @@ import {
   visibleDisplayName,
   visibleVariants,
 } from './shared';
-import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData } from './types';
+import type { CanvasNodeData } from './types';
 import { api } from '../api';
 import { formatRequestError } from '../formatError';
 import type { ProjectPhase } from '../projectNavigation';
@@ -41,11 +41,10 @@ import type {
   CanvasDocument,
   CanvasRole,
   ChatSession,
+  CanvasNode,
   ChatTurnSettings,
-  DraftCanvasNode,
   GeneratePayload,
   GenerationParams,
-  ImageGroupCanvasNode,
   Project,
   StyleRefKind,
   TagDefinition,
@@ -92,7 +91,7 @@ export function useCanvasWorkspace({
   const [canvas, setCanvas] = useState<CanvasDocument>(emptyCanvas);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
-  const [nodes, setNodes] = useState<Node<PhotoNodeData>[]>([]);
+  const [nodes, setNodes] = useState<Node<CanvasNodeData>[]>([]);
   const [generationError, setGenerationError] = useState<{ nodeId: string; message: string } | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -112,11 +111,11 @@ export function useCanvasWorkspace({
   const [generatingNodeIds, setGeneratingNodeIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const reactFlowRef = useRef<ReactFlowInstance<PhotoNodeData> | null>(null);
+  const reactFlowRef = useRef<ReactFlowInstance<CanvasNodeData> | null>(null);
   const pendingImportPositionRef = useRef<{ x: number; y: number } | undefined>(undefined);
   const generatingNodeIdsRef = useRef<Set<string>>(new Set());
   const chatSessionsRef = useRef<ChatSession[]>([]);
-  const persistNodesRef = useRef<(nextNodes: Node<PhotoNodeData>[], options?: { refresh?: boolean }) => Promise<void>>(async () => undefined);
+  const persistNodesRef = useRef<(nextNodes: Node<CanvasNodeData>[], options?: { refresh?: boolean }) => Promise<void>>(async () => undefined);
   const assetsRef = useRef<Asset[]>([]);
   const toFlowNodesCallbacksRef = useRef({
     changeVariant: (_nodeId: string, _direction: -1 | 1) => {},
@@ -145,12 +144,12 @@ export function useCanvasWorkspace({
 
   const updateImageGroupDisplayName = useCallback((nodeId: string, displayName: string) => {
     setNodes((current) => {
-      const renamedNode = current.find((node) => node.id === nodeId && node.data.kind === 'imageGroup') as Node<ImageGroupNodeData> | undefined;
+      const renamedNode = current.find((node) => node.id === nodeId) as Node<CanvasNodeData> | undefined;
       const renamedAssetIds = renamedNode?.data.assetIds ?? [];
       const nextNodes = current.map((node) =>
-        node.id === nodeId && node.data.kind === 'imageGroup'
+        node.id === nodeId
           ? { ...node, data: { ...node.data, displayName } }
-          : node.data.kind === 'draft' && renamedAssetIds.length
+          : renamedAssetIds.length
             ? {
                 ...node,
                 data: {
@@ -174,7 +173,7 @@ export function useCanvasWorkspace({
   const changeVariant = useCallback((nodeId: string, direction: -1 | 1) => {
     setNodes((current) => {
       const next = current.map((node) => {
-        if (node.id !== nodeId || node.data.kind !== 'imageGroup') return node;
+        if (node.id !== nodeId) return node;
         const variants = visibleVariants(node.data.assets, node.data.assetIds, showArchived);
         if (variants.length < 2) return node;
         const currentId = node.data.activeAsset?.id ?? node.data.activeAssetId ?? '';
@@ -214,15 +213,15 @@ export function useCanvasWorkspace({
     setViewerAssetId(null);
     setNodes((current) => {
       const targetNode = current.find(
-        (node) => node.data.kind === 'imageGroup' && node.data.assetIds.includes(assetId),
-      ) as Node<ImageGroupNodeData> | undefined;
+        (node) => node.data.assetIds.includes(assetId),
+      ) as Node<CanvasNodeData> | undefined;
       if (!targetNode) {
         setViewerAssetId(assetId);
         return current;
       }
       setPopoverNodeId(targetNode.id);
       const next = current.map((node) => {
-        if (node.id !== targetNode.id || node.data.kind !== 'imageGroup') return node;
+        if (node.id !== targetNode.id) return node;
         const activeAsset = node.data.assets.find((asset) => asset.id === assetId) ?? node.data.activeAsset;
         return { ...node, data: { ...node.data, activeAssetId: assetId, activeAsset } };
       });
@@ -233,7 +232,7 @@ export function useCanvasWorkspace({
 
   const openAssetInViewer = useCallback((assetId: string) => {
     setNodes((current) => {
-      const targetNode = current.find((node) => node.data.kind === 'imageGroup' && node.data.assetIds.includes(assetId)) as Node<ImageGroupNodeData> | undefined;
+      const targetNode = current.find((node) => node.data.assetIds.includes(assetId)) as Node<CanvasNodeData> | undefined;
       if (!targetNode) {
         setViewerAssetId(assetId);
         setViewerNodeId(null);
@@ -242,7 +241,7 @@ export function useCanvasWorkspace({
       setViewerNodeId(targetNode.id);
       setViewerAssetId(null);
       const next = current.map((node) => {
-        if (node.id !== targetNode.id || node.data.kind !== 'imageGroup') return node;
+        if (node.id !== targetNode.id) return node;
         const activeAsset = node.data.assets.find((asset) => asset.id === assetId) ?? node.data.activeAsset;
         return { ...node, data: { ...node.data, activeAssetId: assetId, activeAsset } };
       });
@@ -349,28 +348,26 @@ export function useCanvasWorkspace({
     const entityTagFiltered = activeEntityTagFilters.length === 0
       ? phaseScopedNodes
       : phaseScopedNodes.filter((node) => {
-          if (node.data.kind !== 'imageGroup') return true;
+          if (!node.data.assetIds.length) return true;
           const required = new Set(activeEntityTagFilters);
           return node.data.assets.some((asset) => asset.tags.some((tag) => required.has(tag)));
         });
     const userTagFiltered = activeUserTagFilters.length === 0
       ? entityTagFiltered
       : entityTagFiltered.filter((node) => {
-          if (node.data.kind !== 'imageGroup') return true;
+          if (!node.data.assetIds.length) return true;
           const required = new Set(activeUserTagFilters);
           return node.data.assets.some((asset) => asset.tags.some((tag) => required.has(tag)));
         });
     if (showArchived) {
       return userTagFiltered
         .filter((node) => {
-          if (node.data.kind !== 'imageGroup') return false;
           if (!node.data.assetIds.length) return false;
           return imageGroupAssetsInNode(node.data).some((asset) => asset.archivedAt);
         })
         .map((node) => withArchivedOnlyAsset(node));
     }
     return userTagFiltered.filter((node) => {
-      if (node.data.kind !== 'imageGroup') return true;
       if (!node.data.assetIds.length) return true;
       return imageGroupAssetsInNode(node.data).some((asset) => !asset.archivedAt);
     });
@@ -407,7 +404,7 @@ export function useCanvasWorkspace({
     }
   }, 600);
 
-  const saveLayout = useCallback(async (_: React.MouseEvent, draggedNode?: Node<PhotoNodeData>) => {
+  const saveLayout = useCallback(async (_: React.MouseEvent, draggedNode?: Node<CanvasNodeData>) => {
     if (!openProjectSlug) return;
     const currentNodes = draggedNode ? nodes.map((node) => (node.id === draggedNode.id ? draggedNode : node)) : nodes;
     setNodes(currentNodes);
@@ -419,7 +416,7 @@ export function useCanvasWorkspace({
   const performDeleteNodeById = useCallback((nodeId: string, assetId?: string) => {
     const nodeToDelete = nodes.find((node) => node.id === nodeId);
     if (!canDeleteNode(nodeToDelete)) return;
-    const isConceptCardDraft = nodeToDelete?.data.kind === 'imageGroup' && Boolean(nodeToDelete.data.sourceConceptCardId);
+    const isConceptCardDraft = Boolean(nodeToDelete?.data.sourceConceptCardId);
     if (isConceptCardDraft && !assetId) {
       setNodes((current) => {
         const next = current.filter((node) => node.id !== nodeId);
@@ -430,12 +427,13 @@ export function useCanvasWorkspace({
       setPopoverNodeId((current) => (current === nodeId ? null : current));
       return;
     }
-    const assetIdsToDelete = nodeToDelete?.data.kind === 'imageGroup'
+    const hasTakes = (nodeToDelete?.data.assetIds.length ?? 0) > 0;
+    const assetIdsToDelete = nodeToDelete && hasTakes
       ? isConceptCardDraft
         ? []
         : [assetId ?? nodeToDelete.data.activeAsset?.id ?? nodeToDelete.data.activeAssetId ?? nodeToDelete.data.assetIds[0]].filter((id): id is string => Boolean(id))
       : [];
-    if (nodeToDelete?.data.kind === 'imageGroup') {
+    if (hasTakes) {
       void Promise.all(assetIdsToDelete.map((assetId) => api.deleteAsset(openProjectSlug, assetId)))
         .then(() => loadProject(openProjectSlug))
         .catch((err) => {
@@ -444,10 +442,10 @@ export function useCanvasWorkspace({
         });
     }
     setNodes((current) => {
-      const next = nodeToDelete?.data.kind === 'imageGroup'
+      const next = hasTakes
         ? current
             .map((node) => {
-              if (node.id !== nodeId || node.data.kind !== 'imageGroup') return node;
+              if (node.id !== nodeId) return node;
               const nextAssetIds = isConceptCardDraft && assetId
                 ? node.data.assetIds.filter((id) => id !== assetId)
                 : node.data.assetIds.filter((id) => !assetIdsToDelete.includes(id));
@@ -457,7 +455,7 @@ export function useCanvasWorkspace({
               const nextActiveAsset = nextAssets.find((asset) => asset.id === nextActiveAssetId) ?? nextAssets[0] ?? null;
               return { ...node, data: { ...node.data, assetIds: nextAssetIds, activeAssetId: nextActiveAssetId, assets: nextAssets, activeAsset: nextActiveAsset } };
             })
-            .filter((node): node is Node<PhotoNodeData> => Boolean(node))
+            .filter((node): node is Node<CanvasNodeData> => Boolean(node))
         : current.filter((node) => node.id !== nodeId);
       void persistNodesRef.current(next);
       return next;
@@ -542,7 +540,6 @@ export function useCanvasWorkspace({
       asset.tags.includes(tagId) ? { ...asset, tags: asset.tags.filter((tag) => tag !== tagId) } : asset
     )));
     setNodes((current) => current.map((node) => {
-      if (node.data.kind !== 'imageGroup') return node;
       const nextAssets = node.data.assets.map((asset) => (
         asset.tags.includes(tagId) ? { ...asset, tags: asset.tags.filter((tag) => tag !== tagId) } : asset
       ));
@@ -569,7 +566,7 @@ export function useCanvasWorkspace({
     if (!asset) return;
     setAssets((current) => current.map((item) => (item.id === assetId ? { ...item, tags: nextTags } : item)));
     setNodes((current) => current.map((node) => {
-      if (node.data.kind !== 'imageGroup' || !node.data.assetIds.includes(assetId)) return node;
+      if (!node.data.assetIds.includes(assetId)) return node;
       const nextAssets = node.data.assets.map((item) => (item.id === assetId ? { ...item, tags: nextTags } : item));
       const nextActiveAsset = node.data.activeAsset?.id === assetId ? { ...node.data.activeAsset, tags: nextTags } : node.data.activeAsset;
       return { ...node, data: { ...node.data, assets: nextAssets, activeAsset: nextActiveAsset } };
@@ -599,7 +596,7 @@ export function useCanvasWorkspace({
     if (!asset) return;
     setAssets((current) => current.map((item) => (item.id === assetId ? { ...item, tags: nextTags } : item)));
     setNodes((current) => current.map((node) => {
-      if (node.data.kind !== 'imageGroup' || !node.data.assetIds.includes(assetId)) return node;
+      if (!node.data.assetIds.includes(assetId)) return node;
       const nextAssets = node.data.assets.map((item) => (item.id === assetId ? { ...item, tags: nextTags } : item));
       const nextActiveAsset = node.data.activeAsset?.id === assetId ? { ...node.data.activeAsset, tags: nextTags } : node.data.activeAsset;
       return { ...node, data: { ...node.data, assets: nextAssets, activeAsset: nextActiveAsset } };
@@ -729,30 +726,16 @@ export function useCanvasWorkspace({
     fileInputRef.current?.click();
   };
 
-  const updateDraft = async (id: string, patch: Partial<DraftCanvasNode>) => {
-    console.debug('[photo-web] update draft', { id, patch });
+  const updateNode = async (id: string, patch: Partial<CanvasNode>) => {
+    const cleanPatch = omitUndefined(patch as Record<string, unknown>) as Partial<CanvasNode>;
     setNodes((current) => {
-      const nextNodes = current.map((node) =>
-        node.id === id && node.data.kind === 'draft' ? { ...node, data: { ...node.data, ...patch } } : node,
-      );
-      persistNodes(nextNodes, { refresh: false }).catch((err) => {
-        console.error('[photo-web] failed to persist draft update', err);
-        toast.error(formatRequestError(err));
-      });
-      return nextNodes;
-    });
-  };
-
-  const updateImageGroup = async (id: string, patch: Partial<ImageGroupCanvasNode>) => {
-    const cleanPatch = omitUndefined(patch as Record<string, unknown>) as Partial<ImageGroupCanvasNode>;
-    setNodes((current) => {
-      const updatedNode = current.find((node) => node.id === id && node.data.kind === 'imageGroup') as Node<ImageGroupNodeData> | undefined;
+      const updatedNode = current.find((node) => node.id === id);
       const renamedAssetIds = cleanPatch.displayName !== undefined ? updatedNode?.data.assetIds ?? [] : [];
       const nextNodes = current.map((node) => {
-        if (node.id === id && node.data.kind === 'imageGroup') {
+        if (node.id === id) {
           return { ...node, data: { ...node.data, ...cleanPatch } };
         }
-        if (node.data.kind === 'draft' && cleanPatch.displayName !== undefined && renamedAssetIds.length) {
+        if (cleanPatch.displayName !== undefined && renamedAssetIds.length) {
           return {
             ...node,
             data: {
@@ -767,14 +750,14 @@ export function useCanvasWorkspace({
         return node;
       });
       persistNodes(nextNodes, { refresh: false }).catch((err) => {
-        console.error('[photo-web] failed to persist image group update', err);
+        console.error('[photo-web] failed to persist node update', err);
         toast.error(formatRequestError(err));
       });
       return nextNodes;
     });
   };
 
-  const persistNodes = useCallback(async (nextNodes: Node<PhotoNodeData>[], options: { refresh?: boolean } = {}) => {
+  const persistNodes = useCallback(async (nextNodes: Node<CanvasNodeData>[], options: { refresh?: boolean } = {}) => {
     if (!openProjectSlug) return;
     const next = nodesToCanvas(canvas, nextNodes);
     if (!(options.refresh ?? true)) {
@@ -821,7 +804,6 @@ export function useCanvasWorkspace({
 
   useEffect(() => {
     setNodes((current) => current.map((node) => {
-      if (node.data.kind !== 'imageGroup') return node;
       return {
         ...node,
         data: {
@@ -837,7 +819,7 @@ export function useCanvasWorkspace({
     if (!selectedNodeIds.length) return;
     const deletableNodes = deletableSelectedNodes(nodes, selectedNodeIds);
     if (!deletableNodes.length) return;
-    const imageNodeCount = deletableNodes.filter((node) => node.data.kind === 'imageGroup').length;
+    const imageNodeCount = deletableNodes.filter((node) => node.data.assetIds.length > 0).length;
     setPendingBulkDelete(deleteSelectedNodesMessage(selectedNodeIds.length, deletableNodes.length, imageNodeCount));
   }, [nodes, selectedNodeIds]);
 
@@ -847,8 +829,8 @@ export function useCanvasWorkspace({
     const deletableNodes = deletableSelectedNodes(nodes, selectedNodeIds);
     if (!deletableNodes.length) return;
     const deletable = new Set(deletableNodes.map((node) => node.id));
-    const selectedImageNodes = deletableNodes.filter((node) => node.data.kind === 'imageGroup') as Node<ImageGroupNodeData>[];
-    const selectedDraftNodes = deletableNodes.filter((node) => node.data.kind !== 'imageGroup');
+    const selectedImageNodes = deletableNodes.filter((node) => node.data.assetIds.length > 0);
+    const selectedDraftNodes = deletableNodes.filter((node) => node.data.assetIds.length === 0);
     try {
       if (selectedImageNodes.length) {
         await Promise.all(selectedImageNodes.flatMap((node) => node.data.assetIds.map((assetId) => api.archiveAsset(openProjectSlug, assetId, true))));
@@ -888,14 +870,13 @@ export function useCanvasWorkspace({
     options: { prompt?: string; params?: GenerationParams; displayName?: string; role?: CanvasRole | null; tags?: string[] } = {},
   ) => {
     const nodeId = `draft_${Date.now()}`;
-    const node: Node<PhotoNodeData> = {
+    const callbacks = toFlowNodesCallbacksRef.current;
+    const node: Node<CanvasNodeData> = {
       id: nodeId,
       position,
-      type: 'draft',
+      type: 'canvasNode',
       data: {
-        kind: 'draft',
         nodeId,
-        type: 'draft',
         displayName: options.displayName ?? '',
         x: position.x,
         y: position.y,
@@ -904,7 +885,17 @@ export function useCanvasWorkspace({
         refs: Array.from(new Set(refs)),
         prompt: options.prompt ?? '',
         params: options.params ?? defaultDraftParams,
+        visualStyleId: null,
+        assetIds: [],
+        activeAssetId: null,
+        assets: [],
+        activeAsset: null,
+        projectTags: callbacks.projectTags,
+        onVariant: callbacks.changeVariant,
+        onView: callbacks.openViewer,
         onDetails: openDetails,
+        onDisplayNameChange: callbacks.updateImageGroupDisplayName,
+        onCreateTag: onCreateTagForNode,
       },
     };
     const nextNodes = [...nodes, node];
@@ -924,7 +915,7 @@ export function useCanvasWorkspace({
     setContextMenu(null);
   };
 
-  const createSiblingDraft = async (group: ImageGroupNodeData, sourceAsset: Asset) => {
+  const createSiblingDraft = async (group: CanvasNodeData, sourceAsset: Asset) => {
     const refs = sourceAsset.generation?.refs ?? [];
     const params = sourceAsset.generation
       ? {
@@ -952,17 +943,32 @@ export function useCanvasWorkspace({
     setGenerationError(null);
   };
 
-  const generateDraft = async (id: string, draft: DraftNodeData | ImageGroupNodeData) => {
+  /** The one Generate action: run the node's recipe (prompt + refs + params),
+   *  optionally overridden from the takes panel; results join the node's stack. */
+  const generateFromNode = async (
+    id: string,
+    node: CanvasNodeData,
+    overrides: { params?: GenerationParams; visualStyleId?: string | null } = {},
+  ) => {
     await flushCanvasSave();
-    const styleRefKind = styleRefKindForTags(draft.tags);
+    const styleRefKind = styleRefKindForTags(node.tags);
+    if (styleRefKind && node.assetIds.length > 0) {
+      setError('Generate style reference replacements from the adaptation style reference action.');
+      return;
+    }
     const generatingId = styleRefKind ? styleRefImageNodeId(styleRefKind, adaptation) : id;
+    const params = overrides.params ?? node.params;
+    // The node's fields are the recipe; fall back to the active take's receipt
+    // for nodes created before recipes were stored on the node.
+    const prompt = node.prompt.trim() ? node.prompt : node.activeAsset?.prompt?.text ?? '';
+    const refs = node.refs.length ? node.refs : node.activeAsset?.generation?.refs ?? [];
     try {
       clearGenerationFailure();
       setError(null);
       setGeneratingNodeIds((current) => new Set(current).add(generatingId));
-      setNodes((current) => current.map((node) => (node.id === generatingId || node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
+      setNodes((current) => current.map((item) => (item.id === generatingId || item.id === id ? { ...item, data: { ...item.data, isGenerating: true } } : item)));
       if (styleRefKind) {
-        const visualStyleId = draft.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null;
+        const visualStyleId = node.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null;
         if (!visualStyleId) {
           setError('Pick a visual style before generating the canonical reference.');
           return;
@@ -971,26 +977,28 @@ export function useCanvasWorkspace({
           kind: styleRefKind,
           canvasNodeId: id,
           visualStyleId,
-          model: draft.params.model,
-          aspectRatio: draft.params.aspectRatio,
-          imageSize: draft.params.imageSize,
-          seed: draft.params.seed,
-          batchCount: draft.params.batchCount,
+          model: params.model,
+          aspectRatio: params.aspectRatio,
+          imageSize: params.imageSize,
+          seed: params.seed,
+          batchCount: params.batchCount,
         });
         if (result.status) setAdaptation(result.status);
       } else {
         const payload: GeneratePayload = {
-          prompt: draft.prompt,
-          refs: draft.refs,
-          model: draft.params.model,
-          aspectRatio: draft.params.aspectRatio,
-          imageSize: draft.params.imageSize,
-          seed: draft.params.seed,
-          batchCount: draft.params.batchCount,
-          title: visibleDisplayName(draft.displayName) || null,
-          tags: draft.tags ?? [],
+          prompt,
+          refs,
+          model: params.model,
+          aspectRatio: params.aspectRatio,
+          imageSize: params.imageSize,
+          seed: params.seed,
+          batchCount: params.batchCount,
+          title: visibleDisplayName(node.displayName) || null,
+          tags: node.tags ?? [],
           canvasNodeId: id,
-          visualStyleId: draft.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null,
+          visualStyleId: overrides.visualStyleId !== undefined
+            ? overrides.visualStyleId ?? null
+            : node.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null,
         };
         if (!payload.prompt.trim()) {
           setError('Add a prompt before generating.');
@@ -1007,58 +1015,13 @@ export function useCanvasWorkspace({
     } catch (err) {
       reportGenerationFailure(generatingId, err);
     } finally {
-      const styleRefKind = styleRefKindForTags(draft.tags);
-      const generatingId = styleRefKind ? styleRefImageNodeId(styleRefKind, adaptation) : id;
       setGeneratingNodeIds((current) => {
         const next = new Set(current);
         next.delete(id);
         next.delete(generatingId);
         return next;
       });
-      setNodes((current) => current.map((node) => (node.id === id || node.id === generatingId ? { ...node, data: { ...node.data, isGenerating: false } } : node)));
-    }
-  };
-
-  const generateImageVariants = async (id: string, group: ImageGroupNodeData, params: GenerationParams, visualStyleId?: string | null) => {
-    await flushCanvasSave();
-    if (styleRefKindForTags(group.tags)) {
-      setError('Generate style reference replacements from the adaptation style reference action.');
-      return;
-    }
-    const sourceAsset = group.activeAsset ?? group.assets[0] ?? null;
-    const prompt = sourceAsset?.prompt?.text ?? '';
-    const refs = sourceAsset?.generation?.refs ?? [];
-    if (!prompt || !sourceAsset?.generation) return;
-    try {
-      clearGenerationFailure();
-      setError(null);
-      setGeneratingNodeIds((current) => new Set(current).add(id));
-      setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: true } } : node)));
-      const payload: GeneratePayload = {
-        prompt,
-        refs,
-        model: params.model,
-        aspectRatio: params.aspectRatio,
-        imageSize: params.imageSize,
-        seed: params.seed,
-        batchCount: params.batchCount,
-        title: visibleDisplayName(group.displayName) || null,
-        tags: group.tags ?? [],
-        canvasNodeId: id,
-        visualStyleId: visualStyleId ?? null,
-      };
-      await api.generate(openProjectSlug, payload);
-      await reload();
-      setPopoverNodeId(id);
-    } catch (err) {
-      reportGenerationFailure(id, err);
-    } finally {
-      setGeneratingNodeIds((current) => {
-        const next = new Set(current);
-        next.delete(id);
-        return next;
-      });
-      setNodes((current) => current.map((node) => (node.id === id ? { ...node, data: { ...node.data, isGenerating: false } } : node)));
+      setNodes((current) => current.map((item) => (item.id === id || item.id === generatingId ? { ...item, data: { ...item.data, isGenerating: false } } : item)));
     }
   };
 
@@ -1088,7 +1051,7 @@ export function useCanvasWorkspace({
     await loadProject(openProjectSlug);
     onShowCanvasView();
     const matchingId = result.nodeId ?? Object.entries(result.canvas.nodes).find(([, node]) => (
-      node.type === 'imageGroup' && node.tags.includes(artifactKey)
+      node.tags.includes(artifactKey)
     ))?.[0];
     if (!matchingId) return;
     setSelectedNodeIds([matchingId]);
@@ -1163,25 +1126,25 @@ export function useCanvasWorkspace({
 
   const onConnectStart = (_: unknown, params: { nodeId: string | null }) => {
     const sourceNode = nodes.find((node) => node.id === params.nodeId);
-    const sourceAssetId = sourceNode?.data.kind === 'imageGroup'
-      ? sourceNode.data.activeAsset?.id ?? null
-      : null;
+    const sourceAssetId = sourceNode?.data.activeAsset?.id ?? null;
     setPendingConnectionSource(sourceAssetId);
   };
 
   const onConnectEnd = (event: MouseEvent | TouchEvent) => {
     if (!pendingConnectionSource || !(event instanceof MouseEvent)) return;
     const target = event.target as HTMLElement | null;
-    const draftElement = target?.closest?.('[data-id^="draft_"]') as HTMLElement | null;
-    if (draftElement?.dataset.id) {
+    const flowNodeElement = target?.closest?.('.react-flow__node') as HTMLElement | null;
+    const dropTargetId = flowNodeElement?.dataset.id;
+    const dropTarget = dropTargetId ? nodes.find((node) => node.id === dropTargetId && node.data.assetIds.length === 0) : undefined;
+    if (dropTarget) {
       const nextNodes = nodes.map((node) =>
-        node.id === draftElement.dataset.id && node.data.kind === 'draft'
+        node.id === dropTarget.id
           ? { ...node, data: { ...node.data, refs: Array.from(new Set([...node.data.refs, pendingConnectionSource])) } }
           : node,
       );
       setNodes(nextNodes);
       void persistNodes(nextNodes);
-      setPopoverNodeId(draftElement.dataset.id);
+      setPopoverNodeId(dropTarget.id);
     } else {
       const flowPosition = reactFlowRef.current?.screenToFlowPosition({
         x: event.clientX,
@@ -1198,12 +1161,10 @@ export function useCanvasWorkspace({
   const onConnect = (connection: Connection) => {
     if (!connection.source || !connection.target) return;
     const sourceNode = nodes.find((node) => node.id === connection.source);
-    const sourceAssetId = sourceNode?.data.kind === 'imageGroup'
-      ? sourceNode.data.activeAsset?.id ?? null
-      : null;
+    const sourceAssetId = sourceNode?.data.activeAsset?.id ?? null;
     if (!sourceAssetId) return;
     const nextNodes = nodes.map((node) =>
-      node.id === connection.target && node.data.kind === 'draft'
+      node.id === connection.target && node.data.assetIds.length === 0
         ? { ...node, data: { ...node.data, refs: Array.from(new Set([...node.data.refs, sourceAssetId])) } }
         : node,
     );
@@ -1267,10 +1228,8 @@ export function useCanvasWorkspace({
     flowPositionFromClientPoint,
     createLooseDraft,
     // node/asset mutations
-    updateDraft,
-    updateImageGroup,
-    generateDraft,
-    generateImageVariants,
+    updateNode,
+    generateFromNode,
     generationError,
     createSiblingDraft,
     changeVariant,

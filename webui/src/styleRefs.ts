@@ -12,14 +12,6 @@ export function styleRefKindForNode(node: CanvasNode): StyleRefKind | null {
   return styleRefKindForTags(node.tags);
 }
 
-export function isStyleRefDraftNode(node: CanvasNode): boolean {
-  return node.type === 'draft' && styleRefKindForNode(node) !== null;
-}
-
-export function isStyleRefImageNode(node: CanvasNode): boolean {
-  return node.type === 'imageGroup' && styleRefKindForNode(node) !== null;
-}
-
 export function styleRefStatusFromAdaptation(
   kind: StyleRefKind,
   adaptation: AdaptationStatus,

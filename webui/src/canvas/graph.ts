@@ -1,44 +1,41 @@
 import type { Edge, Node } from 'reactflow';
-import type { DraftNodeData, ImageGroupNodeData, PhotoNodeData } from './types';
+import type { CanvasNodeData } from './types';
 import { canDeleteNode } from './roles';
 
 export function generatedResultNodeId(sourceNodeId: string): string {
   return `generated_${sourceNodeId}`;
 }
 
-export function deriveStoryGraphEdges(filteredNodes: Node<PhotoNodeData>[]): Edge[] {
+export function deriveStoryGraphEdges(filteredNodes: Node<CanvasNodeData>[]): Edge[] {
   const visibleNodeIds = new Set(filteredNodes.map((node) => node.id));
-  const nodeForAsset = new Map<string, Node<ImageGroupNodeData>>();
+  const nodeForAsset = new Map<string, Node<CanvasNodeData>>();
   filteredNodes.forEach((node) => {
-    if (node.data.kind === 'imageGroup') {
-      const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
-      node.data.assetIds.forEach((assetId) => nodeForAsset.set(assetId, imageNode));
-    }
+    node.data.assetIds.forEach((assetId) => nodeForAsset.set(assetId, node));
   });
-  const edgeForAssetRef = (childNode: Node<ImageGroupNodeData> | Node<DraftNodeData>, childAssetId: string | null, ref: string): Edge | null => {
+  const edgeForAssetRef = (childNode: Node<CanvasNodeData>, childAssetId: string | null, ref: string): Edge | null => {
     const sourceNode = nodeForAsset.get(ref);
     if (!sourceNode || sourceNode.id === childNode.id) return null;
+    const isDraftChild = childNode.data.assetIds.length === 0;
     const sourceVisible = sourceNode.data.activeAsset?.id === ref;
-    const childVisible = childNode.data.kind === 'draft' || childNode.data.activeAsset?.id === childAssetId;
+    const childVisible = isDraftChild || childNode.data.activeAsset?.id === childAssetId;
     const isVisibleLineage = sourceVisible && childVisible;
     return {
       id: `${sourceNode.id}-${childNode.id}-${childAssetId ?? 'draft'}-${ref}`,
       source: sourceNode.id,
       target: childNode.id,
-      animated: childNode.data.kind === 'draft',
-      className: `${isVisibleLineage ? 'lineage-edge-visible' : 'lineage-edge-hidden'}${childAssetId && childNode.data.kind === 'imageGroup' && childNode.data.assets.find((asset) => asset.id === childAssetId)?.generation?.chatSessionId ? ' lineage-edge-chat-refinement' : ''}`,
+      animated: isDraftChild,
+      className: `${isVisibleLineage ? 'lineage-edge-visible' : 'lineage-edge-hidden'}${childAssetId && childNode.data.assets.find((asset) => asset.id === childAssetId)?.generation?.chatSessionId ? ' lineage-edge-chat-refinement' : ''}`,
       style: isVisibleLineage ? undefined : { strokeDasharray: '5 5', opacity: 0.35 },
     };
   };
-  const assetEdges = filteredNodes.flatMap((node) => {
-    if (node.data.kind !== 'imageGroup') return [];
-    const imageNode: Node<ImageGroupNodeData> = { ...node, data: node.data };
-    return node.data.assets.flatMap((asset) => (asset.generation?.refs ?? []).flatMap((ref) => edgeForAssetRef(imageNode, asset.id, ref) ?? []));
-  });
+  // Nodes with takes draw ancestry from each take's generation receipt; nodes
+  // still drafting draw their pending refs.
+  const assetEdges = filteredNodes.flatMap((node) => (
+    node.data.assets.flatMap((asset) => (asset.generation?.refs ?? []).flatMap((ref) => edgeForAssetRef(node, asset.id, ref) ?? []))
+  ));
   const draftEdges = filteredNodes.flatMap((node) => {
-    if (node.data.kind !== 'draft') return [];
-    const draftNode: Node<DraftNodeData> = { ...node, data: node.data };
-    return node.data.refs.flatMap((ref) => edgeForAssetRef(draftNode, null, ref) ?? []);
+    if (node.data.assetIds.length > 0) return [];
+    return node.data.refs.flatMap((ref) => edgeForAssetRef(node, null, ref) ?? []);
   });
   const generatedResultEdges = filteredNodes.flatMap((node) => {
     const sourceNodeId = node.data.role?.type === 'generated-result' ? node.data.role.sourceNodeId : null;
@@ -47,14 +44,14 @@ export function deriveStoryGraphEdges(filteredNodes: Node<PhotoNodeData>[]): Edg
       id: `${sourceNodeId}-${node.id}-generated-result`,
       source: sourceNodeId,
       target: node.id,
-      animated: node.data.kind === 'imageGroup' && node.data.isGenerating,
+      animated: Boolean(node.data.isGenerating),
       className: 'lineage-edge-visible',
     }];
   });
   return [...assetEdges, ...draftEdges, ...generatedResultEdges];
 }
 
-export function deletableSelectedNodes(nodes: Node<PhotoNodeData>[], selectedNodeIds: string[]): Node<PhotoNodeData>[] {
+export function deletableSelectedNodes(nodes: Node<CanvasNodeData>[], selectedNodeIds: string[]): Node<CanvasNodeData>[] {
   const selected = new Set(selectedNodeIds);
   return nodes.filter((node) => selected.has(node.id) && canDeleteNode(node));
 }
@@ -73,7 +70,7 @@ export function deleteSelectedNodesMessage(selectedCount: number, deletableCount
 }
 
 
-function nodeFingerprint(node: Node<PhotoNodeData>): string {
+function nodeFingerprint(node: Node<CanvasNodeData>): string {
   const data: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(node.data as unknown as Record<string, unknown>)) {
     if (typeof value === 'function') continue;
@@ -87,7 +84,7 @@ function nodeFingerprint(node: Node<PhotoNodeData>): string {
  * node object when nothing observable changed (React Flow then skips
  * re-render/remount) and carry selection flags across the reload.
  */
-export function mergeFlowNodes(prev: Node<PhotoNodeData>[], next: Node<PhotoNodeData>[]): Node<PhotoNodeData>[] {
+export function mergeFlowNodes(prev: Node<CanvasNodeData>[], next: Node<CanvasNodeData>[]): Node<CanvasNodeData>[] {
   const prevById = new Map(prev.map((node) => [node.id, node]));
   return next.map((nextNode) => {
     const prevNode = prevById.get(nextNode.id);

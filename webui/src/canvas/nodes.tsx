@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
+import clsx from 'clsx';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { nodeTagActionsRef } from './nodeTagActions';
 import { NodeTagButton } from './assetTagRow';
 import { conceptSubjectFromTags, visibleDisplayName, visibleVariants } from './shared';
-import type { DraftNodeData, ImageGroupNodeData } from './types';
+import type { CanvasNodeData } from './types';
 import { styleRefKindForTags } from '../styleRefs';
 
 export function truncateDraftPreview(text: string, max = 120) {
@@ -12,7 +13,8 @@ export function truncateDraftPreview(text: string, max = 120) {
   return `${normalized.slice(0, max)}…`;
 }
 
-function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
+/** The one canvas node card: prompt state (no takes yet) or image state. */
+function CanvasNodeCard({ data }: NodeProps<CanvasNodeData>) {
   const asset = data.activeAsset;
   const [isEditingName, setIsEditingName] = useState(false);
   const [draftName, setDraftName] = useState(visibleDisplayName(data.displayName));
@@ -27,17 +29,48 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
     data.onDisplayNameChange(data.nodeId, draftName.trim());
     setIsEditingName(false);
   };
+  const styleRefKind = styleRefKindForTags(data.tags);
+
   if (!asset) {
+    const isArchetype = data.tags.includes('archetype');
     const promptPreview = data.prompt.trim()
-      ? data.prompt.replace(/\s+/g, ' ').trim()
+      ? (isArchetype ? truncateDraftPreview(data.prompt) : data.prompt.replace(/\s+/g, ' ').trim())
       : '';
     const subject = conceptSubjectFromTags(data.tags);
-    const badge = subject === 'character' ? 'Character concept' : subject === 'location' ? 'Location concept' : data.tags.includes('character-sheet') ? 'Character' : 'Prompt';
+    const badge = styleRefKind === 'archetype-character'
+      ? 'Character archetype prompt'
+      : styleRefKind === 'archetype-scene'
+        ? 'Scene archetype prompt'
+        : subject === 'character'
+          ? 'Character concept'
+          : subject === 'location'
+            ? 'Location concept'
+            : data.tags.includes('character-sheet')
+              ? 'Character'
+              : 'Prompt';
+    const title = visibleDisplayName(data.displayName)
+      || (styleRefKind === 'archetype-character' ? 'Character Archetype' : styleRefKind === 'archetype-scene' ? 'Scene Archetype' : '');
+    const subtitle = styleRefKind && data.tags.includes('generated') ? 'Generated child available' : '';
+    const tooltip = [
+      data.prompt || 'Prompt not set',
+      `parents: ${data.refs.length}`,
+      `model: ${data.params.model ?? 'default'}`,
+      `ratio: ${data.params.aspectRatio ?? 'default'}, size: ${data.params.imageSize ?? 'default'}, seed: ${data.params.seed ?? 'auto'}`,
+    ].join('\n');
     return (
-      <div className={`node draft-node image-group-prompt-node ${data.isGenerating ? 'generating' : ''}`} title={data.prompt || 'Prompt not set'}>
+      <div
+        className={clsx(
+          'node',
+          'draft-node',
+          isArchetype && 'archetype-draft-node',
+          !styleRefKind && 'image-group-prompt-node',
+          data.isGenerating && 'generating',
+        )}
+        title={tooltip}
+      >
         <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
         <div className="draft-placeholder" aria-hidden="true">
-          {promptPreview && <p className="draft-prompt-preview">{truncateDraftPreview(promptPreview)}</p>}
+          {promptPreview && <p className="draft-prompt-preview">{promptPreview}</p>}
           <span className="node-role-badge">{badge}</span>
           {data.isGenerating && (
             <div className="node-generating-overlay">
@@ -46,18 +79,19 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
             </div>
           )}
         </div>
-        <strong className={`node-title ${visibleDisplayName(data.displayName) ? '' : 'placeholder'}`}>
-          {visibleDisplayName(data.displayName) || 'add title (double click)'}
+        <strong className={clsx('node-title', !title && 'placeholder')}>
+          {title || 'add title (double click)'}
         </strong>
+        {subtitle && <small>{subtitle}</small>}
         <Handle type="source" position={Position.Right} className="output-handle" />
       </div>
     );
   }
+
   const visibleVariantsList = visibleVariants(data.assets, data.assetIds, data.archivedOnlyView ?? false);
   const currentVisibleIndex = visibleVariantsList.findIndex((variant) => variant.id === asset.id);
   const hasMultipleVariants = visibleVariantsList.length > 1;
   const params = asset.generation;
-  const styleRefKind = styleRefKindForTags(data.tags);
   const styleRole = styleRefKind === 'archetype-character' ? 'Character archetype' : styleRefKind === 'archetype-scene' ? 'Scene archetype' : null;
   const tooltip = [
     asset.prompt?.text,
@@ -165,46 +199,6 @@ function ImageGroupNode({ data }: NodeProps<ImageGroupNodeData>) {
   );
 }
 
-function DraftNode({ data }: NodeProps<DraftNodeData>) {
-  const styleRefKind = styleRefKindForTags(data.tags);
-  const styleRole = styleRefKind === 'archetype-character' ? 'Character archetype prompt' : styleRefKind === 'archetype-scene' ? 'Scene archetype prompt' : null;
-  const isArchetype = data.tags.includes('archetype');
-  const nodeTitle = styleRefKind
-    ? visibleDisplayName(data.displayName) || (styleRefKind === 'archetype-character' ? 'Character Archetype' : 'Scene Archetype')
-    : 'Draft';
-  const nodeSubtitle = styleRefKind && data.tags.includes('generated')
-    ? 'Generated child available'
-    : '';
-  const promptPreview = data.prompt.trim()
-    ? (isArchetype ? truncateDraftPreview(data.prompt) : data.prompt.replace(/\s+/g, ' ').trim())
-    : '';
-  const tooltip = [
-    data.prompt || 'Draft prompt not set',
-    `parents: ${data.refs.length}`,
-    `model: ${data.params.model ?? 'default'}`,
-    `ratio: ${data.params.aspectRatio ?? 'default'}, size: ${data.params.imageSize ?? 'default'}, seed: ${data.params.seed ?? 'auto'}`,
-  ].join('\n');
-  return (
-    <div className={`node draft-node ${data.tags.includes('archetype') ? 'archetype-draft-node' : ''} ${data.isGenerating ? 'generating' : ''}`} title={tooltip}>
-      <Handle type="target" position={Position.Left} className="input-handle" isConnectable={false} />
-      <div className="draft-placeholder" aria-hidden="true">
-        {promptPreview && <p className="draft-prompt-preview">{promptPreview}</p>}
-        {styleRole && <span className="node-role-badge">{styleRole}</span>}
-        {data.isGenerating && (
-          <div className="node-generating-overlay">
-            <span className="spinner" aria-hidden="true" />
-            <span>Generating</span>
-          </div>
-        )}
-      </div>
-      <strong>{nodeTitle}</strong>
-      {nodeSubtitle && <small>{nodeSubtitle}</small>}
-      {data.role?.type === 'style-ref-source' && <Handle type="source" position={Position.Right} className="output-handle" />}
-    </div>
-  );
-}
-
 export const nodeTypes = {
-  imageGroup: ImageGroupNode,
-  draft: DraftNode,
+  canvasNode: CanvasNodeCard,
 };

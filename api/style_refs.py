@@ -15,11 +15,10 @@ from models import (
     AdaptationStylePromptPatch,
     AdaptationStyleRefAssetRequest,
     CanvasDocument,
-    DraftCanvasNode,
+    CanvasNode,
     GeneratedResultRole,
     GenerateRequest,
     GenerationParams,
-    ImageGroupCanvasNode,
     StyleRefKind,
     StyleRefSourceRole,
     StyleRefStatus,
@@ -48,12 +47,12 @@ def sync_style_ref_canvas_nodes(slug: str, canvas: CanvasDocument, kind: str | N
         image_node_id = status.canvasImageNodeId
         legacy_image_node_id = f"{node_id}_image"
         existing = next_canvas.nodes.get(node_id)
-        source_x = existing.x if isinstance(existing, DraftCanvasNode | ImageGroupCanvasNode) else float(config["x"])
-        source_y = existing.y if isinstance(existing, DraftCanvasNode | ImageGroupCanvasNode) else float(config["y"])
-        source_width = existing.width if isinstance(existing, DraftCanvasNode | ImageGroupCanvasNode) else 240
-        preserved_visual_style_id = existing.visualStyleId if isinstance(existing, DraftCanvasNode) else None
-        preserved_params = existing.params if isinstance(existing, DraftCanvasNode) else None
-        next_canvas.nodes[node_id] = DraftCanvasNode(
+        source_x = existing.x if existing is not None else float(config["x"])
+        source_y = existing.y if existing is not None else float(config["y"])
+        source_width = existing.width if existing is not None else 240
+        preserved_visual_style_id = existing.visualStyleId if existing is not None and not existing.assetIds else None
+        preserved_params = existing.params if existing is not None and not existing.assetIds else None
+        next_canvas.nodes[node_id] = CanvasNode(
             displayName=str(config["display_name"]),
             x=source_x,
             y=source_y,
@@ -68,14 +67,14 @@ def sync_style_ref_canvas_nodes(slug: str, canvas: CanvasDocument, kind: str | N
         legacy_image = next_canvas.nodes.get(legacy_image_node_id)
         if asset_id is not None:
             child = next_canvas.nodes.get(image_node_id)
-            if isinstance(child, ImageGroupCanvasNode):
+            if child is not None:
                 image_node = child
-            elif isinstance(existing, ImageGroupCanvasNode):
+            elif existing is not None and existing.assetIds:
                 image_node = existing
-            elif isinstance(legacy_image, ImageGroupCanvasNode):
+            elif legacy_image is not None:
                 image_node = legacy_image
             else:
-                image_node = ImageGroupCanvasNode(
+                image_node = CanvasNode(
                     displayName=str(config["display_name"]),
                     x=source_x + 320,
                     y=source_y,
@@ -227,7 +226,7 @@ def generate_style_ref(slug: str, request: AdaptationGenerateStyleRefRequest) ->
     if not request.visualStyleId:
         raise HTTPException(status_code=400, detail="visualStyleId is required to generate a style reference")
     draft_node = canvas.nodes.get(source_node_id)
-    draft_params = draft_node.params if isinstance(draft_node, DraftCanvasNode) else None
+    draft_params = draft_node.params if draft_node is not None else None
     prompt_path = style_ref_prompt_path(root, kind)
     prompt_text = adaptation.read_text(prompt_path).strip()
     if not prompt_text:
