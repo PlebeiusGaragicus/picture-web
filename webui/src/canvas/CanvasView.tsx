@@ -108,8 +108,7 @@ export function CanvasPanels({
           onNodeChange={ws.updateNode}
           onGenerate={ws.generateFromNode}
           generationError={ws.generationError?.nodeId === ws.selectedNode.id ? ws.generationError.message : null}
-          onSaveStyleRefPrompt={ws.saveAdaptationStyleRefPrompt}
-          onSetStyleRefAsset={ws.setAdaptationStyleRefAsset}
+          onSetTagCanonical={ws.setTagCanonical}
           onSetProjectCover={ws.setProjectCover}
           onFindOnCanvas={ws.focusNodeOnCanvas}
           onVariant={ws.changeVariant}

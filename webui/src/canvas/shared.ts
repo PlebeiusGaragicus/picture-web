@@ -23,16 +23,22 @@ export function isPromptOnlyImageGroup(node: { assetIds?: string[] }): boolean {
   return !(node.assetIds?.length);
 }
 
-const STYLE_REF_SOURCE_TAGS = ['character-style', 'scene-style'];
-
-/** Style archetype prompt nodes are file-backed projections: draft-state + style-tagged. */
-export function isDurableSourceNode(node: { data: { tags: string[]; assetIds: string[] } } | null | undefined): boolean {
-  if (!node) return false;
-  return node.data.assetIds.length === 0 && node.data.tags.some((tag) => STYLE_REF_SOURCE_TAGS.includes(tag));
+export function styleEntityTagsOnNode(tags: string[], projectTags: TagDefinition[]): TagDefinition[] {
+  return entityTagsOnAsset(tags, projectTags, 'style');
 }
 
-export function canDeleteNode(node: { data: { tags: string[]; assetIds: string[] } } | null | undefined): boolean {
-  return !isDurableSourceNode(node);
+/** Entity tags whose canonical pointer references this asset. */
+export function canonicalTagsForAsset(assetId: string | null | undefined, projectTags: TagDefinition[]): TagDefinition[] {
+  if (!assetId) return [];
+  return projectTags.filter((tag) => tag.canonicalAssetId === assetId);
+}
+
+/** A node is protected iff its active image is some entity tag's canonical image. */
+export function canDeleteNode(
+  node: { data: { activeAsset?: { id: string } | null } } | null | undefined,
+  projectTags: TagDefinition[],
+): boolean {
+  return canonicalTagsForAsset(node?.data.activeAsset?.id, projectTags).length === 0;
 }
 
 export const defaultDraftParams: GenerationParams = { model: 'gemini-3.1-flash-image', aspectRatio: '16:9', imageSize: '1K', seed: null, batchCount: 1 };

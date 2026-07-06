@@ -70,28 +70,47 @@ def pick_random_seed_default_prompt() -> tuple[str, str] | None:
     return random.choice(seeds)
 
 
+def style_seed_nodes() -> dict[str, CanvasNode]:
+    """Ordinary style-anchor nodes: generate, pick a take, it becomes the style canonical."""
+    return {
+        "style_character": CanvasNode(
+            displayName="Character Style",
+            x=80,
+            y=-220,
+            width=240,
+            tags=["adaptation", "archetype", "character-style"],
+            params=GenerationParams(aspectRatio="1:1", imageSize="1K", batchCount=1),
+        ),
+        "style_scene": CanvasNode(
+            displayName="Scene Style",
+            x=400,
+            y=-220,
+            width=240,
+            tags=["adaptation", "archetype", "scene-style"],
+            params=GenerationParams(aspectRatio="1:1", imageSize="1K", batchCount=1),
+        ),
+    }
+
+
 def default_canvas_for_new_project() -> CanvasDocument:
+    nodes: dict[str, CanvasNode] = dict(style_seed_nodes())
     seed = pick_random_seed_default_prompt()
-    if seed is None:
-        return CanvasDocument()
-    display_name, prompt = seed
-    return CanvasDocument(
-        nodes={
-            DEFAULT_STARTER_DRAFT_NODE_ID: CanvasNode(
-                displayName=display_name,
-                x=120,
-                y=120,
-                refs=[],
-                prompt=prompt,
-                params=GenerationParams(
-                    model="gemini-3.1-flash-image",
-                    aspectRatio="16:9",
-                    imageSize="1K",
-                    batchCount=1,
-                ),
-            )
-        }
-    )
+    if seed is not None:
+        display_name, prompt = seed
+        nodes[DEFAULT_STARTER_DRAFT_NODE_ID] = CanvasNode(
+            displayName=display_name,
+            x=120,
+            y=120,
+            refs=[],
+            prompt=prompt,
+            params=GenerationParams(
+                model="gemini-3.1-flash-image",
+                aspectRatio="16:9",
+                imageSize="1K",
+                batchCount=1,
+            ),
+        )
+    return CanvasDocument(nodes=nodes)
 
 
 def ensure_library() -> None:
@@ -285,6 +304,7 @@ def write_tag_registry(
 ENTITY_TAG_COLORS: dict[EntityKind, str] = {
     "character": "#3b82f6",
     "location": "#f59e0b",
+    "style": "#c084fc",
 }
 
 
@@ -307,6 +327,7 @@ def sync_entity_tags(slug: str, *, character_keys: list[str], location_keys: lis
     registry = read_tag_registry(slug)
     entity_ids = {normalize_tag_id(key) for key in character_keys} | {normalize_tag_id(key) for key in location_keys}
     user_tags = [tag for tag in registry.tags if not tag.locked and tag.id not in entity_ids]
+    style_tags = [tag for tag in registry.tags if tag.entityKind == "style" and tag.id not in entity_ids]
     canonical_by_id = {tag.id: tag.canonicalAssetId for tag in registry.tags if tag.canonicalAssetId}
     entity_tags = [
         *[entity_tag_for_key(key, "character") for key in sorted(character_keys)],
@@ -318,7 +339,7 @@ def sync_entity_tags(slug: str, *, character_keys: list[str], location_keys: lis
     ]
     return write_tag_registry(
         slug,
-        TagRegistryDocument(tags=[*user_tags, *entity_tags]),
+        TagRegistryDocument(tags=[*user_tags, *style_tags, *entity_tags]),
         preserve_orphan_locked_entity_tags=False,
     )
 
@@ -480,6 +501,14 @@ def detach_asset_from_project(slug: str, asset_id: str) -> None:
         write_canvas(slug, canvas)
         logger.debug("detached asset from canvas slug=%s asset_id=%s", slug, asset_id)
 
+    stale_canonicals = {
+        tag.id: None
+        for tag in list_project_tags(slug)
+        if tag.canonicalAssetId == asset_id
+    }
+    if stale_canonicals:
+        update_entity_tag_canonicals(slug, stale_canonicals)
+
     project_path = project_json_path(slug)
     if project_path.is_file():
         project = ProjectMetadata.model_validate(read_json(project_path))
@@ -564,22 +593,8 @@ def canvas_node_id(asset_id: str) -> str:
     return f"node_{asset_id}"
 
 
-def archetype_node_id(kind: str) -> str:
-    return f"archetype_{kind.replace('-', '_')}"
-
-
-def generated_result_node_id(source_node_id: str) -> str:
-    return f"generated_{source_node_id}"
-
-
 def node_tags(*tags: str) -> list[str]:
     return list(dict.fromkeys(tags))
-
-
-def sync_style_ref_canvas_nodes(slug: str, canvas: CanvasDocument, kind: str | None = None) -> CanvasDocument:
-    import style_refs
-
-    return style_refs.sync_style_ref_canvas_nodes(slug, canvas, kind)
 
 
 def restore_asset_to_canvas(slug: str, asset_id: str) -> None:
@@ -663,12 +678,45 @@ def variant_key_for_node(slug: str, node: CanvasNode) -> tuple[str, tuple[str, .
     return None
 
 
-STYLE_REF_SOURCE_TAGS = ("character-style", "scene-style")
+STYLE_ENTITY_TAGS: dict[str, str] = {
+    "character-style": "Character Style",
+    "scene-style": "Scene Style",
+}
 
 
-def is_style_ref_source_node(node: CanvasNode) -> bool:
-    """Style archetype prompt nodes: file-backed, draft-state, style-tagged."""
-    return not node.assetIds and any(tag in node.tags for tag in STYLE_REF_SOURCE_TAGS)
+def ensure_style_entity_tags(slug: str) -> None:
+    """Seed the two style entity tags; their canonicalAssetId anchors visual consistency."""
+    registry = read_tag_registry(slug)
+    present = {tag.id for tag in registry.tags}
+    missing = [tag_id for tag_id in STYLE_ENTITY_TAGS if tag_id not in present]
+    if not missing:
+        return
+    next_tags = [
+        *registry.tags,
+        *[
+            TagDefinition(
+                id=tag_id,
+                name=STYLE_ENTITY_TAGS[tag_id],
+                color=ENTITY_TAG_COLORS["style"],
+                locked=True,
+                entityKind="style",
+            )
+            for tag_id in missing
+        ],
+    ]
+    write_tag_registry(slug, TagRegistryDocument(tags=next_tags))
+
+
+def set_tag_canonical(slug: str, tag_id: str, asset_id: str | None) -> list[TagDefinition]:
+    """Point an entity tag at its canonical reference image."""
+    normalized = normalize_tag_id(tag_id)
+    tag = next((item for item in list_project_tags(slug) if item.id == normalized), None)
+    if tag is None or tag.entityKind is None:
+        raise HTTPException(status_code=404, detail=f"Unknown entity tag: {tag_id}")
+    if asset_id is not None:
+        read_asset_metadata(slug, asset_id)
+    update_entity_tag_canonicals(slug, {normalized: asset_id})
+    return list_project_tags(slug)
 
 
 def normalize_variant_groups(slug: str, canvas: CanvasDocument) -> CanvasDocument:
@@ -930,37 +978,36 @@ def create_generated_assets(
     return GenerateResponse(assets=created)
 
 
+def default_style_canonicals(slug: str, node: CanvasNode) -> None:
+    """A style-tagged node's first take becomes that style tag's canonical."""
+    if node.activeAssetId is None:
+        return
+    style_tags = [tag for tag in node.tags if tag in STYLE_ENTITY_TAGS]
+    if not style_tags:
+        return
+    ensure_style_entity_tags(slug)
+    registry = {tag.id: tag for tag in list_project_tags(slug)}
+    updates = {
+        tag_id: node.activeAssetId
+        for tag_id in style_tags
+        if tag_id in registry and registry[tag_id].canonicalAssetId is None
+    }
+    if updates:
+        update_entity_tag_canonicals(slug, updates)
+
+
 def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[AssetSummary]) -> None:
     canvas = normalize_variant_groups(slug, read_stored_canvas(slug))
     existing = canvas.nodes.get(node_id)
     asset_ids = [asset.id for asset in assets]
     active_asset_id = asset_ids[0] if asset_ids else None
-    if existing is not None and is_style_ref_source_node(existing):
-        child_node_id = generated_result_node_id(node_id)
-        child = canvas.nodes.get(child_node_id)
-        if child is not None:
-            child.assetIds = list(dict.fromkeys([*asset_ids, *child.assetIds]))
-            child.activeAssetId = active_asset_id or child.activeAssetId
-            child.tags = node_tags(*child.tags, "generated-image")
-            canvas.nodes[child_node_id] = child
-        else:
-            canvas.nodes[child_node_id] = CanvasNode(
-                displayName=assets[0].title if assets else existing.displayName,
-                x=existing.x + 320,
-                y=existing.y,
-                width=240,
-                tags=node_tags(*existing.tags, "generated-image"),
-                assetIds=asset_ids,
-                activeAssetId=active_asset_id,
-            )
-        write_canvas(slug, canvas)
-        return
     if existing is not None and (existing.assetIds or existing.origin is not None):
         # Results join the node's stack; domain-linked prompt nodes keep their identity.
         existing.assetIds = list(dict.fromkeys([*existing.assetIds, *asset_ids]))
         existing.activeAssetId = active_asset_id or existing.activeAssetId
         canvas.nodes[node_id] = existing
         write_canvas(slug, canvas)
+        default_style_canonicals(slug, existing)
         if existing.origin is not None and existing.origin.kind == "panel":
             import story_panels
 
@@ -985,6 +1032,7 @@ def attach_generated_assets_to_canvas(slug: str, node_id: str, assets: list[Asse
         existing.assetIds = asset_ids
         existing.activeAssetId = active_asset_id
         canvas.nodes[node_id] = existing
+        default_style_canonicals(slug, existing)
     else:
         canvas.nodes[node_id] = CanvasNode(
             displayName=assets[0].title if assets else "",

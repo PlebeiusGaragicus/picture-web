@@ -19,7 +19,6 @@ AssetKind = Literal["imported", "generated"]
 ArtifactKind = Literal["character-sheet", "location-prompt", "concept-art"]
 AdaptationFileKind = Literal["characters", "locations"]
 ConceptArtSubjectKind = Literal["character", "location"]
-StyleRefKind = Literal["archetype-character", "archetype-scene"]
 MODEL_CAPABILITIES = {
     "gemini-2.5-flash-image": {
         "aspectRatios": {"1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"},
@@ -134,7 +133,7 @@ class ProjectMetadata(ProjectCreate):
     coverThumbnailUrl: str | None = None
 
 
-EntityKind = Literal["character", "location"]
+EntityKind = Literal["character", "location", "style"]
 
 
 class TagDefinition(BaseModel):
@@ -162,6 +161,10 @@ class TagRegistryDocument(BaseModel):
             seen.add(tag.id)
             unique.append(tag)
         return unique
+
+
+class TagCanonicalPatch(BaseModel):
+    assetId: str | None = None
 
 
 class ProjectCoverPatch(BaseModel):
@@ -193,23 +196,8 @@ class CharacterRecord(BaseModel):
     variants: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
 
 
-class AdaptationStyleRefs(BaseModel):
-    archetypeCharacterAssetId: str | None = None
-    archetypeSceneAssetId: str | None = None
-
-
-class StyleRefStatus(BaseModel):
-    kind: StyleRefKind
-    promptPath: str
-    promptText: str = ""
-    assetId: str | None = None
-    canvasDraftNodeId: str
-    canvasImageNodeId: str
-
-
 class AdaptationMetadata(BaseModel):
     version: int = 2
-    styleRefs: AdaptationStyleRefs = Field(default_factory=AdaptationStyleRefs)
     characters: dict[str, CharacterRecord] = Field(default_factory=dict)
     locations: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
 
@@ -236,12 +224,6 @@ class AdaptationStatus(BaseModel):
     projectSlug: str
     hasBook: bool
     hasBookSession: bool
-    styleRefs: dict[str, bool]
-    styleRefStatuses: dict[StyleRefKind, StyleRefStatus]
-    archetypeCharacterAssetId: str | None = None
-    archetypeSceneAssetId: str | None = None
-    archetypeCharacterPromptText: str = ""
-    archetypeScenePromptText: str = ""
     counts: dict[str, int]
     visualStyles: list[VisualStyleDefinition]
     defaultVisualStyleId: str | None = Field(default=None, pattern=TAG_RE)
@@ -429,11 +411,6 @@ class AdaptationImportArtifactRequest(BaseModel):
     artifactKey: str = Field(pattern=SLUG_RE)
 
 
-class AdaptationStylePromptPatch(BaseModel):
-    kind: StyleRefKind
-    prompt: str
-
-
 class AdaptationFileBase(BaseModel):
     key: str = Field(pattern=SLUG_RE)
     body: str = ""
@@ -468,31 +445,6 @@ class AdaptationFileDocument(AdaptationFileBase):
     promptPath: str
     artifactKind: ArtifactKind
     status: Literal["missing", "ready", "generated"] = "missing"
-
-
-class AdaptationStyleRefAssetRequest(BaseModel):
-    kind: StyleRefKind
-    assetId: str
-
-
-class AdaptationGenerateStyleRefRequest(BaseModel):
-    kind: StyleRefKind
-    canvasNodeId: str | None = None
-    visualStyleId: str | None = Field(default=None, pattern=TAG_RE)
-    model: str | None = None
-    aspectRatio: str | None = None
-    imageSize: str | None = None
-    seed: int | None = Field(default=None, ge=0)
-    batchCount: int = Field(default=1, ge=1, le=8)
-
-
-class AdaptationGenerateResponse(BaseModel):
-    generated: bool
-    kind: Literal["character", "artifact", "style-ref"]
-    key: str | None = None
-    asset: AssetSummary | None = None
-    status: AdaptationStatus | None = None
-    message: str
 
 
 class StoryPanelRect(BaseModel):

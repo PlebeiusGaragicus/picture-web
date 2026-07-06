@@ -3,9 +3,8 @@ import clsx from 'clsx';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { nodeTagActionsRef } from './nodeTagActions';
 import { NodeTagButton } from './assetTagRow';
-import { conceptSubjectFromTags, visibleDisplayName, visibleVariants } from './shared';
+import { conceptSubjectFromTags, styleEntityTagsOnNode, visibleDisplayName, visibleVariants } from './shared';
 import type { CanvasNodeData } from './types';
-import { styleRefKindForTags } from '../styleRefs';
 
 export function truncateDraftPreview(text: string, max = 120) {
   const normalized = text.replace(/\s+/g, ' ').trim();
@@ -29,28 +28,23 @@ function CanvasNodeCard({ data }: NodeProps<CanvasNodeData>) {
     data.onDisplayNameChange(data.nodeId, draftName.trim());
     setIsEditingName(false);
   };
-  const styleRefKind = styleRefKindForTags(data.tags);
+  const styleTags = styleEntityTagsOnNode(data.tags, data.projectTags);
 
   if (!asset) {
-    const isArchetype = data.tags.includes('archetype');
     const promptPreview = data.prompt.trim()
-      ? (isArchetype ? truncateDraftPreview(data.prompt) : data.prompt.replace(/\s+/g, ' ').trim())
+      ? (styleTags.length ? truncateDraftPreview(data.prompt) : data.prompt.replace(/\s+/g, ' ').trim())
       : '';
     const subject = conceptSubjectFromTags(data.tags);
-    const badge = styleRefKind === 'archetype-character'
-      ? 'Character archetype prompt'
-      : styleRefKind === 'archetype-scene'
-        ? 'Scene archetype prompt'
-        : subject === 'character'
-          ? 'Character concept'
-          : subject === 'location'
-            ? 'Location concept'
-            : data.tags.includes('character-sheet')
-              ? 'Character'
-              : 'Prompt';
-    const title = visibleDisplayName(data.displayName)
-      || (styleRefKind === 'archetype-character' ? 'Character Archetype' : styleRefKind === 'archetype-scene' ? 'Scene Archetype' : '');
-    const subtitle = styleRefKind && data.tags.includes('generated') ? 'Generated child available' : '';
+    const badge = styleTags.length
+      ? `${styleTags[0].name} anchor`
+      : subject === 'character'
+        ? 'Character concept'
+        : subject === 'location'
+          ? 'Location concept'
+          : data.tags.includes('character-sheet')
+            ? 'Character'
+            : 'Prompt';
+    const title = visibleDisplayName(data.displayName);
     const tooltip = [
       data.prompt || 'Prompt not set',
       `parents: ${data.refs.length}`,
@@ -62,8 +56,8 @@ function CanvasNodeCard({ data }: NodeProps<CanvasNodeData>) {
         className={clsx(
           'node',
           'draft-node',
-          isArchetype && 'archetype-draft-node',
-          !styleRefKind && 'image-group-prompt-node',
+          styleTags.length > 0 && 'archetype-draft-node',
+          !styleTags.length && 'image-group-prompt-node',
           data.isGenerating && 'generating',
         )}
         title={tooltip}
@@ -82,7 +76,6 @@ function CanvasNodeCard({ data }: NodeProps<CanvasNodeData>) {
         <strong className={clsx('node-title', !title && 'placeholder')}>
           {title || 'add title (double click)'}
         </strong>
-        {subtitle && <small>{subtitle}</small>}
         <Handle type="source" position={Position.Right} className="output-handle" />
       </div>
     );
@@ -92,7 +85,7 @@ function CanvasNodeCard({ data }: NodeProps<CanvasNodeData>) {
   const currentVisibleIndex = visibleVariantsList.findIndex((variant) => variant.id === asset.id);
   const hasMultipleVariants = visibleVariantsList.length > 1;
   const params = asset.generation;
-  const styleRole = styleRefKind === 'archetype-character' ? 'Character archetype' : styleRefKind === 'archetype-scene' ? 'Scene archetype' : null;
+  const styleRole = styleTags.length ? `${styleTags[0].name} anchor` : null;
   const tooltip = [
     asset.prompt?.text,
     params ? `model: ${params.model}` : null,

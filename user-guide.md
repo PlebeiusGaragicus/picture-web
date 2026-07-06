@@ -8,13 +8,13 @@ The workflow is a pipeline. Each step feeds the next, and some steps are hard-ga
 Upload your manuscript (`book.txt`). Then run **Read book** so pi ingests the text;
 the extraction tasks that follow branch off this warm session.
 
-## 2. Set the visual style and style refs — Canvas view
+## 2. Set the visual style and style anchors — Canvas view
 
 - Pick or create a **visual style** (a short style snippet appended to every
   generation prompt, e.g. "soft watercolor wash, thick ink outlines").
-- Generate the **archetype style refs** (character archetype, etc.) on the canvas.
-  These durable nodes anchor the overall look and are used as style inputs for
-  later generations.
+- Generate on the seeded **Character Style** / **Scene Style** anchor nodes on
+  the canvas. The take you keep becomes that style tag's **canonical** image,
+  used as a style input for later generations.
 
 ## 3. Concept art — Concept Art view
 
@@ -72,7 +72,7 @@ and a history with full traces for past ones.
 
 ```mermaid
 flowchart LR
-    book[Import + read book] --> style[Visual style + style refs]
+    book[Import + read book] --> style[Visual style + style anchors]
     style --> concept[Concept art]
     concept --> extract[Extract characters/locations]
     extract --> sheets[Generate reference sheets]

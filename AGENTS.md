@@ -53,10 +53,10 @@ Screenshot baselines are committed. A commit that intentionally changes pixels m
 
 ## Backend conventions
 
-- **Routers hold no logic.** `api/routes/*` are thin FastAPI routers (one per feature area); domain logic lives in the top-level service modules (`library.py`, `adaptation.py`, `style_refs.py`, `visual_styles.py`, `pi_runtime.py`, `chat_sessions.py`, ...). Service modules never import `routes`.
+- **Routers hold no logic.** `api/routes/*` are thin FastAPI routers (one per feature area); domain logic lives in the top-level service modules (`library.py`, `adaptation.py`, `visual_styles.py`, `pi_runtime.py`, `chat_sessions.py`, ...). Service modules never import `routes`.
 - **Models** stay in the single `api/models.py`.
 - **One of each:** `common.utc_now()`, `common.slugify(value, fallback)`, and `library.read_json`/`write_json` for persistent JSON. Do not add new local copies.
-- **Import cycles:** the lazy `import adaptation` pattern inside functions is the sanctioned way to break the documented `adaptation ↔ library/style_refs/visual_styles` cycles. Do not introduce new cycles.
+- **Import cycles:** the lazy `import adaptation` pattern inside functions is the sanctioned way to break the documented `adaptation ↔ library/visual_styles` cycles. Do not introduce new cycles.
 - **API shape:** camelCase query params and JSON fields. Raise `HTTPException` with a human-readable `detail` in service code. Detached jobs never raise across the process boundary — they write status JSON + logs and the status endpoint reports `returnCode`/`error`.
 - **Logging:** level comes from the `LOG_LEVEL` env var (default INFO); no hardcoded DEBUG.
 

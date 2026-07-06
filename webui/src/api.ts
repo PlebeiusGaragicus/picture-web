@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationGenerateResponse, AdaptationStatus, AgentSession, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, GenerateStyleRefPayload, ImageGroupNodeResponse, PiTaskProfile, PiTaskStatus, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, StyleRefKind, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationStatus, AgentSession, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, ImageGroupNodeResponse, PiTaskProfile, PiTaskStatus, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = import.meta.env.DEV;
 
@@ -106,11 +106,6 @@ export const api = {
   deleteVisualStyle: (slug: string, styleId: string) =>
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/visual-styles/${styleId}`, {
       method: 'DELETE',
-    }),
-  saveAdaptationStyleRefPrompt: (slug: string, kind: StyleRefKind, prompt: string) =>
-    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/style-ref-prompt`, {
-      method: 'PUT',
-      body: JSON.stringify({ kind, prompt }),
     }),
   listAdaptationFiles: (slug: string, kind: AdaptationFileKind) =>
     request<AdaptationFileDocument[]>(`/api/projects/${slug}/adaptation/files/${kind}`),
@@ -267,15 +262,10 @@ export const api = {
       body: data,
     });
   },
-  setAdaptationStyleRefAsset: (slug: string, kind: StyleRefKind, assetId: string) =>
-    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/style-ref-asset`, {
-      method: 'POST',
-      body: JSON.stringify({ kind, assetId }),
-    }),
-  generateAdaptationStyleRef: (slug: string, payload: GenerateStyleRefPayload) =>
-    request<AdaptationGenerateResponse>(`/api/projects/${slug}/adaptation/generate-style-ref`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
+  setTagCanonical: (slug: string, tagId: string, assetId: string | null) =>
+    request<TagDefinition[]>(`/api/projects/${slug}/tags/${tagId}/canonical`, {
+      method: 'PUT',
+      body: JSON.stringify({ assetId }),
     }),
   patchDisplay: (slug: string, assetId: string, title: string, tags: string[]) =>
     request<Asset>(`/api/projects/${slug}/assets/${assetId}/display`, {

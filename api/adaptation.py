@@ -160,6 +160,7 @@ def ensure_adaptation(slug: str) -> Path:
         visual_styles.write_visual_styles(root, visual_styles.default_visual_styles())
     if not metadata_path(slug).exists():
         write_metadata(slug, AdaptationMetadata())
+    library.ensure_style_entity_tags(slug)
     return root
 
 
@@ -600,16 +601,13 @@ def sync_prompt_links(slug: str, metadata: AdaptationMetadata) -> AdaptationMeta
 
 def status(slug: str) -> AdaptationStatus:
     import concept_cards
-    import style_refs
     import visual_styles
 
     root = ensure_adaptation(slug)
     metadata = sync_prompt_links(slug, read_metadata(slug))
-    metadata, changed = style_refs.clear_stale_style_ref_assets(slug, metadata)
     metadata, artifact_changed = clear_stale_artifact_assets(slug, metadata)
-    if changed or artifact_changed:
+    if artifact_changed:
         metadata = write_metadata(slug, metadata)
-    statuses = style_refs.style_ref_statuses(slug, metadata)
 
     # Keep entity tags pointing at their canonical reference images: the tag
     # registry is the read path for consistency refs (canvas-simplify.md §2.4).
@@ -629,19 +627,6 @@ def status(slug: str) -> AdaptationStatus:
         projectSlug=slug,
         hasBook=(root / "book.txt").is_file(),
         hasBookSession=_has_book_session(root),
-        styleRefs={
-            "archetypeCharacterPrompt": (root / "style-refs" / "archetype-character.md").is_file(),
-            "archetypeCharacterPng": (root / "style-refs" / "archetype-character.png").is_file(),
-            "archetypeScenePrompt": (root / "style-refs" / "archetype-scene.md").is_file(),
-            "archetypeScenePng": (root / "style-refs" / "archetype-scene.png").is_file(),
-            "archetypeCharacterAsset": metadata.styleRefs.archetypeCharacterAssetId is not None,
-            "archetypeSceneAsset": metadata.styleRefs.archetypeSceneAssetId is not None,
-        },
-        styleRefStatuses=statuses,
-        archetypeCharacterAssetId=metadata.styleRefs.archetypeCharacterAssetId,
-        archetypeSceneAssetId=metadata.styleRefs.archetypeSceneAssetId,
-        archetypeCharacterPromptText=statuses["archetype-character"].promptText,
-        archetypeScenePromptText=statuses["archetype-scene"].promptText,
         counts={
             "characterListLines": count_nonempty_lines(root / "characters" / "list.txt"),
             "characterFiles": len(list((root / "characters").glob("*.md"))),

@@ -8,7 +8,7 @@ import {
   type ReactFlowInstance,
 } from 'reactflow';
 import { imageGroupAssetsInNode, nodesToCanvas, omitUndefined, toFlowNodes, withArchivedOnlyAsset, zoomToPercent } from './flowDocument';
-import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, generatedResultNodeId, mergeFlowNodes } from './graph';
+import { deletableSelectedNodes, deleteSelectedNodesMessage, deriveStoryGraphEdges, mergeFlowNodes } from './graph';
 import { nodeTagActionsRef } from './nodeTagActions';
 import {
   SYSTEM_TAGS,
@@ -33,7 +33,6 @@ import { useDebouncedAsyncCallback } from '../shared/debounce';
 import { isEditableShortcutTarget } from '../shared/dom';
 import { useDismissOnOutsidePointerDown } from '../shared/popover';
 import { useToast } from '../shared/toast';
-import { styleRefImageNodeId, styleRefKindForTags } from '../styleRefs';
 import type {
   AdaptationStatus,
   ArtifactKind,
@@ -45,7 +44,6 @@ import type {
   GeneratePayload,
   GenerationParams,
   Project,
-  StyleRefKind,
   TagDefinition,
 } from '../types';
 
@@ -416,7 +414,7 @@ export function useCanvasWorkspace({
 
   const performDeleteNodeById = useCallback((nodeId: string, assetId?: string) => {
     const nodeToDelete = nodes.find((node) => node.id === nodeId);
-    if (!canDeleteNode(nodeToDelete)) return;
+    if (!canDeleteNode(nodeToDelete, projectTags)) return;
     const isConceptCardDraft = nodeToDelete?.data.origin?.kind === 'conceptCard';
     if (isConceptCardDraft && !assetId) {
       setNodes((current) => {
@@ -463,13 +461,13 @@ export function useCanvasWorkspace({
     });
     setSelectedNodeIds((current) => current.filter((id) => id !== nodeId));
     setPopoverNodeId((current) => (current === nodeId ? null : current));
-  }, [loadProject, nodes, openProjectSlug]);
+  }, [loadProject, nodes, openProjectSlug, projectTags]);
 
   const deleteNodeById = useCallback((nodeId: string, assetId?: string) => {
     const nodeToDelete = nodes.find((node) => node.id === nodeId);
-    if (!canDeleteNode(nodeToDelete)) return;
+    if (!canDeleteNode(nodeToDelete, projectTags)) return;
     setPendingDelete({ nodeId, assetId });
-  }, [nodes]);
+  }, [nodes, projectTags]);
 
   const requestArchiveImageAsset = useCallback((nodeId: string, assetId: string) => {
     setPendingArchive({ nodeId, assetId });
@@ -818,16 +816,16 @@ export function useCanvasWorkspace({
 
   const requestDeleteSelectedNodes = useCallback(() => {
     if (!selectedNodeIds.length) return;
-    const deletableNodes = deletableSelectedNodes(nodes, selectedNodeIds);
+    const deletableNodes = deletableSelectedNodes(nodes, selectedNodeIds, projectTags);
     if (!deletableNodes.length) return;
     const imageNodeCount = deletableNodes.filter((node) => node.data.assetIds.length > 0).length;
     setPendingBulkDelete(deleteSelectedNodesMessage(selectedNodeIds.length, deletableNodes.length, imageNodeCount));
-  }, [nodes, selectedNodeIds]);
+  }, [nodes, projectTags, selectedNodeIds]);
 
   const deleteSelectedNodes = useCallback(async () => {
     if (!selectedNodeIds.length) return;
     await flushCanvasSave();
-    const deletableNodes = deletableSelectedNodes(nodes, selectedNodeIds);
+    const deletableNodes = deletableSelectedNodes(nodes, selectedNodeIds, projectTags);
     if (!deletableNodes.length) return;
     const deletable = new Set(deletableNodes.map((node) => node.id));
     const selectedImageNodes = deletableNodes.filter((node) => node.data.assetIds.length > 0);
@@ -852,7 +850,7 @@ export function useCanvasWorkspace({
       await persistNodes(nextNodes);
     }
     await loadProject(openProjectSlug);
-  }, [flushCanvasSave, loadProject, nodes, openProjectSlug, persistNodes, popoverNodeId, selectedNodeIds]);
+  }, [flushCanvasSave, loadProject, nodes, openProjectSlug, persistNodes, popoverNodeId, projectTags, selectedNodeIds]);
 
   useEffect(() => {
     if (!isCanvasActive) return;
@@ -952,12 +950,6 @@ export function useCanvasWorkspace({
     overrides: { params?: GenerationParams; visualStyleId?: string | null } = {},
   ) => {
     await flushCanvasSave();
-    const styleRefKind = styleRefKindForTags(node.tags);
-    if (styleRefKind && node.assetIds.length > 0) {
-      setError('Generate style reference replacements from the adaptation style reference action.');
-      return;
-    }
-    const generatingId = styleRefKind ? styleRefImageNodeId(styleRefKind, adaptation) : id;
     const params = overrides.params ?? node.params;
     // The node's fields are the recipe; fall back to the active take's receipt
     // for nodes created before recipes were stored on the node.
@@ -966,76 +958,50 @@ export function useCanvasWorkspace({
     try {
       clearGenerationFailure();
       setError(null);
-      setGeneratingNodeIds((current) => new Set(current).add(generatingId));
-      setNodes((current) => current.map((item) => (item.id === generatingId || item.id === id ? { ...item, data: { ...item.data, isGenerating: true } } : item)));
-      if (styleRefKind) {
-        const visualStyleId = node.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null;
-        if (!visualStyleId) {
-          setError('Pick a visual style before generating the canonical reference.');
-          return;
-        }
-        const result = await api.generateAdaptationStyleRef(openProjectSlug, {
-          kind: styleRefKind,
-          canvasNodeId: id,
-          visualStyleId,
-          model: params.model,
-          aspectRatio: params.aspectRatio,
-          imageSize: params.imageSize,
-          seed: params.seed,
-          batchCount: params.batchCount,
-        });
-        if (result.status) setAdaptation(result.status);
-      } else {
-        const payload: GeneratePayload = {
-          prompt,
-          refs,
-          model: params.model,
-          aspectRatio: params.aspectRatio,
-          imageSize: params.imageSize,
-          seed: params.seed,
-          batchCount: params.batchCount,
-          title: visibleDisplayName(node.displayName) || null,
-          tags: node.tags ?? [],
-          canvasNodeId: id,
-          visualStyleId: overrides.visualStyleId !== undefined
-            ? overrides.visualStyleId ?? null
-            : node.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null,
-        };
-        if (!payload.prompt.trim()) {
-          setError('Add a prompt before generating.');
-          return;
-        }
-        if (!payload.visualStyleId) {
-          setError('Pick a visual style before generating.');
-          return;
-        }
-        await api.generate(openProjectSlug, payload);
+      setGeneratingNodeIds((current) => new Set(current).add(id));
+      setNodes((current) => current.map((item) => (item.id === id ? { ...item, data: { ...item.data, isGenerating: true } } : item)));
+      const payload: GeneratePayload = {
+        prompt,
+        refs,
+        model: params.model,
+        aspectRatio: params.aspectRatio,
+        imageSize: params.imageSize,
+        seed: params.seed,
+        batchCount: params.batchCount,
+        title: visibleDisplayName(node.displayName) || null,
+        tags: node.tags ?? [],
+        canvasNodeId: id,
+        visualStyleId: overrides.visualStyleId !== undefined
+          ? overrides.visualStyleId ?? null
+          : node.visualStyleId ?? adaptation?.defaultVisualStyleId ?? null,
+      };
+      if (!payload.prompt.trim()) {
+        setError('Add a prompt before generating.');
+        return;
       }
-      setPopoverNodeId(styleRefKind ? generatedResultNodeId(id) : id);
+      if (!payload.visualStyleId) {
+        setError('Pick a visual style before generating.');
+        return;
+      }
+      await api.generate(openProjectSlug, payload);
+      setPopoverNodeId(id);
       await reload();
     } catch (err) {
-      reportGenerationFailure(generatingId, err);
+      reportGenerationFailure(id, err);
     } finally {
       setGeneratingNodeIds((current) => {
         const next = new Set(current);
         next.delete(id);
-        next.delete(generatingId);
         return next;
       });
-      setNodes((current) => current.map((item) => (item.id === id || item.id === generatingId ? { ...item, data: { ...item.data, isGenerating: false } } : item)));
+      setNodes((current) => current.map((item) => (item.id === id ? { ...item, data: { ...item.data, isGenerating: false } } : item)));
     }
   };
 
-  const saveAdaptationStyleRefPrompt = async (kind: StyleRefKind, prompt: string) => {
+  /** Point an entity tag's canonical reference at an asset (or clear it). */
+  const setTagCanonical = async (tagId: string, assetId: string | null) => {
     if (!openProjectSlug) return;
-    setAdaptation(await api.saveAdaptationStyleRefPrompt(openProjectSlug, kind, prompt));
-    await reload();
-  };
-
-  const setAdaptationStyleRefAsset = async (kind: StyleRefKind, assetId: string) => {
-    if (!openProjectSlug) return;
-    setAdaptation(await api.setAdaptationStyleRefAsset(openProjectSlug, kind, assetId));
-    await reload();
+    setProjectTags(await api.setTagCanonical(openProjectSlug, tagId, assetId));
   };
 
   const setProjectCover = async (assetId: string) => {
@@ -1266,8 +1232,7 @@ export function useCanvasWorkspace({
     patchAssetTags,
     updatePartitionedAssetTags,
     // adaptation / project surface
-    saveAdaptationStyleRefPrompt,
-    setAdaptationStyleRefAsset,
+    setTagCanonical,
     setProjectCover,
     draftArtifactToCanvas,
     handleConceptCanvasUpdate,

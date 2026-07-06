@@ -24,7 +24,6 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
 | `gemini.py` | Google GenAI calls; PIL; nothing else imports the SDK. |
 | `adaptation.py` | Adaptation core: `adaptation/` dir + `adaptation.json` metadata, book text, character records, editable character/location files. |
 | `visual_styles.py` | Reusable style snippets appended to generation prompts. |
-| `style_refs.py` | Archetype style references: prompt files, canonical asset ids, canvas projection (`sync_style_ref_canvas_nodes`). |
 | `canvas_nodes.py` | Canvas node factories (image groups, character/location spawns). |
 | `concept_cards.py` | Concept art cards: CRUD, per-card image upload (`POST /concept-cards/{id}/upload` attaches an imported asset to the card), subject-kind retagging, draft-to-canvas. |
 | `chat_sessions.py` | Gemini image-refinement chats (thought signatures preserved, archive-first). |
@@ -41,16 +40,21 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
   `params` (the recipe for its next generation) plus an `assetIds` take stack
   with `activeAssetId`. An empty stack **is** the draft state — generating
   fills the stack in place; there is no separate draft node type.
-- **No roles.** Special behavior is derived, never stored: style-archetype
-  prompt nodes are recognized by their style tags + draft state (and are
-  protected from deletion; they're re-projected from files/metadata by
-  `style_refs.sync_style_ref_canvas_nodes`), and their generated children by
-  the `generated_<sourceId>` node-id convention.
+- **No roles.** Special behavior is derived, never stored. A node is protected
+  from deletion iff its active image is some entity tag's canonical image;
+  legacy generated-child nodes are recognized by the `generated_<sourceId>`
+  node-id convention.
 - **Canonical pointers live on entity tags.** Each entity tag in `tags.json`
-  carries `canonicalAssetId` — the image that keeps that character/location
-  consistent. `adaptation.status()` keeps the pointers synced from the
-  character/location records; panel draft-to-canvas resolves its reference
-  images from the registry.
+  carries `canonicalAssetId` — the image that keeps that character/location/
+  style consistent. `adaptation.status()` keeps character/location pointers
+  synced from their records; panel draft-to-canvas resolves its reference
+  images from the registry; `PUT /tags/{id}/canonical` sets one explicitly.
+- **Style anchors are ordinary nodes.** New projects seed two draft nodes
+  tagged with the `character-style` / `scene-style` entity tags
+  (`library.ensure_style_entity_tags` seeds the tags). They generate through
+  the one normal path; a style-tagged node's first take becomes that tag's
+  canonical by default, and deleting an asset clears any canonical pointers
+  that referenced it. There is no separate style-ref projection or endpoint.
 - **Lineage edges** are derived at render time from each child asset's immutable
   `generation.refs`; generated asset metadata is a historical receipt and is never
   edited in place.
@@ -134,8 +138,8 @@ attaches to each running task's SSE stream, and browses the
 - CSS lives in per-area files under `webui/src/styles/` with tokens in
   `tokens.css`; load order in `styles/index.css` is load-bearing.
 - Lazy `import adaptation` inside functions breaks import cycles between
-  `adaptation`, `library`, `style_refs`, and `visual_styles`. Documented,
-  intentional; don't add new cycles.
+  `adaptation`, `library`, and `visual_styles`. Documented, intentional;
+  don't add new cycles.
 
 ## Storage layout (per project)
 
@@ -148,10 +152,10 @@ photo-library/projects/<slug>/
   story-panels/panels.json     # panel chunks + page layout
   chat-sessions/<id>/          # Gemini refinement chats + blobs
   adaptation/
-    adaptation.json            # styleRefs + characters + locations metadata
+    adaptation.json            # characters + locations metadata
     book.txt                   # source text
     characters/<slug>.md       # unified character file (summary + variants)
     locations/prompts/<slug>.md
-    style-refs/                # archetype prompts + visual-styles.json
+    style-refs/                # visual-styles.json (dir name is historical)
     sessions/                  # pi session files, job logs, status JSON
 ```

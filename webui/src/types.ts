@@ -48,7 +48,7 @@ export interface Project {
   coverThumbnailUrl?: string | null;
 }
 
-export type EntityKind = 'character' | 'location';
+export type EntityKind = 'character' | 'location' | 'style';
 
 export interface TagDefinition {
   id: string;
@@ -69,8 +69,6 @@ export interface ProjectDetail {
   assets: Asset[];
   tags: TagDefinition[];
 }
-
-export type StyleRefKind = 'archetype-character' | 'archetype-scene';
 
 export interface CanvasDocument {
   version: 2;
@@ -131,17 +129,6 @@ export interface GeneratePayload {
   visualStyleId?: string | null;
 }
 
-export interface GenerateStyleRefPayload {
-  kind: StyleRefKind;
-  canvasNodeId?: string | null;
-  visualStyleId: string;
-  model?: string | null;
-  aspectRatio?: string | null;
-  imageSize?: string | null;
-  seed?: number | null;
-  batchCount?: number;
-}
-
 export interface CharacterRecord {
   slug: string;
   promptPath: string;
@@ -174,25 +161,10 @@ export interface AdaptationAssetLink {
   userTags: string[];
 }
 
-export interface StyleRefStatus {
-  kind: StyleRefKind;
-  promptPath: string;
-  promptText: string;
-  assetId?: string | null;
-  canvasDraftNodeId: string;
-  canvasImageNodeId: string;
-}
-
 export interface AdaptationStatus {
   projectSlug: string;
   hasBook: boolean;
   hasBookSession: boolean;
-  styleRefs: Record<string, boolean>;
-  styleRefStatuses: Record<StyleRefKind, StyleRefStatus>;
-  archetypeCharacterAssetId?: string | null;
-  archetypeSceneAssetId?: string | null;
-  archetypeCharacterPromptText?: string;
-  archetypeScenePromptText?: string;
   counts: Record<string, number>;
   visualStyles: VisualStyleDefinition[];
   defaultVisualStyleId?: string | null;
@@ -313,15 +285,6 @@ export interface StoryPanelBookmarkCreatePayload {
 export type StoryPanelPatchPayload = Partial<
   Pick<StoryPanel, 'order' | 'title' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'storyText' | 'visibleText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'captions' | 'imagePrompts' | 'characterSlugs' | 'locationSlug' | 'finalized'>
 >;
-
-export interface AdaptationGenerateResponse {
-  generated: boolean;
-  kind: 'character' | 'artifact' | 'style-ref';
-  key?: string | null;
-  asset?: Asset | null;
-  status?: AdaptationStatus | null;
-  message: string;
-}
 
 export interface AdaptationCanvasImportResponse {
   canvas: CanvasDocument;

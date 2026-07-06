@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Node } from 'reactflow';
-import { isCanonicalStyleRefAsset, styleRefKindForTags } from '../styleRefs';
-import type { AdaptationStatus, Asset, CanvasNode, GenerationParams, StyleRefKind, TagDefinition, VisualStyleDefinition } from '../types';
+import type { AdaptationStatus, Asset, CanvasNode, GenerationParams, TagDefinition, VisualStyleDefinition } from '../types';
 import { VisualStyleSelect } from '../visualStyles/VisualStyleSelect';
 import { TagControlButton } from './assetTagRow';
 
-import { assetLabel, canDeleteNode, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, uniqueOptions, visibleDisplayName, visibleVariants } from './shared';
+import { assetLabel, canonicalTagsForAsset, capabilitiesForModel, defaultDraftParams, modelCapabilities, normalizedParamsForModel, styleEntityTagsOnNode, uniqueOptions, visibleDisplayName, visibleVariants } from './shared';
 import type { CanvasNodeData } from './types';
 
 function GenerationErrorNotice({ message }: { message: string | null | undefined }) {
@@ -27,8 +26,7 @@ export function NodeSidebar({
   onNodeChange,
   onGenerate,
   generationError,
-  onSaveStyleRefPrompt,
-  onSetStyleRefAsset,
+  onSetTagCanonical,
   onSetProjectCover,
   onFindOnCanvas,
   onVariant,
@@ -50,8 +48,7 @@ export function NodeSidebar({
   onNodeChange: (id: string, patch: Partial<CanvasNode>) => void;
   onGenerate: (id: string, node: CanvasNodeData, overrides?: { params?: GenerationParams; visualStyleId?: string | null }) => void;
   generationError?: string | null;
-  onSaveStyleRefPrompt: (kind: StyleRefKind, prompt: string) => Promise<void>;
-  onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
+  onSetTagCanonical: (tagId: string, assetId: string | null) => void;
   onSetProjectCover: (assetId: string) => void;
   onFindOnCanvas: (nodeId: string) => void;
   onVariant: (nodeId: string, direction: -1 | 1) => void;
@@ -70,11 +67,11 @@ export function NodeSidebar({
       <DraftSidebar
         node={node}
         assets={assets}
+        projectTags={projectTags}
         visualStyles={adaptation?.visualStyles ?? []}
         defaultVisualStyleId={adaptation?.defaultVisualStyleId}
         onDraftChange={onNodeChange}
         onGenerate={onGenerate}
-        onSaveStyleRefPrompt={onSaveStyleRefPrompt}
         onDelete={onDelete}
         generationError={generationError}
       />
@@ -106,7 +103,7 @@ export function NodeSidebar({
       onDuplicate={onDuplicate}
       onGenerate={onGenerate}
       generationError={generationError}
-      onSetStyleRefAsset={onSetStyleRefAsset}
+      onSetTagCanonical={onSetTagCanonical}
       onSetProjectCover={onSetProjectCover}
       onFindOnCanvas={onFindOnCanvas}
       onRefineChat={onRefineChat}
@@ -118,26 +115,25 @@ export function NodeSidebar({
 function DraftSidebar({
   node,
   assets,
+  projectTags,
   visualStyles,
   defaultVisualStyleId,
   onDraftChange,
   onGenerate,
-  onSaveStyleRefPrompt,
   onDelete,
   generationError,
 }: {
   node: Node<CanvasNodeData>;
   assets: Asset[];
+  projectTags: TagDefinition[];
   visualStyles: VisualStyleDefinition[];
   defaultVisualStyleId?: string | null;
   onDraftChange: (id: string, patch: Partial<CanvasNode>) => void;
   onGenerate: (id: string, node: CanvasNodeData) => void;
-  onSaveStyleRefPrompt: (kind: StyleRefKind, prompt: string) => Promise<void>;
   onDelete: (id: string, assetId?: string) => void;
   generationError?: string | null;
 }) {
   const draft = node.data;
-  const canDelete = canDeleteNode(node);
 
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const [isParentPickerOpen, setIsParentPickerOpen] = useState(false);
@@ -145,16 +141,9 @@ function DraftSidebar({
   const availableParents = assets.filter((asset) => !draft.refs.includes(asset.id));
   const draftModel = draft.params.model ?? defaultDraftParams.model;
   const draftCapabilities = capabilitiesForModel(draftModel);
-  const styleRefKind = styleRefKindForTags(draft.tags);
-  const isDurableSource = styleRefKind !== null;
-  const isFileBackedPrompt = styleRefKind !== null;
-  const styleRefLabel = styleRefKind === 'archetype-character' ? 'character' : styleRefKind === 'archetype-scene' ? 'scene' : null;
-  const sourceLabel = styleRefLabel ? `${styleRefLabel} archetype` : null;
-  const showArchetypeControls = Boolean(styleRefKind);
+  const styleTags = styleEntityTagsOnNode(draft.tags, projectTags);
   const [isEditingName, setIsEditingName] = useState(false);
   const [draftName, setDraftName] = useState(visibleDisplayName(draft.displayName));
-  const [styleRefPromptDraft, setStyleRefPromptDraft] = useState<string | null>(null);
-  const [isSavingStyleRefPrompt, setIsSavingStyleRefPrompt] = useState(false);
   useEffect(() => {
     if (!isEditingName) setDraftName(visibleDisplayName(draft.displayName));
   }, [draft.displayName, isEditingName]);
@@ -195,104 +184,80 @@ function DraftSidebar({
             {visibleDisplayName(draft.displayName) || 'Draft'}
           </h2>
         )}
-        {canDelete ? <button className="danger" onClick={() => onDelete(node.id)}>Delete</button> : null}
+        <button className="danger" onClick={() => onDelete(node.id)}>Delete</button>
       </div>
-      {styleRefLabel && (
+      {styleTags.length > 0 && (
         <div className="canvas-role-badge">
-          Durable {styleRefLabel} archetype prompt
+          {styleTags.map((tag) => tag.name).join(', ')} anchor
         </div>
       )}
-      {isDurableSource && (
+      {styleTags.length > 0 && (
         <p className="muted">
-          This {sourceLabel ?? 'source'} prompt is backed by an adaptation file. Pick a visual style below, then generate the canonical reference image.
+          Generate takes here; the take you keep becomes this style's canonical reference for future generations.
         </p>
       )}
-      {!isFileBackedPrompt && (
-        <section className="sidebar-section parent-section">
-          <h3>Parents</h3>
-          <div className="parent-list">
-            {parents.length === 0 ? (
-              <div className="parent-item">
-                <div className="parent-thumb-placeholder" />
-                <span className="muted">None</span>
-              </div>
-            ) : parents.map((parent, index) => (
-              <div className="parent-item" key={draft.refs[index]}>
-                {parent?.thumbnailUrl ? <img src={parent.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
-                <span>{visibleDisplayName(draft.parentDisplayNames?.get(draft.refs[index]) ?? '') || assetLabel(parent, 'Unknown parent')}</span>
-                <button
-                  className="parent-remove"
-                  onClick={() => onDraftChange(node.id, { refs: draft.refs.filter((_, refIndex) => refIndex !== index) })}
-                  title="Remove parent"
-                >
-                  ×
-                </button>
-              </div>
+      <section className="sidebar-section parent-section">
+        <h3>Parents</h3>
+        <div className="parent-list">
+          {parents.length === 0 ? (
+            <div className="parent-item">
+              <div className="parent-thumb-placeholder" />
+              <span className="muted">None</span>
+            </div>
+          ) : parents.map((parent, index) => (
+            <div className="parent-item" key={draft.refs[index]}>
+              {parent?.thumbnailUrl ? <img src={parent.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
+              <span>{visibleDisplayName(draft.parentDisplayNames?.get(draft.refs[index]) ?? '') || assetLabel(parent, 'Unknown parent')}</span>
+              <button
+                className="parent-remove"
+                onClick={() => onDraftChange(node.id, { refs: draft.refs.filter((_, refIndex) => refIndex !== index) })}
+                title="Remove parent"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+        <button className="add-parent-button" onClick={() => setIsParentPickerOpen((current) => !current)}>+</button>
+        {isParentPickerOpen && (
+          <div className="asset-picker-popover">
+            {availableParents.length === 0 && <p className="muted">All assets are already parents.</p>}
+            {availableParents.map((asset) => (
+              <button
+                className="asset-picker-row"
+                key={asset.id}
+                onClick={() => {
+                  onDraftChange(node.id, { refs: [...draft.refs, asset.id] });
+                  setIsParentPickerOpen(false);
+                }}
+              >
+                {asset.thumbnailUrl ? <img src={asset.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
+                <span>{visibleDisplayName(draft.parentDisplayNames?.get(asset.id) ?? '') || assetLabel(asset)}</span>
+              </button>
             ))}
           </div>
-          <button className="add-parent-button" onClick={() => setIsParentPickerOpen((current) => !current)}>+</button>
-          {isParentPickerOpen && (
-            <div className="asset-picker-popover">
-              {availableParents.length === 0 && <p className="muted">All assets are already parents.</p>}
-              {availableParents.map((asset) => (
-                <button
-                  className="asset-picker-row"
-                  key={asset.id}
-                  onClick={() => {
-                    onDraftChange(node.id, { refs: [...draft.refs, asset.id] });
-                    setIsParentPickerOpen(false);
-                  }}
-                >
-                  {asset.thumbnailUrl ? <img src={asset.thumbnailUrl} alt="" /> : <div className="parent-thumb-placeholder" />}
-                  <span>{visibleDisplayName(draft.parentDisplayNames?.get(asset.id) ?? '') || assetLabel(asset)}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-      {(!isFileBackedPrompt || showArchetypeControls) && (
-        <VisualStyleSelect
-          styles={visualStyles}
-          value={draft.visualStyleId}
-          defaultStyleId={defaultVisualStyleId}
-          onChange={(styleId) => onDraftChange(node.id, { visualStyleId: styleId })}
-        />
-      )}
-      <section className={`sidebar-section ${isFileBackedPrompt ? 'style-ref-sidebar-section' : ''}`}>
+        )}
+      </section>
+      <VisualStyleSelect
+        styles={visualStyles}
+        value={draft.visualStyleId}
+        defaultStyleId={defaultVisualStyleId}
+        onChange={(styleId) => onDraftChange(node.id, { visualStyleId: styleId })}
+      />
+      <section className="sidebar-section">
         <label className="field-label">
-          {isFileBackedPrompt ? 'File-backed prompt' : 'Prompt'}
+          Prompt
           <textarea
             ref={promptRef}
             className="prompt-textarea"
-            autoFocus={!isFileBackedPrompt}
-            value={styleRefKind ? (styleRefPromptDraft ?? draft.prompt) : draft.prompt}
-            onChange={(event) => (styleRefKind ? setStyleRefPromptDraft(event.target.value) : onDraftChange(node.id, { prompt: event.target.value }))}
+            autoFocus
+            value={draft.prompt}
+            onChange={(event) => onDraftChange(node.id, { prompt: event.target.value })}
             placeholder="Prompt"
           />
         </label>
-        {styleRefKind && styleRefPromptDraft !== null && styleRefPromptDraft !== draft.prompt && (
-          <button
-            className="secondary"
-            disabled={isSavingStyleRefPrompt}
-            onClick={async () => {
-              setIsSavingStyleRefPrompt(true);
-              try {
-                await onSaveStyleRefPrompt(styleRefKind, styleRefPromptDraft);
-                setStyleRefPromptDraft(null);
-              } finally {
-                setIsSavingStyleRefPrompt(false);
-              }
-            }}
-          >
-            {isSavingStyleRefPrompt ? 'Saving prompt...' : 'Save prompt to file'}
-          </button>
-        )}
-        {isFileBackedPrompt && (
-          <p className="muted">This prompt is backed by an adaptation file; saving writes it back to disk.</p>
-        )}
       </section>
-      {(!isFileBackedPrompt || showArchetypeControls) && <section className="sidebar-section generation-section">
+      <section className="sidebar-section generation-section">
         <h3>Parameters</h3>
         <GenerationErrorNotice message={generationError} />
       <div className="row">
@@ -312,7 +277,7 @@ function DraftSidebar({
       </div>
       <div className="row">
         <select
-          value={draft.params.aspectRatio ?? (showArchetypeControls ? '1:1' : '16:9')}
+          value={draft.params.aspectRatio ?? '16:9'}
           onChange={(event) => onDraftChange(node.id, { params: { ...draft.params, aspectRatio: event.target.value } })}
         >
           {draftCapabilities.aspectRatios.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -325,29 +290,23 @@ function DraftSidebar({
         <button
           className="generate-button"
           onClick={() => onGenerate(node.id, draft)}
-          disabled={
-            !draft.prompt.trim()
-            || draft.isGenerating
-            || (showArchetypeControls && !draft.visualStyleId)
-          }
+          disabled={!draft.prompt.trim() || draft.isGenerating}
         >
           {draft.isGenerating && <span className="spinner" aria-hidden="true" />}
-          {draft.isGenerating ? 'Generating...' : showArchetypeControls ? 'Generate canonical reference' : 'Generate'}
+          {draft.isGenerating ? 'Generating...' : 'Generate'}
         </button>
-        {!showArchetypeControls && (
-          <label>
-            Batch size
-            <input
-              type="number"
-              min={1}
-              max={8}
-              value={draft.params.batchCount}
-              onChange={(event) => onDraftChange(node.id, { params: { ...draft.params, batchCount: Number(event.target.value) } })}
-            />
-          </label>
-        )}
+        <label>
+          Batch size
+          <input
+            type="number"
+            min={1}
+            max={8}
+            value={draft.params.batchCount}
+            onChange={(event) => onDraftChange(node.id, { params: { ...draft.params, batchCount: Number(event.target.value) } })}
+          />
+        </label>
       </div>
-      </section>}
+      </section>
     </aside>
   );
 }
@@ -369,7 +328,7 @@ function ImageSidebar({
   onDuplicate,
   onGenerate,
   generationError,
-  onSetStyleRefAsset,
+  onSetTagCanonical,
   onSetProjectCover,
   onFindOnCanvas,
   onRefineChat,
@@ -391,7 +350,7 @@ function ImageSidebar({
   onDuplicate: (node: CanvasNodeData, sourceAsset: Asset) => void;
   onGenerate: (id: string, node: CanvasNodeData, overrides?: { params?: GenerationParams; visualStyleId?: string | null }) => void;
   generationError?: string | null;
-  onSetStyleRefAsset: (kind: StyleRefKind, assetId: string) => void;
+  onSetTagCanonical: (tagId: string, assetId: string | null) => void;
   onSetProjectCover: (assetId: string) => void;
   onFindOnCanvas: (nodeId: string) => void;
   onRefineChat: (nodeId: string, assetId: string) => void;
@@ -407,11 +366,10 @@ function ImageSidebar({
   const activeVariantIndex = Math.max(0, visibleVariantsList.findIndex((variant) => variant.id === asset.id));
   const hasMultipleVariants = visibleVariantsList.length > 1;
   const isGeneratedResult = node.id.startsWith('generated_');
-  const styleRefKind = styleRefKindForTags(node.data.tags);
-  const isCharacterArchetype = adaptation?.styleRefStatuses?.['archetype-character']?.assetId === asset.id;
-  const isSceneArchetype = adaptation?.styleRefStatuses?.['archetype-scene']?.assetId === asset.id;
+  const styleTags = styleEntityTagsOnNode(node.data.tags, projectTags);
+  const canonicalForTags = canonicalTagsForAsset(asset.id, projectTags);
   const isProjectCover = coverAssetId === asset.id;
-  const canSetCanonicalReference = Boolean(styleRefKind) || isCanonicalStyleRefAsset(adaptation, asset.id);
+  const showCanonicalSection = styleTags.length > 0 || canonicalForTags.length > 0;
   const activeModel = isVariantPanelOpen ? variantParams.model ?? asset.generation?.model : asset.generation?.model;
   const activeCapabilities = capabilitiesForModel(activeModel);
   const modelOptions = uniqueOptions(Object.keys(modelCapabilities), asset.generation?.model);
@@ -444,9 +402,9 @@ function ImageSidebar({
         )}
       </div>
       {isArchived && <p className="muted">This variant is archived. Use Tags → Show archived to browse archived items, then unarchive here.</p>}
-      {(isCharacterArchetype || isSceneArchetype || styleRefKind) && (
+      {canonicalForTags.length > 0 && (
         <div className="canvas-role-badge">
-          {isCharacterArchetype ? 'Chosen character archetype' : isSceneArchetype ? 'Chosen scene archetype' : 'Style reference candidate'}
+          Canonical for {canonicalForTags.map((tag) => tag.name).join(', ')}
         </div>
       )}
       {isGeneratedResult && <div className="canvas-role-badge">Generated child image</div>}
@@ -515,14 +473,16 @@ function ImageSidebar({
           </>
         )}
       </div>
-      {canSetCanonicalReference && <section className="sidebar-section canonical-reference-section">
+      {showCanonicalSection && <section className="sidebar-section canonical-reference-section">
         <h3>Canonical Reference</h3>
-        <button className="secondary" onClick={() => onSetStyleRefAsset('archetype-character', asset.id)} disabled={isCharacterArchetype}>
-          {isCharacterArchetype ? 'Current character archetype' : 'Set as character archetype'}
-        </button>
-        <button className="secondary" onClick={() => onSetStyleRefAsset('archetype-scene', asset.id)} disabled={isSceneArchetype}>
-          {isSceneArchetype ? 'Current scene archetype' : 'Set as scene archetype'}
-        </button>
+        {projectTags.filter((tag) => tag.entityKind === 'style').map((tag) => {
+          const isCanonical = tag.canonicalAssetId === asset.id;
+          return (
+            <button key={tag.id} className="secondary" onClick={() => onSetTagCanonical(tag.id, asset.id)} disabled={isCanonical}>
+              {isCanonical ? `Canonical for ${tag.name}` : `★ Make canonical for ${tag.name}`}
+            </button>
+          );
+        })}
       </section>}
       {asset.generation && (
         <section className="sidebar-section parent-section">
@@ -557,7 +517,7 @@ function ImageSidebar({
           </div>
         </section>
       )}
-      {asset.generation && !styleRefKind && (
+      {asset.generation && (
         <VisualStyleSelect
           styles={adaptation?.visualStyles ?? []}
           value={isVariantPanelOpen ? variantVisualStyleId : asset.generation.visualStyleId}
@@ -567,14 +527,13 @@ function ImageSidebar({
         />
       )}
       {prompt && (
-        <section className={`sidebar-section ${styleRefKind ? 'style-ref-sidebar-section' : ''}`}>
+        <section className="sidebar-section">
           <label className="field-label">
             Prompt
             <textarea className="prompt-textarea locked-field prompt-preview" value={prompt} readOnly />
           </label>
-          {styleRefKind && <p className="muted">Chat refinements create exploratory assets. Assign entity tags from the tag editor to link images to characters or locations.</p>}
-          <button className="generate-button" onClick={() => onRefineChat(node.id, asset.id)}>{styleRefKind ? 'Explore refinement in chat' : 'Refine in chat'}</button>
-          {!styleRefKind && <button className="secondary" onClick={() => onDuplicate(node.data, asset)}>Duplicate as draft</button>}
+          <button className="generate-button" onClick={() => onRefineChat(node.id, asset.id)}>Refine in chat</button>
+          <button className="secondary" onClick={() => onDuplicate(node.data, asset)}>Duplicate as draft</button>
         </section>
       )}
       {asset.generation && (
@@ -626,9 +585,7 @@ function ImageSidebar({
               />
             </label>
           </div>
-          {styleRefKind ? (
-            <p className="muted">Generate style reference replacements from the adaptation style reference action so canonical metadata stays in sync.</p>
-          ) : isVariantPanelOpen ? (
+          {isVariantPanelOpen ? (
             <div className="generate-control">
               <button className="generate-button" onClick={() => onGenerate(node.id, node.data, { params: variantParams, visualStyleId: variantVisualStyleId })} disabled={!prompt.trim() || node.data.isGenerating}>
                 {node.data.isGenerating && <span className="spinner" aria-hidden="true" />}

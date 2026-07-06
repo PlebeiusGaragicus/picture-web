@@ -15,6 +15,7 @@ from models import (
     ProjectCreate,
     ProjectDetail,
     ProjectMetadata,
+    TagCanonicalPatch,
     TagDefinition,
     TagRegistryDocument,
 )
@@ -46,6 +47,11 @@ def patch_project(slug: str, payload: ProjectCoverPatch) -> ProjectMetadata:
 @router.get("/api/projects/{slug}/tags", response_model=list[TagDefinition])
 def list_tags(slug: str) -> list[TagDefinition]:
     return library.list_project_tags(slug)
+
+
+@router.put("/api/projects/{slug}/tags/{tag_id}/canonical", response_model=list[TagDefinition])
+def put_tag_canonical(slug: str, tag_id: str, payload: TagCanonicalPatch) -> list[TagDefinition]:
+    return library.set_tag_canonical(slug, tag_id, payload.assetId)
 
 
 @router.put("/api/projects/{slug}/tags", response_model=TagRegistryDocument)

@@ -1,4 +1,5 @@
 import type { Edge, Node } from 'reactflow';
+import type { TagDefinition } from '../types';
 import type { CanvasNodeData } from './types';
 import { canDeleteNode } from './shared';
 
@@ -38,7 +39,7 @@ export function deriveStoryGraphEdges(filteredNodes: Node<CanvasNodeData>[]): Ed
     return node.data.refs.flatMap((ref) => edgeForAssetRef(node, null, ref) ?? []);
   });
   const generatedResultEdges = filteredNodes.flatMap((node) => {
-    // Generated style-archetype children carry their source in the node id.
+    // Legacy generated-child nodes carry their source in the node id.
     const sourceNodeId = node.id.startsWith('generated_') ? node.id.slice('generated_'.length) : null;
     if (!sourceNodeId || !visibleNodeIds.has(sourceNodeId)) return [];
     return [{
@@ -52,14 +53,14 @@ export function deriveStoryGraphEdges(filteredNodes: Node<CanvasNodeData>[]): Ed
   return [...assetEdges, ...draftEdges, ...generatedResultEdges];
 }
 
-export function deletableSelectedNodes(nodes: Node<CanvasNodeData>[], selectedNodeIds: string[]): Node<CanvasNodeData>[] {
+export function deletableSelectedNodes(nodes: Node<CanvasNodeData>[], selectedNodeIds: string[], projectTags: TagDefinition[]): Node<CanvasNodeData>[] {
   const selected = new Set(selectedNodeIds);
-  return nodes.filter((node) => selected.has(node.id) && canDeleteNode(node));
+  return nodes.filter((node) => selected.has(node.id) && canDeleteNode(node, projectTags));
 }
 
 export function deleteSelectedNodesMessage(selectedCount: number, deletableCount: number, imageNodeCount: number): string {
   const skippedCount = selectedCount - deletableCount;
-  const suffix = skippedCount ? ` ${skippedCount} source node(s) will be kept.` : '';
+  const suffix = skippedCount ? ` ${skippedCount} canonical image node(s) will be kept.` : '';
   const draftNodeCount = deletableCount - imageNodeCount;
   if (imageNodeCount && draftNodeCount) {
     return `Archive ${imageNodeCount} selected image node(s) and delete ${draftNodeCount} draft node(s)?${suffix}`;
