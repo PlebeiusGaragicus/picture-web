@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationStatus, AgentSession, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, ImageGroupNodeResponse, PiTaskProfile, PiTaskStatus, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationStatus, CharacterPatchPayload, CharacterRecord, AgentSession, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, ImageGroupNodeResponse, PiTaskProfile, PiTaskStatus, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = import.meta.env.DEV;
 
@@ -155,6 +155,21 @@ export const api = {
       body: data,
     });
   },
+  listCharacters: (slug: string) => request<CharacterRecord[]>(`/api/projects/${slug}/characters`),
+  createCharacter: (slug: string, payload: { name: string; summary?: string; slug?: string }) =>
+    request<CharacterRecord>(`/api/projects/${slug}/characters`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  patchCharacter: (slug: string, characterSlug: string, payload: CharacterPatchPayload) =>
+    request<CharacterRecord>(`/api/projects/${slug}/characters/${characterSlug}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteCharacter: (slug: string, characterSlug: string) =>
+    request<AdaptationStatus>(`/api/projects/${slug}/characters/${characterSlug}`, {
+      method: 'DELETE',
+    }),
   resetCharacterData: (slug: string) =>
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/characters/reset`, {
       method: 'POST',

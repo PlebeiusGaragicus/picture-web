@@ -17,7 +17,7 @@ const emptyTrace: PiTraceDocument = {
 /** Kinds that run project-wide with no per-target argument — safe to re-run as-is. */
 const RERUNNABLE_KINDS = new Set<AgentSessionKind>([
   'read-book',
-  'extract-character-list',
+  'discover-characters',
   'extract-all-characters',
   'suggest-concept-character',
   'suggest-concept-location',
@@ -37,10 +37,12 @@ function kindLabel(kind: AgentSessionKind) {
   switch (kind) {
     case 'read-book':
       return 'Read book';
-    case 'extract-character-list':
-      return 'List characters';
+    case 'discover-characters':
+      return 'Find characters';
     case 'extract-character':
       return 'Extract character';
+    case 'refine-character':
+      return 'Refine character';
     case 'extract-all-characters':
       return 'Extract all characters';
     case 'suggest-concept-character':
@@ -117,9 +119,10 @@ function sessionDestination(session: AgentSession): { phase: ProjectPhase; label
   switch (session.kind) {
     case 'read-book':
       return { phase: 'story', label: 'Open story' };
-    case 'extract-character-list':
+    case 'discover-characters':
     case 'extract-character':
     case 'extract-all-characters':
+    case 'refine-character':
       return { phase: 'characters-hub', label: 'Open characters' };
     case 'suggest-concept-character':
     case 'suggest-concept-location':

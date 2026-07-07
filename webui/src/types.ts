@@ -93,7 +93,7 @@ export interface CanvasNodeLayout {
 }
 
 export type ArtifactKind = 'character-sheet' | 'location-prompt' | 'concept-art';
-export type AdaptationFileKind = 'characters' | 'locations';
+export type AdaptationFileKind = 'locations';
 export type ConceptArtSubjectKind = 'character' | 'location';
 
 /** The one canvas node: an image made from a prompt. An empty `assetIds`
@@ -129,12 +129,50 @@ export interface GeneratePayload {
   visualStyleId?: string | null;
 }
 
+export interface CharacterVariant {
+  label: string;
+  /** When this look applies in the story, e.g. "after the duel in chapter 2". */
+  storyContext: string;
+  mode: string;
+  styleRef: string;
+  prompt: string;
+  assetIds: string[];
+  activeAssetId?: string | null;
+  finalized: boolean;
+  status: 'missing' | 'ready' | 'generated';
+}
+
 export interface CharacterRecord {
   slug: string;
-  promptPath: string;
-  description: string;
+  name: string;
+  summary: string;
+  visualDescription: string;
+  performanceNotes: string;
+  continuityNotes: string;
   userTags: string[];
-  variants: Record<string, AdaptationAssetLink>;
+  variants: Record<string, CharacterVariant>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CharacterVariantPatchPayload {
+  label?: string;
+  storyContext?: string;
+  mode?: string;
+  styleRef?: string;
+  prompt?: string;
+}
+
+export interface CharacterPatchPayload {
+  slug?: string;
+  name?: string;
+  summary?: string;
+  visualDescription?: string;
+  performanceNotes?: string;
+  continuityNotes?: string;
+  userTags?: string[];
+  variants?: Record<string, CharacterVariantPatchPayload>;
+  removeVariants?: string[];
 }
 
 export interface VisualStyleDefinition {
@@ -332,17 +370,9 @@ export interface AdaptationFilePayload {
   subjectKind?: ConceptArtSubjectKind;
 }
 
-export interface CharacterVariantUpdatePayload {
-  prompt?: string;
-  mode?: string;
-  styleRef?: string;
-}
-
 export interface AdaptationFileUpdatePayload {
   key?: string;
   body?: string;
-  description?: string;
-  variants?: Record<string, CharacterVariantUpdatePayload>;
   mode?: string;
   styleRef?: string;
   subjectKind?: ConceptArtSubjectKind;
@@ -421,9 +451,10 @@ export interface ConceptCard {
 
 export type AgentSessionKind =
   | 'read-book'
-  | 'extract-character-list'
+  | 'discover-characters'
   | 'extract-character'
   | 'extract-all-characters'
+  | 'refine-character'
   | 'suggest-concept-character'
   | 'suggest-concept-location'
   | 'draft-panel-prompt'
@@ -431,9 +462,10 @@ export type AgentSessionKind =
 
 export type PiTaskProfile =
   | 'read-book'
-  | 'extract-character-list'
+  | 'discover-characters'
   | 'extract-character'
   | 'extract-all-characters'
+  | 'refine-character'
   | 'suggest-concept-character'
   | 'suggest-concept-location'
   | 'draft-panel-prompt'

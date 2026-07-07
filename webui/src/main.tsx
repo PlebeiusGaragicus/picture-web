@@ -458,7 +458,6 @@ function App() {
             onOpenChatForAsset={workspace.openChatForAsset}
             onViewAsset={workspace.openAssetInViewer}
             onCreateTag={workspace.createProjectTag}
-            onSaveProjectTagName={workspace.saveProjectTagName}
             onPatchAssetTags={workspace.patchAssetTags}
             onReloadProject={async () => {
               await workspace.loadProject(openProjectSlug);

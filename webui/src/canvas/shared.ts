@@ -1,4 +1,4 @@
-import type { AdaptationFileKind, ArtifactKind, Asset, EntityKind, GenerationParams, TagDefinition } from '../types';
+import type { ArtifactKind, Asset, EntityKind, GenerationParams, TagDefinition } from '../types';
 
 export const CONCEPT_TAG = 'concept';
 
@@ -203,10 +203,6 @@ export function characterEntityTagsOnAsset(tagIds: string[], projectTags: TagDef
 
 export function locationEntityTagsOnAsset(tagIds: string[], projectTags: TagDefinition[]): TagDefinition[] {
   return entityTagsOnAsset(tagIds, projectTags, 'location');
-}
-
-export function adaptationFileKindToArtifactKind(kind: AdaptationFileKind): ArtifactKind {
-  return kind === 'characters' ? 'character-sheet' : 'location-prompt';
 }
 
 export function mergeAvailableUserTags(projectTags: TagDefinition[], assets: Asset[]): TagDefinition[] {
