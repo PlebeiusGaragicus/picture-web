@@ -15,8 +15,6 @@ import story_panels_print
 from fastapi.testclient import TestClient
 from main import app
 from models import (
-    AdaptationAssetLink,
-    CharacterRecord,
     DEFAULT_AUTO_PLACE_H,
     DEFAULT_AUTO_PLACE_W,
     LAYOUT_PAGE_ROWS,
@@ -77,6 +75,37 @@ def create_extracted_character(
         json={
             "visualDescription": "Visual details.",
             "performanceNotes": "Behaviour notes.",
+            "continuityNotes": "Continuity.",
+            "variants": variants,
+        },
+    )
+    assert patched.status_code == 200
+
+
+def create_extracted_location(
+    client: TestClient,
+    slug: str,
+    *,
+    prompt: str = "Location reference for the barn.",
+    variant_key: str | None = None,
+) -> None:
+    """Register a location record and patch it to the extracted state."""
+    created = client.post(
+        "/api/projects/farm-comic/locations",
+        json={"name": slug.replace("-", " ").title(), "slug": slug, "summary": f"{slug} summary."},
+    )
+    assert created.status_code == 200
+    variants: dict[str, dict] = {"base": {"prompt": prompt}}
+    if variant_key:
+        variants[variant_key] = {
+            "prompt": "Variant establishing shot.",
+            "label": variant_key.replace("-", " ").title(),
+            "storyContext": "Later in the story.",
+        }
+    patched = client.patch(
+        f"/api/projects/farm-comic/locations/{slug}",
+        json={
+            "visualDescription": "Visual details.",
             "continuityNotes": "Continuity.",
             "variants": variants,
         },
@@ -492,7 +521,7 @@ def test_import_duplicate_file_returns_conflict(tmp_path, monkeypatch):
     assert len(client.get("/api/projects/farm-comic/assets").json()) == 1
 
 
-def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path, monkeypatch):
+def test_adaptation_records_without_book_feed_status(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
 
@@ -504,15 +533,11 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     assert character.json()["slug"] == "hero"
 
     location = client.post(
-        "/api/projects/farm-comic/adaptation/files/locations",
-        json={
-            "key": "barn",
-            "mode": "new-image",
-            "styleRef": "",
-            "body": "Wide establishing image prompt for a red barn.",
-        },
+        "/api/projects/farm-comic/locations",
+        json={"name": "Barn", "summary": "The red barn."},
     )
     assert location.status_code == 200
+    assert location.json()["slug"] == "barn"
 
     update = client.patch(
         "/api/projects/farm-comic/characters/hero",
@@ -534,6 +559,8 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     assert payload["counts"]["characters"] == 1
     assert payload["counts"]["charactersExtracted"] == 0
     assert "barn" in payload["locations"]
+    assert payload["counts"]["locations"] == 1
+    assert payload["counts"]["locationsExtracted"] == 0
 
     deleted = client.delete("/api/projects/farm-comic/characters/hero-primary")
     assert deleted.status_code == 200
@@ -739,6 +766,139 @@ def test_variant_entity_tags_canonicals_and_draft(tmp_path, monkeypatch):
     assert tags["hero-post-duel"]["canonicalAssetId"] == variant_asset
 
 
+def test_location_crud_fields_variants_and_conflicts(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+
+    created = client.post(
+        "/api/projects/farm-comic/locations",
+        json={"name": "Barn", "summary": "The red barn."},
+    )
+    assert created.status_code == 200
+    record = created.json()
+    assert record["slug"] == "barn"
+    assert record["createdAt"]
+
+    # Duplicate create conflicts.
+    assert client.post(
+        "/api/projects/farm-comic/locations",
+        json={"name": "Barn"},
+    ).status_code == 409
+
+    updated = client.patch(
+        "/api/projects/farm-comic/locations/barn",
+        json={
+            "summary": "Updated summary.",
+            "visualDescription": "Weathered red planks.",
+            "continuityNotes": "Keep the rooster weathervane.",
+            "variants": {
+                "base": {"prompt": "Wide establishing shot of the barn."},
+                "after-the-fire": {
+                    "prompt": "Same barn, charred and half-collapsed.",
+                    "label": "After the fire",
+                    "storyContext": "After the fire in chapter 5.",
+                },
+            },
+        },
+    )
+    assert updated.status_code == 200
+    payload = updated.json()
+    assert payload["summary"] == "Updated summary."
+    assert payload["visualDescription"] == "Weathered red planks."
+    assert payload["variants"]["after-the-fire"]["storyContext"] == "After the fire in chapter 5."
+
+    status = client.get("/api/projects/farm-comic/adaptation").json()
+    assert status["locations"]["barn"]["continuityNotes"] == "Keep the rooster weathervane."
+    assert status["counts"]["locationsExtracted"] == 1
+
+    # Each variant gets its own location entity tag; names follow record.name + label.
+    tags = {tag["id"]: tag for tag in client.get("/api/projects/farm-comic/tags").json()}
+    assert {"barn", "barn-after-the-fire"} <= set(tags)
+    assert tags["barn-after-the-fire"]["entityKind"] == "location"
+    assert tags["barn-after-the-fire"]["name"] == "Barn (After the fire)"
+
+    # Variant removal drops the tag too.
+    removed = client.patch(
+        "/api/projects/farm-comic/locations/barn",
+        json={"removeVariants": ["after-the-fire"]},
+    )
+    assert removed.status_code == 200
+    assert list(removed.json()["variants"]) == ["base"]
+    tag_ids = {tag["id"] for tag in client.get("/api/projects/farm-comic/tags").json()}
+    assert "barn-after-the-fire" not in tag_ids
+
+    # Unknown location 404s; rename collisions 409; delete works.
+    assert client.patch(
+        "/api/projects/farm-comic/locations/nowhere",
+        json={"summary": "x"},
+    ).status_code == 404
+    assert client.post(
+        "/api/projects/farm-comic/locations",
+        json={"name": "Field"},
+    ).status_code == 200
+    assert client.patch(
+        "/api/projects/farm-comic/locations/field",
+        json={"slug": "barn"},
+    ).status_code == 409
+    deleted = client.delete("/api/projects/farm-comic/locations/field")
+    assert deleted.status_code == 200
+    assert "field" not in deleted.json()["locations"]
+    assert client.delete("/api/projects/farm-comic/locations/field").status_code == 404
+
+
+def test_location_variant_draft_and_canonical_seeding(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    create_extracted_location(client, "barn", variant_key="after-the-fire")
+
+    drafted = client.post("/api/projects/farm-comic/locations/barn/variants/after-the-fire/draft-to-canvas")
+    assert drafted.status_code == 200
+    node = drafted.json()["canvas"]["nodes"][drafted.json()["nodeId"]]
+    assert {"barn", "barn-after-the-fire", "location-prompt", "comic-adaptation"} <= set(node["tags"])
+    assert node["displayName"] == "Barn (After The Fire)"
+    assert node["assetIds"] == []
+
+    base_draft = client.post("/api/projects/farm-comic/locations/barn/variants/base/draft-to-canvas")
+    assert base_draft.status_code == 200
+    base_node = base_draft.json()["canvas"]["nodes"][base_draft.json()["nodeId"]]
+    assert "barn" in base_node["tags"]
+    assert "barn-after-the-fire" not in base_node["tags"]
+
+    # Draft errors: unknown variant/location 404, empty prompt 400.
+    assert client.post("/api/projects/farm-comic/locations/barn/variants/nope/draft-to-canvas").status_code == 404
+    assert client.post("/api/projects/farm-comic/locations/nowhere/variants/base/draft-to-canvas").status_code == 404
+    assert client.patch(
+        "/api/projects/farm-comic/locations/barn",
+        json={"variants": {"empty-state": {"label": "Empty"}}},
+    ).status_code == 200
+    assert client.post("/api/projects/farm-comic/locations/barn/variants/empty-state/draft-to-canvas").status_code == 400
+
+    # Per-variant canonical seeding from the variant's assets.
+    variant_asset = "01HBARNFIRE"
+    make_png(library.asset_png_path("farm-comic", variant_asset), color="black")
+    library.write_json(
+        library.asset_json_path("farm-comic", variant_asset),
+        {
+            "id": variant_asset,
+            "kind": "imported",
+            "title": "Burnt barn",
+            "tags": [],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    metadata = adaptation.read_metadata("farm-comic")
+    variants = dict(metadata.locations["barn"].variants)
+    variants["after-the-fire"] = variants["after-the-fire"].model_copy(
+        update={"assetIds": [variant_asset], "activeAssetId": variant_asset}
+    )
+    metadata.locations["barn"] = metadata.locations["barn"].model_copy(update={"variants": variants})
+    adaptation.write_metadata("farm-comic", metadata)
+    assert client.get("/api/projects/farm-comic/adaptation").status_code == 200
+    tags = {tag["id"]: tag for tag in client.get("/api/projects/farm-comic/tags").json()}
+    assert tags["barn-after-the-fire"]["canonicalAssetId"] == variant_asset
+
+
 def test_panel_entities_accept_variant_flat_keys(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
@@ -758,23 +918,27 @@ def test_panel_entities_accept_variant_flat_keys(tmp_path, monkeypatch):
         json={"characterSlugs": ["hero-elder"]},
     ).status_code == 422
 
+    # Location variant flat keys validate the same way.
+    assert client.patch(
+        "/api/projects/farm-comic/locations/barn",
+        json={"variants": {"after-the-fire": {"prompt": "Charred barn.", "label": "After the fire"}}},
+    ).status_code == 200
+    assert client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{panel_id}",
+        json={"locationSlug": "barn-after-the-fire"},
+    ).status_code == 200
+    assert client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{panel_id}",
+        json={"locationSlug": "barn-rebuilt"},
+    ).status_code == 422
 
-def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monkeypatch):
+
+def test_draft_character_and_location_variants_to_canvas(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
 
     create_extracted_character(client, "hero", prompt="Full body character sheet for the farm hero.")
-
-    location = client.post(
-        "/api/projects/farm-comic/adaptation/files/locations",
-        json={
-            "key": "barn",
-            "mode": "new-image",
-            "styleRef": "",
-            "body": "Wide establishing image prompt for a red barn.",
-        },
-    )
-    assert location.status_code == 200
+    create_extracted_location(client, "barn", prompt="Wide establishing image prompt for a red barn.")
 
     first = client.post(
         "/api/projects/farm-comic/characters/hero/variants/base/draft-to-canvas",
@@ -803,15 +967,15 @@ def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monke
     assert len(character_nodes) == 2
 
     location_import = client.post(
-        "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
-        json={"artifactKind": "location-prompt", "artifactKey": "barn"},
+        "/api/projects/farm-comic/locations/barn/variants/base/draft-to-canvas",
     )
     assert location_import.status_code == 200
     assert location_import.json()["importedNodeCount"] == 1
     location_node_id = location_import.json()["nodeId"]
     location_node = location_import.json()["canvas"]["nodes"][location_node_id]
-    assert "barn" in location_node["tags"]
+    assert {"barn", "location-prompt"} <= set(location_node["tags"])
     assert location_node["assetIds"] == []
+    assert "red barn" in location_node["prompt"]
 
 
 def test_story_panels_document_and_panel_api(tmp_path, monkeypatch):
@@ -1837,7 +2001,7 @@ def test_visual_styles_crud_and_generate_composition(tmp_path, monkeypatch):
     assert missing.status_code == 404
 
 
-def test_import_artifact_to_canvas_creates_empty_image_group(tmp_path, monkeypatch):
+def test_variant_draft_to_canvas_creates_empty_image_group(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
     style_ref_id = "01HARCH"
@@ -2670,10 +2834,7 @@ def _seed_panel_entities_project(client, tmp_path) -> str:
     assert created.status_code == 200
     panel = next(item for item in created.json()["panels"] if item["sourceKind"] == "panel" and item["selectedText"])
     create_extracted_character(client, "hero")
-    assert client.post(
-        "/api/projects/farm-comic/adaptation/files/locations",
-        json={"key": "barn", "mode": "new-image", "styleRef": "", "body": "Red barn establishing prompt."},
-    ).status_code == 200
+    create_extracted_location(client, "barn", prompt="Red barn establishing prompt.")
     return panel["id"]
 
 
@@ -2755,8 +2916,8 @@ def test_draft_panel_to_canvas_blocks_then_creates_node_and_auto_attaches(tmp_pa
     metadata = adaptation.read_metadata("farm-comic")
     metadata.characters["hero"].variants["base"].assetIds = [hero_asset]
     metadata.characters["hero"].variants["base"].activeAssetId = hero_asset
-    metadata.locations["barn"].assetIds = [barn_asset]
-    metadata.locations["barn"].activeAssetId = barn_asset
+    metadata.locations["barn"].variants["base"].assetIds = [barn_asset]
+    metadata.locations["barn"].variants["base"].activeAssetId = barn_asset
     adaptation.write_metadata("farm-comic", metadata)
 
     drafted = client.post(

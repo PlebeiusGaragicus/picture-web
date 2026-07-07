@@ -17,18 +17,18 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
 | Module | Role |
 |--------|------|
 | `main.py` | App factory; includes routers, nothing else. |
-| `routes/` | One router per feature: `projects`, `canvas`, `adaptation`, `characters`, `concept_art`, `sessions`, `story_panels`. Routers hold no logic. |
+| `routes/` | One router per feature: `projects`, `canvas`, `adaptation`, `characters`, `locations`, `concept_art`, `sessions`, `story_panels`. Routers hold no logic. |
 | `library.py` | Projects, assets (`{id}.json` + `{id}.png`, ULID ids), canvas.json, tag registry, generated-asset creation. Canonical JSON IO: `read_json`/`write_json`. |
 | `models.py` | All Pydantic models, single file. |
 | `common.py` | `utc_now()`, `slugify(value, fallback)` — the only implementations. |
 | `gemini.py` | Google GenAI calls; PIL; nothing else imports the SDK. |
-| `adaptation.py` | Adaptation core: `adaptation/` dir + `adaptation.json` metadata, book text, structured character records (CRUD; adaptation.json is their single store), editable location files. |
+| `adaptation.py` | Adaptation core: `adaptation/` dir + `adaptation.json` metadata, book text, structured character and location records (CRUD; adaptation.json is their single store; both share `EntityVariant` per-variant entity tags + canonicals). |
 | `visual_styles.py` | Reusable style snippets appended to generation prompts. |
 | `canvas_nodes.py` | Canvas node factories (image groups, character/location spawns). |
 | `concept_cards.py` | Concept art cards: CRUD, per-card image upload (`POST /concept-cards/{id}/upload` attaches an imported asset to the card), subject-kind retagging, draft-to-canvas. |
 | `chat_sessions.py` | Gemini image-refinement chats (thought signatures preserved, archive-first). |
 | `agent_sessions.py` / `pi_session_trace.py` | Pi agent session registry and session-file trace parsing. |
-| `pi_runtime.py` / `pi_profiles.py` | In-process pi task runtime (one `pi --mode rpc` subprocess per step, `task_progress` between steps, SSE event ring buffer, abort, restart-safe snapshots) and the narrow task profiles it runs (`read-book`, `discover-characters`, `extract-character` (targeted), `extract-all-characters` (multi-step), `refine-character` (targeted, feedback-driven), `suggest-concept-character/location`, `draft-panel-prompt`, `refine-panel-prompt`). Profiles with `tools` get the photo-web extension loaded with a scoped allow-list (see the pi agent seam). |
+| `pi_runtime.py` / `pi_profiles.py` | In-process pi task runtime (one `pi --mode rpc` subprocess per step, `task_progress` between steps, SSE event ring buffer, abort, restart-safe snapshots) and the narrow task profiles it runs (`read-book`, `discover-characters`/`discover-locations`, `extract-character`/`extract-location` (targeted), `extract-all-characters`/`extract-all-locations` (multi-step), `refine-character`/`refine-location` (targeted, feedback-driven), `suggest-concept-character/location`, `draft-panel-prompt`, `refine-panel-prompt`; the character/location record plumbing is one `_EntityKind`-parameterized implementation). Profiles with `tools` get the photo-web extension loaded with a scoped allow-list (see the pi agent seam). |
 | `story_panels.py` / `story_panels_print.py` | Panel chunks, page layout, booklet PDF (reportlab). Panels carry entity links (`characterSlugs`/`locationSlug`, validated against `adaptation.status()`, written by the human patch path or the agent's `set_panel_image_prompt` delivery). `draft_panel_to_canvas` turns a saved image prompt into an `imageGroup` node whose `refs` are the tagged entities' canonical assets (409 if any entity has no asset yet) with `sourcePanelId` set; `library.attach_generated_assets_to_canvas` uses `sourcePanelId` to auto-attach generated assets back onto the panel. |
 | `adaptation_workflow/` | Pi plumbing for `pi_runtime`: `config.py` (context, pi/node discovery), `events.py` (`project_event`), `diagnostics.py` (`TaskDiagnostics`). |
 
@@ -62,8 +62,8 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
   `generation.refs`; generated asset metadata is a historical receipt and is never
   edited in place.
 - **Entity tags** (`character`/`location` kinds in the tag registry) link generated
-  assets back to character records — the Characters hub finds a character's images
-  by tag, not by stored ids.
+  assets back to character/location records — the Characters and Locations hubs
+  find a record's images by tag, not by stored ids.
 
 ## The pi agent seam
 
@@ -92,15 +92,17 @@ One invocation path:
    extension registers only the allow-listed tools
    (`set_panel_image_prompt`, `replace_panel_image_prompt`,
    `create_concept_card`, `register_character`, `list_characters`,
-   `update_character`), each a typed `fetch()` back into the local API
+   `update_character`, `register_location`, `list_locations`,
+   `update_location`), each a typed `fetch()` back into the local API
    with server-side validation, so the agent delivers its result with one
    tool call and no scratch files. `on_success` verifies delivery (a new
    prompt/card/record exists, or the record changed) and fails the task if
-   the agent never called the tool. Character records live in
-   `adaptation.json` (`CharacterRecord`: name, summary, visualDescription,
-   performanceNotes, continuityNotes, variants keyed by slug with
-   label/storyContext/prompt + asset link state) — discovery registers them,
-   extraction fills them, refine patches them from user feedback.
+   the agent never called the tool. Character and location records live in
+   `adaptation.json` (`CharacterRecord`/`LocationRecord`: name, summary,
+   visualDescription, performanceNotes (characters only), continuityNotes,
+   variants keyed by slug with label/storyContext/prompt + asset link state)
+   — discovery registers them, extraction fills them, refine patches them
+   from user feedback.
 
 `pi_session_trace.py` parses pi's on-disk session `.jsonl` files for the trace
 view and is transport-independent.
@@ -133,7 +135,7 @@ attaches to each running task's SSE stream, and browses the
   `ChatRefinementPanel`, edge derivation, node sidebars, tag editing.
 - `storyPanels/` — Story + Layout views and their pure layout/print logic.
 - `sessions/` — Agent dashboard: live pi task strip, session list, pi trace timeline.
-- `conceptArt/`, `characters/`, `visualStyles/` — the other workspace views.
+- `conceptArt/`, `characters/` (`EntityHubView` + `EntityEditModal`, parameterized by kind and rendered as both the Characters and Locations pages), `visualStyles/` — the other workspace views.
 - `shared/` — cross-feature helpers (`dom.ts`, `canvasDefaults.ts`, `popover.ts`).
 - `api.ts` — the single REST client; `types.ts` — the domain/API types.
 
@@ -159,9 +161,8 @@ photo-library/projects/<slug>/
   story-panels/panels.json     # panel chunks + page layout
   chat-sessions/<id>/          # Gemini refinement chats + blobs
   adaptation/
-    adaptation.json            # character records + location metadata
+    adaptation.json            # character + location records
     book.txt                   # source text
-    locations/prompts/<slug>.md
     style-refs/                # visual-styles.json (dir name is historical)
     sessions/                  # pi session files, job logs, status JSON
 ```

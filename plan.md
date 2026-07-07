@@ -126,13 +126,13 @@ Goal: repeat the character recipe for locations; delete the adaptation-files
 subsystem and markdown parsing entirely.
 
 Backend:
-- [ ] `api/models.py`: `LocationRecord` = slug, name, summary, visualDescription,
+- [x] `api/models.py`: `LocationRecord` = slug, name, summary, visualDescription,
       continuityNotes, userTags, `variants: dict[str, EntityVariant]` (base +
       durable states: "after the fire"), createdAt/updatedAt. `LocationCreate`,
       `LocationPatch` (mirror character ones incl. rename + removeVariants).
       `AdaptationMetadata.locations: dict[str, LocationRecord]`, version → 4.
       DELETE: `AdaptationAssetLink`, `AdaptationFileKind/Document/Create/Update`.
-- [ ] `api/adaptation.py`: location CRUD mirroring characters
+- [x] `api/adaptation.py`: location CRUD mirroring characters
       (`list/create/update/delete_location`, `location_is_extracted`,
       `draft_location_variant_to_canvas`); `write_metadata` passes location flat
       keys + names; `status()` seeds location variant canonicals; counts →
@@ -144,52 +144,59 @@ Backend:
       endpoint), `artifact_link_groups`, location branches of stale-asset sweep
       (use the variant sweep for both kinds). `ensure_adaptation` stops creating
       `locations/` dirs.
-- [ ] `api/routes/`: locations router (GET/POST/PATCH/DELETE
+- [x] `api/routes/`: locations router (GET/POST/PATCH/DELETE
       `/api/projects/{slug}/locations`, `POST .../locations/{key}/variants/{vkey}/draft-to-canvas`);
       adaptation.py router drops the files + import-artifact endpoints.
-- [ ] `api/canvas_nodes.py` `spawn_from_location` → record + variant based, tags
+- [x] `api/canvas_nodes.py` `spawn_from_location` → record + variant based, tags
       `("comic-adaptation", "location-prompt", key, flat_key?)`.
-- [ ] `api/story_panels.py`: `locationSlug` validation accepts location flat keys.
-- [ ] Tools (`photo-web.ts`): `register_location {name, summary}`,
+- [x] `api/story_panels.py`: `locationSlug` validation accepts location flat keys.
+- [x] Tools (`photo-web.ts`): `register_location {name, summary}`,
       `list_locations {}`, `update_location {slug, …}` — clone character tools.
-- [ ] Profiles (`pi_profiles.py`): `discover-locations`, `extract-location`
+- [x] Profiles (`pi_profiles.py`): `discover-locations`, `extract-location`
       (target), `extract-all-locations`, `refine-location` (target+instructions) —
       clone the character plans/prechecks/delivery checks; generalize helpers
       (`_registered_characters` → parameterized by kind) rather than copy-paste.
       `AgentSessionKind`/`PiTaskProfile` updated. `_suggest_concept_plan` location
       context lines switch from locations/index.md + prompts dir to registered records.
-- [ ] Skills: `discover-locations`, `extract-location`, `refine-location` SKILL.md —
+- [x] Skills: `discover-locations`, `extract-location`, `refine-location` SKILL.md —
       location sheet prompt rules (wide establishing shot, camera height, lighting,
       no characters in frame, no text/labels; variants state only the visual delta).
-- [ ] Delete `.pi/skills/concept-location` references to locations/index.md if any.
+- [x] Delete `.pi/skills/concept-location` references to locations/index.md if any (none found; `_suggest_concept_plan` context switched to registered records).
 
-Frontend (the missing surface):
-- [ ] Extend the Characters view into a two-section hub: "Characters" grid (as
-      today) + "Locations" grid below with the same card anatomy (thumb from
-      location-tagged nodes, Extract-when-empty, Draft, state). Toolbar gains
-      "Find locations" / "Extract all locations" (or a segmented pair — keep it
-      one toolbar row; label the buttons explicitly, no icon-only).
-- [ ] Generalize `CharacterEditModal` → parameterized entity modal
+Frontend (the missing surface) — **revised 2026-07-07: user chose a separate
+"Locations" page (own nav entry) instead of a two-section Characters hub**:
+- [x] Generalize `CharactersHubView` → `EntityHubView` parameterized by
+      `kind: 'character'|'location'` (same card anatomy: thumb from entity-tagged
+      nodes, Extract-when-empty, Draft, state; kind-specific toolbar with
+      "+ <kind>" / "Find <kind>s" / "Extract all").
+- [x] New `locations-hub` project phase: nav item "Locations" (map-pin icon in
+      PhaseIcon), rendered via `EntityHubView kind="location"` in main.tsx.
+- [x] Generalize `CharacterEditModal` → `EntityEditModal.tsx`
       (`kind: 'character'|'location'`): locations hide Performance notes; task
-      profiles + API calls passed in/branched by kind. Keep file name or rename to
-      `EntityEditModal.tsx`.
-- [ ] `api.ts` location CRUD + draft methods; `types.ts` LocationRecord etc.;
+      profiles + API calls passed in/branched by kind.
+- [x] `api.ts` location CRUD + draft methods; `types.ts` LocationRecord etc.;
       delete AdaptationFile* types + api methods (unused by UI — verified).
-- [ ] `main.tsx` wiring; view title likely stays "Characters" (nav rename deferred — decide during implementation).
-- [ ] e2e seed.ts: check whether it seeds locations/adaptation files; refresh baselines for the two-section layout.
+      Also deleted `draftArtifactToCanvas` from useCanvasWorkspace (no consumers)
+      and added `draftLocationVariantToCanvas`; new `isLocationCanvasNode` in
+      canvas/shared.ts.
+- [x] `main.tsx` wiring (phase toggles, workspace hub checks, draft handlers).
+- [x] e2e seed.ts: check whether it seeds locations/adaptation files (verified: it
+      doesn't); baselines refreshed (all in-project shots pick up the new nav
+      item); added a locations.png smoke shot.
 
 Tests & data:
-- [ ] Rewrite location parts of `test_api.py` (adaptation-files tests → /locations
+- [x] Rewrite location parts of `test_api.py` (adaptation-files tests → /locations
       CRUD; import-artifact test → variant draft endpoints; entity-tag asserts for
       location flat keys). `test_pi_runtime.py`: location profile tests cloned from
       character ones (precheck/skip/live tool/fails-without-tool; extract-all
-      labels). `test_adaptation_workflow.py`: suggest-location context lines test.
-- [ ] Real data: delete `adaptation/locations/` dirs from cupcake/tom/farm-comic (believed empty of md files — verify); cupcake metadata.locations is empty, so no rescue expected.
-- [ ] Docs: ARCHITECTURE.md (module map, storage layout, pi seam tool list,
-      profiles list), user-guide.md §4/§5 (locations flow through the same hub).
-- [ ] Verify: full backend pytest; `npm run build && npm run test:e2e` with
-      baseline refresh; grep sweep:
-      `grep -rn "AdaptationAssetLink\|adaptation/files\|sync_location_links\|parse_prompt_sections" api webui/src .pi` → zero hits.
+      labels). `test_adaptation_workflow.py`: suggest-location context lines test
+      + discover/extract/refine location step tests.
+- [x] Real data: deleted empty `adaptation/locations/` dirs from cupcake/tom/farm-comic
+      (verified empty via rmdir); all metadata.locations were empty, no rescue needed.
+- [x] Docs: ARCHITECTURE.md (module map, storage layout, pi seam tool list,
+      profiles list, frontend map), user-guide.md §4/§5 (Locations page flow).
+- [x] Verify: full backend pytest (135 passed); `npm run typecheck && npm run build
+      && npm run test:e2e` (8 passed, baselines refreshed in-commit); grep sweep → zero hits.
 
 ## Commit sequencing
 
@@ -209,3 +216,4 @@ Tests & data:
 - 2026-07-07: plan written; starting Phase A.
 - 2026-07-07: Phase A done — EntityVariant slim schema (label/storyContext/prompt/assetIds/activeAssetId), derived variant_status, tools/skills/UI/tests updated, cupcake variants stripped. 119 backend tests + tsc green. Starting Phase B.
 - 2026-07-07: Phase B done — per-variant entity tags + canonicals, variant draft endpoint (import_artifact character branch deleted), panel flat-key validation, variant-aware panel context, per-variant Draft buttons in modal. 124 backend tests + build + e2e green (no pixel change). Committing A+B, then Phase C.
+- 2026-07-07: Phase C done — LocationRecord + EntityVariant records (metadata v4), locations router + variant draft endpoint, adaptation-files/markdown subsystem deleted entirely, location pi tools/profiles/skills (record plumbing generalized via `_EntityKind`), panel context lines variant-aware for locations. Frontend: user chose a **separate Locations page** over a two-section hub — `EntityHubView`/`EntityEditModal` parameterized by kind, new `locations-hub` nav phase with map-pin icon. Empty `adaptation/locations/` dirs removed from real projects. 135 backend tests, typecheck, build, 8 e2e green (baselines refreshed for the new nav item + locations.png added). Docs updated.

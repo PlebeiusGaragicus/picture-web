@@ -93,7 +93,6 @@ export interface CanvasNodeLayout {
 }
 
 export type ArtifactKind = 'character-sheet' | 'location-prompt' | 'concept-art';
-export type AdaptationFileKind = 'locations';
 export type ConceptArtSubjectKind = 'character' | 'location';
 
 /** The one canvas node: an image made from a prompt. An empty `assetIds`
@@ -169,28 +168,34 @@ export interface CharacterPatchPayload {
   removeVariants?: string[];
 }
 
+export interface LocationRecord {
+  slug: string;
+  name: string;
+  summary: string;
+  visualDescription: string;
+  continuityNotes: string;
+  userTags: string[];
+  variants: Record<string, EntityVariant>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LocationPatchPayload {
+  slug?: string;
+  name?: string;
+  summary?: string;
+  visualDescription?: string;
+  continuityNotes?: string;
+  userTags?: string[];
+  variants?: Record<string, EntityVariantPatchPayload>;
+  removeVariants?: string[];
+}
+
 export interface VisualStyleDefinition {
   id: string;
   name: string;
   prompt: string;
   default?: boolean;
-}
-
-export interface AdaptationAssetLink {
-  artifactKind: ArtifactKind;
-  promptPath: string;
-  subjectKind?: ConceptArtSubjectKind | null;
-  mode: string;
-  styleRef: string;
-  prompt: string;
-  narration: string;
-  dialogue: string;
-  caption: string;
-  assetIds: string[];
-  activeAssetId?: string | null;
-  finalized: boolean;
-  status: 'missing' | 'ready' | 'generated';
-  userTags: string[];
 }
 
 export interface AdaptationStatus {
@@ -201,7 +206,7 @@ export interface AdaptationStatus {
   visualStyles: VisualStyleDefinition[];
   defaultVisualStyleId?: string | null;
   characters: Record<string, CharacterRecord>;
-  locations: Record<string, AdaptationAssetLink>;
+  locations: Record<string, LocationRecord>;
 }
 
 export interface StoryPanelRect {
@@ -345,34 +350,6 @@ export interface ConceptNodeResponse {
   canvas: CanvasDocument;
 }
 
-export interface AdaptationFileDocument {
-  kind: AdaptationFileKind;
-  key: string;
-  promptPath: string;
-  artifactKind: ArtifactKind;
-  body: string;
-  mode: string;
-  styleRef: string;
-  status: 'missing' | 'ready' | 'generated';
-}
-
-export interface AdaptationFilePayload {
-  key: string;
-  body: string;
-  mode?: string;
-  styleRef?: string;
-  subjectKind?: ConceptArtSubjectKind;
-}
-
-export interface AdaptationFileUpdatePayload {
-  key?: string;
-  body?: string;
-  mode?: string;
-  styleRef?: string;
-  subjectKind?: ConceptArtSubjectKind;
-  userTags?: string[];
-}
-
 export interface ChatTurnSettings {
   model: string;
   aspectRatio: string;
@@ -449,6 +426,10 @@ export type AgentSessionKind =
   | 'extract-character'
   | 'extract-all-characters'
   | 'refine-character'
+  | 'discover-locations'
+  | 'extract-location'
+  | 'extract-all-locations'
+  | 'refine-location'
   | 'suggest-concept-character'
   | 'suggest-concept-location'
   | 'draft-panel-prompt'
@@ -460,6 +441,10 @@ export type PiTaskProfile =
   | 'extract-character'
   | 'extract-all-characters'
   | 'refine-character'
+  | 'discover-locations'
+  | 'extract-location'
+  | 'extract-all-locations'
+  | 'refine-location'
   | 'suggest-concept-character'
   | 'suggest-concept-location'
   | 'draft-panel-prompt'

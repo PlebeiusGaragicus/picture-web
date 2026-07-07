@@ -7,7 +7,7 @@ import clsx from 'clsx';
 import { formatRequestError } from './formatError';
 import { api } from './api';
 import { exportProjectAssetsToFolder } from './exportAssets';
-import { CharactersHubView } from './characters/CharactersHubView';
+import { EntityHubView } from './characters/EntityHubView';
 import { BookTextView } from './storyPanels/BookTextView';
 import { readAutoPlaceEnabled, writeAutoPlaceEnabled } from './storyPanels/autoPlace';
 import { LayoutEditorView } from './storyPanels/LayoutEditorView';
@@ -33,7 +33,7 @@ import { PiTaskPanel } from './sessions/PiTaskPanel';
 type PhaseViewMode = 'list' | 'canvas';
 
 function phaseHasCanvas(phase: ProjectPhase) {
-  return phase === 'image-canvas' || phase === 'characters-hub' || phase === 'concept-art';
+  return phase === 'image-canvas' || phase === 'characters-hub' || phase === 'locations-hub' || phase === 'concept-art';
 }
 
 function App() {
@@ -219,7 +219,7 @@ function App() {
       </HoverTooltip>
     ) : button;
   })() : null;
-  const isWorkspaceHubActive = isAgentDashboardActive || isConceptArtActive || projectPhase === 'characters-hub';
+  const isWorkspaceHubActive = isAgentDashboardActive || isConceptArtActive || projectPhase === 'characters-hub' || projectPhase === 'locations-hub';
   const showProjectTopBar = Boolean(openProjectSlug && (isPhaseSidebarCollapsed || isCanvasActive || isStoryPanelPhaseActive || isWorkspaceHubActive));
 
   const phaseViewToggle = (label: string) => (
@@ -245,7 +245,11 @@ function App() {
     </div>
   );
 
-  const charactersHubViewToggle = projectPhase === 'characters-hub' ? phaseViewToggle('Characters view') : null;
+  const charactersHubViewToggle = projectPhase === 'characters-hub'
+    ? phaseViewToggle('Characters view')
+    : projectPhase === 'locations-hub'
+      ? phaseViewToggle('Locations view')
+      : null;
   const conceptArtViewToggle = projectPhase === 'concept-art' ? phaseViewToggle('Concept art view') : null;
 
   const exportBookletPdf = async (pageBorder: BookletPageBorder = exportPageBorder) => {
@@ -446,15 +450,19 @@ function App() {
             onOpenAgentSession={openAgentSession}
           />
         )}
-        {projectPhase === 'characters-hub' && adaptation && (
-          <CharactersHubView
+        {(projectPhase === 'characters-hub' || projectPhase === 'locations-hub') && adaptation && (
+          <EntityHubView
+            key={projectPhase}
+            kind={projectPhase === 'locations-hub' ? 'location' : 'character'}
             projectSlug={openProjectSlug}
             adaptation={adaptation}
             assets={workspace.assets}
             canvas={workspace.canvas}
             projectTags={workspace.projectTags}
             viewMode={phaseViewMode === 'canvas' ? 'canvas' : 'list'}
-            onDraftVariantToCanvas={workspace.draftCharacterVariantToCanvas}
+            onDraftVariantToCanvas={projectPhase === 'locations-hub'
+              ? workspace.draftLocationVariantToCanvas
+              : workspace.draftCharacterVariantToCanvas}
             onOpenChatForAsset={workspace.openChatForAsset}
             onViewAsset={workspace.openAssetInViewer}
             onCreateTag={workspace.createProjectTag}

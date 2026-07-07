@@ -8,7 +8,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routes import adaptation, canvas, characters, concept_art, projects, sessions, story_panels
+from routes import adaptation, canvas, characters, concept_art, locations, projects, sessions, story_panels
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -35,6 +35,7 @@ app.include_router(projects.router)
 app.include_router(canvas.router)
 app.include_router(adaptation.router)
 app.include_router(characters.router)
+app.include_router(locations.router)
 app.include_router(concept_art.router)
 app.include_router(sessions.router)
 app.include_router(story_panels.router)

@@ -18,7 +18,7 @@ import library
 import pi_profiles
 import pi_runtime
 from main import app
-from models import CharacterCreate, CharacterPatch, EntityVariantPatch
+from models import CharacterCreate, CharacterPatch, EntityVariantPatch, LocationCreate, LocationPatch
 
 FAKE_PI = Path(__file__).parent / "testdata" / "fake_pi.py"
 
@@ -108,6 +108,26 @@ def register_character(name: str, *, extracted: bool) -> str:
                 visualDescription="Sturdy.",
                 performanceNotes="Kind.",
                 variants={"base": EntityVariantPatch(prompt=BASE_SHEET_PROMPT)},
+            ),
+        )
+    return record.slug
+
+
+LOCATION_SHEET_PROMPT = (
+    "Location reference for the barn. Wide establishing shot at eye level, "
+    "warm morning light. No characters in frame. No text, no labels, no watermarks."
+)
+
+
+def register_location(name: str, *, extracted: bool) -> str:
+    record = adaptation.create_location("farm-comic", LocationCreate(name=name, summary=f"{name} on the farm."))
+    if extracted:
+        adaptation.update_location(
+            "farm-comic",
+            record.slug,
+            LocationPatch(
+                visualDescription="Weathered red planks.",
+                variants={"base": EntityVariantPatch(prompt=LOCATION_SHEET_PROMPT)},
             ),
         )
     return record.slug
@@ -693,8 +713,12 @@ def test_draft_panel_prompt_end_to_end(tmp_path, monkeypatch, live_api):
     client, root = setup_project_with_book(tmp_path, monkeypatch)
     seed_extracted_character(root)
     assert client.post(
-        "/api/projects/farm-comic/adaptation/files/locations",
-        json={"key": "barnyard", "mode": "new-image", "styleRef": "", "body": "A muddy barnyard at dawn."},
+        "/api/projects/farm-comic/locations",
+        json={"name": "Barnyard", "summary": "The muddy barnyard."},
+    ).status_code == 200
+    assert client.patch(
+        "/api/projects/farm-comic/locations/barnyard",
+        json={"visualDescription": "Muddy and fenced.", "variants": {"base": {"prompt": "A muddy barnyard at dawn."}}},
     ).status_code == 200
     (panel_id,) = make_story_panels(client, ["Hero feeds the chickens at dawn."])
     live_api()
@@ -877,6 +901,171 @@ def test_refine_character_fails_when_tool_never_called(tmp_path, monkeypatch):
     )
     assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "failed"
     assert "update_character" in (handle.error or "")
+
+
+# --- location profiles (clones of the character record plumbing) ----------------
+
+
+def test_extract_location_precheck_target_validation(tmp_path, monkeypatch):
+    setup_project_with_book(tmp_path, monkeypatch)
+    root = library.project_dir("farm-comic") / "adaptation"
+    write_book_session_manifest(root)
+    ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
+    profile = pi_profiles.get_profile("extract-location")
+
+    with pytest.raises(HTTPException) as exc_info:
+        profile.precheck(ctx, pi_profiles.TaskArgs())
+    assert exc_info.value.status_code == 400
+
+    with pytest.raises(HTTPException) as exc_info:
+        profile.precheck(ctx, pi_profiles.TaskArgs(target="barn"))
+    assert exc_info.value.status_code == 404  # not registered yet
+
+    register_location("Barn", extracted=False)
+    profile.precheck(ctx, pi_profiles.TaskArgs(target="barn"))
+
+
+def test_discover_locations_registers_via_tool(tmp_path, monkeypatch, live_api):
+    client, root = setup_project_with_book(tmp_path, monkeypatch)
+    write_book_session_manifest(root)
+    live_api()
+    monkeypatch.setenv(
+        "FAKE_PI_CALL_TOOL",
+        json.dumps(
+            {
+                "tool": "register_location",
+                "method": "POST",
+                "path": "/api/projects/farm-comic/locations",
+                "body": {"name": "Barn", "summary": "The red barn."},
+            }
+        ),
+    )
+    manager = use_fake_pi(monkeypatch)
+
+    handle = manager.start_task("farm-comic", "discover-locations")
+    assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "done"
+
+    env = json.loads((root / "sessions" / "pi" / "fake-pi-env.json").read_text())
+    assert env["PHOTO_WEB_ALLOWED_TOOLS"] == "register_location,list_locations"
+
+    records = client.get("/api/projects/farm-comic/locations").json()
+    assert [record["slug"] for record in records] == ["barn"]
+
+    session = client.get(f"/api/projects/farm-comic/agent-sessions/{handle.id}").json()
+    assert session["kind"] == "discover-locations"
+    assert session["source"]["registeredSlugs"] == ["barn"]
+
+
+def test_discover_locations_skips_pi_when_records_exist(tmp_path, monkeypatch):
+    setup_project_with_book(tmp_path, monkeypatch)
+    root = library.project_dir("farm-comic") / "adaptation"
+    write_book_session_manifest(root)
+    register_location("Barn", extracted=False)
+    manager = use_fake_pi(monkeypatch)
+
+    handle = manager.start_task("farm-comic", "discover-locations")
+    assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "done"
+
+    assert not (root / "sessions" / "pi" / "fake-pi-argv.json").exists()
+    assert list(adaptation.read_metadata("farm-comic").locations) == ["barn"]
+
+
+def test_extract_all_locations_multi_step_progress(tmp_path, monkeypatch, live_api):
+    _client, root = setup_project_with_book(tmp_path, monkeypatch)
+    write_book_session_manifest(root)
+    register_location("Barn", extracted=True)
+    register_location("Field", extracted=False)
+    live_api()
+    monkeypatch.setenv(
+        "FAKE_PI_CALL_TOOL",
+        json.dumps(
+            {
+                "tool": "update_location",
+                "method": "PATCH",
+                "path": "/api/projects/farm-comic/locations/{target}",
+                "body": {
+                    "visualDescription": "Open pasture.",
+                    "variants": {"base": {"prompt": LOCATION_SHEET_PROMPT}},
+                },
+            }
+        ),
+    )
+    manager = use_fake_pi(monkeypatch)
+
+    handle = manager.start_task("farm-comic", "extract-all-locations")
+    assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "done"
+
+    progress = [record["event"] for record in handle.events_since(0) if record["event"]["type"] == "task_progress"]
+    assert [event["label"] for event in progress] == [
+        "discover locations",
+        "extract location barn",
+        "extract location field",
+    ]
+
+    field = adaptation.read_metadata("farm-comic").locations["field"]
+    assert field.visualDescription == "Open pasture."
+    assert field.variants["base"].prompt == LOCATION_SHEET_PROMPT
+
+    env = json.loads((root / "sessions" / "pi" / "fake-pi-env.json").read_text())
+    assert env["PHOTO_WEB_ALLOWED_TOOLS"] == "register_location,update_location,list_locations"
+
+
+def test_extract_location_fails_when_tool_never_called(tmp_path, monkeypatch):
+    _client, root = setup_project_with_book(tmp_path, monkeypatch)
+    write_book_session_manifest(root)
+    register_location("Field", extracted=False)
+    manager = use_fake_pi(monkeypatch)  # default fake pi makes no tool call
+
+    handle = manager.start_task("farm-comic", "extract-location", target="field")
+    assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "failed"
+    assert "update_location" in (handle.error or "")
+
+
+def test_refine_location_end_to_end(tmp_path, monkeypatch, live_api):
+    client, root = setup_project_with_book(tmp_path, monkeypatch)
+    write_book_session_manifest(root)
+    register_location("Barn", extracted=True)
+    live_api()
+    monkeypatch.setenv(
+        "FAKE_PI_CALL_TOOL",
+        json.dumps(
+            {
+                "tool": "update_location",
+                "method": "PATCH",
+                "path": "/api/projects/farm-comic/locations/barn",
+                "body": {
+                    "visualDescription": "Weathered red planks, charred beams.",
+                    "variants": {
+                        "after-the-fire": {
+                            "label": "After the fire",
+                            "storyContext": "After the fire in chapter 5.",
+                            "prompt": "Same location as the reference image, charred and half-collapsed.",
+                        }
+                    },
+                },
+            }
+        ),
+    )
+    manager = use_fake_pi(monkeypatch)
+
+    handle = manager.start_task(
+        "farm-comic",
+        "refine-location",
+        target="barn",
+        instructions="Add an after-the-fire variant",
+    )
+    assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "done"
+
+    env = json.loads((root / "sessions" / "pi" / "fake-pi-env.json").read_text())
+    assert env["PHOTO_WEB_ALLOWED_TOOLS"] == "update_location,list_locations"
+
+    barn = adaptation.read_metadata("farm-comic").locations["barn"]
+    assert "charred beams" in barn.visualDescription
+    assert barn.variants["after-the-fire"].storyContext == "After the fire in chapter 5."
+
+    session = client.get(f"/api/projects/farm-comic/agent-sessions/{handle.id}").json()
+    assert session["kind"] == "refine-location"
+    assert session["source"]["locationSlug"] == "barn"
 
 
 # --- image prompt endpoints ------------------------------------------------------

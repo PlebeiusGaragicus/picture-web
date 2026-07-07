@@ -328,7 +328,7 @@ def sync_entity_tags(
     *,
     character_keys: list[str],
     location_keys: list[str],
-    character_names: dict[str, str] | None = None,
+    entity_names: dict[str, str] | None = None,
 ) -> TagRegistryDocument:
     registry = read_tag_registry(slug)
     entity_ids = {normalize_tag_id(key) for key in character_keys} | {normalize_tag_id(key) for key in location_keys}
@@ -337,7 +337,7 @@ def sync_entity_tags(
     canonical_by_id = {tag.id: tag.canonicalAssetId for tag in registry.tags if tag.canonicalAssetId}
     names_by_id = {
         normalize_tag_id(key): name.strip()
-        for key, name in (character_names or {}).items()
+        for key, name in (entity_names or {}).items()
         if name.strip()
     }
     entity_tags = [
@@ -345,9 +345,7 @@ def sync_entity_tags(
         *[entity_tag_for_key(key, "location") for key in sorted(location_keys)],
     ]
     entity_tags = [
-        tag.model_copy(update={"name": names_by_id[tag.id]})
-        if tag.entityKind == "character" and tag.id in names_by_id
-        else tag
+        tag.model_copy(update={"name": names_by_id[tag.id]}) if tag.id in names_by_id else tag
         for tag in entity_tags
     ]
     entity_tags = [

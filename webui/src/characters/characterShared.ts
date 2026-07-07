@@ -1,4 +1,9 @@
-import type { CharacterRecord } from '../types';
+import type { CharacterRecord, LocationRecord } from '../types';
+
+/** Characters and locations share the record shape the hub cares about;
+ *  performanceNotes is the one character-only field. */
+export type EntityRecord = CharacterRecord | LocationRecord;
+export type EntityRecordKind = 'character' | 'location';
 
 export function slugifyKey(value: string): string {
   return value
@@ -8,7 +13,7 @@ export function slugifyKey(value: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-export function characterDisplayName(record: CharacterRecord): string {
+export function entityDisplayName(record: EntityRecord): string {
   return record.name.trim() || record.slug
     .split('-')
     .filter(Boolean)
@@ -16,15 +21,15 @@ export function characterDisplayName(record: CharacterRecord): string {
     .join(' ');
 }
 
-export function characterIsExtracted(record: CharacterRecord): boolean {
+export function entityIsExtracted(record: EntityRecord): boolean {
   const base = record.variants.base;
   return Boolean(record.visualDescription.trim() && base && base.prompt.trim());
 }
 
-export type CharacterHubState = 'Empty' | 'Extracted' | 'Generated';
+export type EntityHubState = 'Empty' | 'Extracted' | 'Generated';
 
-export function characterHubState(record: CharacterRecord): CharacterHubState {
+export function entityHubState(record: EntityRecord): EntityHubState {
   if (record.variants.base?.assetIds?.length) return 'Generated';
-  if (characterIsExtracted(record)) return 'Extracted';
+  if (entityIsExtracted(record)) return 'Extracted';
   return 'Empty';
 }

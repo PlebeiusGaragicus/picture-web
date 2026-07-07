@@ -9,7 +9,7 @@ import pytest
 
 from adaptation_workflow.events import clip_text, project_event
 from common import slugify as slugify_name
-from models import CharacterRecord, EntityVariant
+from models import CharacterRecord, EntityVariant, LocationRecord
 
 
 def test_slugify_name() -> None:
@@ -81,14 +81,27 @@ def _registered_record(slug: str, *, extracted: bool) -> CharacterRecord:
     )
 
 
+def _registered_location(slug: str, *, extracted: bool) -> LocationRecord:
+    if not extracted:
+        return LocationRecord(slug=slug, name=slug.title(), summary="A sunny barn.")
+    return LocationRecord(
+        slug=slug,
+        name=slug.title(),
+        summary="A sunny barn.",
+        visualDescription="Red planks.",
+        continuityNotes="Keep the weathervane.",
+        variants={"base": EntityVariant(prompt="Location reference.")},
+    )
+
+
 def test_discover_characters_step(tmp_path: Path, monkeypatch) -> None:
-    from pi_profiles import PiTaskResultInfo, _discover_characters_step
+    from pi_profiles import PiTaskResultInfo, _CHARACTER_KIND, _discover_entities_step
 
     ctx = _make_ctx(tmp_path)
     records: dict[str, CharacterRecord] = {}
     monkeypatch.setattr("pi_profiles._registered_characters", lambda _ctx: dict(records))
 
-    step = _discover_characters_step(ctx, force=False)
+    step = _discover_entities_step(ctx, _CHARACTER_KIND, force=False)
     prompt = step.build_prompt()
     assert prompt is not None
     assert "/skill:discover-characters" in prompt
@@ -101,21 +114,41 @@ def test_discover_characters_step(tmp_path: Path, monkeypatch) -> None:
     assert step.on_success(PiTaskResultInfo()) == {"registeredSlugs": ["gilda"]}
 
     # Existing records without force means there is nothing for pi to do.
-    assert _discover_characters_step(ctx, force=False).build_prompt() is None
-    force_prompt = _discover_characters_step(ctx, force=True).build_prompt()
+    assert _discover_entities_step(ctx, _CHARACTER_KIND, force=False).build_prompt() is None
+    force_prompt = _discover_entities_step(ctx, _CHARACTER_KIND, force=True).build_prompt()
     assert force_prompt is not None
     assert "do NOT register these again" in force_prompt
     assert "Gilda: A yellow filly." in force_prompt
 
 
+def test_discover_locations_step(tmp_path: Path, monkeypatch) -> None:
+    from pi_profiles import PiTaskResultInfo, _LOCATION_KIND, _discover_entities_step
+
+    ctx = _make_ctx(tmp_path)
+    records: dict[str, LocationRecord] = {}
+    monkeypatch.setattr("pi_profiles._registered_locations", lambda _ctx: dict(records))
+
+    step = _discover_entities_step(ctx, _LOCATION_KIND, force=False)
+    prompt = step.build_prompt()
+    assert prompt is not None
+    assert "/skill:discover-locations" in prompt
+
+    with pytest.raises(RuntimeError, match="register_location"):
+        step.on_success(PiTaskResultInfo())
+
+    records["sunny-barn"] = _registered_location("sunny-barn", extracted=False)
+    assert step.on_success(PiTaskResultInfo()) == {"registeredSlugs": ["sunny-barn"]}
+    assert _discover_entities_step(ctx, _LOCATION_KIND, force=False).build_prompt() is None
+
+
 def test_extract_character_step_uses_record(tmp_path: Path, monkeypatch) -> None:
-    from pi_profiles import _extract_character_step
+    from pi_profiles import _CHARACTER_KIND, _extract_entity_step
 
     ctx = _make_ctx(tmp_path)
     records = {"gilda": _registered_record("gilda", extracted=False)}
     monkeypatch.setattr("pi_profiles._registered_characters", lambda _ctx: dict(records))
 
-    step = _extract_character_step(ctx, "gilda", force=False)
+    step = _extract_entity_step(ctx, _CHARACTER_KIND, "gilda", force=False)
     prompt = step.build_prompt()
     assert prompt is not None
     assert "/skill:extract-character gilda" in prompt
@@ -129,18 +162,41 @@ def test_extract_character_step_uses_record(tmp_path: Path, monkeypatch) -> None
     step.on_success(None)
 
     # An extracted record without force means there is nothing for pi to do.
-    assert _extract_character_step(ctx, "gilda", force=False).build_prompt() is None
-    assert _extract_character_step(ctx, "gilda", force=True).build_prompt() is not None
+    assert _extract_entity_step(ctx, _CHARACTER_KIND, "gilda", force=False).build_prompt() is None
+    assert _extract_entity_step(ctx, _CHARACTER_KIND, "gilda", force=True).build_prompt() is not None
+
+
+def test_extract_location_step_uses_record(tmp_path: Path, monkeypatch) -> None:
+    from pi_profiles import _LOCATION_KIND, _extract_entity_step
+
+    ctx = _make_ctx(tmp_path)
+    records = {"sunny-barn": _registered_location("sunny-barn", extracted=False)}
+    monkeypatch.setattr("pi_profiles._registered_locations", lambda _ctx: dict(records))
+
+    step = _extract_entity_step(ctx, _LOCATION_KIND, "sunny-barn", force=False)
+    prompt = step.build_prompt()
+    assert prompt is not None
+    assert "/skill:extract-location sunny-barn" in prompt
+    assert "A sunny barn." in prompt
+    # Location record context has no performanceNotes field.
+    assert "performanceNotes" not in prompt
+
+    with pytest.raises(RuntimeError, match="update_location"):
+        step.on_success(None)
+
+    records["sunny-barn"] = _registered_location("sunny-barn", extracted=True)
+    step.on_success(None)
+    assert _extract_entity_step(ctx, _LOCATION_KIND, "sunny-barn", force=False).build_prompt() is None
 
 
 def test_refine_character_plan(tmp_path: Path, monkeypatch) -> None:
-    from pi_profiles import TaskArgs, _refine_character_plan
+    from pi_profiles import TaskArgs, _CHARACTER_KIND, _refine_entity_plan
 
     ctx = _make_ctx(tmp_path)
     records = {"gilda": _registered_record("gilda", extracted=True)}
     monkeypatch.setattr("pi_profiles._registered_characters", lambda _ctx: dict(records))
 
-    steps = list(_refine_character_plan(ctx, TaskArgs(target="gilda", instructions="Make the scar prominent")))
+    steps = list(_refine_entity_plan(ctx, _CHARACTER_KIND, TaskArgs(target="gilda", instructions="Make the scar prominent")))
     assert len(steps) == 1
     prompt = steps[0].build_prompt()
     assert prompt is not None
@@ -153,6 +209,27 @@ def test_refine_character_plan(tmp_path: Path, monkeypatch) -> None:
 
     records["gilda"] = records["gilda"].model_copy(update={"visualDescription": "Yellow coat, prominent scar."})
     assert steps[0].on_success(None) == {"characterSlug": "gilda"}
+
+
+def test_refine_location_plan(tmp_path: Path, monkeypatch) -> None:
+    from pi_profiles import TaskArgs, _LOCATION_KIND, _refine_entity_plan
+
+    ctx = _make_ctx(tmp_path)
+    records = {"sunny-barn": _registered_location("sunny-barn", extracted=True)}
+    monkeypatch.setattr("pi_profiles._registered_locations", lambda _ctx: dict(records))
+
+    steps = list(_refine_entity_plan(ctx, _LOCATION_KIND, TaskArgs(target="sunny-barn", instructions="Add the silo")))
+    assert len(steps) == 1
+    prompt = steps[0].build_prompt()
+    assert prompt is not None
+    assert "/skill:refine-location sunny-barn" in prompt
+    assert "Add the silo" in prompt
+
+    with pytest.raises(RuntimeError, match="update_location"):
+        steps[0].on_success(None)
+
+    records["sunny-barn"] = records["sunny-barn"].model_copy(update={"visualDescription": "Red planks, tall silo."})
+    assert steps[0].on_success(None) == {"locationSlug": "sunny-barn"}
 
 
 def test_suggest_concept_character_plan(tmp_path: Path, monkeypatch) -> None:
@@ -193,9 +270,10 @@ def test_suggest_concept_location_plan(tmp_path: Path, monkeypatch) -> None:
     from pi_profiles import _suggest_concept_plan
 
     ctx = _make_ctx(tmp_path)
-    locations_dir = ctx.book_root_abs / "locations"
-    locations_dir.mkdir(parents=True)
-    (locations_dir / "index.md").write_text("## sunny-barn\nName: Sunny Barn\n")
+    monkeypatch.setattr(
+        "pi_profiles._registered_locations",
+        lambda _ctx: {"sunny-barn": _registered_location("sunny-barn", extracted=False).model_copy(update={"name": "Sunny Barn"})},
+    )
 
     cards: list[SimpleNamespace] = []
     monkeypatch.setattr("concept_cards.existing_concept_summaries", lambda _slug: [])
@@ -206,7 +284,7 @@ def test_suggest_concept_location_plan(tmp_path: Path, monkeypatch) -> None:
     prompt = steps[0].build_prompt()
     assert prompt is not None
     assert "/skill:concept-location" in prompt
-    assert "sunny-barn" in prompt
+    assert "Sunny Barn: A sunny barn." in prompt
 
     cards.append(SimpleNamespace(id="card-loc", createdAt="2026-01-01T00:00:00Z"))
     update = steps[0].on_success(None)

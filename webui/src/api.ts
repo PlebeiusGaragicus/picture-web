@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationFileDocument, AdaptationFileKind, AdaptationFilePayload, AdaptationFileUpdatePayload, AdaptationStatus, CharacterPatchPayload, CharacterRecord, AgentSession, ArtifactKind, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, ImageGroupNodeResponse, PiTaskProfile, PiTaskStatus, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationStatus, CharacterPatchPayload, CharacterRecord, AgentSession, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, ImageGroupNodeResponse, LocationPatchPayload, LocationRecord, PiTaskProfile, PiTaskStatus, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = import.meta.env.DEV;
 
@@ -107,22 +107,6 @@ export const api = {
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/visual-styles/${styleId}`, {
       method: 'DELETE',
     }),
-  listAdaptationFiles: (slug: string, kind: AdaptationFileKind) =>
-    request<AdaptationFileDocument[]>(`/api/projects/${slug}/adaptation/files/${kind}`),
-  createAdaptationFile: (slug: string, kind: AdaptationFileKind, payload: AdaptationFilePayload) =>
-    request<AdaptationFileDocument>(`/api/projects/${slug}/adaptation/files/${kind}`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  updateAdaptationFile: (slug: string, kind: AdaptationFileKind, key: string, payload: AdaptationFileUpdatePayload) =>
-    request<AdaptationFileDocument>(`/api/projects/${slug}/adaptation/files/${kind}/${key}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    }),
-  deleteAdaptationFile: (slug: string, kind: AdaptationFileKind, key: string) =>
-    request<AdaptationStatus>(`/api/projects/${slug}/adaptation/files/${kind}/${key}`, {
-      method: 'DELETE',
-    }),
   listConceptCards: (slug: string, includeArchived = false) =>
     request<ConceptCard[]>(`/api/projects/${slug}/concept-cards${includeArchived ? '?includeArchived=true' : ''}`),
   createConceptCard: (slug: string, payload: { subjectKind: ConceptArtSubjectKind; prompt?: string; displayName?: string }) =>
@@ -178,10 +162,24 @@ export const api = {
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/characters/reset`, {
       method: 'POST',
     }),
-  importAdaptationArtifactToCanvas: (slug: string, artifactKind: ArtifactKind, artifactKey: string) =>
-    request<AdaptationCanvasImportResponse>(`/api/projects/${slug}/adaptation/import-artifact-to-canvas`, {
+  listLocations: (slug: string) => request<LocationRecord[]>(`/api/projects/${slug}/locations`),
+  createLocation: (slug: string, payload: { name: string; summary?: string; slug?: string }) =>
+    request<LocationRecord>(`/api/projects/${slug}/locations`, {
       method: 'POST',
-      body: JSON.stringify({ artifactKind, artifactKey }),
+      body: JSON.stringify(payload),
+    }),
+  patchLocation: (slug: string, locationSlug: string, payload: LocationPatchPayload) =>
+    request<LocationRecord>(`/api/projects/${slug}/locations/${locationSlug}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteLocation: (slug: string, locationSlug: string) =>
+    request<AdaptationStatus>(`/api/projects/${slug}/locations/${locationSlug}`, {
+      method: 'DELETE',
+    }),
+  draftLocationVariant: (slug: string, locationSlug: string, variantKey: string) =>
+    request<AdaptationCanvasImportResponse>(`/api/projects/${slug}/locations/${locationSlug}/variants/${variantKey}/draft-to-canvas`, {
+      method: 'POST',
     }),
   startPiTask: (
     slug: string,

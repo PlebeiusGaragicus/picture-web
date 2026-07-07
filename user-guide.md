@@ -22,7 +22,7 @@ Explore look and feel before committing to canonical designs. Create cards (or l
 pi **suggest** character/location concepts), edit them, and generate on the canvas.
 Concept art is a *style* input — it does not stand in for canonical references.
 
-## 4. Extract characters and locations — Characters view
+## 4. Extract characters and locations — Characters and Locations views
 
 Run **Find characters** to register the cast, then **Extract** each character
 (or **Extract all**). This fills each character record: summary, visual
@@ -33,13 +33,20 @@ story context). Review and edit records in the structured editor; use the
 prominent, add a post-duel variant"). These slugs and look descriptors are what
 panel prompts are built from.
 
+Locations work exactly the same way on the **Locations** page: **Find
+locations** registers the story's recurring settings, **Extract** fills each
+record with a visual description and wide establishing-shot prompt variants
+(base plus durable states like "after the fire", each with a story context).
+
 **Gate:** panel prompt drafting is blocked until at least one character with look
 text exists.
 
 ## 5. Generate canonical reference sheets — Canvas view
 
-Generate the character sheets (base variant) and location images from their
-prompts. Each entity's active asset becomes its canonical reference image.
+Generate the character sheets and location establishing shots (per variant —
+each variant's **Draft** button creates a tagged canvas node) from their
+prompts. Each variant's active asset becomes that look's canonical reference
+image.
 
 **Gate:** drafting a panel to the canvas is blocked for any tagged entity that has
 no reference asset yet.

@@ -19,6 +19,13 @@ export function isCharacterCanvasNode(tags: string[] | undefined, projectTags: T
   return tags.some((tagId) => entityCharacterTagIds.has(tagId));
 }
 
+export function isLocationCanvasNode(tags: string[] | undefined, projectTags: TagDefinition[]): boolean {
+  if (!tags?.length) return false;
+  if (tags.includes('location-prompt')) return true;
+  const entityLocationTagIds = new Set(projectTags.filter((tag) => tag.entityKind === 'location').map((tag) => tag.id));
+  return tags.some((tagId) => entityLocationTagIds.has(tagId));
+}
+
 export function isPromptOnlyImageGroup(node: { assetIds?: string[] }): boolean {
   return !(node.assetIds?.length);
 }

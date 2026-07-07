@@ -99,22 +99,35 @@ def spawn_from_character_variant(
     return node_id, saved
 
 
-def spawn_from_location(slug: str, location_key: str) -> tuple[str, CanvasDocument]:
+def spawn_from_location_variant(
+    slug: str,
+    location_slug: str,
+    variant_key: str = "base",
+) -> tuple[str, CanvasDocument]:
     import adaptation
 
-    metadata = adaptation.sync_location_links(slug, adaptation.read_metadata(slug))
-    link = metadata.locations.get(location_key)
+    metadata = adaptation.read_metadata(slug)
+    record = metadata.locations.get(location_slug)
+    if record is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail=f"Unknown location: {location_slug}")
+    link = record.variants.get(variant_key)
     if link is None:
         from fastapi import HTTPException
 
-        raise HTTPException(status_code=404, detail=f"Unknown location: {location_key}")
+        raise HTTPException(status_code=404, detail=f"Unknown location variant: {location_slug}/{variant_key}")
     canvas = library.read_stored_canvas(slug)
     x, y = next_canvas_position(canvas)
-    tags = library.node_tags("comic-adaptation", "location-prompt", location_key)
+    display_name = adaptation.entity_display_name(record)
+    tag_keys = ["comic-adaptation", "location-prompt", location_slug]
+    if variant_key != "base":
+        display_name = f"{display_name} ({link.label.strip() or variant_key})"
+        tag_keys.append(adaptation.variant_entity_key(location_slug, variant_key))
     node_id, saved = create_image_group_node(
         slug,
-        display_name=location_key.replace("-", " ").title(),
-        tags=tags,
+        display_name=display_name,
+        tags=library.node_tags(*tag_keys),
         prompt=link.prompt.strip(),
         refs=list(link.assetIds),
         params=GenerationParams(),

@@ -117,23 +117,49 @@ def _read_book_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[TaskStep
     )
 
 
-# --- character discovery -------------------------------------------------------
+# --- entity record discovery / extract / refine (characters + locations) -------
+
+
+@dataclass(frozen=True)
+class _EntityKind:
+    """Parameterizes the record-agent plumbing shared by characters and locations."""
+
+    kind: str  # "character" | "location"
+    records: Callable[[AdaptationContext], dict[str, Any]]
+    is_extracted: Callable[[Any], bool]
+    context_fields: tuple[str, ...]
 
 
 def _registered_characters(ctx: AdaptationContext) -> dict[str, CharacterRecord]:
     return adaptation.read_metadata(ctx.project_slug).characters
 
 
-def _character_record_context(record: CharacterRecord) -> str:
+def _registered_locations(ctx: AdaptationContext) -> dict[str, Any]:
+    return adaptation.read_metadata(ctx.project_slug).locations
+
+
+# The records lambdas resolve the module-level functions at call time so tests
+# can monkeypatch _registered_characters/_registered_locations.
+_CHARACTER_KIND = _EntityKind(
+    kind="character",
+    records=lambda ctx: _registered_characters(ctx),
+    is_extracted=adaptation.character_is_extracted,
+    context_fields=("slug", "name", "summary", "visualDescription", "performanceNotes", "continuityNotes"),
+)
+
+_LOCATION_KIND = _EntityKind(
+    kind="location",
+    records=lambda ctx: _registered_locations(ctx),
+    is_extracted=adaptation.location_is_extracted,
+    context_fields=("slug", "name", "summary", "visualDescription", "continuityNotes"),
+)
+
+
+def _entity_record_context(entity: _EntityKind, record: Any) -> str:
     """Editable-fields-only view of a record for agent prompts (no asset state)."""
     return json.dumps(
         {
-            "slug": record.slug,
-            "name": record.name,
-            "summary": record.summary,
-            "visualDescription": record.visualDescription,
-            "performanceNotes": record.performanceNotes,
-            "continuityNotes": record.continuityNotes,
+            **{field: getattr(record, field) for field in entity.context_fields},
             "variants": {
                 key: {
                     "label": variant.label,
@@ -147,17 +173,18 @@ def _character_record_context(record: CharacterRecord) -> str:
     )
 
 
-def _discover_characters_step(ctx: AdaptationContext, *, force: bool) -> TaskStep:
+def _discover_entities_step(ctx: AdaptationContext, entity: _EntityKind, *, force: bool) -> TaskStep:
+    kind = entity.kind
     slugs_before: set[str] = set()
 
     def build_prompt() -> str | None:
-        existing = _registered_characters(ctx)
+        existing = entity.records(ctx)
         slugs_before.update(existing)
         if existing and not force:
             return None
-        lines = ["/skill:discover-characters"]
+        lines = [f"/skill:discover-{kind}s"]
         if existing:
-            lines.extend(["", "Characters already registered (do NOT register these again):"])
+            lines.extend(["", f"{kind.capitalize()}s already registered (do NOT register these again):"])
             for slug, record in sorted(existing.items()):
                 summary = record.summary.strip()
                 lines.append(f"- {record.name or slug}: {summary}" if summary else f"- {record.name or slug}")
@@ -166,100 +193,89 @@ def _discover_characters_step(ctx: AdaptationContext, *, force: bool) -> TaskSte
     def on_success(result: PiTaskResultInfo | None) -> dict[str, Any] | None:
         if result is None:
             return None
-        new_slugs = set(_registered_characters(ctx)) - slugs_before
+        new_slugs = set(entity.records(ctx)) - slugs_before
         if not new_slugs:
-            raise RuntimeError("Agent finished without calling register_character")
+            raise RuntimeError(f"Agent finished without calling register_{kind}")
         return {"registeredSlugs": sorted(new_slugs)}
 
-    return TaskStep(name="discover characters", build_prompt=build_prompt, on_success=on_success)
+    return TaskStep(name=f"discover {kind}s", build_prompt=build_prompt, on_success=on_success)
 
 
-def _discover_characters_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[TaskStep]:
-    yield _discover_characters_step(ctx, force=args.force)
+def _extract_entity_step(ctx: AdaptationContext, entity: _EntityKind, entity_slug: str, *, force: bool) -> TaskStep:
+    kind = entity.kind
 
-
-# --- character extract --------------------------------------------------------
-
-
-def _extract_character_step(ctx: AdaptationContext, character_slug: str, *, force: bool) -> TaskStep:
     def build_prompt() -> str | None:
-        record = _registered_characters(ctx).get(character_slug)
+        record = entity.records(ctx).get(entity_slug)
         if record is None:
-            raise RuntimeError(f"Character not registered: {character_slug}")
-        if adaptation.character_is_extracted(record) and not force:
+            raise RuntimeError(f"{kind.capitalize()} not registered: {entity_slug}")
+        if entity.is_extracted(record) and not force:
             return None
         payload = "\n".join(
             [
-                "Current character record (fill it in with update_character):",
-                _character_record_context(record),
+                f"Current {kind} record (fill it in with update_{kind}):",
+                _entity_record_context(entity, record),
             ]
         )
-        return write_multiline_prompt(f"/skill:extract-character {character_slug}", payload)
+        return write_multiline_prompt(f"/skill:extract-{kind} {entity_slug}", payload)
 
     def on_success(result: PiTaskResultInfo | None) -> None:
-        record = _registered_characters(ctx).get(character_slug)
+        record = entity.records(ctx).get(entity_slug)
         if record is None:
-            raise RuntimeError(f"Character disappeared during extract: {character_slug}")
-        if not adaptation.character_is_extracted(record):
+            raise RuntimeError(f"{kind.capitalize()} disappeared during extract: {entity_slug}")
+        if not entity.is_extracted(record):
             raise RuntimeError(
-                f"Agent finished without delivering an extracted record for {character_slug} "
-                "(update_character must set visualDescription and a base variant prompt)"
+                f"Agent finished without delivering an extracted record for {entity_slug} "
+                f"(update_{kind} must set visualDescription and a base variant prompt)"
             )
 
-    return TaskStep(name=f"extract character {character_slug}", build_prompt=build_prompt, on_success=on_success)
+    return TaskStep(name=f"extract {kind} {entity_slug}", build_prompt=build_prompt, on_success=on_success)
 
 
-def _extract_character_precheck(ctx: AdaptationContext, args: TaskArgs) -> None:
+def _extract_entity_precheck(ctx: AdaptationContext, entity: _EntityKind, args: TaskArgs) -> None:
     _require_book_session(ctx)
     if not args.target:
-        raise HTTPException(status_code=400, detail="extract-character requires a target character slug")
-    if args.target not in _registered_characters(ctx):
-        raise HTTPException(status_code=404, detail=f"Character not registered: {args.target}")
+        raise HTTPException(status_code=400, detail=f"extract-{entity.kind} requires a target {entity.kind} slug")
+    if args.target not in entity.records(ctx):
+        raise HTTPException(status_code=404, detail=f"{entity.kind.capitalize()} not registered: {args.target}")
 
 
-def _extract_character_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[TaskStep]:
-    assert args.target is not None
-    yield _extract_character_step(ctx, args.target, force=args.force)
-
-
-def _extract_all_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[TaskStep]:
-    yield _discover_characters_step(ctx, force=False)
+def _extract_all_entities_plan(ctx: AdaptationContext, entity: _EntityKind) -> Iterator[TaskStep]:
+    yield _discover_entities_step(ctx, entity, force=False)
     # Resumed after the discovery step, so records exist (or the task failed).
-    for character_slug in sorted(_registered_characters(ctx)):
-        yield _extract_character_step(ctx, character_slug, force=False)
+    for entity_slug in sorted(entity.records(ctx)):
+        yield _extract_entity_step(ctx, entity, entity_slug, force=False)
 
 
-# --- character refine -----------------------------------------------------------
-
-
-def _refine_character_precheck(ctx: AdaptationContext, args: TaskArgs) -> None:
+def _refine_entity_precheck(ctx: AdaptationContext, entity: _EntityKind, args: TaskArgs) -> None:
+    kind = entity.kind
     _require_book_session(ctx)
     if not args.target:
-        raise HTTPException(status_code=400, detail="refine-character requires a target character slug")
+        raise HTTPException(status_code=400, detail=f"refine-{kind} requires a target {kind} slug")
     if not (args.instructions or "").strip():
-        raise HTTPException(status_code=400, detail="refine-character requires feedback instructions")
-    record = _registered_characters(ctx).get(args.target)
+        raise HTTPException(status_code=400, detail=f"refine-{kind} requires feedback instructions")
+    record = entity.records(ctx).get(args.target)
     if record is None:
-        raise HTTPException(status_code=404, detail=f"Character not registered: {args.target}")
-    if not adaptation.character_is_extracted(record):
+        raise HTTPException(status_code=404, detail=f"{kind.capitalize()} not registered: {args.target}")
+    if not entity.is_extracted(record):
         raise HTTPException(status_code=409, detail=f"Extract {args.target} before refining")
 
 
-def _refine_character_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[TaskStep]:
+def _refine_entity_plan(ctx: AdaptationContext, entity: _EntityKind, args: TaskArgs) -> Iterator[TaskStep]:
     assert args.target is not None
-    character_slug = args.target
+    kind = entity.kind
+    entity_slug = args.target
     feedback = (args.instructions or "").strip()
     context_before: dict[str, str] = {}
 
     def build_prompt() -> str:
-        record = _registered_characters(ctx).get(character_slug)
+        record = entity.records(ctx).get(entity_slug)
         if record is None:
-            raise RuntimeError(f"Character not registered: {character_slug}")
-        context_before["record"] = _character_record_context(record)
+            raise RuntimeError(f"{kind.capitalize()} not registered: {entity_slug}")
+        context_before["record"] = _entity_record_context(entity, record)
         lines = [
-            f"/skill:refine-character {character_slug}",
+            f"/skill:refine-{kind} {entity_slug}",
             "",
-            "Current character record (revise it with update_character):",
+            f"Current {kind} record (revise it with update_{kind}):",
             context_before["record"],
             "",
             "User feedback (apply this):",
@@ -268,15 +284,15 @@ def _refine_character_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[T
         return "\n".join(lines).rstrip() + "\n"
 
     def on_success(result: PiTaskResultInfo | None) -> dict[str, Any]:
-        record = _registered_characters(ctx).get(character_slug)
+        record = entity.records(ctx).get(entity_slug)
         if record is None:
-            raise RuntimeError(f"Character disappeared while refining: {character_slug}")
-        if _character_record_context(record) == context_before.get("record"):
-            raise RuntimeError("Agent finished without calling update_character")
-        return {"characterSlug": character_slug}
+            raise RuntimeError(f"{kind.capitalize()} disappeared while refining: {entity_slug}")
+        if _entity_record_context(entity, record) == context_before.get("record"):
+            raise RuntimeError(f"Agent finished without calling update_{kind}")
+        return {f"{kind}Slug": entity_slug}
 
     yield TaskStep(
-        name=f"refine character {character_slug}",
+        name=f"refine {kind} {entity_slug}",
         build_prompt=build_prompt,
         on_success=on_success,
     )
@@ -311,22 +327,18 @@ def _suggest_concept_plan(ctx: AdaptationContext, subject_kind: str) -> Iterator
             "",
             *_concept_context_lines(ctx.project_slug),
         ]
-        if subject_kind == "character":
-            characters = _registered_characters(ctx)
-            if characters:
-                context_lines.extend(["", "Main cast already covered by registered character records:"])
-                for slug_key, record in sorted(characters.items()):
-                    summary = record.summary.strip()
-                    context_lines.append(f"- {record.name or slug_key}: {summary}" if summary else f"- {record.name or slug_key}")
-        else:
-            locations_index = ctx.book_root_abs / "locations" / "index.md"
-            if locations_index.is_file() and locations_index.read_text().strip():
-                context_lines.extend(["", "Locations already covered in locations/index.md:", locations_index.read_text().rstrip()])
-            prompts_dir = ctx.book_root_abs / "locations" / "prompts"
-            if prompts_dir.is_dir():
-                prompt_slugs = sorted(path.stem for path in prompts_dir.glob("*.md"))
-                if prompt_slugs:
-                    context_lines.extend(["", "Existing location prompt slugs:", ", ".join(prompt_slugs)])
+        entity = _CHARACTER_KIND if subject_kind == "character" else _LOCATION_KIND
+        covered_intro = (
+            "Main cast already covered by registered character records:"
+            if subject_kind == "character"
+            else "Settings already covered by registered location records:"
+        )
+        records = entity.records(ctx)
+        if records:
+            context_lines.extend(["", covered_intro])
+            for slug_key, record in sorted(records.items()):
+                summary = record.summary.strip()
+                context_lines.append(f"- {record.name or slug_key}: {summary}" if summary else f"- {record.name or slug_key}")
         return "\n".join(context_lines).rstrip() + "\n"
 
     def on_success(result: PiTaskResultInfo | None) -> dict[str, Any]:
@@ -382,6 +394,25 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
+def _entity_look_lines(records: dict[str, Any]) -> list[str]:
+    """One line per record variant: base look, then flat-key deltas with story context."""
+    look_lines: list[str] = []
+    for slug, record in records.items():
+        base = record.variants.get("base")
+        look = (base.prompt if base else "") or record.visualDescription or record.summary
+        if look.strip():
+            look_lines.append(f"- {slug}: {_clip(look, 400)}")
+        for variant_key, variant in record.variants.items():
+            if variant_key == "base":
+                continue
+            flat_key = adaptation.variant_entity_key(slug, variant_key)
+            story_context = variant.storyContext.strip()
+            delta = variant.prompt.strip() or variant.label.strip() or variant_key
+            prefix = f"[{story_context}] " if story_context else ""
+            look_lines.append(f"- {flat_key}: {prefix}{_clip(delta, 300)}")
+    return look_lines
+
+
 def _panel_prompt_context_lines(ctx: AdaptationContext, panel: Any, document: Any) -> list[str]:
     """Small assembled context per pi-idea §0.4: panel text, neighbors, cast looks, style, guide."""
     lines: list[str] = []
@@ -408,20 +439,7 @@ def _panel_prompt_context_lines(ctx: AdaptationContext, panel: Any, document: An
         lines.extend(["THIS PANEL's story text (draw this moment):", _panel_story_text(panel), ""])
 
     status = adaptation.status(ctx.project_slug)
-    look_lines: list[str] = []
-    for slug, record in status.characters.items():
-        base = record.variants.get("base")
-        look = (base.prompt if base else "") or record.visualDescription or record.summary
-        if look.strip():
-            look_lines.append(f"- {slug}: {_clip(look, 400)}")
-        for variant_key, variant in record.variants.items():
-            if variant_key == "base":
-                continue
-            flat_key = adaptation.variant_entity_key(slug, variant_key)
-            story_context = variant.storyContext.strip()
-            delta = variant.prompt.strip() or variant.label.strip() or variant_key
-            prefix = f"[{story_context}] " if story_context else ""
-            look_lines.append(f"- {flat_key}: {prefix}{_clip(delta, 300)}")
+    look_lines = _entity_look_lines(status.characters)
     if look_lines:
         lines.append(
             "Canonical characters (the slugs before the colon are the ONLY valid characterSlugs "
@@ -433,16 +451,14 @@ def _panel_prompt_context_lines(ctx: AdaptationContext, panel: Any, document: An
         lines.extend(look_lines)
         lines.append("")
 
-    location_lines: list[str] = []
-    for slug, link in status.locations.items():
-        look = link.prompt or link.narration
-        entry = f"- {slug}: {_clip(look, 300)}" if look.strip() else f"- {slug}"
-        location_lines.append(entry)
+    location_lines = _entity_look_lines(status.locations)
     if location_lines:
         lines.append(
-            "Canonical locations (the slugs are the ONLY valid locationSlug values; pick the one "
-            "that matches this panel's setting, and use its description for the setting portion "
-            "of the prompt):"
+            "Canonical locations (the slugs before the colon are the ONLY valid locationSlug "
+            "values; pick the one that matches this panel's setting, and use its description for "
+            "the setting portion of the prompt. Variant slugs like castle-after-the-fire are the "
+            "same place in a different durable state — when this panel's story moment matches a "
+            "variant's bracketed story context, use the variant slug instead of the base slug):"
         )
         lines.extend(location_lines)
         lines.append("")
@@ -600,15 +616,15 @@ DISCOVER_CHARACTERS = TaskProfile(
     id="discover-characters",
     title=lambda target: "Find characters",
     precheck=_require_book_session,
-    plan=_discover_characters_plan,
+    plan=lambda ctx, args: iter([_discover_entities_step(ctx, _CHARACTER_KIND, force=args.force)]),
     tools=("register_character", "list_characters"),
 )
 
 EXTRACT_CHARACTER = TaskProfile(
     id="extract-character",
     title=lambda target: f"Extract {target}",
-    precheck=_extract_character_precheck,
-    plan=_extract_character_plan,
+    precheck=lambda ctx, args: _extract_entity_precheck(ctx, _CHARACTER_KIND, args),
+    plan=lambda ctx, args: iter([_extract_entity_step(ctx, _CHARACTER_KIND, args.target, force=args.force)]),
     accepts_target=True,
     tools=("update_character", "list_characters"),
 )
@@ -617,18 +633,53 @@ EXTRACT_ALL_CHARACTERS = TaskProfile(
     id="extract-all-characters",
     title=lambda target: "Extract all characters",
     precheck=_require_book_session,
-    plan=_extract_all_plan,
+    plan=lambda ctx, args: _extract_all_entities_plan(ctx, _CHARACTER_KIND),
     tools=("register_character", "update_character", "list_characters"),
 )
 
 REFINE_CHARACTER = TaskProfile(
     id="refine-character",
     title=lambda target: f"Refine {target}" if target else "Refine character",
-    precheck=_refine_character_precheck,
-    plan=_refine_character_plan,
+    precheck=lambda ctx, args: _refine_entity_precheck(ctx, _CHARACTER_KIND, args),
+    plan=lambda ctx, args: _refine_entity_plan(ctx, _CHARACTER_KIND, args),
     accepts_target=True,
     accepts_instructions=True,
     tools=("update_character", "list_characters"),
+)
+
+DISCOVER_LOCATIONS = TaskProfile(
+    id="discover-locations",
+    title=lambda target: "Find locations",
+    precheck=_require_book_session,
+    plan=lambda ctx, args: iter([_discover_entities_step(ctx, _LOCATION_KIND, force=args.force)]),
+    tools=("register_location", "list_locations"),
+)
+
+EXTRACT_LOCATION = TaskProfile(
+    id="extract-location",
+    title=lambda target: f"Extract {target}",
+    precheck=lambda ctx, args: _extract_entity_precheck(ctx, _LOCATION_KIND, args),
+    plan=lambda ctx, args: iter([_extract_entity_step(ctx, _LOCATION_KIND, args.target, force=args.force)]),
+    accepts_target=True,
+    tools=("update_location", "list_locations"),
+)
+
+EXTRACT_ALL_LOCATIONS = TaskProfile(
+    id="extract-all-locations",
+    title=lambda target: "Extract all locations",
+    precheck=_require_book_session,
+    plan=lambda ctx, args: _extract_all_entities_plan(ctx, _LOCATION_KIND),
+    tools=("register_location", "update_location", "list_locations"),
+)
+
+REFINE_LOCATION = TaskProfile(
+    id="refine-location",
+    title=lambda target: f"Refine {target}" if target else "Refine location",
+    precheck=lambda ctx, args: _refine_entity_precheck(ctx, _LOCATION_KIND, args),
+    plan=lambda ctx, args: _refine_entity_plan(ctx, _LOCATION_KIND, args),
+    accepts_target=True,
+    accepts_instructions=True,
+    tools=("update_location", "list_locations"),
 )
 
 SUGGEST_CONCEPT_CHARACTER = TaskProfile(
@@ -675,6 +726,10 @@ PROFILES: dict[str, TaskProfile] = {
         EXTRACT_CHARACTER,
         EXTRACT_ALL_CHARACTERS,
         REFINE_CHARACTER,
+        DISCOVER_LOCATIONS,
+        EXTRACT_LOCATION,
+        EXTRACT_ALL_LOCATIONS,
+        REFINE_LOCATION,
         SUGGEST_CONCEPT_CHARACTER,
         SUGGEST_CONCEPT_LOCATION,
         DRAFT_PANEL_PROMPT,

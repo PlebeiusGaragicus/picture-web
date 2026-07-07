@@ -36,7 +36,7 @@ import { useDismissOnOutsidePointerDown } from '../shared/popover';
 import { useToast } from '../shared/toast';
 import type {
   AdaptationStatus,
-  ArtifactKind,
+  AdaptationCanvasImportResponse,
   Asset,
   CanvasDocument,
   ChatSession,
@@ -1029,26 +1029,8 @@ export function useCanvasWorkspace({
     onProjectUpdated(updated);
   };
 
-  const draftArtifactToCanvas = useCallback(async (artifactKind: ArtifactKind, artifactKey: string) => {
+  const landVariantDraft = useCallback(async (result: AdaptationCanvasImportResponse) => {
     if (!openProjectSlug) return;
-    setError(null);
-    const result = await api.importAdaptationArtifactToCanvas(openProjectSlug, artifactKind, artifactKey);
-    setCanvas(result.canvas);
-    await loadProject(openProjectSlug);
-    onShowCanvasView();
-    const matchingId = result.nodeId ?? Object.entries(result.canvas.nodes).find(([, node]) => (
-      node.tags.includes(artifactKey)
-    ))?.[0];
-    if (!matchingId) return;
-    setSelectedNodeIds([matchingId]);
-    setPopoverNodeId(matchingId);
-    window.setTimeout(() => focusNodeOnCanvas(matchingId), 0);
-  }, [focusNodeOnCanvas, loadProject, onShowCanvasView, openProjectSlug, setError]);
-
-  const draftCharacterVariantToCanvas = useCallback(async (characterSlug: string, variantKey: string) => {
-    if (!openProjectSlug) return;
-    setError(null);
-    const result = await api.draftCharacterVariant(openProjectSlug, characterSlug, variantKey);
     setCanvas(result.canvas);
     await loadProject(openProjectSlug);
     onShowCanvasView();
@@ -1057,7 +1039,19 @@ export function useCanvasWorkspace({
     setSelectedNodeIds([matchingId]);
     setPopoverNodeId(matchingId);
     window.setTimeout(() => focusNodeOnCanvas(matchingId), 0);
-  }, [focusNodeOnCanvas, loadProject, onShowCanvasView, openProjectSlug, setError]);
+  }, [focusNodeOnCanvas, loadProject, onShowCanvasView, openProjectSlug]);
+
+  const draftCharacterVariantToCanvas = useCallback(async (characterSlug: string, variantKey: string) => {
+    if (!openProjectSlug) return;
+    setError(null);
+    await landVariantDraft(await api.draftCharacterVariant(openProjectSlug, characterSlug, variantKey));
+  }, [landVariantDraft, openProjectSlug, setError]);
+
+  const draftLocationVariantToCanvas = useCallback(async (locationSlug: string, variantKey: string) => {
+    if (!openProjectSlug) return;
+    setError(null);
+    await landVariantDraft(await api.draftLocationVariant(openProjectSlug, locationSlug, variantKey));
+  }, [landVariantDraft, openProjectSlug, setError]);
 
   const handleConceptCanvasUpdate = useCallback((canvasDoc: CanvasDocument, nodeId?: string) => {
     setCanvas(canvasDoc);
@@ -1268,8 +1262,8 @@ export function useCanvasWorkspace({
     // adaptation / project surface
     setTagCanonical,
     setProjectCover,
-    draftArtifactToCanvas,
     draftCharacterVariantToCanvas,
+    draftLocationVariantToCanvas,
     handleConceptCanvasUpdate,
     handlePanelDraftedToCanvas,
     // chat

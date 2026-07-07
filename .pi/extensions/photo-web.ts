@@ -185,6 +185,90 @@ const TOOLS: Record<string, ToolDefinition> = {
       return { content: [{ type: "text", text: `Updated: ${result}` }], details: {} };
     },
   },
+  register_location: {
+    name: "register_location",
+    label: "Register location",
+    description:
+      "Register one location from the book as a new location record. " +
+      "Call exactly once per location; use update_location afterwards to fill in details.",
+    parameters: Type.Object({
+      name: Type.String({ description: "Canonical display name, e.g. \"Sugarcube Corner\"" }),
+      summary: Type.String({
+        description: "One-to-three sentence summary: what this place is and why it matters in the story",
+      }),
+    }),
+    async execute(_toolCallId, params) {
+      const result = await callApi("POST", `/api/projects/${PROJECT}/locations`, {
+        name: params.name,
+        summary: params.summary,
+      });
+      return { content: [{ type: "text", text: `Registered: ${result}` }], details: {} };
+    },
+  },
+  list_locations: {
+    name: "list_locations",
+    label: "List locations",
+    description:
+      "List every registered location record: slug, name, extraction state, and variant keys. " +
+      "Use the returned slugs when calling update_location.",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params) {
+      const result = await callApi("GET", `/api/projects/${PROJECT}/locations`);
+      const records = JSON.parse(result) as Array<{
+        slug: string;
+        name: string;
+        visualDescription: string;
+        variants: Record<string, { prompt: string }>;
+      }>;
+      const lines = records.map((record) => {
+        const extracted = record.visualDescription.trim() && record.variants.base?.prompt?.trim();
+        const variantKeys = Object.keys(record.variants).join(", ") || "none";
+        return `${record.slug} | ${record.name || record.slug} | ${extracted ? "extracted" : "empty"} | variants: ${variantKeys}`;
+      });
+      const text = lines.length ? lines.join("\n") : "(no locations registered)";
+      return { content: [{ type: "text", text }], details: {} };
+    },
+  },
+  update_location: {
+    name: "update_location",
+    label: "Update location",
+    description:
+      "Patch one registered location record: any of the description fields and/or variants. " +
+      "Only include the fields you are changing; omitted fields keep their current value. " +
+      "Variants are upserted by key ('base' plus optional durable-state variants like 'after-the-fire').",
+    parameters: Type.Object({
+      slug: Type.String({ description: "Location slug from the task context or list_locations" }),
+      name: Type.Optional(Type.String({ description: "Canonical display name" })),
+      summary: Type.Optional(Type.String({ description: "What this place is and why it matters" })),
+      visualDescription: Type.Optional(
+        Type.String({ description: "Source-supported appearance: architecture, landscape, scale, palette, recurring visual features" }),
+      ),
+      continuityNotes: Type.Optional(
+        Type.String({ description: "Features that must stay consistent across panels and variants; open design choices" }),
+      ),
+      variants: Type.Optional(
+        Type.Record(
+          Type.String(),
+          Type.Object({
+            label: Type.Optional(Type.String({ description: "Short human label, e.g. \"After the fire\"" })),
+            storyContext: Type.Optional(
+              Type.String({ description: "When this state applies in the story, e.g. \"after the fire in chapter 5\"" }),
+            ),
+            prompt: Type.Optional(Type.String({ description: "Complete establishing-shot reference prompt for this state" })),
+          }),
+          { description: "Variant patches keyed by variant slug; 'base' is required for a complete location" },
+        ),
+      ),
+      removeVariants: Type.Optional(
+        Type.Array(Type.String(), { description: "Variant keys to delete from the record" }),
+      ),
+    }),
+    async execute(_toolCallId, params) {
+      const { slug, ...patch } = params as { slug: string } & Record<string, unknown>;
+      const result = await callApi("PATCH", `/api/projects/${PROJECT}/locations/${slug}`, patch);
+      return { content: [{ type: "text", text: `Updated: ${result}` }], details: {} };
+    },
+  },
   create_concept_card: {
     name: "create_concept_card",
     label: "Create concept card",

@@ -2,35 +2,36 @@ import { useEffect, useState } from 'react';
 import { Modal } from '../ui';
 import { TagControlButton } from '../canvas/assetTagRow';
 import { SYSTEM_TAGS } from '../canvas/shared';
-import { slugifyKey } from './characterShared';
+import { slugifyKey, type EntityRecord, type EntityRecordKind } from './characterShared';
 import type { usePiTask } from '../sessions/usePiTask';
-import type { CharacterRecord, TagDefinition } from '../types';
+import type { TagDefinition } from '../types';
 
 type PiTaskController = ReturnType<typeof usePiTask>;
 
-export interface CharacterVariantDraft {
+export interface EntityVariantDraft {
   label: string;
   storyContext: string;
   prompt: string;
 }
 
-export interface CharacterDraft {
+export interface EntityDraft {
   name: string;
   summary: string;
   visualDescription: string;
+  /** Characters only; stays '' for locations. */
   performanceNotes: string;
   continuityNotes: string;
   tagIds: string[];
-  variants: Record<string, CharacterVariantDraft>;
+  variants: Record<string, EntityVariantDraft>;
   removedVariants: string[];
 }
 
-function draftFromRecord(record: CharacterRecord, entityTagId: string): CharacterDraft {
+function draftFromRecord(record: EntityRecord, entityTagId: string): EntityDraft {
   return {
     name: record.name,
     summary: record.summary,
     visualDescription: record.visualDescription,
-    performanceNotes: record.performanceNotes,
+    performanceNotes: 'performanceNotes' in record ? record.performanceNotes : '',
     continuityNotes: record.continuityNotes,
     tagIds: Array.from(new Set([entityTagId, ...record.userTags])),
     variants: Object.fromEntries(
@@ -47,7 +48,7 @@ function draftFromRecord(record: CharacterRecord, entityTagId: string): Characte
   };
 }
 
-function variantDisplayLabel(variantKey: string, draft: CharacterVariantDraft): string {
+function variantDisplayLabel(variantKey: string, draft: EntityVariantDraft): string {
   if (variantKey === 'base') return 'Base';
   return draft.label.trim() || variantKey
     .split('-')
@@ -64,8 +65,36 @@ function sortedVariantKeys(keys: string[]): string[] {
   });
 }
 
-export function CharacterEditModal({
-  characterSlug,
+const KIND_TEXT = {
+  character: {
+    nameLabel: 'Character name',
+    emptyHint: 'This character is registered but empty. Extract it to fill in the description and reference-sheet prompts from the book.',
+    summaryPlaceholder: 'Who they are and why they matter in the story',
+    visualPlaceholder: 'Body, face, clothing, silhouette, recurring visual traits',
+    continuityPlaceholder: 'Traits that must stay consistent across panels and variants',
+    variantPlaceholder: 'New variant, e.g. "young" or "post-duel"',
+    variantEmptyHint: 'No variants yet. Extract with pi, or add a base variant to write a reference-sheet prompt by hand.',
+    labelPlaceholder: 'Post-duel',
+    storyContextPlaceholder: 'After the duel in chapter 2',
+    refinePlaceholder: 'Feedback, e.g. "make her scar more prominent, add a post-duel variant"',
+  },
+  location: {
+    nameLabel: 'Location name',
+    emptyHint: 'This location is registered but empty. Extract it to fill in the description and establishing-shot prompts from the book.',
+    summaryPlaceholder: 'What this place is and why it matters in the story',
+    visualPlaceholder: 'Architecture or landscape, scale, materials, palette, recurring visual features',
+    continuityPlaceholder: 'Features that must stay consistent across panels and variants',
+    variantPlaceholder: 'New variant, e.g. "after-the-fire"',
+    variantEmptyHint: 'No variants yet. Extract with pi, or add a base variant to write an establishing-shot prompt by hand.',
+    labelPlaceholder: 'After the fire',
+    storyContextPlaceholder: 'After the fire in chapter 5',
+    refinePlaceholder: 'Feedback, e.g. "the barn should look older, add an after-the-fire variant"',
+  },
+} as const;
+
+export function EntityEditModal({
+  kind,
+  entitySlug,
   record,
   isExtracted,
   hasBookSession,
@@ -79,38 +108,40 @@ export function CharacterEditModal({
   onRequestDelete,
   onCreateTag,
 }: {
-  characterSlug: string;
-  record: CharacterRecord;
+  kind: EntityRecordKind;
+  entitySlug: string;
+  record: EntityRecord;
   isExtracted: boolean;
   hasBookSession: boolean;
   projectTags: TagDefinition[];
   busy: boolean;
   extractTask: PiTaskController;
   refineTask: PiTaskController;
-  onSave: (draft: CharacterDraft) => Promise<void>;
+  onSave: (draft: EntityDraft) => Promise<void>;
   onDraftVariant: (variantKey: string) => Promise<void>;
   onClose: () => void;
   onRequestDelete: () => void;
   onCreateTag: (tag: TagDefinition) => void;
 }) {
-  const [draft, setDraft] = useState<CharacterDraft>(() => draftFromRecord(record, characterSlug));
+  const [draft, setDraft] = useState<EntityDraft>(() => draftFromRecord(record, entitySlug));
   const [newVariantKey, setNewVariantKey] = useState('');
   const [refineFeedback, setRefineFeedback] = useState('');
+  const text = KIND_TEXT[kind];
 
   // Re-seed the form when the agent lands an extract/refine result for this record.
   useEffect(() => {
-    setDraft(draftFromRecord(record, characterSlug));
-  }, [characterSlug, record.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+    setDraft(draftFromRecord(record, entitySlug));
+  }, [entitySlug, record.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const extracting = extractTask.isActive && extractTask.target === characterSlug;
-  const refining = refineTask.isActive && refineTask.target === characterSlug;
+  const extracting = extractTask.isActive && extractTask.target === entitySlug;
+  const refining = refineTask.isActive && refineTask.target === entitySlug;
   const agentBusy = extracting || refining;
 
-  const setField = (field: keyof CharacterDraft, value: string) => {
+  const setField = (field: keyof EntityDraft, value: string) => {
     setDraft((current) => ({ ...current, [field]: value }));
   };
 
-  const setVariantField = (variantKey: string, field: keyof CharacterVariantDraft, value: string) => {
+  const setVariantField = (variantKey: string, field: keyof EntityVariantDraft, value: string) => {
     setDraft((current) => ({
       ...current,
       variants: {
@@ -153,13 +184,13 @@ export function CharacterEditModal({
   };
 
   const startExtract = () => {
-    void extractTask.start({ target: characterSlug });
+    void extractTask.start({ target: entitySlug });
   };
 
   const startRefine = () => {
     const feedback = refineFeedback.trim();
     if (!feedback) return;
-    void refineTask.start({ target: characterSlug, instructions: feedback });
+    void refineTask.start({ target: entitySlug, instructions: feedback });
     setRefineFeedback('');
   };
 
@@ -167,16 +198,14 @@ export function CharacterEditModal({
 
   return (
     <Modal
-      title={draft.name || characterSlug}
+      title={draft.name || entitySlug}
       dialogClassName="editor-dialog--character-edit"
       onClose={onClose}
     >
       <div className="adaptation-file-form character-edit-form">
         {!isExtracted && (
           <div className="character-edit-agent-row">
-            <p className="muted">
-              This character is registered but empty. Extract it to fill in the description and reference-sheet prompts from the book.
-            </p>
+            <p className="muted">{text.emptyHint}</p>
             <button
               className="generate-button"
               type="button"
@@ -189,12 +218,12 @@ export function CharacterEditModal({
           </div>
         )}
         <label className="field-label character-edit-name">
-          Character name
+          {text.nameLabel}
           <input
             type="text"
             value={draft.name}
             onChange={(event) => setField('name', event.target.value)}
-            placeholder="Character name"
+            placeholder={text.nameLabel}
           />
         </label>
         <div className="field-label">
@@ -209,9 +238,9 @@ export function CharacterEditModal({
                   tagIds: Array.from(new Set([
                     ...current.tagIds.filter((tagId) => SYSTEM_TAGS.has(tagId)),
                     ...userTags,
-                    characterSlug,
-                    ...characterTags.filter((tagId) => tagId !== characterSlug),
-                    ...locationTags,
+                    entitySlug,
+                    ...characterTags.filter((tagId) => tagId !== entitySlug),
+                    ...locationTags.filter((tagId) => tagId !== entitySlug),
                   ])),
                 }));
               }}
@@ -228,7 +257,7 @@ export function CharacterEditModal({
             rows={3}
             value={draft.summary}
             onChange={(event) => setField('summary', event.target.value)}
-            placeholder="Who they are and why they matter in the story"
+            placeholder={text.summaryPlaceholder}
           />
         </label>
         <label className="field-label">
@@ -238,19 +267,21 @@ export function CharacterEditModal({
             rows={6}
             value={draft.visualDescription}
             onChange={(event) => setField('visualDescription', event.target.value)}
-            placeholder="Body, face, clothing, silhouette, recurring visual traits"
+            placeholder={text.visualPlaceholder}
           />
         </label>
-        <label className="field-label">
-          Performance notes
-          <textarea
-            className="modal-textarea"
-            rows={4}
-            value={draft.performanceNotes}
-            onChange={(event) => setField('performanceNotes', event.target.value)}
-            placeholder="Temperament, speech, posture, mannerisms — the material expressions are chosen from"
-          />
-        </label>
+        {kind === 'character' && (
+          <label className="field-label">
+            Performance notes
+            <textarea
+              className="modal-textarea"
+              rows={4}
+              value={draft.performanceNotes}
+              onChange={(event) => setField('performanceNotes', event.target.value)}
+              placeholder="Temperament, speech, posture, mannerisms — the material expressions are chosen from"
+            />
+          </label>
+        )}
         <label className="field-label">
           Continuity notes
           <textarea
@@ -258,14 +289,14 @@ export function CharacterEditModal({
             rows={3}
             value={draft.continuityNotes}
             onChange={(event) => setField('continuityNotes', event.target.value)}
-            placeholder="Traits that must stay consistent across panels and variants"
+            placeholder={text.continuityPlaceholder}
           />
         </label>
 
         <div className="character-edit-variant-list">
           <h3 className="character-edit-section-heading">Variants</h3>
           {variantKeys.length === 0 && (
-            <p className="muted">No variants yet. Extract with pi, or add a base variant to write a reference-sheet prompt by hand.</p>
+            <p className="muted">{text.variantEmptyHint}</p>
           )}
           {variantKeys.map((variantKey) => {
             const variant = draft.variants[variantKey];
@@ -273,7 +304,7 @@ export function CharacterEditModal({
               <div key={variantKey} className="character-edit-variant-item character-edit-variant-card">
                 <div className="character-edit-variant-head">
                   <strong>{variantDisplayLabel(variantKey, variant)}</strong>
-                  <code className="muted">{variantKey === 'base' ? characterSlug : `${characterSlug}-${variantKey}`}</code>
+                  <code className="muted">{variantKey === 'base' ? entitySlug : `${entitySlug}-${variantKey}`}</code>
                   <span className="character-edit-variant-head-actions">
                     <button
                       className="secondary"
@@ -301,7 +332,7 @@ export function CharacterEditModal({
                         type="text"
                         value={variant.label}
                         onChange={(event) => setVariantField(variantKey, 'label', event.target.value)}
-                        placeholder="Post-duel"
+                        placeholder={text.labelPlaceholder}
                       />
                     </label>
                     <label className="field-label">
@@ -310,7 +341,7 @@ export function CharacterEditModal({
                         type="text"
                         value={variant.storyContext}
                         onChange={(event) => setVariantField(variantKey, 'storyContext', event.target.value)}
-                        placeholder="After the duel in chapter 2"
+                        placeholder={text.storyContextPlaceholder}
                       />
                     </label>
                   </div>
@@ -338,7 +369,7 @@ export function CharacterEditModal({
                   addVariant();
                 }
               }}
-              placeholder={variantKeys.length ? 'New variant, e.g. "young" or "post-duel"' : 'base'}
+              placeholder={variantKeys.length ? text.variantPlaceholder : 'base'}
             />
             <button className="secondary" type="button" onClick={addVariant} disabled={!slugifyKey(newVariantKey || 'variant') || Boolean(draft.variants[slugifyKey(newVariantKey || 'variant')])}>
               + variant
@@ -360,7 +391,7 @@ export function CharacterEditModal({
                     startRefine();
                   }
                 }}
-                placeholder={'Feedback, e.g. "make her scar more prominent, add a post-duel variant"'}
+                placeholder={text.refinePlaceholder}
                 disabled={agentBusy || !hasBookSession}
               />
               <button

@@ -17,7 +17,6 @@ DEFAULT_AUTO_PLACE_H = LAYOUT_PAGE_ROWS / 3.0
 
 AssetKind = Literal["imported", "generated"]
 ArtifactKind = Literal["character-sheet", "location-prompt", "concept-art"]
-AdaptationFileKind = Literal["locations"]
 ConceptArtSubjectKind = Literal["character", "location"]
 MODEL_CAPABILITIES = {
     "gemini-2.5-flash-image": {
@@ -171,23 +170,6 @@ class ProjectCoverPatch(BaseModel):
     coverAssetId: str | None = None
 
 
-class AdaptationAssetLink(BaseModel):
-    artifactKind: ArtifactKind
-    promptPath: str
-    subjectKind: ConceptArtSubjectKind | None = None
-    mode: str = ""
-    styleRef: str = ""
-    prompt: str = ""
-    narration: str = ""
-    dialogue: str = ""
-    caption: str = ""
-    assetIds: list[str] = Field(default_factory=list)
-    activeAssetId: str | None = None
-    finalized: bool = False
-    status: Literal["missing", "ready", "generated"] = "missing"
-    userTags: list[str] = Field(default_factory=list)
-
-
 class EntityVariant(BaseModel):
     """One durable look of a character/location: a reference-sheet prompt plus
     its generated takes. Consistency mechanics (which image anchors the look)
@@ -238,10 +220,39 @@ class CharacterPatch(BaseModel):
     removeVariants: list[str] | None = None
 
 
+class LocationRecord(BaseModel):
+    slug: str = Field(pattern=SLUG_RE)
+    name: str = ""
+    summary: str = ""
+    visualDescription: str = ""
+    continuityNotes: str = ""
+    userTags: list[str] = Field(default_factory=list)
+    variants: dict[str, EntityVariant] = Field(default_factory=dict)
+    createdAt: str = ""
+    updatedAt: str = ""
+
+
+class LocationCreate(BaseModel):
+    name: str = Field(min_length=1)
+    summary: str = ""
+    slug: str | None = Field(default=None, pattern=SLUG_RE)
+
+
+class LocationPatch(BaseModel):
+    slug: str | None = Field(default=None, pattern=SLUG_RE)
+    name: str | None = None
+    summary: str | None = None
+    visualDescription: str | None = None
+    continuityNotes: str | None = None
+    userTags: list[str] | None = None
+    variants: dict[str, EntityVariantPatch] | None = None
+    removeVariants: list[str] | None = None
+
+
 class AdaptationMetadata(BaseModel):
-    version: int = 3
+    version: int = 4
     characters: dict[str, CharacterRecord] = Field(default_factory=dict)
-    locations: dict[str, AdaptationAssetLink] = Field(default_factory=dict)
+    locations: dict[str, LocationRecord] = Field(default_factory=dict)
 
 
 class VisualStyleDefinition(BaseModel):
@@ -270,7 +281,7 @@ class AdaptationStatus(BaseModel):
     visualStyles: list[VisualStyleDefinition]
     defaultVisualStyleId: str | None = Field(default=None, pattern=TAG_RE)
     characters: dict[str, CharacterRecord]
-    locations: dict[str, AdaptationAssetLink]
+    locations: dict[str, LocationRecord]
 
 
 AgentSessionKind = Literal[
@@ -279,6 +290,10 @@ AgentSessionKind = Literal[
     "extract-character",
     "extract-all-characters",
     "refine-character",
+    "discover-locations",
+    "extract-location",
+    "extract-all-locations",
+    "refine-location",
     "suggest-concept-character",
     "suggest-concept-location",
     "draft-panel-prompt",
@@ -447,39 +462,6 @@ class ImageGroupNodeCreate(BaseModel):
 class ImageGroupNodeResponse(BaseModel):
     nodeId: str
     canvas: CanvasDocument
-
-
-class AdaptationImportArtifactRequest(BaseModel):
-    artifactKind: ArtifactKind
-    artifactKey: str = Field(pattern=SLUG_RE)
-
-
-class AdaptationFileBase(BaseModel):
-    key: str = Field(pattern=SLUG_RE)
-    body: str = ""
-    mode: str = ""
-    styleRef: str = ""
-    subjectKind: ConceptArtSubjectKind | None = None
-
-
-class AdaptationFileCreate(AdaptationFileBase):
-    pass
-
-
-class AdaptationFileUpdate(BaseModel):
-    key: str | None = Field(default=None, pattern=SLUG_RE)
-    body: str | None = None
-    mode: str | None = None
-    styleRef: str | None = None
-    subjectKind: ConceptArtSubjectKind | None = None
-    userTags: list[str] | None = None
-
-
-class AdaptationFileDocument(AdaptationFileBase):
-    kind: AdaptationFileKind
-    promptPath: str
-    artifactKind: ArtifactKind
-    status: Literal["missing", "ready", "generated"] = "missing"
 
 
 class StoryPanelRect(BaseModel):

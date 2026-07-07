@@ -4,25 +4,25 @@ import { api } from '../api';
 import { PiTaskPanel } from '../sessions/PiTaskPanel';
 import { usePiTask } from '../sessions/usePiTask';
 import { formatRequestError } from '../formatError';
-import { SYSTEM_TAGS, isCharacterCanvasNode, partitionAssetTagIds } from '../canvas/shared';
-import { CharacterEditModal, type CharacterDraft } from './CharacterEditModal';
-import { characterDisplayName, characterHubState, characterIsExtracted, slugifyKey } from './characterShared';
-import type { AdaptationStatus, Asset, CanvasDocument, CharacterRecord, CanvasNode, EntityVariant, TagDefinition } from '../types';
+import { SYSTEM_TAGS, isCharacterCanvasNode, isLocationCanvasNode, partitionAssetTagIds } from '../canvas/shared';
+import { EntityEditModal, type EntityDraft } from './EntityEditModal';
+import { entityDisplayName, entityHubState, entityIsExtracted, slugifyKey, type EntityRecordKind } from './characterShared';
+import type { AdaptationStatus, Asset, CanvasDocument, CanvasNode, EntityVariant, TagDefinition } from '../types';
 
 function latestAssetForVariant(variant: EntityVariant, assetsById: Map<string, Asset>) {
   const assetId = variant.activeAssetId ?? variant.assetIds[variant.assetIds.length - 1];
   return assetId ? assetsById.get(assetId) ?? null : null;
 }
 
-function characterImageAssetsForSlug(
-  characterSlug: string,
+function entityImageAssetsForSlug(
+  entitySlug: string,
   canvasEntries: Array<[string, CanvasNode]>,
   assetsById: Map<string, Asset>,
 ) {
   const assets: Array<{ asset: Asset; nodeId: string }> = [];
   const seen = new Set<string>();
   for (const [nodeId, node] of canvasEntries) {
-    if (!node.tags.includes(characterSlug)) continue;
+    if (!node.tags.includes(entitySlug)) continue;
     const orderedAssetIds = [
       ...(node.activeAssetId ? [node.activeAssetId] : []),
       ...node.assetIds,
@@ -38,7 +38,39 @@ function characterImageAssetsForSlug(
   return assets;
 }
 
-export function CharactersHubView({
+const KIND_CONFIG = {
+  character: {
+    isEntityCanvasNode: isCharacterCanvasNode,
+    createLabel: '+ character',
+    newNamePrefix: 'New Character',
+    findLabel: 'Find characters',
+    findTitle: 'Read through the book and register every character as a card',
+    emptyHint: "Add a character or run Find characters to register the book's cast here.",
+    profiles: {
+      discover: 'discover-characters',
+      extractAll: 'extract-all-characters',
+      extractOne: 'extract-character',
+      refine: 'refine-character',
+    },
+  },
+  location: {
+    isEntityCanvasNode: isLocationCanvasNode,
+    createLabel: '+ location',
+    newNamePrefix: 'New Location',
+    findLabel: 'Find locations',
+    findTitle: 'Read through the book and register every recurring setting as a card',
+    emptyHint: "Add a location or run Find locations to register the book's settings here.",
+    profiles: {
+      discover: 'discover-locations',
+      extractAll: 'extract-all-locations',
+      extractOne: 'extract-location',
+      refine: 'refine-location',
+    },
+  },
+} as const;
+
+export function EntityHubView({
+  kind,
   projectSlug,
   adaptation,
   assets,
@@ -53,13 +85,14 @@ export function CharactersHubView({
   onReloadProject,
   onOpenAgentSession,
 }: {
+  kind: EntityRecordKind;
   projectSlug: string;
   adaptation: AdaptationStatus;
   assets: Asset[];
   canvas: CanvasDocument;
   projectTags: TagDefinition[];
   viewMode: 'list' | 'canvas';
-  onDraftVariantToCanvas: (characterSlug: string, variantKey: string) => Promise<void>;
+  onDraftVariantToCanvas: (entitySlug: string, variantKey: string) => Promise<void>;
   onOpenChatForAsset: (nodeId: string, assetId: string) => void;
   onViewAsset: (assetId: string) => void;
   onCreateTag: (tag: TagDefinition) => void;
@@ -67,33 +100,32 @@ export function CharactersHubView({
   onReloadProject: () => Promise<void>;
   onOpenAgentSession: (sessionId: string) => void;
 }) {
+  const config = KIND_CONFIG[kind];
+  const records = kind === 'location' ? adaptation.locations : adaptation.characters;
   const assetsById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const canvasEntries = useMemo(
     () => Object.entries(canvas.nodes)
-      .filter((entry): entry is [string, CanvasNode] => {
-        const node = entry[1];
-        return isCharacterCanvasNode(node.tags, projectTags);
-      })
+      .filter((entry): entry is [string, CanvasNode] => config.isEntityCanvasNode(entry[1].tags, projectTags))
       .sort(([left], [right]) => left.localeCompare(right)),
-    [canvas.nodes, projectTags],
+    [canvas.nodes, config, projectTags],
   );
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const discoverTask = usePiTask(
     projectSlug,
-    'discover-characters',
+    config.profiles.discover,
     async () => {
       await onReloadProject();
     },
-    // Characters register one tool call at a time; show each as it arrives.
+    // Records register one tool call at a time; show each as it arrives.
     async () => {
       await onReloadProject();
     },
   );
   const extractAllTask = usePiTask(
     projectSlug,
-    'extract-all-characters',
+    config.profiles.extractAll,
     async () => {
       await onReloadProject();
     },
@@ -101,21 +133,21 @@ export function CharactersHubView({
       await onReloadProject();
     },
   );
-  const extractOneTask = usePiTask(projectSlug, 'extract-character', async () => {
+  const extractOneTask = usePiTask(projectSlug, config.profiles.extractOne, async () => {
     await onReloadProject();
   });
-  const refineTask = usePiTask(projectSlug, 'refine-character', async () => {
+  const refineTask = usePiTask(projectSlug, config.profiles.refine, async () => {
     await onReloadProject();
   });
   const discoverRunning = discoverTask.isActive;
   const extractAllRunning = extractAllTask.isActive;
   const extractingSlug = extractOneTask.isActive ? extractOneTask.target : null;
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
-  const [deletingCharacter, setDeletingCharacter] = useState(false);
+  const [deletingEntity, setDeletingEntity] = useState(false);
   const [thumbnailIndexes, setThumbnailIndexes] = useState<Record<string, number>>({});
-  const editingRecord = editingKey ? adaptation.characters[editingKey] ?? null : null;
+  const editingRecord = editingKey ? records[editingKey] ?? null : null;
 
-  const saveEdit = async (draft: CharacterDraft) => {
+  const saveEdit = async (draft: EntityDraft) => {
     if (!editingKey || !editingRecord) return;
     setBusyKey(editingKey);
     setError(null);
@@ -126,18 +158,22 @@ export function CharactersHubView({
       // node tags, panel links) stays put.
       const nextKey = slugifyKey(draft.name);
       const hasImages = Object.values(editingRecord.variants).some((variant) => variant.assetIds.length > 0);
-      const shouldRename = Boolean(nextKey) && nextKey !== editingKey && !hasImages && !adaptation.characters[nextKey];
-      await api.patchCharacter(projectSlug, editingKey, {
+      const shouldRename = Boolean(nextKey) && nextKey !== editingKey && !hasImages && !records[nextKey];
+      const shared = {
         ...(shouldRename ? { slug: nextKey } : {}),
         name: draft.name.trim(),
         summary: draft.summary,
         visualDescription: draft.visualDescription,
-        performanceNotes: draft.performanceNotes,
         continuityNotes: draft.continuityNotes,
         userTags: partitioned.user,
         variants: draft.variants,
         removeVariants: draft.removedVariants.filter((variantKey) => !draft.variants[variantKey]),
-      });
+      };
+      if (kind === 'location') {
+        await api.patchLocation(projectSlug, editingKey, shared);
+      } else {
+        await api.patchCharacter(projectSlug, editingKey, { ...shared, performanceNotes: draft.performanceNotes });
+      }
       await onReloadProject();
 
       const base = editingRecord.variants.base;
@@ -148,7 +184,7 @@ export function CharactersHubView({
           ...partitioned.user,
           editingKey,
           ...partitioned.character.filter((tagId) => tagId !== editingKey),
-          ...partitioned.location,
+          ...partitioned.location.filter((tagId) => tagId !== editingKey),
         ]));
         await onPatchAssetTags(activeAsset.id, nextTags);
       }
@@ -173,12 +209,16 @@ export function CharactersHubView({
     }
   };
 
-  const deleteCharacter = async (key: string) => {
+  const deleteEntity = async (key: string) => {
     setBusyKey(key);
-    setDeletingCharacter(true);
+    setDeletingEntity(true);
     setError(null);
     try {
-      await api.deleteCharacter(projectSlug, key);
+      if (kind === 'location') {
+        await api.deleteLocation(projectSlug, key);
+      } else {
+        await api.deleteCharacter(projectSlug, key);
+      }
       await onReloadProject();
       if (editingKey === key) {
         setEditingKey(null);
@@ -188,22 +228,25 @@ export function CharactersHubView({
       setError(formatRequestError(err));
     } finally {
       setBusyKey(null);
-      setDeletingCharacter(false);
+      setDeletingEntity(false);
     }
   };
 
-  const createCharacter = async () => {
-    const existingKeys = new Set(Object.keys(adaptation.characters));
+  const createEntity = async () => {
+    const existingKeys = new Set(Object.keys(records));
     let index = existingKeys.size + 1;
-    while (existingKeys.has(`new-character-${index}`)) {
+    while (existingKeys.has(slugifyKey(`${config.newNamePrefix} ${index}`))) {
       index += 1;
     }
     setBusyKey('__create__');
     setError(null);
     try {
-      const record = await api.createCharacter(projectSlug, { name: `New Character ${index}` });
+      const name = `${config.newNamePrefix} ${index}`;
+      const record = kind === 'location'
+        ? await api.createLocation(projectSlug, { name })
+        : await api.createCharacter(projectSlug, { name });
       await onReloadProject();
-      // Stay on the Characters list and open the edit modal in place.
+      // Stay on the hub and open the edit modal in place.
       setEditingKey(record.slug);
     } catch (err) {
       setError(formatRequestError(err));
@@ -220,17 +263,17 @@ export function CharactersHubView({
         <div className="story-adaptation-screen story-panels-screen characters-hub-screen">
           <header className="layout-view-toolbar characters-hub-toolbar">
             <div className="layout-view-toolbar-primary">
-              <button className="secondary" type="button" onClick={() => void createCharacter()} disabled={busyKey === '__create__'}>
-                {busyKey === '__create__' ? 'Creating…' : '+ character'}
+              <button className="secondary" type="button" onClick={() => void createEntity()} disabled={busyKey === '__create__'}>
+                {busyKey === '__create__' ? 'Creating…' : config.createLabel}
               </button>
               <button
                 className="secondary"
                 type="button"
                 onClick={() => void discoverTask.start()}
                 disabled={!adaptation.hasBookSession || workflowBusy}
-                title="Read through the book and register every character as a card"
+                title={config.findTitle}
               >
-                {discoverRunning ? 'Finding…' : 'Find characters'}
+                {discoverRunning ? 'Finding…' : config.findLabel}
               </button>
               <button className="generate-button" type="button" onClick={() => void extractAllTask.start()} disabled={!adaptation.hasBookSession || workflowBusy}>
                 {extractAllRunning ? 'Extracting all…' : 'Extract all'}
@@ -240,7 +283,7 @@ export function CharactersHubView({
           {error && <p className="error error-banner layout-view-error">{error}</p>}
           {discoverTask.state !== null && (
             <PiTaskPanel
-              title="Find characters"
+              title={config.findLabel}
               state={discoverTask.state}
               events={discoverTask.events}
               error={discoverTask.error}
@@ -251,7 +294,7 @@ export function CharactersHubView({
           )}
           {extractAllTask.state !== null && (
             <PiTaskPanel
-              title="Extract all characters"
+              title={`Extract all ${kind}s`}
               state={extractAllTask.state}
               events={extractAllTask.events}
               error={extractAllTask.error}
@@ -262,7 +305,7 @@ export function CharactersHubView({
           )}
           {extractOneTask.state !== null && (
             <PiTaskPanel
-              title={extractOneTask.target ? `Extract ${extractOneTask.target}` : 'Extract character'}
+              title={extractOneTask.target ? `Extract ${extractOneTask.target}` : `Extract ${kind}`}
               state={extractOneTask.state}
               events={extractOneTask.events}
               error={extractOneTask.error}
@@ -273,7 +316,7 @@ export function CharactersHubView({
           )}
           {refineTask.state !== null && (
             <PiTaskPanel
-              title={refineTask.target ? `Refine ${refineTask.target}` : 'Refine character'}
+              title={refineTask.target ? `Refine ${refineTask.target}` : `Refine ${kind}`}
               state={refineTask.state}
               events={refineTask.events}
               error={refineTask.error}
@@ -284,21 +327,21 @@ export function CharactersHubView({
           )}
           <div className="characters-hub-workspace">
             <section className="character-card-grid">
-              {Object.entries(adaptation.characters).sort(([left], [right]) => left.localeCompare(right)).map(([characterSlug, record]) => {
+              {Object.entries(records).sort(([left], [right]) => left.localeCompare(right)).map(([entitySlug, record]) => {
                 const base = record.variants.base ?? null;
-                const taggedImages = characterImageAssetsForSlug(characterSlug, canvasEntries, assetsById);
-                const thumbnailIndex = Math.min(thumbnailIndexes[characterSlug] ?? 0, Math.max(0, taggedImages.length - 1));
+                const taggedImages = entityImageAssetsForSlug(entitySlug, canvasEntries, assetsById);
+                const thumbnailIndex = Math.min(thumbnailIndexes[entitySlug] ?? 0, Math.max(0, taggedImages.length - 1));
                 const thumbnail = taggedImages[thumbnailIndex] ?? null;
                 const asset = thumbnail?.asset ?? null;
-                const busy = busyKey === characterSlug || extractingSlug === characterSlug;
-                const state = characterHubState(record);
-                const title = characterDisplayName(record);
+                const busy = busyKey === entitySlug || extractingSlug === entitySlug;
+                const state = entityHubState(record);
+                const title = entityDisplayName(record);
                 const canPlaceOnCanvas = Boolean(base?.prompt.trim());
                 return (
                   <article
-                    key={characterSlug}
+                    key={entitySlug}
                     className="story-card character-hub-card is-clickable"
-                    onClick={() => setEditingKey(characterSlug)}
+                    onClick={() => setEditingKey(entitySlug)}
                   >
                     <div
                       className={`character-hub-thumb ${asset ? 'has-image' : ''}`}
@@ -317,11 +360,11 @@ export function CharactersHubView({
                               <button
                                 type="button"
                                 className="secondary character-hub-thumb-nav-button"
-                                aria-label="Previous character thumbnail"
+                                aria-label={`Previous ${kind} thumbnail`}
                                 onClick={() => {
                                   setThumbnailIndexes((current) => ({
                                     ...current,
-                                    [characterSlug]: (thumbnailIndex - 1 + taggedImages.length) % taggedImages.length,
+                                    [entitySlug]: (thumbnailIndex - 1 + taggedImages.length) % taggedImages.length,
                                   }));
                                 }}
                               >
@@ -331,11 +374,11 @@ export function CharactersHubView({
                               <button
                                 type="button"
                                 className="secondary character-hub-thumb-nav-button"
-                                aria-label="Next character thumbnail"
+                                aria-label={`Next ${kind} thumbnail`}
                                 onClick={() => {
                                   setThumbnailIndexes((current) => ({
                                     ...current,
-                                    [characterSlug]: (thumbnailIndex + 1) % taggedImages.length,
+                                    [entitySlug]: (thumbnailIndex + 1) % taggedImages.length,
                                   }));
                                 }}
                               >
@@ -363,8 +406,8 @@ export function CharactersHubView({
                       )}
                       <div className="character-hub-actions" onClick={(event) => event.stopPropagation()}>
                         {state === 'Empty' && (
-                          <button className="secondary" type="button" disabled={busy || !adaptation.hasBookSession} onClick={() => void extractOneTask.start({ target: characterSlug })}>
-                            {extractingSlug === characterSlug ? 'Extracting…' : 'Extract'}
+                          <button className="secondary" type="button" disabled={busy || !adaptation.hasBookSession} onClick={() => void extractOneTask.start({ target: entitySlug })}>
+                            {extractingSlug === entitySlug ? 'Extracting…' : 'Extract'}
                           </button>
                         )}
                         <button
@@ -372,7 +415,7 @@ export function CharactersHubView({
                           type="button"
                           disabled={busy || !canPlaceOnCanvas}
                           title={canPlaceOnCanvas ? 'Create another tagged draft node on the canvas' : 'Add a prompt before drafting to canvas'}
-                          onClick={() => void draftVariantToCanvas(characterSlug, 'base')}
+                          onClick={() => void draftVariantToCanvas(entitySlug, 'base')}
                         >
                           {busy ? 'Working…' : 'Draft'}
                         </button>
@@ -386,16 +429,17 @@ export function CharactersHubView({
                   </article>
                 );
               })}
-              {!Object.keys(adaptation.characters).length && <p className="muted">Add a character or run Find characters to register the book's cast here.</p>}
+              {!Object.keys(records).length && <p className="muted">{config.emptyHint}</p>}
             </section>
           </div>
         </div>
       )}
       {editingKey && editingRecord && (
-        <CharacterEditModal
-          characterSlug={editingKey}
+        <EntityEditModal
+          kind={kind}
+          entitySlug={editingKey}
           record={editingRecord}
-          isExtracted={characterIsExtracted(editingRecord)}
+          isExtracted={entityIsExtracted(editingRecord)}
           hasBookSession={adaptation.hasBookSession}
           projectTags={projectTags}
           busy={busyKey === editingKey}
@@ -411,7 +455,7 @@ export function CharactersHubView({
       {pendingDeleteKey && createPortal(
         <div
           className="confirm-backdrop character-delete-confirm"
-          onClick={() => !deletingCharacter && setPendingDeleteKey(null)}
+          onClick={() => !deletingEntity && setPendingDeleteKey(null)}
         >
           <div
             className="confirm-dialog character-delete-confirm-dialog"
@@ -420,20 +464,20 @@ export function CharactersHubView({
             aria-labelledby="character-delete-confirm-title"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 id="character-delete-confirm-title">Delete character?</h2>
+            <h2 id="character-delete-confirm-title">Delete {kind}?</h2>
             <p>
-              Remove <strong>{adaptation.characters[pendingDeleteKey] ? characterDisplayName(adaptation.characters[pendingDeleteKey]) : pendingDeleteKey}</strong> from this project?
-              The character record will be deleted. Generated images on the canvas are kept.
+              Remove <strong>{records[pendingDeleteKey] ? entityDisplayName(records[pendingDeleteKey]) : pendingDeleteKey}</strong> from this project?
+              The {kind} record will be deleted. Generated images on the canvas are kept.
             </p>
             <div className="row">
               <button
                 className="danger"
-                disabled={deletingCharacter}
-                onClick={() => void deleteCharacter(pendingDeleteKey)}
+                disabled={deletingEntity}
+                onClick={() => void deleteEntity(pendingDeleteKey)}
               >
-                {deletingCharacter ? 'Deleting...' : 'Delete character'}
+                {deletingEntity ? 'Deleting...' : `Delete ${kind}`}
               </button>
-              <button className="secondary" disabled={deletingCharacter} onClick={() => setPendingDeleteKey(null)}>Cancel</button>
+              <button className="secondary" disabled={deletingEntity} onClick={() => setPendingDeleteKey(null)}>Cancel</button>
             </div>
           </div>
         </div>,

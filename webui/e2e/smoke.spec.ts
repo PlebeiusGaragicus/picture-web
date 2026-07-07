@@ -83,6 +83,13 @@ test('characters view', async ({ page }) => {
   await expect(page).toHaveScreenshot('characters.png');
 });
 
+test('locations view', async ({ page }) => {
+  await openFixtureProject(page);
+  await page.getByRole('button', { name: 'Locations', exact: true }).click();
+  await settle(page);
+  await expect(page).toHaveScreenshot('locations.png');
+});
+
 test('agent view', async ({ page }) => {
   await openFixtureProject(page);
   await page.getByRole('button', { name: 'Agent', exact: true }).click();
