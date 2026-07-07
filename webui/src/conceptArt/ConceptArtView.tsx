@@ -59,6 +59,7 @@ export function ConceptArtView({
   onConceptCanvasUpdate,
   onReloadProject,
   onReloadAdaptation,
+  onOpenAgentSession,
 }: {
   projectSlug: string;
   adaptation: AdaptationStatus;
@@ -70,6 +71,7 @@ export function ConceptArtView({
   onDeleteNode: (nodeId: string) => void;
   onReloadProject: () => Promise<void>;
   onReloadAdaptation: () => Promise<void>;
+  onOpenAgentSession: (sessionId: string) => void;
 }) {
   const assetsById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const [conceptCards, setConceptCards] = useState<ConceptCard[]>([]);
@@ -304,6 +306,7 @@ export function ConceptArtView({
           error={characterSuggestTask.error}
           onAbort={() => void characterSuggestTask.abort()}
           onDismiss={characterSuggestTask.dismiss}
+          onOpenSession={characterSuggestTask.taskId ? () => onOpenAgentSession(characterSuggestTask.taskId!) : undefined}
         />
       )}
       {locationSuggestTask.state !== null && (
@@ -314,6 +317,7 @@ export function ConceptArtView({
           error={locationSuggestTask.error}
           onAbort={() => void locationSuggestTask.abort()}
           onDismiss={locationSuggestTask.dismiss}
+          onOpenSession={locationSuggestTask.taskId ? () => onOpenAgentSession(locationSuggestTask.taskId!) : undefined}
         />
       )}
     </>

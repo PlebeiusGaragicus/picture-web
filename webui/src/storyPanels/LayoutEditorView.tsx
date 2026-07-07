@@ -26,11 +26,13 @@ export function LayoutEditorView({
   initialNavigation,
   onNavigationComplete,
   onPanelDraftedToCanvas,
+  onOpenAgentSession,
 }: {
   projectSlug: string;
   initialNavigation: LayoutEditorNavigation | null;
   onNavigationComplete: () => void;
   onPanelDraftedToCanvas?: (canvas: CanvasDocument, nodeId: string) => void;
+  onOpenAgentSession: (sessionId: string) => void;
 }) {
   const {
     bookText,
@@ -309,6 +311,7 @@ export function LayoutEditorView({
           error={draftPromptTask.error}
           onAbort={() => void draftPromptTask.abort()}
           onDismiss={draftPromptTask.dismiss}
+          onOpenSession={draftPromptTask.taskId ? () => onOpenAgentSession(draftPromptTask.taskId!) : undefined}
         />
       )}
       {refinePromptTask.state !== null && (
@@ -319,6 +322,7 @@ export function LayoutEditorView({
           error={refinePromptTask.error}
           onAbort={() => void refinePromptTask.abort()}
           onDismiss={refinePromptTask.dismiss}
+          onOpenSession={refinePromptTask.taskId ? () => onOpenAgentSession(refinePromptTask.taskId!) : undefined}
         />
       )}
       <div className="layout-view-workspace">

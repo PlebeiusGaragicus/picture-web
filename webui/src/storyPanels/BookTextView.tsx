@@ -24,6 +24,7 @@ export function BookTextView({
   autoPlaceEnabled,
   onImportBook,
   onPanelDraftedToCanvas,
+  onOpenAgentSession,
 }: {
   projectSlug: string;
   onNavigateToLayoutEditor: (navigation: LayoutEditorNavigation) => void;
@@ -33,6 +34,7 @@ export function BookTextView({
   autoPlaceEnabled: boolean;
   onImportBook: (file: File) => Promise<void>;
   onPanelDraftedToCanvas?: (canvas: CanvasDocument, nodeId: string) => void;
+  onOpenAgentSession: (sessionId: string) => void;
 }) {
   const {
     bookText,
@@ -342,6 +344,7 @@ export function BookTextView({
           error={draftPromptTask.error}
           onAbort={() => void draftPromptTask.abort()}
           onDismiss={draftPromptTask.dismiss}
+          onOpenSession={draftPromptTask.taskId ? () => onOpenAgentSession(draftPromptTask.taskId!) : undefined}
         />
       )}
       {refinePromptTask.state !== null && (
@@ -352,6 +355,7 @@ export function BookTextView({
           error={refinePromptTask.error}
           onAbort={() => void refinePromptTask.abort()}
           onDismiss={refinePromptTask.dismiss}
+          onOpenSession={refinePromptTask.taskId ? () => onOpenAgentSession(refinePromptTask.taskId!) : undefined}
         />
       )}
     </>

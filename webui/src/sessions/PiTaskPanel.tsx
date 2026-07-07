@@ -44,6 +44,18 @@ function buildItems(events: PiTaskEvent[]): PanelItem[] {
   return items;
 }
 
+/** One-line summary of the most recent activity, shown while the panel is collapsed. */
+function latestActivity(items: PanelItem[]): string {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind === 'progress') return `Step ${item.index}: ${item.label}`;
+    if (item.kind === 'tool') return `${item.state === 'running' ? '⋯' : item.state === 'error' ? '✕' : '✓'} ${item.name}`;
+    const line = item.text.trim().split('\n').find(Boolean);
+    if (line) return line;
+  }
+  return 'Waiting for the agent…';
+}
+
 function stateLabel(state: PiTaskState | null): string {
   switch (state) {
     case 'starting':
@@ -70,6 +82,7 @@ export function PiTaskPanel({
   error,
   onAbort,
   onDismiss,
+  onOpenSession,
 }: {
   title: string;
   state: PiTaskState | null;
@@ -77,25 +90,44 @@ export function PiTaskPanel({
   error: string | null;
   onAbort: () => void;
   onDismiss: () => void;
+  /** Navigates to this task's session in the Agent dashboard; makes the title a link. */
+  onOpenSession?: () => void;
 }) {
   const items = useMemo(() => buildItems(events), [events]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const body = bodyRef.current;
     if (body) body.scrollTop = body.scrollHeight;
-  }, [items.length, state]);
+  }, [items.length, state, expanded]);
 
   if (state === null) return null;
   const terminal = isTerminalTaskState(state);
 
   return (
-    <section className={clsx('pi-task-panel', `is-${state}`)} aria-live="polite">
+    <section className={clsx('pi-task-panel', `is-${state}`, expanded && 'is-expanded')} aria-live="polite">
       <header className="pi-task-panel-header">
         <span className={clsx('pi-task-state-dot', `is-${state}`)} aria-hidden />
-        <h3>{title}</h3>
+        {onOpenSession ? (
+          <h3>
+            <button className="pi-task-panel-title-link" type="button" onClick={onOpenSession} title="Open in Agents">
+              {title}
+            </button>
+          </h3>
+        ) : (
+          <h3>{title}</h3>
+        )}
         <span className="pi-task-state-label">{stateLabel(state)}</span>
+        <button
+          className="secondary pi-task-panel-button"
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+        >
+          {expanded ? 'Hide log' : 'Show log'}
+        </button>
         {!terminal && (
           <button className="secondary pi-task-panel-button" type="button" onClick={onAbort} disabled={state === 'aborting'}>
             Cancel
@@ -108,6 +140,10 @@ export function PiTaskPanel({
         )}
       </header>
       {error && <p className="error pi-task-panel-error">{error}</p>}
+      {!expanded && !error && (
+        <p className="pi-task-panel-summary" title={latestActivity(items)}>{latestActivity(items)}</p>
+      )}
+      {expanded && (
       <div className="pi-task-panel-body" ref={bodyRef}>
         {items.map((item) =>
           item.kind === 'text' ? (
@@ -137,6 +173,7 @@ export function PiTaskPanel({
         )}
         {!items.length && <p className="muted">Waiting for the agent…</p>}
       </div>
+      )}
     </section>
   );
 }

@@ -4,7 +4,7 @@ import { api } from '../api';
 import { formatRequestError } from '../formatError';
 import { Icon } from '../Icon';
 import type { ProjectPhase } from '../projectNavigation';
-import type { AgentSession, AgentSessionKind, AgentSessionStatus, PiTaskState, PiTaskStatus, PiTraceDocument } from '../types';
+import type { AgentSession, AgentSessionKind, AgentSessionStatus, PiTaskEvent, PiTaskState, PiTaskStatus, PiTraceDocument } from '../types';
 import { useAttachedPiTask } from './usePiTask';
 import { PiTaskPanel } from './PiTaskPanel';
 import { cleanSessionPreview, formatSessionSubtitle, PiTraceTimeline, summarizeTrace } from './PiTraceView';
@@ -151,13 +151,18 @@ function ActiveTaskCard({
   task,
   onFinished,
   onDismiss,
+  onEvent,
+  onOpenSession,
 }: {
   projectSlug: string;
   task: PiTaskStatus;
   onFinished: (state: PiTaskState) => void | Promise<void>;
   onDismiss: () => void;
+  onEvent: (taskId: string, record: PiTaskEvent) => void;
+  onOpenSession: () => void;
 }) {
-  const { state, events, error, abort } = useAttachedPiTask(projectSlug, task.taskId, task.state, onFinished);
+  const handleEvent = useCallback((record: PiTaskEvent) => onEvent(task.taskId, record), [onEvent, task.taskId]);
+  const { state, events, error, abort } = useAttachedPiTask(projectSlug, task.taskId, task.state, onFinished, handleEvent);
   return (
     <PiTaskPanel
       title={task.title}
@@ -166,6 +171,7 @@ function ActiveTaskCard({
       error={error}
       onAbort={() => void abort()}
       onDismiss={onDismiss}
+      onOpenSession={onOpenSession}
     />
   );
 }
@@ -174,10 +180,15 @@ export function AgentDashboardView({
   projectSlug,
   onReloadAdaptation,
   onOpenPhase,
+  focusSessionId,
+  onFocusSessionHandled,
 }: {
   projectSlug: string;
   onReloadAdaptation: () => Promise<void>;
   onOpenPhase: (phase: ProjectPhase) => void;
+  /** Session to select on arrival (deep link from a task panel elsewhere). */
+  focusSessionId?: string | null;
+  onFocusSessionHandled?: () => void;
 }) {
   const [sessions, setSessions] = useState<AgentSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -279,18 +290,39 @@ export function AgentDashboardView({
     void loadTrace(activeSession.id);
   }, [activeSession?.id, activeSession?.piSessionFile, activeSession?.piSessionId, activeSession?.status, loadTrace, traceCache]);
 
+  // Deep link: select the session a task panel elsewhere pointed at.
   useEffect(() => {
-    if (!sessions.some((session) => session.status === 'running')) return;
-    const timer = window.setInterval(async () => {
-      const next = await api.listAgentSessions(projectSlug, true);
-      setSessions(next);
-      const selected = activeSessionId ? next.find((session) => session.id === activeSessionId) : null;
-      if (selected?.status === 'running' && (selected.piSessionId || selected.piSessionFile)) {
-        await loadTrace(selected.id);
-      }
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [activeSessionId, loadTrace, projectSlug, sessions]);
+    if (!focusSessionId) return;
+    if (!sessions.some((session) => session.id === focusSessionId)) return;
+    setActiveSessionId(focusSessionId);
+    onFocusSessionHandled?.();
+  }, [focusSessionId, onFocusSessionHandled, sessions]);
+
+  const activeSessionIdRef = useRef<string | null>(null);
+  activeSessionIdRef.current = activeSession?.id ?? null;
+  const traceRefreshTimerRef = useRef<number | null>(null);
+  const lastTraceRefreshRef = useRef(0);
+
+  useEffect(() => () => {
+    if (traceRefreshTimerRef.current !== null) window.clearTimeout(traceRefreshTimerRef.current);
+  }, []);
+
+  // Agent session ids equal pi task ids, so a live task's SSE events map
+  // straight onto the session selected in the trace pane: refresh the trace
+  // (throttled) as results land instead of polling on a timer.
+  const handleTaskEvent = useCallback((taskId: string, record: PiTaskEvent) => {
+    const type = record.event.type;
+    if (type !== 'tool_end' && type !== 'task_progress' && type !== 'task_state') return;
+    if (type === 'task_state') void loadSessions();
+    if (activeSessionIdRef.current !== taskId) return;
+    if (traceRefreshTimerRef.current !== null) return;
+    const delay = Math.max(0, 1200 - (Date.now() - lastTraceRefreshRef.current));
+    traceRefreshTimerRef.current = window.setTimeout(() => {
+      traceRefreshTimerRef.current = null;
+      lastTraceRefreshRef.current = Date.now();
+      if (activeSessionIdRef.current === taskId) void loadTrace(taskId);
+    }, delay);
+  }, [loadSessions, loadTrace]);
 
   const archiveSession = async (session: AgentSession) => {
     setError(null);
@@ -387,10 +419,10 @@ export function AgentDashboardView({
   return (
     <div className="agent-hub">
       <header className="agent-hub-header">
-        <div>
-          <h1 className="agent-hub-title">Agents</h1>
-          <p className="muted">Monitor, browse, and re-run every Pi agent in this project.</p>
-        </div>
+        <h1 className="agent-hub-title">Agents</h1>
+        {stats.running > 0 && (
+          <span className="agent-hub-live-count">{stats.running} running</span>
+        )}
         <button
           className="secondary agent-hub-refresh"
           type="button"
@@ -403,46 +435,21 @@ export function AgentDashboardView({
         </button>
       </header>
 
-      <section className="agent-hub-stats" aria-label="Agent run summary">
-        <div className="agent-hub-stat">
-          <span className="agent-hub-stat-value">{stats.runs}</span>
-          <span className="agent-hub-stat-label">Runs</span>
-        </div>
-        <div className="agent-hub-stat is-running">
-          <span className="agent-hub-stat-value">{stats.running}</span>
-          <span className="agent-hub-stat-label">Running</span>
-        </div>
-        <div className="agent-hub-stat is-succeeded">
-          <span className="agent-hub-stat-value">{stats.succeeded}</span>
-          <span className="agent-hub-stat-label">Done</span>
-        </div>
-        <div className="agent-hub-stat is-failed">
-          <span className="agent-hub-stat-value">{stats.failed}</span>
-          <span className="agent-hub-stat-label">Failed</span>
-        </div>
-      </section>
-
-      <section className="agent-hub-live" aria-label="Live agents">
-        <header className="agent-hub-section-head">
-          <h2>Live now</h2>
-          {trackedTasks.length > 0 && <span className="agent-hub-live-count">{trackedTasks.length}</span>}
-        </header>
-        {trackedTasks.length > 0 ? (
-          <div className="agent-hub-live-cards">
-            {trackedTasks.map((task) => (
-              <ActiveTaskCard
-                key={task.taskId}
-                projectSlug={projectSlug}
-                task={task}
-                onFinished={onTaskFinished}
-                onDismiss={() => dismissTask(task.taskId)}
-              />
-            ))}
-          </div>
-        ) : (
-          <p className="agent-hub-live-empty muted">No agents running right now.</p>
-        )}
-      </section>
+      {trackedTasks.length > 0 && (
+        <section className="agent-hub-live" aria-label="Live agents">
+          {trackedTasks.map((task) => (
+            <ActiveTaskCard
+              key={task.taskId}
+              projectSlug={projectSlug}
+              task={task}
+              onFinished={onTaskFinished}
+              onDismiss={() => dismissTask(task.taskId)}
+              onEvent={handleTaskEvent}
+              onOpenSession={() => setActiveSessionId(task.taskId)}
+            />
+          ))}
+        </section>
+      )}
 
       <div className="agent-hub-browser">
         <aside className="agent-hub-list-pane">

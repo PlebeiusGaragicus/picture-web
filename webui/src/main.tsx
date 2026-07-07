@@ -42,6 +42,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [projectPhase, setProjectPhase] = useState<ProjectPhase>('image-canvas');
   const [layoutEditorNavigation, setLayoutEditorNavigation] = useState<LayoutEditorNavigation | null>(null);
+  const [agentFocusSessionId, setAgentFocusSessionId] = useState<string | null>(null);
   const [phaseViewMode, setPhaseViewMode] = useState<PhaseViewMode>('list');
   const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
   const [storyPanelChunksOpen, setStoryPanelChunksOpen] = useState(true);
@@ -155,6 +156,13 @@ function App() {
     setPhaseViewMode(phase === 'image-canvas' ? 'canvas' : 'list');
     workspace.resetForPhaseChange();
   }, [workspace.resetForPhaseChange]);
+
+  // Deep link from a task panel anywhere in the app to its session in the
+  // Agent dashboard (agent session ids equal pi task ids).
+  const openAgentSession = useCallback((sessionId: string) => {
+    setAgentFocusSessionId(sessionId);
+    handleProjectPhaseChange('chat');
+  }, [handleProjectPhaseChange]);
 
   useEffect(() => {
     if (!openProjectSlug) return;
@@ -407,6 +415,7 @@ function App() {
               error={readBookTask.error}
               onAbort={() => void readBookTask.abort()}
               onDismiss={readBookTask.dismiss}
+              onOpenSession={readBookTask.taskId ? () => openAgentSession(readBookTask.taskId!) : undefined}
             />
           </div>
         )}
@@ -415,6 +424,8 @@ function App() {
             projectSlug={openProjectSlug}
             onReloadAdaptation={loadAdaptation}
             onOpenPhase={handleProjectPhaseChange}
+            focusSessionId={agentFocusSessionId}
+            onFocusSessionHandled={() => setAgentFocusSessionId(null)}
           />
         )}
         {isConceptArtActive && adaptation && (
@@ -432,6 +443,7 @@ function App() {
               await loadAdaptation();
             }}
             onReloadAdaptation={loadAdaptation}
+            onOpenAgentSession={openAgentSession}
           />
         )}
         {projectPhase === 'characters-hub' && adaptation && (
@@ -452,6 +464,7 @@ function App() {
               await workspace.loadProject(openProjectSlug);
               await loadAdaptation();
             }}
+            onOpenAgentSession={openAgentSession}
           />
         )}
         {isStoryActive && (
@@ -468,6 +481,7 @@ function App() {
             }}
             onImportBook={importAdaptationBook}
             onPanelDraftedToCanvas={workspace.handlePanelDraftedToCanvas}
+            onOpenAgentSession={openAgentSession}
           />
         )}
         {isLayoutEditorActive && (
@@ -477,6 +491,7 @@ function App() {
             initialNavigation={layoutEditorNavigation}
             onNavigationComplete={() => setLayoutEditorNavigation(null)}
             onPanelDraftedToCanvas={workspace.handlePanelDraftedToCanvas}
+            onOpenAgentSession={openAgentSession}
           />
         )}
         {isCanvasActive && <CanvasFlowSurface workspace={workspace} />}

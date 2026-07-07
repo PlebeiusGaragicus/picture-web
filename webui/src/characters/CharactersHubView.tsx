@@ -119,6 +119,7 @@ export function CharactersHubView({
   onSaveProjectTagName,
   onPatchAssetTags,
   onReloadProject,
+  onOpenAgentSession,
 }: {
   projectSlug: string;
   adaptation: AdaptationStatus;
@@ -133,6 +134,7 @@ export function CharactersHubView({
   onSaveProjectTagName: (tagId: string, name: string) => Promise<void>;
   onPatchAssetTags: (assetId: string, tags: string[]) => Promise<void>;
   onReloadProject: () => Promise<void>;
+  onOpenAgentSession: (sessionId: string) => void;
 }) {
   const assetsById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const characterKeys = useMemo(() => new Set(Object.keys(adaptation.characters)), [adaptation.characters]);
@@ -331,6 +333,7 @@ export function CharactersHubView({
               error={listTask.error}
               onAbort={() => void listTask.abort()}
               onDismiss={listTask.dismiss}
+              onOpenSession={listTask.taskId ? () => onOpenAgentSession(listTask.taskId!) : undefined}
             />
           )}
           {extractAllTask.state !== null && (
@@ -341,6 +344,7 @@ export function CharactersHubView({
               error={extractAllTask.error}
               onAbort={() => void extractAllTask.abort()}
               onDismiss={extractAllTask.dismiss}
+              onOpenSession={extractAllTask.taskId ? () => onOpenAgentSession(extractAllTask.taskId!) : undefined}
             />
           )}
           {extractOneTask.state !== null && (
@@ -351,6 +355,7 @@ export function CharactersHubView({
               error={extractOneTask.error}
               onAbort={() => void extractOneTask.abort()}
               onDismiss={extractOneTask.dismiss}
+              onOpenSession={extractOneTask.taskId ? () => onOpenAgentSession(extractOneTask.taskId!) : undefined}
             />
           )}
           <div className="characters-hub-workspace">

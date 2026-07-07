@@ -151,19 +151,24 @@ export function usePiTask(
 
 /**
  * Attaches to one already-running pi task by id (Agent dashboard): streams
- * its SSE events and reports live state. Does not start tasks.
+ * its SSE events and reports live state. Does not start tasks. `onEvent`
+ * fires for every streamed record so the caller can react (e.g. refresh the
+ * trace pane) without polling.
  */
 export function useAttachedPiTask(
   projectSlug: string,
   taskId: string,
   initialState: PiTaskState,
   onFinished?: (state: PiTaskState) => void | Promise<void>,
+  onEvent?: (record: PiTaskEvent) => void,
 ) {
   const [state, setState] = useState<PiTaskState>(initialState);
   const [events, setEvents] = useState<PiTaskEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
 
   useEffect(() => {
     let finished = false;
@@ -176,6 +181,7 @@ export function useAttachedPiTask(
         return;
       }
       setEvents((current) => [...current, record]);
+      onEventRef.current?.(record);
       if (record.event.type === 'task_state') {
         const nextState = record.event.state as PiTaskState;
         setState(nextState);
