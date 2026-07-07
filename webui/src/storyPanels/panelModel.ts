@@ -29,6 +29,7 @@ export function captionAsPanel(parent: StoryPanel, caption: StoryPanelCaption): 
     panelKind: 'text',
     spansSpread: parent.spansSpread,
     rect: caption.rect,
+    tail: caption.tail ?? null,
     layer: caption.layer,
     parentPanelId: parent.id,
     assetIds: [],

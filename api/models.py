@@ -497,12 +497,20 @@ class StoryPanelImageCrop(BaseModel):
     scale: float = Field(default=1, ge=1, le=4)
 
 
+class StoryPanelCaptionTail(BaseModel):
+    """Tip of a dialogue bubble's tail, in page-grid coordinates (24-column space on spanning parents)."""
+
+    x: float = Field(ge=0, le=2 * LAYOUT_GRID_COLUMNS)
+    y: float = Field(ge=0, le=LAYOUT_PAGE_ROWS)
+
+
 class StoryPanelCaption(BaseModel):
     id: str = Field(pattern=TAG_RE)
     visibleText: str = ""
     richText: str = ""
     textStyle: StoryPanelTextStyle = Field(default_factory=StoryPanelTextStyle)
     rect: StoryPanelRect
+    tail: StoryPanelCaptionTail | None = None
     layer: int = Field(default=0, ge=0)
 
 

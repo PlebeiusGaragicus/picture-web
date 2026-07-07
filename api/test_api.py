@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from io import BytesIO
 import base64
+import math
 
 import library
 import gemini
@@ -1522,6 +1523,55 @@ def test_story_panel_spread_span_rect_and_print_pairing():
     by_page = story_panels_print._panels_by_page(document)
     assert [(panel.id, offset) for panel, offset in by_page[interior[0].id]] == [("panel-001", 0.0)]
     assert [(panel.id, offset) for panel, offset in by_page[interior[1].id]] == [("panel-001", 12.0)]
+
+
+def test_story_panels_speech_tail_geometry():
+    # Tip inside the bubble -> no tail.
+    assert story_panels_print._speech_tail_geometry(0, 0, 120, 40, 60, 20) is None
+
+    # Tip below the bubble: triangle points at the tip and its base sits on/near
+    # the bubble boundary, straddling the tip's direction from center.
+    tail = story_panels_print._speech_tail_geometry(0, 0, 120, 40, 60, -40)
+    assert tail is not None
+    fill_a, tip, fill_b = tail["fill"]
+    assert tip == (60, -40)
+    assert fill_a[1] > -5 and fill_b[1] > -5  # base points near the bubble, not the tip
+    for (start, end) in tail["edges"]:
+        assert end == (60, -40)
+        # Edge start lies on the stadium boundary (radius 20 around center line).
+        assert abs(math.hypot(start[0] - max(20, min(100, start[0])), start[1] - 20) - 20) < 0.5
+
+
+def test_story_panels_booklet_pdf_with_caption_tail(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the door.\n")
+
+    document = client.get("/api/projects/farm-comic/story-panels").json()
+    interior = [page for page in document["pages"] if page["pageKind"] == "story"]
+    document["panels"].append({
+        "id": "panel-talk",
+        "order": 99,
+        "pageId": interior[0]["id"],
+        "rect": {"x": 1, "y": 1, "w": 8, "h": 5},
+        "captions": [{
+            "id": "caption-talk",
+            "visibleText": "Hello there!",
+            "rect": {"x": 2, "y": 6.5, "w": 5, "h": 1},
+            "tail": {"x": 4.5, "y": 5.5},
+        }],
+    })
+    saved = client.put("/api/projects/farm-comic/story-panels", json=document)
+    assert saved.status_code == 200
+    stored = saved.json()
+    stored_caption = next(p for p in stored["panels"] if p["id"] == "panel-talk")["captions"][0]
+    assert stored_caption["tail"] == {"x": 4.5, "y": 5.5}
+
+    response = client.get("/api/projects/farm-comic/story-panels/print/booklet.pdf")
+    assert response.status_code == 200
+    assert response.content.startswith(b"%PDF")
 
 
 def test_story_panels_booklet_pdf_with_spanning_panel(tmp_path, monkeypatch):

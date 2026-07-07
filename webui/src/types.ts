@@ -207,12 +207,19 @@ export interface StoryPanelTextStyle {
   outlineColor?: string;
 }
 
+/** Tip of a dialogue bubble's tail, in page-grid coordinates (24-column space on spanning parents). */
+export interface StoryPanelCaptionTail {
+  x: number;
+  y: number;
+}
+
 export interface StoryPanelCaption {
   id: string;
   visibleText: string;
   richText: string;
   textStyle: StoryPanelTextStyle;
   rect: StoryPanelRect;
+  tail?: StoryPanelCaptionTail | null;
   layer: number;
 }
 
@@ -238,6 +245,8 @@ export interface StoryPanel {
   /** Panel spans its two-page spread: rect uses a unified 24-column space anchored on the left page. */
   spansSpread?: boolean;
   rect: StoryPanelRect;
+  /** Dialogue-bubble tail tip; only meaningful on caption items (parentPanelId set). */
+  tail?: StoryPanelCaptionTail | null;
   layer: number;
   parentPanelId?: string | null;
   assetIds: string[];

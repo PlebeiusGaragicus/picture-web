@@ -3205,3 +3205,22 @@
   color: var(--text-secondary);
   font-size: var(--text-sm);
 }
+
+/* Dialogue bubble tail: page-space SVG over the caption; only the drag handle is interactive. */
+.story-panels-caption-tail {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.story-panels-caption-tail-handle {
+  fill: var(--blue-600);
+  stroke: var(--white);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+  cursor: grab;
+  touch-action: none;
+}

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from io import BytesIO
@@ -309,7 +311,69 @@ def _draw_caption(
     w = (caption.rect.w / GRID_COLUMNS) * page_w
     h = (caption.rect.h / page_rows) * page_h
     y = page_y + page_h - ((caption.rect.y / page_rows) * page_h) - h
-    _draw_text_panel(pdf, caption, x, y, w, h)
+    tail = None
+    style = caption.textStyle
+    if style.speechKind == "dialogue" and style.background != "transparent" and caption.tail is not None:
+        tip_x = page_x + ((caption.tail.x - column_offset) / GRID_COLUMNS) * page_w
+        tip_y = page_y + page_h - (caption.tail.y / page_rows) * page_h
+        tail = _speech_tail_geometry(x, y, w, h, tip_x, tip_y)
+    _draw_text_panel(pdf, caption, x, y, w, h, tail=tail)
+
+
+def _speech_tail_geometry(
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    tip_x: float,
+    tip_y: float,
+) -> dict | None:
+    """Tail triangle for a stadium-shaped dialogue bubble; None when the tip is inside the bubble.
+
+    Pure geometry (orientation-agnostic), mirrored by webui speechTail.ts so
+    print and web tails match: `fill` is drawn borderless over the bubble edge
+    (opening the throat), `edges` are the two visible tail sides.
+    """
+    r = min(w, h) / 2
+    if w >= h:
+        ax, ay, bx, by = x + r, y + h / 2, x + w - r, y + h / 2
+    else:
+        ax, ay, bx, by = x + w / 2, y + r, x + w / 2, y + h - r
+
+    def signed_distance(px: float, py: float) -> float:
+        vx, vy = bx - ax, by - ay
+        denom = vx * vx + vy * vy or 1.0
+        t = max(0.0, min(1.0, ((px - ax) * vx + (py - ay) * vy) / denom))
+        qx, qy = ax + vx * t, ay + vy * t
+        return math.hypot(px - qx, py - qy) - r
+
+    cx, cy = x + w / 2, y + h / 2
+    if signed_distance(tip_x, tip_y) < 1.0:
+        return None
+
+    def boundary(angle: float) -> tuple[float, float]:
+        ux, uy = math.cos(angle), math.sin(angle)
+        lo, hi = 0.0, w + h
+        for _ in range(24):
+            mid = (lo + hi) / 2
+            if signed_distance(cx + ux * mid, cy + uy * mid) < 0:
+                lo = mid
+            else:
+                hi = mid
+        return cx + ux * lo, cy + uy * lo
+
+    angle = math.atan2(tip_y - cy, tip_x - cx)
+    base_x, base_y = boundary(angle)
+    radial = math.hypot(base_x - cx, base_y - cy) or 1.0
+    offset = min(0.6, (min(w, h) * 0.28) / radial)
+    s1 = boundary(angle + offset)
+    s2 = boundary(angle - offset)
+
+    def inset(point: tuple[float, float]) -> tuple[float, float]:
+        return cx + (point[0] - cx) * 0.88, cy + (point[1] - cy) * 0.88
+
+    tip = (tip_x, tip_y)
+    return {"fill": (inset(s1), tip, inset(s2)), "edges": ((s1, tip), (s2, tip))}
 
 
 def _caption_outline_offsets() -> tuple[tuple[float, float], ...]:
@@ -327,7 +391,16 @@ def _caption_outline_offsets() -> tuple[tuple[float, float], ...]:
     )
 
 
-def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel | StoryPanelCaption, x: float, y: float, w: float, h: float) -> None:
+def _draw_text_panel(
+    pdf: canvas.Canvas,
+    panel: StoryPanel | StoryPanelCaption,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    *,
+    tail: dict | None = None,
+) -> None:
     style = panel.textStyle
     is_caption = _is_caption_panel(panel)
     transparent = is_caption and style.background == "transparent"
@@ -342,6 +415,20 @@ def _draw_text_panel(pdf: canvas.Canvas, panel: StoryPanel | StoryPanelCaption, 
         pdf.roundRect(x, y, w, h, radius, stroke=0 if transparent else 1, fill=0 if transparent else 1)
     else:
         pdf.rect(x, y, w, h, stroke=0 if transparent else 1, fill=0 if transparent else 1)
+    if tail is not None:
+        # Borderless triangle opens the bubble throat; only the two side edges stroke.
+        fill_a, fill_tip, fill_b = tail["fill"]
+        path = pdf.beginPath()
+        path.moveTo(*fill_a)
+        path.lineTo(*fill_tip)
+        path.lineTo(*fill_b)
+        path.close()
+        pdf.setFillColor(white)
+        pdf.drawPath(path, stroke=0, fill=1)
+        pdf.setStrokeColor(HexColor("#cbd5e1"))
+        pdf.setLineWidth(0.75)
+        for (start_x, start_y), (end_x, end_y) in tail["edges"]:
+            pdf.line(start_x, start_y, end_x, end_y)
     selected_text = panel.selectedText if isinstance(panel, StoryPanel) else ""
     visible_text = panel.visibleText or selected_text
     rich_text = panel.richText or _plain_text_to_rich_text(visible_text)

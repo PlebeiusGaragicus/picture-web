@@ -5,7 +5,8 @@ import { Icon } from '../Icon';
 import { useDismissOnOutsidePointerDown } from '../shared/popover';
 import type { CSSProperties, ReactNode } from 'react';
 import { nonArchivedVariants } from '../canvas/shared';
-import type { Asset, CanvasDocument, StoryPanel, StoryPanelCaption, StoryPanelDocument, StoryPanelImageCrop, StoryPanelRect, StoryPanelTextStyle, TagDefinition } from '../types';
+import type { Asset, CanvasDocument, StoryPanel, StoryPanelCaption, StoryPanelCaptionTail, StoryPanelDocument, StoryPanelImageCrop, StoryPanelRect, StoryPanelTextStyle, TagDefinition } from '../types';
+import { speechTailGeometry } from './speechTail';
 import { assetThumbnailUrl } from './panelImageAssets';
 import {
   focalFromPanDelta,
@@ -309,8 +310,14 @@ function captionPatchFromPanelPatch(patch: Partial<StoryPanel>): Partial<StoryPa
   if (patch.richText !== undefined) captionPatch.richText = patch.richText;
   if (patch.textStyle !== undefined) captionPatch.textStyle = patch.textStyle;
   if (patch.rect !== undefined) captionPatch.rect = patch.rect;
+  if (patch.tail !== undefined) captionPatch.tail = patch.tail;
   if (patch.layer !== undefined) captionPatch.layer = patch.layer;
   return captionPatch;
+}
+
+/** Default tail: tip a little above the bubble, pointing into the parent image. */
+function defaultCaptionTail(rect: StoryPanelRect): StoryPanelCaptionTail {
+  return { x: rect.x + rect.w / 2, y: Math.max(0, rect.y - 1.2) };
 }
 
 function updatePanelOrCaptionById(document: StoryPanelDocument, panelId: string, patch: Partial<StoryPanel>) {
@@ -857,8 +864,10 @@ export function PageLayoutEditor({
     setUndoStack((current) => [...current, { document: beforeDocument, label }]);
     setRedoStack([]);
   };
-  const commitDocument = (nextDocument: StoryPanelDocument, label?: string) => {
-    pushHistory(displayDocument, label ?? inferDocumentChangeLabel(displayDocument, nextDocument));
+  /** Drag commits pass the pre-drag document explicitly — displayDocument is
+   * the draft (post-drag) by the time the pointer is released. */
+  const commitDocument = (nextDocument: StoryPanelDocument, label?: string, beforeDocument: StoryPanelDocument = displayDocument) => {
+    pushHistory(beforeDocument, label ?? inferDocumentChangeLabel(beforeDocument, nextDocument));
     onSaveDocument(nextDocument);
   };
   const undo = () => {
@@ -1134,6 +1143,7 @@ export function PageLayoutEditor({
         speechKind,
         background: captionBackgroundForSpeech(speechKind),
       },
+      ...(speechKind === 'dialogue' && !caption.tail ? { tail: defaultCaptionTail(caption.rect) } : {}),
     });
   };
   const shrinkCaptionToFit = (captionId: string) => {
@@ -1191,12 +1201,14 @@ export function PageLayoutEditor({
     .slice(0, 40);
   const addCaptionPanel = (parent: StoryPanel) => {
     const captions = captionPanelsFor(displayDocument, parent.id);
+    const rect = defaultCaptionRect(parent, captions, panelLayoutColumns(parent));
     const nextCaption: StoryPanelCaption = {
       id: nextPanelId(displayDocument),
       visibleText: '',
       richText: plainTextToRichText(''),
       textStyle: { ...defaultCaptionTextStyle },
-      rect: defaultCaptionRect(parent, captions, panelLayoutColumns(parent)),
+      rect,
+      tail: defaultCaptionTail(rect),
       layer: parent.layer + 1 + captions.length,
     };
     commitDocument({
@@ -1313,7 +1325,7 @@ export function PageLayoutEditor({
     zoomDragPanelIdRef.current = null;
     draftDocumentRef.current = null;
     setDraftDocument(null);
-    commitDocument(nextDocument, 'Zoom image');
+    commitDocument(nextDocument, 'Zoom image', document);
   };
   const cancelZoomAdjust = () => {
     zoomDragPanelIdRef.current = null;
@@ -1642,6 +1654,28 @@ export function PageLayoutEditor({
         : unifiedRect.x >= gridColumns - epsilon
           ? { pageId: dragPair.rightId, spansSpread: false, rect: { ...unifiedRect, x: unifiedRect.x - gridColumns } }
           : { pageId: dragPair.leftId, spansSpread: true, rect: unifiedRect };
+      // Unspanning drops captions back into the 12-column page space. Compute
+      // from the pre-drag document so repeated move events stay idempotent.
+      if (state.startSpansSpread && !nextPatch.spansSpread) {
+        const originalPanel = document.panels.find((candidate) => candidate.id === state.panelId);
+        if (originalPanel?.captions?.length) {
+          const movesRight = nextPatch.pageId === dragPair.rightId;
+          nextPatch.captions = originalPanel.captions.map((caption) => {
+            const shift = movesRight && caption.rect.x + caption.rect.w / 2 >= gridColumns ? gridColumns : 0;
+            const tailShift = movesRight && (caption.tail?.x ?? 0) >= gridColumns ? gridColumns : 0;
+            return {
+              ...caption,
+              rect: clampCaptionRect({ ...caption.rect, x: caption.rect.x - shift }),
+              tail: caption.tail
+                ? {
+                  x: Math.min(gridColumns, Math.max(0, caption.tail.x - tailShift)),
+                  y: caption.tail.y,
+                }
+                : caption.tail,
+            };
+          });
+        }
+      }
       setSnapGuides(guides);
       setDraftDocument(updatePanelOrCaptionById(displayDocument, state.panelId, nextPatch));
       return;
@@ -1771,7 +1805,41 @@ export function PageLayoutEditor({
     }
     setDragState(null);
     setDraftDocument(null);
-    commitDocument(nextDocument, label);
+    commitDocument(nextDocument, label, document);
+  };
+  const tailDragRef = useRef<{ captionId: string; columns: number; offsetColumns: number; box: DOMRect } | null>(null);
+  const beginTailDrag = (event: React.PointerEvent<SVGCircleElement>, caption: StoryPanel, offsetColumns: number) => {
+    if (isSaving) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const svg = event.currentTarget.ownerSVGElement;
+    if (!svg) return;
+    tailDragRef.current = {
+      captionId: caption.id,
+      columns: panelLayoutColumns(caption),
+      offsetColumns,
+      box: svg.getBoundingClientRect(),
+    };
+    setDraftDocument(displayDocumentRef.current);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const continueTailDrag = (event: React.PointerEvent<SVGCircleElement>) => {
+    const state = tailDragRef.current;
+    if (!state) return;
+    const gridX = ((event.clientX - state.box.left) / state.box.width) * gridColumns + state.offsetColumns;
+    const gridY = ((event.clientY - state.box.top) / state.box.height) * LAYOUT_PAGE_ROWS;
+    const tail: StoryPanelCaptionTail = {
+      x: Math.min(state.columns, Math.max(0, roundStep(gridX, CAPTION_GRID_SNAP))),
+      y: Math.min(LAYOUT_PAGE_ROWS, Math.max(0, roundStep(gridY, CAPTION_GRID_SNAP))),
+    };
+    setDraftDocument(updatePanelOrCaptionById(displayDocumentRef.current, state.captionId, { tail }));
+  };
+  const endTailDrag = () => {
+    if (!tailDragRef.current) return;
+    tailDragRef.current = null;
+    const nextDocument = draftDocumentRef.current;
+    setDraftDocument(null);
+    if (nextDocument) commitDocument(nextDocument, 'Move speech tail', document);
   };
   const beginCropPan = (event: React.PointerEvent<HTMLDivElement>, panel: StoryPanel) => {
     if (isSaving || cropModePanelId !== panel.id || !panel.activeAssetId) return;
@@ -1815,7 +1883,7 @@ export function PageLayoutEditor({
     const nextDocument = draftDocument;
     setCropDragState(null);
     setDraftDocument(null);
-    commitDocument(nextDocument, 'Adjust image crop');
+    commitDocument(nextDocument, 'Adjust image crop', document);
   };
   const openPanelMenu = (event: React.MouseEvent, panel: StoryPanel) => {
     event.preventDefault();
@@ -1913,6 +1981,72 @@ export function PageLayoutEditor({
       setVisibleTextDraft(sanitizeRichText(active.innerHTML));
     }
   };
+  /** Tail SVGs for the dialogue captions on one page, drawn over the bubbles
+   * in printable-page point space (360×576) so web and PDF tails match. */
+  const renderCaptionTails = (pagePanels: { panel: StoryPanel; offsetColumns: number }[], interactive: boolean) => (
+    pagePanels.map(({ panel, offsetColumns }) => {
+      if (!isCaption(panel) || !panel.tail) return null;
+      const style = captionStyleForPanel(panel);
+      if (captionSpeechKindFor(style) !== 'dialogue' || style.background === 'transparent') return null;
+      const toPt = (gridX: number, gridY: number) => ({
+        x: ((gridX - offsetColumns) / gridColumns) * PRINT_PAGE_WIDTH,
+        y: (gridY / LAYOUT_PAGE_ROWS) * PRINT_PAGE_HEIGHT,
+      });
+      const origin = toPt(panel.rect.x, panel.rect.y);
+      const rectPt = {
+        ...origin,
+        w: (panel.rect.w / gridColumns) * PRINT_PAGE_WIDTH,
+        h: (panel.rect.h / LAYOUT_PAGE_ROWS) * PRINT_PAGE_HEIGHT,
+      };
+      const tipPt = toPt(panel.tail.x, panel.tail.y);
+      const geometry = speechTailGeometry(rectPt, tipPt);
+      const selected = interactive && selectedPanelId === panel.id;
+      if (!geometry && !selected) return null;
+      return (
+        <svg
+          key={`${panel.id}-tail-${offsetColumns}`}
+          className="story-panels-caption-tail"
+          viewBox={`0 0 ${PRINT_PAGE_WIDTH} ${PRINT_PAGE_HEIGHT}`}
+          preserveAspectRatio="none"
+          style={{ zIndex: panel.layer + 2 }}
+          aria-hidden="true"
+        >
+          {geometry && (
+            <>
+              <polygon
+                points={geometry.fill.map((point) => `${point.x},${point.y}`).join(' ')}
+                fill="#ffffff"
+              />
+              {geometry.edges.map(([start, end], index) => (
+                <line
+                  key={index}
+                  x1={start.x}
+                  y1={start.y}
+                  x2={end.x}
+                  y2={end.y}
+                  stroke="#cbd5e1"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+            </>
+          )}
+          {selected && (
+            <circle
+              className="story-panels-caption-tail-handle"
+              cx={tipPt.x}
+              cy={tipPt.y}
+              r={7}
+              onPointerDown={(event) => beginTailDrag(event, panel, offsetColumns)}
+              onPointerMove={continueTailDrag}
+              onPointerUp={endTailDrag}
+              onPointerCancel={endTailDrag}
+            />
+          )}
+        </svg>
+      );
+    })
+  );
   const renderSnapGuides = (pageId: string) => {
     if (!dragState || !snapGuides || !snapGuides.pageIds.includes(pageId)) return null;
     const offset = snapGuides.pageIds[0] === pageId ? 0 : gridColumns;
@@ -2227,6 +2361,7 @@ export function PageLayoutEditor({
                           ))}
                         </div>
                       ))}
+                      {renderCaptionTails(pagePanels, true)}
                       {renderSnapGuides(page.id)}
                     </div>
                   </article>
@@ -2334,6 +2469,7 @@ export function PageLayoutEditor({
                       ))}
                     </div>
                   ))}
+                  {renderCaptionTails(pagePanels, layoutMode !== 'all-pages')}
                   {renderSnapGuides(page.id)}
                 </div>,
               )}
@@ -2629,6 +2765,20 @@ export function PageLayoutEditor({
                                         </button>
                                       </div>
                                     </div>
+                                    {captionSpeechKindFor(captionStyleForPanel(caption)) === 'dialogue' && (
+                                      <div className="story-panels-caption-style-field">
+                                        <button
+                                          type="button"
+                                          className="secondary"
+                                          disabled={isSaving}
+                                          onClick={() => updatePanelById(caption.id, {
+                                            tail: caption.tail ? null : defaultCaptionTail(caption.rect),
+                                          })}
+                                        >
+                                          {caption.tail ? 'Remove tail' : 'Add tail'}
+                                        </button>
+                                      </div>
+                                    )}
                                     <div className="story-panels-caption-style-field">
                                       <button
                                         type="button"
