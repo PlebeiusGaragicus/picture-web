@@ -47,7 +47,6 @@ function App() {
   const [storyPanelChunksOpen, setStoryPanelChunksOpen] = useState(true);
   const [storyHasBookText, setStoryHasBookText] = useState(false);
   const [storyAutoPlaceEnabled, setStoryAutoPlaceEnabled] = useState(readAutoPlaceEnabled);
-  const [layoutEditorTopBarEnd, setLayoutEditorTopBarEnd] = useState<ReactNode>(null);
   const [showExportPdfModal, setShowExportPdfModal] = useState(false);
   const [exportPageBorder, setExportPageBorder] = useState<BookletPageBorder>('black');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
@@ -377,7 +376,6 @@ function App() {
               <>
                 {charactersHubViewToggle}
                 {conceptArtViewToggle}
-                {layoutEditorTopBarEnd}
                 {isCanvasActive ? (
                   <FloatingTagsMenu
                     userAvailableTags={workspace.availableUserTags}
@@ -478,7 +476,6 @@ function App() {
             projectSlug={openProjectSlug}
             initialNavigation={layoutEditorNavigation}
             onNavigationComplete={() => setLayoutEditorNavigation(null)}
-            onTopBarEndContentChange={setLayoutEditorTopBarEnd}
             onPanelDraftedToCanvas={workspace.handlePanelDraftedToCanvas}
           />
         )}

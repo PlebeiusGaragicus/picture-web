@@ -1,7 +1,7 @@
 /* Small stroke icons for toolbar controls, matching PhaseIcon's visual style
    (1.6px currentColor strokes) so all app chrome reads as one icon set. */
 
-type IconName = 'undo' | 'redo' | 'print' | 'info' | 'refresh';
+type IconName = 'undo' | 'redo' | 'print' | 'info' | 'refresh' | 'images';
 
 const PATHS: Record<IconName, JSX.Element> = {
   undo: (
@@ -34,6 +34,13 @@ const PATHS: Record<IconName, JSX.Element> = {
     <>
       <path d="M20 11a8 8 0 0 0-14.3-4.5M4 4v3.5H7.5" />
       <path d="M4 13a8 8 0 0 0 14.3 4.5M20 20v-3.5H16.5" />
+    </>
+  ),
+  images: (
+    <>
+      <rect x="3" y="7" width="14" height="14" rx="2" />
+      <path d="M7 3h12a2 2 0 0 1 2 2v12" />
+      <path d="M3 16.5 8 12l5 5 2-2 2 2" />
     </>
   ),
 };

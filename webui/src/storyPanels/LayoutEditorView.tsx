@@ -1,57 +1,35 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type React from 'react';
 import { PageLayoutEditor, type StoryPanelLayoutMode } from './PageLayoutEditor';
-import { LayoutViewModeSelect } from './LayoutViewModeSelect';
 import { PanelChunkList } from './PanelChunkList';
 import type { InsertDraftPayload } from './storyPanelSidebar';
 import { autoPlaceDraftPanel, readAutoPlaceEnabled } from './autoPlace';
 import type { LayoutEditorNavigation } from './layoutEditorNavigation';
-import { readSingleSidePanel, writeSingleSidePanel, type SingleSidePanel } from './singleSidePanel';
 import { readSinglePagePreviewMode, writeSinglePagePreviewMode, type SinglePagePreviewMode } from './singlePagePreview';
+import {
+  readInspectorVisible,
+  readPanelsTrayVisible,
+  writeInspectorVisible,
+  writePanelsTrayVisible,
+} from './layoutUiPrefs';
 import { sortedPanels } from './storyPanelUtils';
 import { isEditableShortcutTarget } from '../shared/dom';
 import { useStoryPanelDocument } from './useStoryPanelDocument';
 import { PiTaskPanel } from '../sessions/PiTaskPanel';
 import { usePiTask } from '../sessions/usePiTask';
 import { formatRequestError } from '../formatError';
-import { HoverTooltip } from '../ui';
-import { Icon } from '../Icon';
 import { api } from '../api';
 import type { AdaptationStatus, CanvasDocument, StoryPanelPatchPayload, StoryPanelRect } from '../types';
 import { isPanel, isUnplaced } from './panelModel';
-
-const SPREAD_PANEL_INFO_KEY = 'story-panels-spread-panel-info';
-
-function readSpreadPanelInfoEnabled(): boolean {
-  try {
-    const stored = localStorage.getItem(SPREAD_PANEL_INFO_KEY);
-    if (stored === 'false') return false;
-    if (stored === 'true') return true;
-  } catch {
-    // Ignore storage read failures in private browsing or restricted contexts.
-  }
-  return true;
-}
-
-function writeSpreadPanelInfoEnabled(enabled: boolean) {
-  try {
-    localStorage.setItem(SPREAD_PANEL_INFO_KEY, enabled ? 'true' : 'false');
-  } catch {
-    // Ignore storage write failures.
-  }
-}
 
 export function LayoutEditorView({
   projectSlug,
   initialNavigation,
   onNavigationComplete,
-  onTopBarEndContentChange,
   onPanelDraftedToCanvas,
 }: {
   projectSlug: string;
   initialNavigation: LayoutEditorNavigation | null;
   onNavigationComplete: () => void;
-  onTopBarEndContentChange?: (content: ReactNode | null) => void;
   onPanelDraftedToCanvas?: (canvas: CanvasDocument, nodeId: string) => void;
 }) {
   const {
@@ -74,10 +52,8 @@ export function LayoutEditorView({
   const [focusedChunkPanelId, setFocusedChunkPanelId] = useState<string | null>(null);
   const [navigateToPanelId, setNavigateToPanelId] = useState<string | null>(null);
   const [layoutMode, setLayoutMode] = useState<StoryPanelLayoutMode>('spread');
-  const [historyControls, setHistoryControls] = useState<React.ReactNode>(null);
-  const [pageControls, setPageControls] = useState<React.ReactNode>(null);
-  const [spreadPanelInfoEnabled, setSpreadPanelInfoEnabled] = useState(readSpreadPanelInfoEnabled);
-  const [singleSidePanel, setSingleSidePanel] = useState<SingleSidePanel>(readSingleSidePanel);
+  const [inspectorVisible, setInspectorVisible] = useState(readInspectorVisible);
+  const [panelsTrayVisible, setPanelsTrayVisible] = useState(readPanelsTrayVisible);
   const [singlePagePreviewMode, setSinglePagePreviewMode] = useState<SinglePagePreviewMode>(readSinglePagePreviewMode);
   const [isPlacingPanel, setIsPlacingPanel] = useState(false);
   const [promptRefreshKey, setPromptRefreshKey] = useState(0);
@@ -108,11 +84,6 @@ export function LayoutEditorView({
     onPanelDraftedToCanvas?.(result.canvas, result.nodeId);
   };
 
-  const selectSingleSidePanel = (panel: SingleSidePanel) => {
-    writeSingleSidePanel(panel);
-    setSingleSidePanel(panel);
-  };
-
   const togglePrintPreview = () => {
     setSinglePagePreviewMode((current) => {
       const next = current === 'print' ? 'readable' : 'print';
@@ -121,23 +92,20 @@ export function LayoutEditorView({
     });
   };
 
-  const toggleSpreadPanelInfo = () => {
-    setSpreadPanelInfoEnabled((current) => {
-      const next = !current;
-      writeSpreadPanelInfoEnabled(next);
-      return next;
-    });
+  const setInspector = (visible: boolean) => {
+    writeInspectorVisible(visible);
+    setInspectorVisible(visible);
   };
 
-  const setSpreadPanelInfoVisible = (enabled: boolean) => {
-    writeSpreadPanelInfoEnabled(enabled);
-    setSpreadPanelInfoEnabled(enabled);
+  const setPanelsTray = (visible: boolean) => {
+    writePanelsTrayVisible(visible);
+    setPanelsTrayVisible(visible);
   };
 
   useEffect(() => {
     if (!initialNavigation || !document) return;
     setLayoutMode('single');
-    selectSingleSidePanel(initialNavigation.singleSidePanel);
+    setPanelsTray(true);
     setSelectedPanelId(initialNavigation.panelId);
     setFocusedChunkPanelId(null);
     window.setTimeout(() => setFocusedChunkPanelId(initialNavigation.panelId), 0);
@@ -170,7 +138,7 @@ export function LayoutEditorView({
     const panel = document.panels.find((candidate) => candidate.id === panelId);
     if (!panel) return;
     setLayoutMode('single');
-    selectSingleSidePanel('chunks');
+    setPanelsTray(true);
     setSelectedPanelId(panelId);
     setFocusedChunkPanelId(null);
     window.setTimeout(() => setFocusedChunkPanelId(panelId), 0);
@@ -251,14 +219,6 @@ export function LayoutEditorView({
   };
 
   useEffect(() => {
-    if (!onTopBarEndContentChange) return;
-    onTopBarEndContentChange(
-      <LayoutViewModeSelect value={layoutMode} onChange={setLayoutMode} disabled={isSaving} />,
-    );
-    return () => onTopBarEndContentChange(null);
-  }, [layoutMode, isSaving, onTopBarEndContentChange]);
-
-  useEffect(() => {
     const layoutShortcuts: Record<string, StoryPanelLayoutMode> = {
       a: 'all-pages',
       '2': 'spread',
@@ -271,15 +231,24 @@ export function LayoutEditorView({
       if (nextMode) {
         event.preventDefault();
         setLayoutMode(nextMode);
-        if (key === 's') {
-          selectSingleSidePanel('info');
-        }
         return;
       }
       if (key === 'p') {
         event.preventDefault();
-        setLayoutMode('single');
-        selectSingleSidePanel('chunks');
+        setPanelsTrayVisible((current) => {
+          const next = !current;
+          writePanelsTrayVisible(next);
+          return next;
+        });
+        return;
+      }
+      if (key === 'i') {
+        event.preventDefault();
+        setInspectorVisible((current) => {
+          const next = !current;
+          writeInspectorVisible(next);
+          return next;
+        });
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -331,68 +300,6 @@ export function LayoutEditorView({
 
   return (
     <div className="story-adaptation-screen story-panels-screen layout-view-screen">
-      <header className="layout-view-toolbar">
-        <div className="layout-view-toolbar-primary">
-          <div className="story-panels-history-actions">
-            {historyControls}
-          </div>
-          <HoverTooltip
-            text={singlePagePreviewMode === 'print' ? 'Hide print preview' : 'Show print preview'}
-            placement="bottom"
-          >
-            <button
-              type="button"
-              className={`secondary small-button layout-view-export-button ${singlePagePreviewMode === 'print' ? 'is-active' : ''}`}
-              disabled={isSaving}
-              aria-pressed={singlePagePreviewMode === 'print'}
-              aria-label={singlePagePreviewMode === 'print' ? 'Hide print preview' : 'Show print preview'}
-              onClick={togglePrintPreview}
-            >
-              <Icon name="print" />
-            </button>
-          </HoverTooltip>
-          {layoutMode === 'spread' && (
-            <button
-              type="button"
-              className={`secondary small-button layout-view-spread-info-toggle ${spreadPanelInfoEnabled ? 'is-active' : ''}`}
-              disabled={isSaving}
-              aria-pressed={spreadPanelInfoEnabled}
-              aria-label={spreadPanelInfoEnabled ? 'Hide panel info in spread view' : 'Show panel info in spread view'}
-              title={spreadPanelInfoEnabled ? 'Hide panel info when a panel is selected' : 'Show panel info when a panel is selected'}
-              onClick={toggleSpreadPanelInfo}
-            >
-              <Icon name="info" />
-            </button>
-          )}
-        </div>
-        <div className="layout-view-toolbar-center">
-          {layoutMode === 'single' && (
-            <div className="story-panels-preview-toggle" role="group" aria-label="Side panel">
-              <button
-                type="button"
-                className={singleSidePanel === 'info' ? 'is-active' : ''}
-                disabled={isSaving}
-                aria-pressed={singleSidePanel === 'info'}
-                onClick={() => selectSingleSidePanel('info')}
-              >
-                Info
-              </button>
-              <button
-                type="button"
-                className={singleSidePanel === 'chunks' ? 'is-active' : ''}
-                disabled={isSaving}
-                aria-pressed={singleSidePanel === 'chunks'}
-                onClick={() => selectSingleSidePanel('chunks')}
-              >
-                Panels
-              </button>
-            </div>
-          )}
-        </div>
-        <div className="layout-view-toolbar-page">
-          {pageControls}
-        </div>
-      </header>
       {error && <p className="error error-banner layout-view-error">{error}</p>}
       {draftPromptTask.state !== null && (
         <PiTaskPanel
@@ -419,18 +326,17 @@ export function LayoutEditorView({
           document={document}
           selectedPanelId={selectedPanelId}
           layoutMode={layoutMode}
-          singleSidePanel={singleSidePanel}
           singlePagePreviewMode={singlePagePreviewMode}
+          onTogglePrintPreview={togglePrintPreview}
           onSelectPanel={selectLayoutPanel}
           onSaveDocument={saveDocument}
           isSaving={isSaving}
           sidePanel={panelChunks}
           onLayoutModeChange={setLayoutMode}
-          onSingleSidePanelChange={selectSingleSidePanel}
-          onSpreadPanelInfoEnabledChange={setSpreadPanelInfoVisible}
-          onHistoryControlsChange={setHistoryControls}
-          onPageControlsChange={setPageControls}
-          spreadPanelInfoEnabled={spreadPanelInfoEnabled}
+          inspectorVisible={inspectorVisible}
+          onInspectorVisibleChange={setInspector}
+          panelsTrayVisible={panelsTrayVisible}
+          onPanelsTrayVisibleChange={setPanelsTray}
           unplacedPanels={unplacedPanels}
           onCreatePanelAt={createPanelAt}
           onPlacePanelAt={placePanelAt}

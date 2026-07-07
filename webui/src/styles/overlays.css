@@ -79,8 +79,10 @@
   flex: 0 0 auto;
 }
 
+/* Keyboard focus only (:focus-visible) — plain :focus-within kept tooltips
+   pinned open after a mouse click on toolbar toggles. */
 .hover-tooltip-wrap:hover .hover-tooltip-bubble,
-.hover-tooltip-wrap:focus-within .hover-tooltip-bubble {
+.hover-tooltip-wrap:has(:focus-visible) .hover-tooltip-bubble {
   opacity: 1;
   visibility: visible;
 }

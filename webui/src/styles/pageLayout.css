@@ -93,7 +93,6 @@
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  padding: var(--space-6);
 }
 
 .layout-view-export-button {
