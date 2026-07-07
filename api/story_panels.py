@@ -546,9 +546,14 @@ def create_bookmark(slug: str, payload: StoryPanelBookmarkCreate) -> StoryPanelD
     return save_document(slug, document)
 
 
-def _validate_image_prompt_text(text: str) -> str:
-    from adaptation_workflow.validate import CHAT_WRAPPER_RE
+# Agent output that leaked conversational framing instead of plain prose.
+CHAT_WRAPPER_RE = re.compile(
+    r"^(Sure|Here is|Here's|I wrote|Done\.|```|Apologies|I'm sorry)",
+    re.MULTILINE,
+)
 
+
+def _validate_image_prompt_text(text: str) -> str:
     cleaned = text.strip()
     if not cleaned:
         raise HTTPException(status_code=400, detail="Image prompt text must not be empty")

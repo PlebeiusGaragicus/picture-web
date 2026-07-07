@@ -64,7 +64,7 @@ def spawn_from_character_variant(
 ) -> tuple[str, CanvasDocument]:
     import adaptation
 
-    metadata = adaptation.sync_prompt_links(slug, adaptation.read_metadata(slug))
+    metadata = adaptation.read_metadata(slug)
     record = metadata.characters.get(character_slug)
     if record is None:
         from fastapi import HTTPException
@@ -77,9 +77,9 @@ def spawn_from_character_variant(
         raise HTTPException(status_code=404, detail=f"Unknown character variant: {character_slug}/{variant_key}")
     canvas = library.read_stored_canvas(slug)
     x, y = next_canvas_position(canvas)
-    display_name = character_slug.replace("-", " ").title()
+    display_name = adaptation.character_display_name(record)
     if variant_key != "base":
-        display_name = f"{display_name} ({variant_key})"
+        display_name = f"{display_name} ({link.label.strip() or variant_key})"
     tags = library.node_tags("comic-adaptation", "character-sheet", character_slug)
     node_id, saved = create_image_group_node(
         slug,
@@ -97,7 +97,7 @@ def spawn_from_character_variant(
 def spawn_from_location(slug: str, location_key: str) -> tuple[str, CanvasDocument]:
     import adaptation
 
-    metadata = adaptation.sync_prompt_links(slug, adaptation.read_metadata(slug))
+    metadata = adaptation.sync_location_links(slug, adaptation.read_metadata(slug))
     link = metadata.locations.get(location_key)
     if link is None:
         from fastapi import HTTPException

@@ -22,15 +22,15 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
 | `models.py` | All Pydantic models, single file. |
 | `common.py` | `utc_now()`, `slugify(value, fallback)` — the only implementations. |
 | `gemini.py` | Google GenAI calls; PIL; nothing else imports the SDK. |
-| `adaptation.py` | Adaptation core: `adaptation/` dir + `adaptation.json` metadata, book text, character records, editable character/location files. |
+| `adaptation.py` | Adaptation core: `adaptation/` dir + `adaptation.json` metadata, book text, structured character records (CRUD; adaptation.json is their single store), editable location files. |
 | `visual_styles.py` | Reusable style snippets appended to generation prompts. |
 | `canvas_nodes.py` | Canvas node factories (image groups, character/location spawns). |
 | `concept_cards.py` | Concept art cards: CRUD, per-card image upload (`POST /concept-cards/{id}/upload` attaches an imported asset to the card), subject-kind retagging, draft-to-canvas. |
 | `chat_sessions.py` | Gemini image-refinement chats (thought signatures preserved, archive-first). |
 | `agent_sessions.py` / `pi_session_trace.py` | Pi agent session registry and session-file trace parsing. |
-| `pi_runtime.py` / `pi_profiles.py` | In-process pi task runtime (one `pi --mode rpc` subprocess per step, `task_progress` between steps, SSE event ring buffer, abort, restart-safe snapshots) and the narrow task profiles it runs (`read-book`, `extract-character-list`, `extract-character` (targeted), `extract-all-characters` (multi-step), `suggest-concept-character/location`, `draft-panel-prompt`, `refine-panel-prompt`). Profiles with `tools` get the photo-web extension loaded with a scoped allow-list (see the pi agent seam). |
+| `pi_runtime.py` / `pi_profiles.py` | In-process pi task runtime (one `pi --mode rpc` subprocess per step, `task_progress` between steps, SSE event ring buffer, abort, restart-safe snapshots) and the narrow task profiles it runs (`read-book`, `discover-characters`, `extract-character` (targeted), `extract-all-characters` (multi-step), `refine-character` (targeted, feedback-driven), `suggest-concept-character/location`, `draft-panel-prompt`, `refine-panel-prompt`). Profiles with `tools` get the photo-web extension loaded with a scoped allow-list (see the pi agent seam). |
 | `story_panels.py` / `story_panels_print.py` | Panel chunks, page layout, booklet PDF (reportlab). Panels carry entity links (`characterSlugs`/`locationSlug`, validated against `adaptation.status()`, written by the human patch path or the agent's `set_panel_image_prompt` delivery). `draft_panel_to_canvas` turns a saved image prompt into an `imageGroup` node whose `refs` are the tagged entities' canonical assets (409 if any entity has no asset yet) with `sourcePanelId` set; `library.attach_generated_assets_to_canvas` uses `sourcePanelId` to auto-attach generated assets back onto the panel. |
-| `adaptation_workflow/` | Pi plumbing for `pi_runtime`: `config.py` (context, pi/node discovery), `character_file.py`, `validate.py`, `events.py` (`project_event`), `diagnostics.py` (`TaskDiagnostics`). |
+| `adaptation_workflow/` | Pi plumbing for `pi_runtime`: `config.py` (context, pi/node discovery), `events.py` (`project_event`), `diagnostics.py` (`TaskDiagnostics`). |
 
 ## Canvas model
 
@@ -69,8 +69,8 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
 
 One invocation path:
 
-1. **Pi tasks** (read-book, character list/extract, concept suggest, panel
-   prompt draft/refine): endpoint
+1. **Pi tasks** (read-book, character discover/extract/refine, concept
+   suggest, panel prompt draft/refine): endpoint
    → `pi_runtime.PiSessionManager` runs the profile's step plan, one
    `pi --mode rpc` subprocess per step (threads, in-process), emitting a
    `task_progress {index, label}` event before each step. Events stream over
@@ -84,19 +84,23 @@ One invocation path:
    `(profile, target)` and answered with 409.
 
    **Tools-as-API (pi-idea §6):** profiles whose output is a domain object
-   (`draft-panel-prompt`, `refine-panel-prompt`, `suggest-concept-*`) declare
-   `TaskProfile.tools`. The runtime then adds
+   (`draft-panel-prompt`, `refine-panel-prompt`, `suggest-concept-*`, the
+   character profiles) declare `TaskProfile.tools`. The runtime then adds
    `--extension .pi/extensions/photo-web.ts` and sets `PHOTO_WEB_API`
    (origin: `PHOTO_WEB_API` env override, else `http://127.0.0.1:{API_PORT}`),
    `PHOTO_WEB_PROJECT`, `PHOTO_WEB_TASK`, and `PHOTO_WEB_ALLOWED_TOOLS`. The
    extension registers only the allow-listed tools
    (`set_panel_image_prompt`, `replace_panel_image_prompt`,
-   `create_concept_card`), each a typed `fetch()` back into the local API
+   `create_concept_card`, `register_character`, `list_characters`,
+   `update_character`), each a typed `fetch()` back into the local API
    with server-side validation, so the agent delivers its result with one
    tool call and no scratch files. `on_success` verifies delivery (a new
-   prompt/card exists) and fails the task if the agent never called the tool.
-   Character extraction stays file-based — `characters/*.md` are the actual
-   editable data model.
+   prompt/card/record exists, or the record changed) and fails the task if
+   the agent never called the tool. Character records live in
+   `adaptation.json` (`CharacterRecord`: name, summary, visualDescription,
+   performanceNotes, continuityNotes, variants keyed by slug with
+   label/storyContext/prompt + asset link state) — discovery registers them,
+   extraction fills them, refine patches them from user feedback.
 
 `pi_session_trace.py` parses pi's on-disk session `.jsonl` files for the trace
 view and is transport-independent.
@@ -155,9 +159,8 @@ photo-library/projects/<slug>/
   story-panels/panels.json     # panel chunks + page layout
   chat-sessions/<id>/          # Gemini refinement chats + blobs
   adaptation/
-    adaptation.json            # characters + locations metadata
+    adaptation.json            # character records + location metadata
     book.txt                   # source text
-    characters/<slug>.md       # unified character file (summary + variants)
     locations/prompts/<slug>.md
     style-refs/                # visual-styles.json (dir name is historical)
     sessions/                  # pi session files, job logs, status JSON

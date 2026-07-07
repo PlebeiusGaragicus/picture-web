@@ -52,73 +52,37 @@ def make_png(path: Path, color: str = "red") -> None:
     Image.new("RGB", (16, 16), color=color).save(path)
 
 
-def character_record_metadata(
-    slug: str,
-    *,
-    prompt: str = "Character reference sheet prompt.",
-    asset_ids: list[str] | None = None,
-    user_tags: list[str] | None = None,
-    status: str | None = None,
-) -> dict:
-    asset_ids = list(asset_ids or [])
-    link_status = status or ("generated" if asset_ids else "ready")
-    return {
-        "slug": slug,
-        "promptPath": f"characters/{slug}.md",
-        "description": f"## Summary\n\n{slug}\n",
-        "userTags": user_tags or [],
-        "variants": {
-            "base": {
-                "artifactKind": "character-sheet",
-                "promptPath": f"characters/{slug}.md",
-                "mode": "new-image",
-                "styleRef": "style-refs/archetype-character.png",
-                "prompt": prompt,
-                "assetIds": asset_ids,
-                "activeAssetId": asset_ids[-1] if asset_ids else None,
-                "status": link_status,
-            }
-        },
-    }
-
-
-def write_unified_character_file(
-    path: Path,
+def create_extracted_character(
+    client: TestClient,
     slug: str,
     *,
     prompt: str = "Character reference sheet for the hero.",
     variant_key: str | None = None,
 ) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content = (
-        f"# {slug}\n\n"
-        "## Summary\n\n"
-        f"{slug} summary.\n\n"
-        "## Visual Description\n\n"
-        "Visual details.\n\n"
-        "## Behaviour, mannerisms and personality\n\n"
-        "Behaviour notes.\n\n"
-        "## Continuity Notes\n\n"
-        "Continuity.\n\n"
-        "## Source References\n\n"
-        '- `L001`: "quote"\n\n'
-        "# base\n"
-        "mode: new-image\n"
-        "style_ref: style-refs/archetype-character.png\n\n"
-        f"{prompt} Layout: top row — front full-body, three-quarter full-body, back full-body, "
-        "same neutral standing pose, consistent scale. Bottom row — four head close-ups. "
-        "White background. No text, no labels, no watermarks. Expressions: neutral, happy, sad, angry.\n"
+    """Register a character record and patch it to the extracted state."""
+    created = client.post(
+        "/api/projects/farm-comic/characters",
+        json={"name": slug.replace("-", " ").title(), "slug": slug, "summary": f"{slug} summary."},
     )
+    assert created.status_code == 200
+    variants: dict[str, dict] = {"base": {"prompt": prompt}}
     if variant_key:
-        content += (
-            f"\n# {variant_key}\n"
-            "mode: edit-reference\n"
-            f"style_ref: characters/{slug}/base.png\n\n"
-            "Variant sheet. Layout: top row — front full-body, three-quarter full-body, back full-body, "
-            "same neutral standing pose, consistent scale. Bottom row — four head close-ups. "
-            "White background. No text, no labels, no watermarks. Expressions: neutral, happy, sad, angry.\n"
-        )
-    path.write_text(content)
+        variants[variant_key] = {
+            "prompt": "Variant sheet.",
+            "mode": "edit-reference",
+            "label": variant_key.replace("-", " ").title(),
+            "storyContext": "Later in the story.",
+        }
+    patched = client.patch(
+        f"/api/projects/farm-comic/characters/{slug}",
+        json={
+            "visualDescription": "Visual details.",
+            "performanceNotes": "Behaviour notes.",
+            "continuityNotes": "Continuity.",
+            "variants": variants,
+        },
+    )
+    assert patched.status_code == 200
 
 
 def png_bytes(color: str = "red") -> bytes:
@@ -534,16 +498,11 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     create_project(client)
 
     character = client.post(
-        "/api/projects/farm-comic/adaptation/files/characters",
-        json={
-            "key": "hero",
-            "mode": "new-image",
-            "styleRef": "",
-            "body": "Full body character sheet for the farm hero.",
-        },
+        "/api/projects/farm-comic/characters",
+        json={"name": "Hero", "summary": "The farm hero."},
     )
     assert character.status_code == 200
-    assert character.json()["promptPath"] == "characters/hero.md"
+    assert character.json()["slug"] == "hero"
 
     location = client.post(
         "/api/projects/farm-comic/adaptation/files/locations",
@@ -556,22 +515,16 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     )
     assert location.status_code == 200
 
-    update = client.put(
-        "/api/projects/farm-comic/adaptation/files/characters/hero",
-        json={
-            "key": "hero-primary",
-            "body": "Updated character sheet prompt.",
-            "mode": "new-image",
-            "styleRef": "",
-            "userTags": ["farm", "protagonist"],
-        },
+    update = client.patch(
+        "/api/projects/farm-comic/characters/hero",
+        json={"slug": "hero-primary", "userTags": ["farm", "protagonist"]},
     )
     assert update.status_code == 200
-    assert update.json()["key"] == "hero-primary"
+    assert update.json()["slug"] == "hero-primary"
 
-    characters = client.get("/api/projects/farm-comic/adaptation/files/characters")
+    characters = client.get("/api/projects/farm-comic/characters")
     assert characters.status_code == 200
-    assert [item["key"] for item in characters.json()] == ["hero-primary"]
+    assert [item["slug"] for item in characters.json()] == ["hero-primary"]
 
     status = client.get("/api/projects/farm-comic/adaptation")
     assert status.status_code == 200
@@ -579,9 +532,11 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     assert payload["hasBook"] is False
     assert "hero-primary" in payload["characters"]
     assert payload["characters"]["hero-primary"]["userTags"] == ["farm", "protagonist"]
+    assert payload["counts"]["characters"] == 1
+    assert payload["counts"]["charactersExtracted"] == 0
     assert "barn" in payload["locations"]
 
-    deleted = client.delete("/api/projects/farm-comic/adaptation/files/characters/hero-primary")
+    deleted = client.delete("/api/projects/farm-comic/characters/hero-primary")
     assert deleted.status_code == 200
     assert "hero-primary" not in deleted.json()["characters"]
 
@@ -590,50 +545,79 @@ def test_adaptation_editable_files_without_book_feed_status_and_canvas(tmp_path,
     assert "hero-primary" not in status_after_delete.json()["characters"]
 
 
-def test_character_update_description_and_variants(tmp_path, monkeypatch):
+def test_character_crud_fields_variants_and_conflicts(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
 
-    character_path = tmp_path / "photo-library" / "projects" / "farm-comic" / "adaptation" / "characters" / "hero.md"
-    character_path.parent.mkdir(parents=True, exist_ok=True)
-    character_path.write_text(
-        "# hero\n\n"
-        "## Summary\n\nHero summary.\n\n"
-        "## Visual Description\n\nTall.\n\n"
-        "## Behaviour, mannerisms and personality\n\nBrave.\n\n"
-        "## Continuity Notes\n\nNone.\n\n"
-        "## Source References\n\n- `L001`: \"Hi.\"\n\n"
-        "# base\n"
-        "mode: new-image\n"
-        "style_ref: style-refs/archetype-character.png\n\n"
-        "Base prompt.\n\n"
-        "# winter-coat\n"
-        "mode: new-image\n"
-        "style_ref: style-refs/archetype-character.png\n\n"
-        "Winter coat prompt.\n"
+    created = client.post(
+        "/api/projects/farm-comic/characters",
+        json={"name": "Hero", "summary": "The farm hero."},
     )
+    assert created.status_code == 200
+    record = created.json()
+    assert record["slug"] == "hero"
+    assert record["createdAt"]
+    created_updated_at = record["updatedAt"]
 
-    updated = client.put(
-        "/api/projects/farm-comic/adaptation/files/characters/hero",
+    # Duplicate create conflicts.
+    assert client.post(
+        "/api/projects/farm-comic/characters",
+        json={"name": "Hero"},
+    ).status_code == 409
+
+    updated = client.patch(
+        "/api/projects/farm-comic/characters/hero",
         json={
-            "description": "## Summary\n\nUpdated summary.\n",
+            "summary": "Updated summary.",
+            "visualDescription": "Tall.",
+            "performanceNotes": "Brave.",
+            "continuityNotes": "Keep the hat.",
             "variants": {
                 "base": {"prompt": "Updated base prompt."},
-                "winter-coat": {"prompt": "Updated winter prompt."},
+                "winter-coat": {
+                    "prompt": "Updated winter prompt.",
+                    "label": "Winter Coat",
+                    "storyContext": "During the blizzard chapters.",
+                    "mode": "edit-reference",
+                },
             },
         },
     )
     assert updated.status_code == 200
-
-    text = character_path.read_text()
-    assert "## Summary\n\nUpdated summary." in text
-    assert "Updated base prompt." in text
-    assert "Updated winter prompt." in text
+    payload = updated.json()
+    assert payload["summary"] == "Updated summary."
+    assert payload["performanceNotes"] == "Brave."
+    assert payload["variants"]["base"]["prompt"] == "Updated base prompt."
+    assert payload["variants"]["base"]["status"] == "ready"
+    assert payload["variants"]["winter-coat"]["storyContext"] == "During the blizzard chapters."
+    assert payload["updatedAt"] >= created_updated_at
 
     status = client.get("/api/projects/farm-comic/adaptation").json()
-    assert status["characters"]["hero"]["description"].startswith("## Summary")
-    assert status["characters"]["hero"]["variants"]["base"]["prompt"] == "Updated base prompt."
-    assert status["characters"]["hero"]["variants"]["winter-coat"]["prompt"] == "Updated winter prompt."
+    assert status["characters"]["hero"]["visualDescription"] == "Tall."
+    assert status["characters"]["hero"]["variants"]["winter-coat"]["label"] == "Winter Coat"
+    assert status["counts"]["charactersExtracted"] == 1
+
+    # Variant removal.
+    removed = client.patch(
+        "/api/projects/farm-comic/characters/hero",
+        json={"removeVariants": ["winter-coat"]},
+    )
+    assert removed.status_code == 200
+    assert list(removed.json()["variants"]) == ["base"]
+
+    # Unknown character 404s; rename collisions 409.
+    assert client.patch(
+        "/api/projects/farm-comic/characters/nobody",
+        json={"summary": "x"},
+    ).status_code == 404
+    assert client.post(
+        "/api/projects/farm-comic/characters",
+        json={"name": "Villain"},
+    ).status_code == 200
+    assert client.patch(
+        "/api/projects/farm-comic/characters/villain",
+        json={"slug": "hero"},
+    ).status_code == 409
 
 
 def test_reset_character_data_clears_files_metadata_and_entity_tags(tmp_path, monkeypatch):
@@ -641,13 +625,8 @@ def test_reset_character_data_clears_files_metadata_and_entity_tags(tmp_path, mo
     create_project(client)
 
     created = client.post(
-        "/api/projects/farm-comic/adaptation/files/characters",
-        json={
-            "key": "hero",
-            "mode": "new-image",
-            "styleRef": "",
-            "body": "Full body character sheet for the farm hero.",
-        },
+        "/api/projects/farm-comic/characters",
+        json={"name": "Hero", "summary": "The farm hero."},
     )
     assert created.status_code == 200
 
@@ -661,7 +640,7 @@ def test_reset_character_data_clears_files_metadata_and_entity_tags(tmp_path, mo
     tags = client.get("/api/projects/farm-comic/tags").json()
     assert [tag["id"] for tag in tags] == ["character-style", "scene-style"]
 
-    characters = client.get("/api/projects/farm-comic/adaptation/files/characters")
+    characters = client.get("/api/projects/farm-comic/characters")
     assert characters.status_code == 200
     assert characters.json() == []
 
@@ -671,36 +650,27 @@ def test_character_rename_drops_stale_entity_tag(tmp_path, monkeypatch):
     create_project(client)
 
     created = client.post(
-        "/api/projects/farm-comic/adaptation/files/characters",
-        json={
-            "key": "new-character-1",
-            "mode": "new-image",
-            "styleRef": "",
-            "body": "A new character.",
-        },
+        "/api/projects/farm-comic/characters",
+        json={"name": "New Character 1", "summary": "A new character."},
     )
     assert created.status_code == 200
+    assert created.json()["slug"] == "new-character-1"
 
     tags = client.get("/api/projects/farm-comic/tags").json()
     assert [tag["id"] for tag in tags] == ["character-style", "new-character-1", "scene-style"]
     assert tags[1]["name"] == "New Character 1"
 
-    renamed = client.put(
-        "/api/projects/farm-comic/adaptation/files/characters/new-character-1",
-        json={
-            "key": "hero",
-            "body": "A new character.",
-            "mode": "new-image",
-            "styleRef": "",
-            "userTags": [],
-        },
+    renamed = client.patch(
+        "/api/projects/farm-comic/characters/new-character-1",
+        json={"slug": "hero", "name": "The Hero"},
     )
     assert renamed.status_code == 200
-    assert renamed.json()["key"] == "hero"
+    assert renamed.json()["slug"] == "hero"
 
-    tags = client.get("/api/projects/farm-comic/tags").json()
-    assert [tag["id"] for tag in tags] == ["character-style", "hero", "scene-style"]
-    assert tags[1]["name"] == "Hero"
+    # Entity tag id follows the slug; tag display name follows record.name.
+    tags = {tag["id"]: tag for tag in client.get("/api/projects/farm-comic/tags").json()}
+    assert set(tags) == {"character-style", "hero", "scene-style"}
+    assert tags["hero"]["name"] == "The Hero"
 
     status = client.get("/api/projects/farm-comic/adaptation").json()
     assert list(status["characters"]) == ["hero"]
@@ -711,26 +681,7 @@ def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monke
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
 
-    character = client.post(
-        "/api/projects/farm-comic/adaptation/files/characters",
-        json={
-            "key": "hero",
-            "mode": "new-image",
-            "styleRef": "",
-            "body": "Full body character sheet for the farm hero.",
-        },
-    )
-    assert character.status_code == 200
-
-    updated = client.put(
-        "/api/projects/farm-comic/adaptation/files/characters/hero",
-        json={
-            "body": "Full body character sheet for the farm hero.",
-            "mode": "new-image",
-            "styleRef": "",
-        },
-    )
-    assert updated.status_code == 200
+    create_extracted_character(client, "hero", prompt="Full body character sheet for the farm hero.")
 
     location = client.post(
         "/api/projects/farm-comic/adaptation/files/locations",
@@ -1825,26 +1776,7 @@ def test_import_artifact_to_canvas_creates_empty_image_group(tmp_path, monkeypat
     library.ensure_style_entity_tags("farm-comic")
     library.set_tag_canonical("farm-comic", "character-style", style_ref_id)
 
-    character = client.post(
-        "/api/projects/farm-comic/adaptation/files/characters",
-        json={
-            "key": "hero",
-            "mode": "new-image",
-            "styleRef": "",
-            "body": "Full body character sheet for the farm hero.",
-        },
-    )
-    assert character.status_code == 200
-
-    updated = client.put(
-        "/api/projects/farm-comic/adaptation/files/characters/hero",
-        json={
-            "body": "Full body character sheet for the farm hero.",
-            "mode": "new-image",
-            "styleRef": "",
-        },
-    )
-    assert updated.status_code == 200
+    create_extracted_character(client, "hero", prompt="Full body character sheet for the farm hero.")
 
     imported = client.post(
         "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
@@ -2658,7 +2590,7 @@ def _seed_panel_entities_project(client, tmp_path) -> str:
     )
     assert created.status_code == 200
     panel = next(item for item in created.json()["panels"] if item["sourceKind"] == "panel" and item["selectedText"])
-    write_unified_character_file(root / "characters" / "hero.md", "hero")
+    create_extracted_character(client, "hero")
     assert client.post(
         "/api/projects/farm-comic/adaptation/files/locations",
         json={"key": "barn", "mode": "new-image", "styleRef": "", "body": "Red barn establishing prompt."},
@@ -2899,8 +2831,8 @@ def test_generate_auto_attaches_entity_tag_canonicals(tmp_path, monkeypatch):
 
     monkeypatch.setattr(gemini, "generate_image", fake_generate)
     created = client.post(
-        "/api/projects/farm-comic/adaptation/files/characters",
-        json={"key": "hero", "body": "# Hero\n\nBrave.\n"},
+        "/api/projects/farm-comic/characters",
+        json={"name": "Hero", "summary": "Brave."},
     )
     assert created.status_code == 200
     canonical_id = "01HHEROCANON"

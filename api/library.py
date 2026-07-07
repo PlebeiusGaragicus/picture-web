@@ -323,15 +323,32 @@ def entity_tag_for_key(key: str, entity_kind: EntityKind) -> TagDefinition:
     )
 
 
-def sync_entity_tags(slug: str, *, character_keys: list[str], location_keys: list[str]) -> TagRegistryDocument:
+def sync_entity_tags(
+    slug: str,
+    *,
+    character_keys: list[str],
+    location_keys: list[str],
+    character_names: dict[str, str] | None = None,
+) -> TagRegistryDocument:
     registry = read_tag_registry(slug)
     entity_ids = {normalize_tag_id(key) for key in character_keys} | {normalize_tag_id(key) for key in location_keys}
     user_tags = [tag for tag in registry.tags if not tag.locked and tag.id not in entity_ids]
     style_tags = [tag for tag in registry.tags if tag.entityKind == "style" and tag.id not in entity_ids]
     canonical_by_id = {tag.id: tag.canonicalAssetId for tag in registry.tags if tag.canonicalAssetId}
+    names_by_id = {
+        normalize_tag_id(key): name.strip()
+        for key, name in (character_names or {}).items()
+        if name.strip()
+    }
     entity_tags = [
         *[entity_tag_for_key(key, "character") for key in sorted(character_keys)],
         *[entity_tag_for_key(key, "location") for key in sorted(location_keys)],
+    ]
+    entity_tags = [
+        tag.model_copy(update={"name": names_by_id[tag.id]})
+        if tag.entityKind == "character" and tag.id in names_by_id
+        else tag
+        for tag in entity_tags
     ]
     entity_tags = [
         tag.model_copy(update={"canonicalAssetId": canonical_by_id.get(tag.id)}) if tag.id in canonical_by_id else tag

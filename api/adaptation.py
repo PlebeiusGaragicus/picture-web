@@ -1,4 +1,4 @@
-"""Project-backed comic adaptation: metadata, book text, character files."""
+"""Project-backed comic adaptation: metadata, book text, character records."""
 
 from __future__ import annotations
 
@@ -6,18 +6,24 @@ import json
 import re
 import shutil
 from pathlib import Path
+from typing import Any
 
 from fastapi import HTTPException, UploadFile
 
 import library
+from common import slugify, utc_now
 from models import (
+    SLUG_RE,
     AdaptationCanvasImportResponse,
     AdaptationFileCreate,
     AdaptationFileDocument,
     AdaptationFileKind,
     AdaptationFileUpdate,
     AdaptationAssetLink,
+    CharacterCreate,
+    CharacterPatch,
     CharacterRecord,
+    CharacterVariant,
     AdaptationMetadata,
     AdaptationStatus,
     ArtifactKind,
@@ -51,7 +57,8 @@ def asset_exists(slug: str, asset_id: str) -> bool:
     return library.asset_json_path(slug, asset_id).is_file() and library.asset_png_path(slug, asset_id).is_file()
 
 
-def _clear_stale_link_group(slug: str, group: dict[str, AdaptationAssetLink]) -> bool:
+def _clear_stale_link_group(slug: str, group: dict[str, Any]) -> bool:
+    """Drop missing asset ids from links; works on AdaptationAssetLink and CharacterVariant."""
     changed = False
     for key, link in list(group.items()):
         asset_ids = [asset_id for asset_id in link.assetIds if asset_exists(slug, asset_id)]
@@ -73,38 +80,33 @@ def artifact_link_groups(metadata: AdaptationMetadata) -> tuple[dict[str, Adapta
     return (metadata.locations,)
 
 
-def character_entries_from_records(characters: dict[str, CharacterRecord]) -> dict[str, AdaptationAssetLink]:
-    return {key: link for key, (_slug, _variant, link) in character_flat_entries_from_records(characters).items()}
+def variant_entity_key(character_slug: str, variant_key: str) -> str:
+    if variant_key == "base":
+        return character_slug
+    return f"{character_slug}-{variant_key}"
 
 
-def character_flat_entries_from_records(characters: dict[str, CharacterRecord]) -> dict[str, tuple[str, str, AdaptationAssetLink]]:
-    from adaptation_workflow.character_file import variant_entity_key
-
-    entries: dict[str, tuple[str, str, AdaptationAssetLink]] = {}
-    for slug, record in characters.items():
-        for variant_key, link in record.variants.items():
-            entries[variant_entity_key(slug, variant_key)] = (slug, variant_key, link)
-    return entries
-
-
-def character_flat_entries(metadata: AdaptationMetadata) -> dict[str, tuple[str, str, AdaptationAssetLink]]:
-    return character_flat_entries_from_records(metadata.characters)
+def resolve_character_variant_key(character_slug: str, flat_key: str) -> tuple[str, str] | None:
+    if flat_key == character_slug:
+        return character_slug, "base"
+    prefix = f"{character_slug}-"
+    if flat_key.startswith(prefix):
+        return character_slug, flat_key.removeprefix(prefix)
+    return None
 
 
 def resolve_character_link(
     metadata: AdaptationMetadata,
     character_slug: str,
     variant_key: str = "base",
-) -> AdaptationAssetLink | None:
+) -> CharacterVariant | None:
     record = metadata.characters.get(character_slug)
     if record is None:
         return None
     return record.variants.get(variant_key)
 
 
-def resolve_character_flat_link(metadata: AdaptationMetadata, flat_key: str) -> tuple[str, str, AdaptationAssetLink] | None:
-    from adaptation_workflow.character_file import resolve_character_variant_key
-
+def resolve_character_flat_link(metadata: AdaptationMetadata, flat_key: str) -> tuple[str, str, CharacterVariant] | None:
     for slug in metadata.characters:
         resolved = resolve_character_variant_key(slug, flat_key)
         if resolved is None:
@@ -116,18 +118,93 @@ def resolve_character_flat_link(metadata: AdaptationMetadata, flat_key: str) -> 
     return None
 
 
-def update_character_variant_link(
-    metadata: AdaptationMetadata,
-    character_slug: str,
-    variant_key: str,
-    link: AdaptationAssetLink,
-) -> None:
+def character_is_extracted(record: CharacterRecord) -> bool:
+    base = record.variants.get("base")
+    return bool(record.visualDescription.strip() and base is not None and base.prompt.strip())
+
+
+def character_display_name(record: CharacterRecord) -> str:
+    return record.name.strip() or " ".join(part.capitalize() for part in record.slug.split("-") if part)
+
+
+def list_characters(slug: str) -> list[CharacterRecord]:
+    metadata = read_metadata(slug)
+    return [metadata.characters[key] for key in sorted(metadata.characters)]
+
+
+def create_character(slug: str, payload: CharacterCreate) -> CharacterRecord:
+    metadata = read_metadata(slug)
+    character_slug = payload.slug or slugify(payload.name, "character")
+    if character_slug in metadata.characters:
+        raise HTTPException(status_code=409, detail=f"Character already exists: {character_slug}")
+    now = utc_now()
+    record = CharacterRecord(
+        slug=character_slug,
+        name=payload.name.strip(),
+        summary=payload.summary,
+        createdAt=now,
+        updatedAt=now,
+    )
+    metadata.characters[character_slug] = record
+    write_metadata(slug, metadata)
+    return record
+
+
+def _variant_with_status(variant: CharacterVariant) -> CharacterVariant:
+    next_status = "generated" if variant.assetIds else ("ready" if variant.prompt.strip() else "missing")
+    if next_status == variant.status:
+        return variant
+    return variant.model_copy(update={"status": next_status})
+
+
+def update_character(slug: str, character_slug: str, patch: CharacterPatch) -> CharacterRecord:
+    metadata = read_metadata(slug)
     record = metadata.characters.get(character_slug)
     if record is None:
-        return
+        raise HTTPException(status_code=404, detail=f"Character not found: {character_slug}")
+    updates: dict[str, Any] = {}
+    for field in ("name", "summary", "visualDescription", "performanceNotes", "continuityNotes"):
+        value = getattr(patch, field)
+        if value is not None:
+            updates[field] = value
+    if patch.userTags is not None:
+        updates["userTags"] = list(patch.userTags)
     variants = dict(record.variants)
-    variants[variant_key] = link
-    metadata.characters[character_slug] = record.model_copy(update={"variants": variants})
+    for variant_key, variant_patch in (patch.variants or {}).items():
+        if not re.match(SLUG_RE, variant_key):
+            raise HTTPException(status_code=400, detail=f"Invalid variant key: {variant_key}")
+        existing = variants.get(variant_key, CharacterVariant())
+        merged = existing.model_copy(
+            update={
+                key: value
+                for key, value in variant_patch.model_dump(exclude_none=True).items()
+            }
+        )
+        variants[variant_key] = _variant_with_status(merged)
+    for variant_key in patch.removeVariants or []:
+        variants.pop(variant_key, None)
+    updates["variants"] = variants
+    next_slug = patch.slug or character_slug
+    if next_slug != character_slug:
+        if next_slug in metadata.characters:
+            raise HTTPException(status_code=409, detail=f"Character already exists: {next_slug}")
+        updates["slug"] = next_slug
+    updates["updatedAt"] = utc_now()
+    next_record = record.model_copy(update=updates)
+    if next_slug != character_slug:
+        metadata.characters.pop(character_slug)
+    metadata.characters[next_slug] = next_record
+    write_metadata(slug, metadata)
+    return next_record
+
+
+def delete_character(slug: str, character_slug: str) -> AdaptationStatus:
+    metadata = read_metadata(slug)
+    if character_slug not in metadata.characters:
+        raise HTTPException(status_code=404, detail=f"Character not found: {character_slug}")
+    metadata.characters.pop(character_slug)
+    write_metadata(slug, metadata)
+    return status(slug)
 
 
 def clear_stale_artifact_assets(slug: str, metadata: AdaptationMetadata) -> tuple[AdaptationMetadata, bool]:
@@ -148,7 +225,6 @@ def ensure_adaptation(slug: str) -> Path:
     for path in [
         root / "sessions",
         root / "style-refs",
-        root / "characters",
         root / "locations",
         root / "locations" / "prompts",
     ]:
@@ -165,7 +241,7 @@ def ensure_adaptation(slug: str) -> Path:
 
 
 def import_artifact_to_canvas(slug: str, artifact_kind: str, artifact_key: str) -> AdaptationCanvasImportResponse:
-    metadata = sync_prompt_links(slug, read_metadata(slug))
+    metadata = sync_location_links(slug, read_metadata(slug))
     library.sync_entity_tags(
         slug,
         character_keys=list(metadata.characters.keys()),
@@ -204,6 +280,7 @@ def write_metadata(slug: str, metadata: AdaptationMetadata) -> AdaptationMetadat
         slug,
         character_keys=list(metadata.characters.keys()),
         location_keys=list(metadata.locations.keys()),
+        character_names={key: record.name for key, record in metadata.characters.items() if record.name.strip()},
     )
     return metadata
 
@@ -275,7 +352,6 @@ def parse_prompt_sections(path: Path) -> dict[str, dict[str, str]]:
 def file_kind_config(kind: AdaptationFileKind) -> tuple[ArtifactKind, Path]:
     root = Path()
     configs: dict[AdaptationFileKind, tuple[ArtifactKind, Path]] = {
-        "characters": ("character-sheet", root / "characters"),
         "locations": ("location-prompt", root / "locations" / "prompts"),
     }
     return configs[kind]
@@ -301,12 +377,6 @@ def format_adaptation_file(
     *,
     subject_kind: str = "",
 ) -> str:
-    if kind == "characters":
-        from adaptation_workflow.character_file import format_character_stub
-
-        name = key.replace("-", " ").title()
-        summary = body.strip() or "New character."
-        return format_character_stub(key, f"{name}: {summary}")
     return format_prompt_file(key, body, mode or "new-image", style_ref)
 
 
@@ -332,13 +402,7 @@ def adaptation_file_from_link(
 
 def list_adaptation_files(slug: str, kind: AdaptationFileKind) -> list[AdaptationFileDocument]:
     root = ensure_adaptation(slug)
-    metadata = sync_prompt_links(slug, read_metadata(slug))
-    if kind == "characters":
-        return [
-            adaptation_file_from_character_record(slug=slug, record=record)
-            for _slug, record in sorted(metadata.characters.items())
-            if (root / record.promptPath).is_file()
-        ]
+    metadata = sync_location_links(slug, read_metadata(slug))
     groups: dict[AdaptationFileKind, dict[str, AdaptationAssetLink]] = {
         "locations": metadata.locations,
     }
@@ -347,20 +411,6 @@ def list_adaptation_files(slug: str, kind: AdaptationFileKind) -> list[Adaptatio
         for key, link in sorted(groups[kind].items())
         if (root / link.promptPath).is_file()
     ]
-
-
-def adaptation_file_from_character_record(*, slug: str, record: CharacterRecord) -> AdaptationFileDocument:
-    base = record.variants.get("base")
-    return AdaptationFileDocument(
-        kind="characters",
-        key=record.slug,
-        promptPath=record.promptPath,
-        artifactKind="character-sheet",
-        body=record.description,
-        mode=base.mode if base else "",
-        styleRef=base.styleRef if base else "",
-        status=base.status if base else "missing",
-    )
 
 
 def create_adaptation_file(slug: str, kind: AdaptationFileKind, payload: AdaptationFileCreate) -> AdaptationFileDocument:
@@ -377,7 +427,7 @@ def create_adaptation_file(slug: str, kind: AdaptationFileKind, payload: Adaptat
             subject_kind=payload.subjectKind or "",
         )
     )
-    metadata = sync_prompt_links(slug, read_metadata(slug))
+    metadata = sync_location_links(slug, read_metadata(slug))
     write_metadata(slug, metadata)
     files = {item.key: item for item in list_adaptation_files(slug, kind)}
     if payload.key not in files:
@@ -400,81 +450,29 @@ def update_adaptation_file(slug: str, kind: AdaptationFileKind, key: str, payloa
     next_body = current.body if payload.body is None else payload.body
     next_mode = current.mode if payload.mode is None else payload.mode
     next_style_ref = current.styleRef if payload.styleRef is None else payload.styleRef
-    subject_kind = ""
-    if kind == "characters":
-        from adaptation_workflow.character_file import format_character_file, parse_character_file
-
-        parsed = parse_character_file(current_path)
-        file_slug = next_key
-        if payload.description is not None:
-            parsed.description = payload.description
-        if payload.variants is not None:
-            for variant_key, variant_update in payload.variants.items():
-                existing = dict(
-                    parsed.variants.get(
-                        variant_key,
-                        {"mode": "new-image", "style_ref": "", "prompt": ""},
-                    )
-                )
-                if variant_update.prompt is not None:
-                    existing["prompt"] = variant_update.prompt
-                if variant_update.mode is not None:
-                    existing["mode"] = variant_update.mode
-                if variant_update.styleRef is not None:
-                    existing["style_ref"] = variant_update.styleRef
-                parsed.variants[variant_key] = existing
-        elif payload.body is not None or payload.mode is not None or payload.styleRef is not None:
-            base = dict(parsed.variants.get("base", {"mode": next_mode, "style_ref": next_style_ref, "prompt": ""}))
-            if payload.body is not None:
-                base["prompt"] = next_body
-            if payload.mode is not None:
-                base["mode"] = next_mode
-            if payload.styleRef is not None:
-                base["style_ref"] = next_style_ref
-            parsed.variants["base"] = base
-        if next_key != key:
-            current_path.unlink()
-        next_path.write_text(format_character_file(file_slug, parsed.description, parsed.variants))
-    else:
-        if next_key != key:
-            current_path.unlink()
-        next_path.write_text(
-            format_adaptation_file(
-                kind,
-                next_key,
-                next_body,
-                next_mode,
-                next_style_ref,
-                subject_kind=subject_kind,
-            )
+    if next_key != key:
+        current_path.unlink()
+    next_path.write_text(
+        format_adaptation_file(
+            kind,
+            next_key,
+            next_body,
+            next_mode,
+            next_style_ref,
         )
+    )
     if next_key != key:
         metadata = read_metadata(slug)
-        if kind == "characters":
-            record = metadata.characters.pop(key, None)
-            if record is not None:
-                metadata.characters[next_key] = record.model_copy(update={"slug": next_key, "promptPath": relpath(ensure_adaptation(slug), next_path)})
-                write_metadata(slug, metadata)
-        else:
-            groups: dict[AdaptationFileKind, dict[str, AdaptationAssetLink]] = {
-                "locations": metadata.locations,
-            }
-            existing = groups[kind].pop(key, None)
-            if existing is not None:
-                groups[kind][next_key] = existing
-                write_metadata(slug, metadata)
-    if payload.userTags is not None and kind in {"characters", "locations"}:
-        metadata = sync_prompt_links(slug, read_metadata(slug))
-        if kind == "characters":
-            record = metadata.characters.get(next_key)
-            if record is not None:
-                metadata.characters[next_key] = record.model_copy(update={"userTags": list(payload.userTags)})
-                write_metadata(slug, metadata)
-        else:
-            link = metadata.locations.get(next_key)
-            if link is not None:
-                metadata.locations[next_key] = link.model_copy(update={"userTags": list(payload.userTags)})
-                write_metadata(slug, metadata)
+        existing = metadata.locations.pop(key, None)
+        if existing is not None:
+            metadata.locations[next_key] = existing
+            write_metadata(slug, metadata)
+    if payload.userTags is not None:
+        metadata = sync_location_links(slug, read_metadata(slug))
+        link = metadata.locations.get(next_key)
+        if link is not None:
+            metadata.locations[next_key] = link.model_copy(update={"userTags": list(payload.userTags)})
+            write_metadata(slug, metadata)
     files = {item.key: item for item in list_adaptation_files(slug, kind)}
     return files[next_key]
 
@@ -484,32 +482,24 @@ def delete_adaptation_file(slug: str, kind: AdaptationFileKind, key: str) -> Ada
     if not current_path.exists():
         raise HTTPException(status_code=404, detail=f"{kind} file not found: {key}")
     current_path.unlink()
-    metadata = sync_prompt_links(slug, read_metadata(slug))
+    metadata = sync_location_links(slug, read_metadata(slug))
     write_metadata(slug, metadata)
     return status(slug)
 
 
 def reset_character_data(slug: str) -> AdaptationStatus:
-    root = ensure_adaptation(slug)
-    characters_dir = root / "characters"
-    if characters_dir.is_dir():
-        for path in characters_dir.iterdir():
-            if path.is_file():
-                path.unlink()
+    ensure_adaptation(slug)
     sessions = adaptation_dir(slug) / "sessions"
     if sessions.is_dir():
         for path in sessions.iterdir():
             name = path.name
             if not path.is_file():
                 continue
-            if name.startswith("run-character-list") or name.startswith("run-character-extract-"):
+            if name.startswith("run-discover-characters") or name.startswith("run-character-extract-"):
                 path.unlink()
-    metadata = sync_prompt_links(slug, read_metadata(slug))
-    library.sync_entity_tags(
-        slug,
-        character_keys=[],
-        location_keys=list(metadata.locations.keys()),
-    )
+    metadata = read_metadata(slug)
+    metadata.characters = {}
+    write_metadata(slug, metadata)
     return status(slug)
 
 
@@ -548,41 +538,10 @@ def prompt_link(
     )
 
 
-def sync_prompt_links(slug: str, metadata: AdaptationMetadata) -> AdaptationMetadata:
-    from adaptation_workflow.character_file import parse_character_file
-
+def sync_location_links(slug: str, metadata: AdaptationMetadata) -> AdaptationMetadata:
+    """Rebuild location links from locations/prompts/*.md. Characters live in
+    adaptation.json directly and are never touched here."""
     root = ensure_adaptation(slug)
-    old_characters = metadata.characters
-    new_characters: dict[str, CharacterRecord] = {}
-    characters_dir = root / "characters"
-    if characters_dir.is_dir():
-        for char_file in sorted(characters_dir.glob("*.md")):
-            slug_key = char_file.stem
-            prompt_path = relpath(root, char_file)
-            try:
-                parsed = parse_character_file(char_file)
-            except ValueError:
-                continue
-            old_record = old_characters.get(slug_key)
-            old_variants = old_record.variants if old_record else {}
-            new_variants: dict[str, AdaptationAssetLink] = {}
-            for variant_key, section in parsed.variants.items():
-                existing = old_variants.get(variant_key)
-                new_variants[variant_key] = prompt_link(
-                    artifact_kind="character-sheet",
-                    prompt_path=prompt_path,
-                    section=section,
-                    existing=existing,
-                )
-            user_tags = list(old_record.userTags) if old_record else []
-            new_characters[slug_key] = CharacterRecord(
-                slug=slug_key,
-                promptPath=prompt_path,
-                description=parsed.description,
-                userTags=user_tags,
-                variants=new_variants,
-            )
-    metadata.characters = new_characters
     old_locations = metadata.locations
     new_locations: dict[str, AdaptationAssetLink] = {}
     for prompt_file in sorted((root / "locations" / "prompts").glob("*.md")):
@@ -604,7 +563,7 @@ def status(slug: str) -> AdaptationStatus:
     import visual_styles
 
     root = ensure_adaptation(slug)
-    metadata = sync_prompt_links(slug, read_metadata(slug))
+    metadata = sync_location_links(slug, read_metadata(slug))
     metadata, artifact_changed = clear_stale_artifact_assets(slug, metadata)
     if artifact_changed:
         metadata = write_metadata(slug, metadata)
@@ -629,8 +588,8 @@ def status(slug: str) -> AdaptationStatus:
         hasBook=(root / "book.txt").is_file(),
         hasBookSession=_has_book_session(root),
         counts={
-            "characterListLines": count_nonempty_lines(root / "characters" / "list.txt"),
-            "characterFiles": len(list((root / "characters").glob("*.md"))),
+            "characters": len(metadata.characters),
+            "charactersExtracted": sum(1 for record in metadata.characters.values() if character_is_extracted(record)),
             "locationPrompts": len(list((root / "locations" / "prompts").glob("*.md"))),
             "conceptArt": len(concept_cards.list_cards(slug)),
         },
@@ -639,10 +598,6 @@ def status(slug: str) -> AdaptationStatus:
         characters=metadata.characters,
         locations=metadata.locations,
     )
-
-
-def count_nonempty_lines(path: Path) -> int:
-    return sum(1 for line in read_text(path).splitlines() if line.strip())
 
 
 def read_book(slug: str) -> str:

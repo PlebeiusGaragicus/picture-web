@@ -240,11 +240,24 @@ def draft_card_to_canvas(slug: str, card_id: str) -> ConceptNodeResponse:
     return ConceptNodeResponse(nodeId=node_id, canvas=saved)
 
 
+CHARACTER_SHEET_LAYOUT_BLOCK = (
+    "Layout: top row — front full-body, three-quarter full-body, back full-body, "
+    "same neutral standing pose, consistent scale. Bottom row — head close-ups for each expression. "
+    "White background. No text, no labels, no watermarks."
+)
+
+
+def default_character_reference_sheet_prompt() -> str:
+    return (
+        "Character reference sheet\n[describe essential visual traits here]\n"
+        f"{CHARACTER_SHEET_LAYOUT_BLOCK}\n"
+        "Expressions: [list expressions here]"
+    )
+
+
 def default_concept_prompt(subject_kind: ConceptArtSubjectKind) -> str:
     if subject_kind == "character":
-        from adaptation_workflow.character_file import default_character_reference_sheet_prompt
-
-        return default_character_reference_sheet_prompt("New character")
+        return default_character_reference_sheet_prompt()
     return ""
 
 

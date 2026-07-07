@@ -11,12 +11,14 @@ import uvicorn
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+import adaptation
 import adaptation_workflow.config as workflow_config
 import gemini
 import library
 import pi_profiles
 import pi_runtime
 from main import app
+from models import CharacterCreate, CharacterPatch, CharacterVariantPatch
 
 FAKE_PI = Path(__file__).parent / "testdata" / "fake_pi.py"
 
@@ -88,6 +90,29 @@ def wait_for_state(handle: pi_runtime.TaskHandle, states: set[str], timeout: flo
     raise AssertionError(f"Task never reached {states}; state={handle.state} error={handle.error}")
 
 
+BASE_SHEET_PROMPT = (
+    "Character reference sheet. "
+    "Layout: top row — front full-body, three-quarter full-body, back full-body, same neutral standing pose, consistent scale. "
+    "Bottom row — four head close-ups. White background. No text, no labels, no watermarks. "
+    "Expressions: joy, surprise, concern, determination."
+)
+
+
+def register_character(name: str, *, extracted: bool) -> str:
+    record = adaptation.create_character("farm-comic", CharacterCreate(name=name, summary=f"{name} of the farm."))
+    if extracted:
+        adaptation.update_character(
+            "farm-comic",
+            record.slug,
+            CharacterPatch(
+                visualDescription="Sturdy.",
+                performanceNotes="Kind.",
+                variants={"base": CharacterVariantPatch(prompt=BASE_SHEET_PROMPT)},
+            ),
+        )
+    return record.slug
+
+
 def write_book_session_manifest(root: Path) -> None:
     pi_session_file = root / "sessions" / "pi" / "root-session.jsonl"
     pi_session_file.parent.mkdir(parents=True, exist_ok=True)
@@ -116,10 +141,10 @@ def test_profiles_prompts_and_flags(tmp_path, monkeypatch):
     assert steps[0].build_prompt() == f"/skill:read-book {ctx.book_path}"
     assert steps[0].fork_from_book_session is False
 
-    character_list = pi_profiles.get_profile("extract-character-list")
-    steps = list(character_list.plan(ctx, pi_profiles.TaskArgs()))
+    discover = pi_profiles.get_profile("discover-characters")
+    steps = list(discover.plan(ctx, pi_profiles.TaskArgs()))
     assert len(steps) == 1
-    assert steps[0].build_prompt() == f"/skill:character-list {ctx.book_root_abs}"
+    assert steps[0].build_prompt() == "/skill:discover-characters\n"
     assert steps[0].fork_from_book_session is True
 
     with pytest.raises(HTTPException) as exc_info:
@@ -127,11 +152,11 @@ def test_profiles_prompts_and_flags(tmp_path, monkeypatch):
     assert exc_info.value.status_code == 404
 
 
-def test_character_list_precheck_requires_book_session(tmp_path, monkeypatch):
+def test_discover_characters_precheck_requires_book_session(tmp_path, monkeypatch):
     setup_project_with_book(tmp_path, monkeypatch)
     ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
     with pytest.raises(HTTPException) as exc_info:
-        pi_profiles.get_profile("extract-character-list").precheck(ctx, pi_profiles.TaskArgs())
+        pi_profiles.get_profile("discover-characters").precheck(ctx, pi_profiles.TaskArgs())
     assert exc_info.value.status_code == 409
 
 
@@ -148,10 +173,9 @@ def test_extract_character_precheck_target_validation(tmp_path, monkeypatch):
 
     with pytest.raises(HTTPException) as exc_info:
         profile.precheck(ctx, pi_profiles.TaskArgs(target="hero"))
-    assert exc_info.value.status_code == 409  # no list.txt yet
+    assert exc_info.value.status_code == 404  # not registered yet
 
-    (root / "characters").mkdir(parents=True, exist_ok=True)
-    (root / "characters" / "list.txt").write_text("Hero: a brave farmhand\n")
+    register_character("Hero", extracted=False)
     with pytest.raises(HTTPException) as exc_info:
         profile.precheck(ctx, pi_profiles.TaskArgs(target="villain"))
     assert exc_info.value.status_code == 404
@@ -225,38 +249,63 @@ def test_duplicate_profile_run_conflicts(tmp_path, monkeypatch):
     wait_for_state(handle, {"cancelled", "failed", "done"})
 
 
-def test_character_list_forks_book_session_and_syncs_stubs(tmp_path, monkeypatch):
-    setup_project_with_book(tmp_path, monkeypatch)
-    root = library.project_dir("farm-comic") / "adaptation"
+def test_discover_characters_forks_book_session_and_registers(tmp_path, monkeypatch, live_api):
+    client, root = setup_project_with_book(tmp_path, monkeypatch)
     write_book_session_manifest(root)
-    list_path = (root / "characters" / "list.txt").resolve()
-    monkeypatch.setenv("FAKE_PI_WRITE_FILE", f"{list_path}::Hero: a brave farmhand\n")
+    live_api()
+    monkeypatch.setenv(
+        "FAKE_PI_CALL_TOOL",
+        json.dumps(
+            {
+                "tool": "register_character",
+                "method": "POST",
+                "path": "/api/projects/farm-comic/characters",
+                "body": {"name": "Hero", "summary": "A brave farmhand."},
+            }
+        ),
+    )
     manager = use_fake_pi(monkeypatch)
 
-    handle = manager.start_task("farm-comic", "extract-character-list")
+    handle = manager.start_task("farm-comic", "discover-characters")
     assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "done"
 
     argv = json.loads((root / "sessions" / "pi" / "fake-pi-argv.json").read_text())
     assert "--fork" in argv
     assert argv[argv.index("--fork") + 1] == "root-session"
+    env = json.loads((root / "sessions" / "pi" / "fake-pi-env.json").read_text())
+    assert env["PHOTO_WEB_ALLOWED_TOOLS"] == "register_character,list_characters"
 
-    assert list_path.is_file()
-    assert (root / "characters" / "hero.md").is_file()
+    records = client.get("/api/projects/farm-comic/characters").json()
+    assert [record["slug"] for record in records] == ["hero"]
+    assert records[0]["summary"] == "A brave farmhand."
+
+    session = client.get(f"/api/projects/farm-comic/agent-sessions/{handle.id}").json()
+    assert session["kind"] == "discover-characters"
+    assert session["source"]["registeredSlugs"] == ["hero"]
 
 
-def test_character_list_skips_pi_when_list_exists(tmp_path, monkeypatch):
+def test_discover_characters_fails_when_tool_never_called(tmp_path, monkeypatch):
+    _client, root = setup_project_with_book(tmp_path, monkeypatch)
+    write_book_session_manifest(root)
+    manager = use_fake_pi(monkeypatch)  # default fake pi makes no tool call
+
+    handle = manager.start_task("farm-comic", "discover-characters")
+    assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "failed"
+    assert "register_character" in (handle.error or "")
+
+
+def test_discover_characters_skips_pi_when_records_exist(tmp_path, monkeypatch):
     setup_project_with_book(tmp_path, monkeypatch)
     root = library.project_dir("farm-comic") / "adaptation"
     write_book_session_manifest(root)
-    (root / "characters").mkdir(parents=True, exist_ok=True)
-    (root / "characters" / "list.txt").write_text("Hero: a brave farmhand\n")
+    register_character("Hero", extracted=False)
     manager = use_fake_pi(monkeypatch)
 
-    handle = manager.start_task("farm-comic", "extract-character-list")
+    handle = manager.start_task("farm-comic", "discover-characters")
     assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "done"
 
     assert not (root / "sessions" / "pi" / "fake-pi-argv.json").exists()
-    assert (root / "characters" / "hero.md").is_file()
+    assert list(adaptation.read_metadata("farm-comic").characters) == ["hero"]
 
 
 def test_restart_sweep_marks_interrupted_tasks_failed(tmp_path, monkeypatch):
@@ -287,32 +336,27 @@ def test_restart_sweep_marks_interrupted_tasks_failed(tmp_path, monkeypatch):
     assert statuses[0].error == "Interrupted by API restart"
 
 
-VALID_CHARACTER_FILE = (
-    "# {stem}\n\n"
-    "## Summary\n\nA farmhand.\n\n"
-    "## Visual Description\n\nSturdy.\n\n"
-    "## Behaviour, mannerisms and personality\n\nKind.\n\n"
-    "## Continuity Notes\n\nKeep hat.\n\n"
-    "## Source References\n\n- `L001`: \"Hi.\"\n\n"
-    "# base\n"
-    "mode: new-image\n"
-    "style_ref: style-refs/archetype-character.png\n\n"
-    "Character reference sheet. "
-    "Layout: top row — front full-body, three-quarter full-body, back full-body, same neutral standing pose, consistent scale. "
-    "Bottom row — four head close-ups. White background. No text, no labels, no watermarks. "
-    "Expressions: joy, surprise, concern, determination.\n"
-)
-
-
-def test_extract_all_characters_multi_step_progress(tmp_path, monkeypatch):
-    setup_project_with_book(tmp_path, monkeypatch)
-    root = library.project_dir("farm-comic") / "adaptation"
+def test_extract_all_characters_multi_step_progress(tmp_path, monkeypatch, live_api):
+    client, root = setup_project_with_book(tmp_path, monkeypatch)
     write_book_session_manifest(root)
-    (root / "characters").mkdir(parents=True, exist_ok=True)
-    (root / "characters" / "list.txt").write_text("Hero: a brave farmhand\nVillain: a scheming fox\n")
-    # Hero already has a valid file, so its step is a no-op.
-    (root / "characters" / "hero.md").write_text(VALID_CHARACTER_FILE.format(stem="hero"))
-    monkeypatch.setenv("FAKE_PI_WRITE_FROM_PROMPT", VALID_CHARACTER_FILE)
+    # Hero is already extracted, so its step is a no-op; villain gets filled by the tool.
+    register_character("Hero", extracted=True)
+    register_character("Villain", extracted=False)
+    live_api()
+    monkeypatch.setenv(
+        "FAKE_PI_CALL_TOOL",
+        json.dumps(
+            {
+                "tool": "update_character",
+                "method": "PATCH",
+                "path": "/api/projects/farm-comic/characters/{target}",
+                "body": {
+                    "visualDescription": "A scheming fox.",
+                    "variants": {"base": {"prompt": BASE_SHEET_PROMPT}},
+                },
+            }
+        ),
+    )
     manager = use_fake_pi(monkeypatch)
 
     handle = manager.start_task("farm-comic", "extract-all-characters")
@@ -320,29 +364,43 @@ def test_extract_all_characters_multi_step_progress(tmp_path, monkeypatch):
 
     progress = [record["event"] for record in handle.events_since(0) if record["event"]["type"] == "task_progress"]
     assert [event["index"] for event in progress] == [1, 2, 3]
-    assert progress[0]["label"] == "character list"
-    assert progress[1]["label"] == "character file hero"
-    assert progress[2]["label"] == "character file villain"
-    assert (root / "characters" / "villain.md").read_text().startswith("# villain")
+    assert progress[0]["label"] == "discover characters"
+    assert progress[1]["label"] == "extract character hero"
+    assert progress[2]["label"] == "extract character villain"
+
+    villain = adaptation.read_metadata("farm-comic").characters["villain"]
+    assert villain.visualDescription == "A scheming fox."
+    assert villain.variants["base"].prompt == BASE_SHEET_PROMPT
+
+    env = json.loads((root / "sessions" / "pi" / "fake-pi-env.json").read_text())
+    assert env["PHOTO_WEB_ALLOWED_TOOLS"] == "register_character,update_character,list_characters"
+
+
+def test_extract_character_fails_when_tool_never_called(tmp_path, monkeypatch):
+    _client, root = setup_project_with_book(tmp_path, monkeypatch)
+    write_book_session_manifest(root)
+    register_character("Villain", extracted=False)
+    manager = use_fake_pi(monkeypatch)  # default fake pi makes no tool call
+
+    handle = manager.start_task("farm-comic", "extract-character", target="villain")
+    assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "failed"
+    assert "update_character" in (handle.error or "")
 
 
 def test_extract_one_character_skip_and_force(tmp_path, monkeypatch):
     setup_project_with_book(tmp_path, monkeypatch)
     root = library.project_dir("farm-comic") / "adaptation"
     write_book_session_manifest(root)
-    (root / "characters").mkdir(parents=True, exist_ok=True)
-    (root / "characters" / "list.txt").write_text("Hero: a brave farmhand\n")
-    (root / "characters" / "hero.md").write_text(VALID_CHARACTER_FILE.format(stem="hero"))
-    monkeypatch.setenv("FAKE_PI_WRITE_FROM_PROMPT", VALID_CHARACTER_FILE)
+    register_character("Hero", extracted=True)
     manager = use_fake_pi(monkeypatch)
 
-    # Valid file + no force: pi never runs.
+    # Extracted record + no force: pi never runs.
     handle = manager.start_task("farm-comic", "extract-character", target="hero")
     assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "done"
     assert handle.target == "hero"
     assert not (root / "sessions" / "pi" / "fake-pi-argv.json").exists()
 
-    # Force re-runs pi.
+    # Force re-runs pi (the record stays extracted, so delivery validation passes).
     handle = manager.start_task("farm-comic", "extract-character", target="hero", force=True)
     assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "done"
     assert (root / "sessions" / "pi" / "fake-pi-argv.json").exists()
@@ -355,8 +413,8 @@ def test_duplicate_target_conflicts_but_other_target_allowed(tmp_path, monkeypat
     setup_project_with_book(tmp_path, monkeypatch)
     root = library.project_dir("farm-comic") / "adaptation"
     write_book_session_manifest(root)
-    (root / "characters").mkdir(parents=True, exist_ok=True)
-    (root / "characters" / "list.txt").write_text("Hero: a brave farmhand\nVillain: a scheming fox\n")
+    register_character("Hero", extracted=False)
+    register_character("Villain", extracted=False)
     monkeypatch.setenv("FAKE_PI_HANG", "1")
     manager = use_fake_pi(monkeypatch)
 
@@ -497,8 +555,7 @@ def test_pi_task_routes_end_to_end(tmp_path, monkeypatch):
 
 def seed_extracted_character(root) -> None:
     """Panel-prompt drafting is gated on at least one canonical character existing."""
-    (root / "characters").mkdir(parents=True, exist_ok=True)
-    (root / "characters" / "hero.md").write_text(VALID_CHARACTER_FILE.format(stem="hero"))
+    register_character("Hero", extracted=True)
 
 
 def make_story_panels(client, story_texts: list[str]) -> list[str]:
@@ -524,9 +581,7 @@ def test_load_prompt_guide(tmp_path, monkeypatch):
 
 def test_draft_panel_prompt_plan_context_and_guide(tmp_path, monkeypatch):
     client, root = setup_project_with_book(tmp_path, monkeypatch)
-    (root / "characters").mkdir(parents=True, exist_ok=True)
-    (root / "characters" / "list.txt").write_text("Hero: a brave farmhand\n")
-    (root / "characters" / "hero.md").write_text(VALID_CHARACTER_FILE.format(stem="hero"))
+    register_character("Hero", extracted=True)
     panel_ids = make_story_panels(
         client,
         ["The barn at dawn.", "Hero feeds the chickens.", "A fox watches from the fence.", "Rain begins."],
@@ -724,6 +779,105 @@ def test_refine_panel_prompt_end_to_end(tmp_path, monkeypatch, live_api):
     texts = {prompt["id"]: prompt["text"] for prompt in panel["imagePrompts"]}
     assert texts["prompt-001"] == refined
     assert texts["prompt-002"] == "Keep me unchanged."
+
+
+# --- refine character ------------------------------------------------------------
+
+
+def test_refine_character_prechecks(tmp_path, monkeypatch):
+    setup_project_with_book(tmp_path, monkeypatch)
+    root = library.project_dir("farm-comic") / "adaptation"
+    write_book_session_manifest(root)
+    ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
+    profile = pi_profiles.get_profile("refine-character")
+
+    with pytest.raises(HTTPException) as exc_info:
+        profile.precheck(ctx, pi_profiles.TaskArgs(instructions="darker mane"))
+    assert exc_info.value.status_code == 400  # missing target
+
+    with pytest.raises(HTTPException) as exc_info:
+        profile.precheck(ctx, pi_profiles.TaskArgs(target="hero"))
+    assert exc_info.value.status_code == 400  # missing instructions
+
+    with pytest.raises(HTTPException) as exc_info:
+        profile.precheck(ctx, pi_profiles.TaskArgs(target="hero", instructions="darker mane"))
+    assert exc_info.value.status_code == 404  # not registered
+
+    register_character("Hero", extracted=False)
+    with pytest.raises(HTTPException) as exc_info:
+        profile.precheck(ctx, pi_profiles.TaskArgs(target="hero", instructions="darker mane"))
+    assert exc_info.value.status_code == 409  # registered but not extracted
+
+    adaptation.update_character(
+        "farm-comic",
+        "hero",
+        CharacterPatch(visualDescription="Sturdy.", variants={"base": CharacterVariantPatch(prompt=BASE_SHEET_PROMPT)}),
+    )
+    profile.precheck(ctx, pi_profiles.TaskArgs(target="hero", instructions="darker mane"))
+
+
+def test_refine_character_end_to_end(tmp_path, monkeypatch, live_api):
+    client, root = setup_project_with_book(tmp_path, monkeypatch)
+    write_book_session_manifest(root)
+    register_character("Hero", extracted=True)
+    live_api()
+    monkeypatch.setenv(
+        "FAKE_PI_CALL_TOOL",
+        json.dumps(
+            {
+                "tool": "update_character",
+                "method": "PATCH",
+                "path": "/api/projects/farm-comic/characters/hero",
+                "body": {
+                    "visualDescription": "Sturdy, with a prominent scar over the left eye.",
+                    "variants": {
+                        "post-duel": {
+                            "label": "Post-duel",
+                            "storyContext": "After the duel in chapter 2.",
+                            "mode": "edit-reference",
+                            "prompt": "Same design as the reference image, add the scar. " + BASE_SHEET_PROMPT,
+                        }
+                    },
+                },
+            }
+        ),
+    )
+    manager = use_fake_pi(monkeypatch)
+
+    handle = manager.start_task(
+        "farm-comic",
+        "refine-character",
+        target="hero",
+        instructions="Make the scar prominent and add a post-duel variant",
+    )
+    assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "done"
+
+    # Refinement forks the warm book session.
+    argv = json.loads((root / "sessions" / "pi" / "fake-pi-argv.json").read_text())
+    assert "--fork" in argv
+    env = json.loads((root / "sessions" / "pi" / "fake-pi-env.json").read_text())
+    assert env["PHOTO_WEB_ALLOWED_TOOLS"] == "update_character,list_characters"
+
+    hero = adaptation.read_metadata("farm-comic").characters["hero"]
+    assert "prominent scar" in hero.visualDescription
+    assert hero.variants["post-duel"].storyContext == "After the duel in chapter 2."
+
+    session = client.get(f"/api/projects/farm-comic/agent-sessions/{handle.id}").json()
+    assert session["kind"] == "refine-character"
+    assert session["source"]["characterSlug"] == "hero"
+
+
+def test_refine_character_fails_when_tool_never_called(tmp_path, monkeypatch):
+    _client, root = setup_project_with_book(tmp_path, monkeypatch)
+    write_book_session_manifest(root)
+    register_character("Hero", extracted=True)
+    manager = use_fake_pi(monkeypatch)  # default fake pi makes no tool call
+
+    handle = manager.start_task(
+        "farm-comic", "refine-character", target="hero", instructions="darker mane"
+    )
+    assert wait_for_state(handle, {"done", "failed", "cancelled"}) == "failed"
+    assert "update_character" in (handle.error or "")
 
 
 # --- image prompt endpoints ------------------------------------------------------

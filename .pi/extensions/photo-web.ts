@@ -18,14 +18,15 @@ import { Type } from "typebox";
 const API = process.env.PHOTO_WEB_API ?? "http://127.0.0.1:8787";
 const PROJECT = process.env.PHOTO_WEB_PROJECT ?? "";
 
-async function callApi(method: string, path: string, body: unknown): Promise<string> {
+async function callApi(method: string, path: string, body?: unknown): Promise<string> {
   if (!PROJECT) {
     throw new Error("PHOTO_WEB_PROJECT is not set; the runtime must provide the project slug");
   }
   const response = await fetch(`${API}${path}`, {
     method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    ...(body === undefined
+      ? {}
+      : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
   });
   const text = await response.text();
   if (!response.ok) {
@@ -95,6 +96,95 @@ const TOOLS: Record<string, ToolDefinition> = {
         { text: params.prompt },
       );
       return { content: [{ type: "text", text: `Replaced: ${result}` }], details: {} };
+    },
+  },
+  register_character: {
+    name: "register_character",
+    label: "Register character",
+    description:
+      "Register one character from the book as a new character record. " +
+      "Call exactly once per character; use update_character afterwards to fill in details.",
+    parameters: Type.Object({
+      name: Type.String({ description: "Canonical display name, e.g. \"Pinkie Pie\"" }),
+      summary: Type.String({
+        description: "One-to-three sentence summary: who they are and why they matter in the story",
+      }),
+    }),
+    async execute(_toolCallId, params) {
+      const result = await callApi("POST", `/api/projects/${PROJECT}/characters`, {
+        name: params.name,
+        summary: params.summary,
+      });
+      return { content: [{ type: "text", text: `Registered: ${result}` }], details: {} };
+    },
+  },
+  list_characters: {
+    name: "list_characters",
+    label: "List characters",
+    description:
+      "List every registered character record: slug, name, extraction state, and variant keys. " +
+      "Use the returned slugs when calling update_character.",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params) {
+      const result = await callApi("GET", `/api/projects/${PROJECT}/characters`);
+      const records = JSON.parse(result) as Array<{
+        slug: string;
+        name: string;
+        visualDescription: string;
+        variants: Record<string, { prompt: string }>;
+      }>;
+      const lines = records.map((record) => {
+        const extracted = record.visualDescription.trim() && record.variants.base?.prompt?.trim();
+        const variantKeys = Object.keys(record.variants).join(", ") || "none";
+        return `${record.slug} | ${record.name || record.slug} | ${extracted ? "extracted" : "empty"} | variants: ${variantKeys}`;
+      });
+      const text = lines.length ? lines.join("\n") : "(no characters registered)";
+      return { content: [{ type: "text", text }], details: {} };
+    },
+  },
+  update_character: {
+    name: "update_character",
+    label: "Update character",
+    description:
+      "Patch one registered character record: any of the description fields and/or variants. " +
+      "Only include the fields you are changing; omitted fields keep their current value. " +
+      "Variants are upserted by key ('base' plus optional durable-look variants like 'aged' or 'post-duel').",
+    parameters: Type.Object({
+      slug: Type.String({ description: "Character slug from the task context or list_characters" }),
+      name: Type.Optional(Type.String({ description: "Canonical display name" })),
+      summary: Type.Optional(Type.String({ description: "Who they are and why they matter" })),
+      visualDescription: Type.Optional(
+        Type.String({ description: "Source-supported appearance: body, face, clothing, silhouette, recurring visual traits" }),
+      ),
+      performanceNotes: Type.Optional(
+        Type.String({ description: "Visual acting: temperament, speech, posture, recurring mannerisms and expressions" }),
+      ),
+      continuityNotes: Type.Optional(
+        Type.String({ description: "Traits that must stay consistent across panels and variants; open design choices" }),
+      ),
+      variants: Type.Optional(
+        Type.Record(
+          Type.String(),
+          Type.Object({
+            label: Type.Optional(Type.String({ description: "Short human label, e.g. \"Post-duel\"" })),
+            storyContext: Type.Optional(
+              Type.String({ description: "When this look applies in the story, e.g. \"after the duel in chapter 2\"" }),
+            ),
+            mode: Type.Optional(StringEnum(["new-image", "edit-reference"] as const)),
+            styleRef: Type.Optional(Type.String()),
+            prompt: Type.Optional(Type.String({ description: "Complete reference-sheet prompt with layout block and Expressions line" })),
+          }),
+          { description: "Variant patches keyed by variant slug; 'base' is required for a complete character" },
+        ),
+      ),
+      removeVariants: Type.Optional(
+        Type.Array(Type.String(), { description: "Variant keys to delete from the record" }),
+      ),
+    }),
+    async execute(_toolCallId, params) {
+      const { slug, ...patch } = params as { slug: string } & Record<string, unknown>;
+      const result = await callApi("PATCH", `/api/projects/${PROJECT}/characters/${slug}`, patch);
+      return { content: [{ type: "text", text: `Updated: ${result}` }], details: {} };
     },
   },
   create_concept_card: {

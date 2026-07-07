@@ -11,6 +11,7 @@ more.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -20,6 +21,7 @@ from fastapi import HTTPException
 import adaptation
 from adaptation_workflow.config import AdaptationContext, BookSession
 from common import utc_now
+from models import CharacterRecord
 
 
 PROMPT_GUIDES_DIR = Path(__file__).resolve().parent / "prompt_guides"
@@ -70,7 +72,8 @@ class TaskProfile:
     # Raise HTTPException when the task must not start.
     precheck: Callable[[AdaptationContext, TaskArgs], None]
     # Lazily yields steps; resumed after each step completes, so it can
-    # read files produced by prior steps (extract-all reads list.txt).
+    # read state produced by prior steps (extract-all reads the records
+    # registered by its discovery step).
     plan: Callable[[AdaptationContext, TaskArgs], Iterator[TaskStep]]
     accepts_target: bool = False
     accepts_instructions: bool = False
@@ -90,10 +93,6 @@ def _no_precheck(ctx: AdaptationContext, args: TaskArgs) -> None:
 def _require_book_session(ctx: AdaptationContext, args: TaskArgs | None = None) -> None:
     if not adaptation._has_book_session(ctx.book_root_abs):
         raise HTTPException(status_code=409, detail="Load book session before running this task")
-
-
-def _character_list_path(ctx: AdaptationContext) -> Path:
-    return ctx.book_root_abs / "characters" / "list.txt"
 
 
 # --- read-book -------------------------------------------------------------
@@ -118,81 +117,106 @@ def _read_book_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[TaskStep
     )
 
 
-# --- character list ----------------------------------------------------------
+# --- character discovery -------------------------------------------------------
 
 
-def _character_list_step(ctx: AdaptationContext) -> TaskStep:
+def _registered_characters(ctx: AdaptationContext) -> dict[str, CharacterRecord]:
+    return adaptation.read_metadata(ctx.project_slug).characters
+
+
+def _character_record_context(record: CharacterRecord) -> str:
+    """Editable-fields-only view of a record for agent prompts (no asset state)."""
+    return json.dumps(
+        {
+            "slug": record.slug,
+            "name": record.name,
+            "summary": record.summary,
+            "visualDescription": record.visualDescription,
+            "performanceNotes": record.performanceNotes,
+            "continuityNotes": record.continuityNotes,
+            "variants": {
+                key: {
+                    "label": variant.label,
+                    "storyContext": variant.storyContext,
+                    "mode": variant.mode,
+                    "styleRef": variant.styleRef,
+                    "prompt": variant.prompt,
+                }
+                for key, variant in record.variants.items()
+            },
+        },
+        indent=2,
+    )
+
+
+def _discover_characters_step(ctx: AdaptationContext, *, force: bool) -> TaskStep:
+    slugs_before: set[str] = set()
+
     def build_prompt() -> str | None:
-        if _character_list_path(ctx).is_file():
+        existing = _registered_characters(ctx)
+        slugs_before.update(existing)
+        if existing and not force:
             return None
-        return f"/skill:character-list {ctx.book_root_abs}"
+        lines = ["/skill:discover-characters"]
+        if existing:
+            lines.extend(["", "Characters already registered (do NOT register these again):"])
+            for slug, record in sorted(existing.items()):
+                summary = record.summary.strip()
+                lines.append(f"- {record.name or slug}: {summary}" if summary else f"- {record.name or slug}")
+        return "\n".join(lines).rstrip() + "\n"
 
-    def on_success(result: PiTaskResultInfo | None) -> None:
-        from adaptation_workflow.character_file import sync_character_stubs_from_list
+    def on_success(result: PiTaskResultInfo | None) -> dict[str, Any] | None:
+        if result is None:
+            return None
+        new_slugs = set(_registered_characters(ctx)) - slugs_before
+        if not new_slugs:
+            raise RuntimeError("Agent finished without calling register_character")
+        return {"registeredSlugs": sorted(new_slugs)}
 
-        if not _character_list_path(ctx).is_file():
-            raise RuntimeError(f"Missing {_character_list_path(ctx)}")
-        sync_character_stubs_from_list(ctx.book_root_abs)
-
-    return TaskStep(name="character list", build_prompt=build_prompt, on_success=on_success)
+    return TaskStep(name="discover characters", build_prompt=build_prompt, on_success=on_success)
 
 
-def _character_list_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[TaskStep]:
-    yield _character_list_step(ctx)
+def _discover_characters_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[TaskStep]:
+    yield _discover_characters_step(ctx, force=args.force)
 
 
 # --- character extract --------------------------------------------------------
 
 
-def _character_file_is_valid(path: Path) -> bool:
-    from adaptation_workflow.validate import ValidationError, validate_character_file
-
-    if not path.is_file():
-        return False
-    try:
-        validate_character_file(path, require_variants=True)
-    except ValidationError:
-        return False
-    return True
-
-
 def _extract_character_step(ctx: AdaptationContext, character_slug: str, *, force: bool) -> TaskStep:
-    out = ctx.book_root_abs / "characters" / f"{character_slug}.md"
-
     def build_prompt() -> str | None:
-        from adaptation_workflow.character_file import find_character_list_line
-
-        if _character_file_is_valid(out) and not force:
+        record = _registered_characters(ctx).get(character_slug)
+        if record is None:
+            raise RuntimeError(f"Character not registered: {character_slug}")
+        if adaptation.character_is_extracted(record) and not force:
             return None
-        list_line = find_character_list_line(_character_list_path(ctx), character_slug)
-        if list_line is None:
-            raise RuntimeError(f"Character slug not found in list.txt: {character_slug}")
-        if out.is_file():
-            out.unlink()
-        return write_multiline_prompt(f"/skill:character-file {ctx.book_root_abs} {out}", list_line)
+        payload = "\n".join(
+            [
+                "Current character record (fill it in with update_character):",
+                _character_record_context(record),
+            ]
+        )
+        return write_multiline_prompt(f"/skill:extract-character {character_slug}", payload)
 
     def on_success(result: PiTaskResultInfo | None) -> None:
-        from adaptation_workflow.validate import ValidationError, validate_character_file
+        record = _registered_characters(ctx).get(character_slug)
+        if record is None:
+            raise RuntimeError(f"Character disappeared during extract: {character_slug}")
+        if not adaptation.character_is_extracted(record):
+            raise RuntimeError(
+                f"Agent finished without delivering an extracted record for {character_slug} "
+                "(update_character must set visualDescription and a base variant prompt)"
+            )
 
-        try:
-            validate_character_file(out, require_variants=True)
-        except ValidationError as exc:
-            raise RuntimeError(str(exc)) from exc
-
-    return TaskStep(name=f"character file {character_slug}", build_prompt=build_prompt, on_success=on_success)
+    return TaskStep(name=f"extract character {character_slug}", build_prompt=build_prompt, on_success=on_success)
 
 
 def _extract_character_precheck(ctx: AdaptationContext, args: TaskArgs) -> None:
-    from adaptation_workflow.character_file import character_list_lines
-
     _require_book_session(ctx)
     if not args.target:
         raise HTTPException(status_code=400, detail="extract-character requires a target character slug")
-    if not _character_list_path(ctx).is_file():
-        raise HTTPException(status_code=409, detail="List characters before extract")
-    listed = {slug for slug, _line in character_list_lines(_character_list_path(ctx))}
-    if args.target not in listed:
-        raise HTTPException(status_code=404, detail=f"Character not in list: {args.target}")
+    if args.target not in _registered_characters(ctx):
+        raise HTTPException(status_code=404, detail=f"Character not registered: {args.target}")
 
 
 def _extract_character_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[TaskStep]:
@@ -201,13 +225,63 @@ def _extract_character_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[
 
 
 def _extract_all_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[TaskStep]:
-    from adaptation_workflow.character_file import character_list_lines
-
-    yield _character_list_step(ctx)
-    # Resumed after the list step, so list.txt exists (or the task failed).
-    slugs = [slug for slug, _line in character_list_lines(_character_list_path(ctx))]
-    for character_slug in slugs:
+    yield _discover_characters_step(ctx, force=False)
+    # Resumed after the discovery step, so records exist (or the task failed).
+    for character_slug in sorted(_registered_characters(ctx)):
         yield _extract_character_step(ctx, character_slug, force=False)
+
+
+# --- character refine -----------------------------------------------------------
+
+
+def _refine_character_precheck(ctx: AdaptationContext, args: TaskArgs) -> None:
+    _require_book_session(ctx)
+    if not args.target:
+        raise HTTPException(status_code=400, detail="refine-character requires a target character slug")
+    if not (args.instructions or "").strip():
+        raise HTTPException(status_code=400, detail="refine-character requires feedback instructions")
+    record = _registered_characters(ctx).get(args.target)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Character not registered: {args.target}")
+    if not adaptation.character_is_extracted(record):
+        raise HTTPException(status_code=409, detail=f"Extract {args.target} before refining")
+
+
+def _refine_character_plan(ctx: AdaptationContext, args: TaskArgs) -> Iterator[TaskStep]:
+    assert args.target is not None
+    character_slug = args.target
+    feedback = (args.instructions or "").strip()
+    context_before: dict[str, str] = {}
+
+    def build_prompt() -> str:
+        record = _registered_characters(ctx).get(character_slug)
+        if record is None:
+            raise RuntimeError(f"Character not registered: {character_slug}")
+        context_before["record"] = _character_record_context(record)
+        lines = [
+            f"/skill:refine-character {character_slug}",
+            "",
+            "Current character record (revise it with update_character):",
+            context_before["record"],
+            "",
+            "User feedback (apply this):",
+            feedback,
+        ]
+        return "\n".join(lines).rstrip() + "\n"
+
+    def on_success(result: PiTaskResultInfo | None) -> dict[str, Any]:
+        record = _registered_characters(ctx).get(character_slug)
+        if record is None:
+            raise RuntimeError(f"Character disappeared while refining: {character_slug}")
+        if _character_record_context(record) == context_before.get("record"):
+            raise RuntimeError("Agent finished without calling update_character")
+        return {"characterSlug": character_slug}
+
+    yield TaskStep(
+        name=f"refine character {character_slug}",
+        build_prompt=build_prompt,
+        on_success=on_success,
+    )
 
 
 # --- concept art suggest --------------------------------------------------------
@@ -240,9 +314,12 @@ def _suggest_concept_plan(ctx: AdaptationContext, subject_kind: str) -> Iterator
             *_concept_context_lines(ctx.project_slug),
         ]
         if subject_kind == "character":
-            list_path = _character_list_path(ctx)
-            if list_path.is_file() and list_path.read_text().strip():
-                context_lines.extend(["", "Main cast already covered in characters/list.txt:", list_path.read_text().rstrip()])
+            characters = _registered_characters(ctx)
+            if characters:
+                context_lines.extend(["", "Main cast already covered by registered character records:"])
+                for slug_key, record in sorted(characters.items()):
+                    summary = record.summary.strip()
+                    context_lines.append(f"- {record.name or slug_key}: {summary}" if summary else f"- {record.name or slug_key}")
         else:
             locations_index = ctx.book_root_abs / "locations" / "index.md"
             if locations_index.is_file() and locations_index.read_text().strip():
@@ -336,7 +413,7 @@ def _panel_prompt_context_lines(ctx: AdaptationContext, panel: Any, document: An
     look_lines: list[str] = []
     for slug, record in status.characters.items():
         base = record.variants.get("base")
-        look = (base.prompt if base else "") or record.description
+        look = (base.prompt if base else "") or record.visualDescription or record.summary
         if look.strip():
             look_lines.append(f"- {slug}: {_clip(look, 400)}")
     if look_lines:
@@ -382,7 +459,7 @@ def _require_extracted_characters(ctx: AdaptationContext) -> None:
     """Process gate: panel prompts need a canonical cast to reference."""
     status = adaptation.status(ctx.project_slug)
     has_looks = any(
-        ((record.variants.get("base").prompt if record.variants.get("base") else "") or record.description).strip()
+        ((record.variants.get("base").prompt if record.variants.get("base") else "") or record.visualDescription).strip()
         for record in status.characters.values()
     )
     if not has_looks:
@@ -511,11 +588,12 @@ READ_BOOK = TaskProfile(
     plan=_read_book_plan,
 )
 
-EXTRACT_CHARACTER_LIST = TaskProfile(
-    id="extract-character-list",
-    title=lambda target: "List characters",
+DISCOVER_CHARACTERS = TaskProfile(
+    id="discover-characters",
+    title=lambda target: "Find characters",
     precheck=_require_book_session,
-    plan=_character_list_plan,
+    plan=_discover_characters_plan,
+    tools=("register_character", "list_characters"),
 )
 
 EXTRACT_CHARACTER = TaskProfile(
@@ -524,6 +602,7 @@ EXTRACT_CHARACTER = TaskProfile(
     precheck=_extract_character_precheck,
     plan=_extract_character_plan,
     accepts_target=True,
+    tools=("update_character", "list_characters"),
 )
 
 EXTRACT_ALL_CHARACTERS = TaskProfile(
@@ -531,6 +610,17 @@ EXTRACT_ALL_CHARACTERS = TaskProfile(
     title=lambda target: "Extract all characters",
     precheck=_require_book_session,
     plan=_extract_all_plan,
+    tools=("register_character", "update_character", "list_characters"),
+)
+
+REFINE_CHARACTER = TaskProfile(
+    id="refine-character",
+    title=lambda target: f"Refine {target}" if target else "Refine character",
+    precheck=_refine_character_precheck,
+    plan=_refine_character_plan,
+    accepts_target=True,
+    accepts_instructions=True,
+    tools=("update_character", "list_characters"),
 )
 
 SUGGEST_CONCEPT_CHARACTER = TaskProfile(
@@ -573,9 +663,10 @@ PROFILES: dict[str, TaskProfile] = {
     profile.id: profile
     for profile in (
         READ_BOOK,
-        EXTRACT_CHARACTER_LIST,
+        DISCOVER_CHARACTERS,
         EXTRACT_CHARACTER,
         EXTRACT_ALL_CHARACTERS,
+        REFINE_CHARACTER,
         SUGGEST_CONCEPT_CHARACTER,
         SUGGEST_CONCEPT_LOCATION,
         DRAFT_PANEL_PROMPT,

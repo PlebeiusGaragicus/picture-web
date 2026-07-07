@@ -9,7 +9,7 @@ import pytest
 
 from adaptation_workflow.events import clip_text, project_event
 from common import slugify as slugify_name
-from adaptation_workflow.validate import ValidationError, validate_character_file
+from models import CharacterRecord, CharacterVariant
 
 
 def test_slugify_name() -> None:
@@ -67,45 +67,92 @@ def _make_ctx(tmp_path: Path):
     )
 
 
-VALID_CHARACTER_FILE = (
-    "# {stem}\n\n"
-    "## Summary\n\nA yellow filly.\n\n"
-    "## Visual Description\n\nYellow coat.\n\n"
-    "## Behaviour, mannerisms and personality\n\nShy.\n\n"
-    "## Continuity Notes\n\nStay yellow.\n\n"
-    "## Source References\n\n- `L001`: \"Hi.\"\n\n"
-    "# base\n"
-    "mode: new-image\n"
-    "style_ref: style-refs/archetype-character.png\n\n"
-    "Character reference sheet. "
-    "Layout: top row — front full-body, three-quarter full-body, back full-body, same neutral standing pose, consistent scale. "
-    "Bottom row — four head close-ups. White background. No text, no labels, no watermarks. "
-    "Expressions: joy, surprise, concern, determination.\n"
-)
+def _registered_record(slug: str, *, extracted: bool) -> CharacterRecord:
+    if not extracted:
+        return CharacterRecord(slug=slug, name=slug.title(), summary="A yellow filly.")
+    return CharacterRecord(
+        slug=slug,
+        name=slug.title(),
+        summary="A yellow filly.",
+        visualDescription="Yellow coat.",
+        performanceNotes="Shy.",
+        continuityNotes="Stay yellow.",
+        variants={"base": CharacterVariant(prompt="Character reference sheet.", status="ready")},
+    )
 
 
-def test_extract_character_step_uses_list_line(tmp_path: Path) -> None:
-    from adaptation_workflow.character_file import format_character_stub
+def test_discover_characters_step(tmp_path: Path, monkeypatch) -> None:
+    from pi_profiles import PiTaskResultInfo, _discover_characters_step
+
+    ctx = _make_ctx(tmp_path)
+    records: dict[str, CharacterRecord] = {}
+    monkeypatch.setattr("pi_profiles._registered_characters", lambda _ctx: dict(records))
+
+    step = _discover_characters_step(ctx, force=False)
+    prompt = step.build_prompt()
+    assert prompt is not None
+    assert "/skill:discover-characters" in prompt
+
+    # Agent never calls register_character -> on_success fails.
+    with pytest.raises(RuntimeError, match="register_character"):
+        step.on_success(PiTaskResultInfo())
+
+    records["gilda"] = _registered_record("gilda", extracted=False)
+    assert step.on_success(PiTaskResultInfo()) == {"registeredSlugs": ["gilda"]}
+
+    # Existing records without force means there is nothing for pi to do.
+    assert _discover_characters_step(ctx, force=False).build_prompt() is None
+    force_prompt = _discover_characters_step(ctx, force=True).build_prompt()
+    assert force_prompt is not None
+    assert "do NOT register these again" in force_prompt
+    assert "Gilda: A yellow filly." in force_prompt
+
+
+def test_extract_character_step_uses_record(tmp_path: Path, monkeypatch) -> None:
     from pi_profiles import _extract_character_step
 
     ctx = _make_ctx(tmp_path)
-    characters = ctx.book_root_abs / "characters"
-    characters.mkdir(parents=True)
-    (characters / "list.txt").write_text("Gilda: A yellow filly.\n")
-    (characters / "gilda.md").write_text(format_character_stub("gilda", "Gilda: A yellow filly."))
+    records = {"gilda": _registered_record("gilda", extracted=False)}
+    monkeypatch.setattr("pi_profiles._registered_characters", lambda _ctx: dict(records))
 
     step = _extract_character_step(ctx, "gilda", force=False)
     prompt = step.build_prompt()
     assert prompt is not None
-    assert "/skill:character-file" in prompt
-    assert "Gilda: A yellow filly." in prompt
+    assert "/skill:extract-character gilda" in prompt
+    assert "A yellow filly." in prompt
 
-    (characters / "gilda.md").write_text(VALID_CHARACTER_FILE.format(stem="gilda"))
+    # Agent never delivers -> on_success fails on the still-empty record.
+    with pytest.raises(RuntimeError, match="update_character"):
+        step.on_success(None)
+
+    records["gilda"] = _registered_record("gilda", extracted=True)
     step.on_success(None)
 
-    # A valid file without force means there is nothing for pi to do.
+    # An extracted record without force means there is nothing for pi to do.
     assert _extract_character_step(ctx, "gilda", force=False).build_prompt() is None
     assert _extract_character_step(ctx, "gilda", force=True).build_prompt() is not None
+
+
+def test_refine_character_plan(tmp_path: Path, monkeypatch) -> None:
+    from pi_profiles import TaskArgs, _refine_character_plan
+
+    ctx = _make_ctx(tmp_path)
+    records = {"gilda": _registered_record("gilda", extracted=True)}
+    monkeypatch.setattr("pi_profiles._registered_characters", lambda _ctx: dict(records))
+
+    steps = list(_refine_character_plan(ctx, TaskArgs(target="gilda", instructions="Make the scar prominent")))
+    assert len(steps) == 1
+    prompt = steps[0].build_prompt()
+    assert prompt is not None
+    assert "/skill:refine-character gilda" in prompt
+    assert "Make the scar prominent" in prompt
+
+    # Unchanged record -> agent never called update_character.
+    with pytest.raises(RuntimeError, match="update_character"):
+        steps[0].on_success(None)
+
+    records["gilda"] = records["gilda"].model_copy(update={"visualDescription": "Yellow coat, prominent scar."})
+    assert steps[0].on_success(None) == {"characterSlug": "gilda"}
 
 
 def test_suggest_concept_character_plan(tmp_path: Path, monkeypatch) -> None:
@@ -114,9 +161,10 @@ def test_suggest_concept_character_plan(tmp_path: Path, monkeypatch) -> None:
     from pi_profiles import _suggest_concept_plan
 
     ctx = _make_ctx(tmp_path)
-    characters = ctx.book_root_abs / "characters"
-    characters.mkdir(parents=True)
-    (characters / "list.txt").write_text("Pinkie Pie: Party pony.\n")
+    monkeypatch.setattr(
+        "pi_profiles._registered_characters",
+        lambda _ctx: {"pinkie-pie": _registered_record("pinkie-pie", extracted=False).model_copy(update={"name": "Pinkie Pie", "summary": "Party pony."})},
+    )
 
     cards: list[SimpleNamespace] = []
     monkeypatch.setattr("concept_cards.existing_concept_summaries", lambda _slug: [])
@@ -163,42 +211,6 @@ def test_suggest_concept_location_plan(tmp_path: Path, monkeypatch) -> None:
     cards.append(SimpleNamespace(id="card-loc", createdAt="2026-01-01T00:00:00Z"))
     update = steps[0].on_success(None)
     assert update == {"outputCardId": "card-loc", "subjectKind": "location"}
-
-
-def test_validate_character_file_stub_and_full(tmp_path: Path) -> None:
-    from adaptation_workflow.character_file import format_character_stub
-    from adaptation_workflow.validate import (
-        ValidationError,
-        validate_character_file,
-        validate_character_stub,
-    )
-
-    stub = tmp_path / "hero.md"
-    stub.write_text(format_character_stub("hero", "Hero: A hero."))
-    validate_character_stub(stub)
-
-    full = tmp_path / "pinkie-pie.md"
-    full.write_text(
-        "# pinkie-pie\n\n"
-        "## Summary\n\nPinkie Pie summary.\n\n"
-        "## Visual Description\n\nPink body.\n\n"
-        "## Behaviour, mannerisms and personality\n\nBouncy.\n\n"
-        "## Continuity Notes\n\nStay pink.\n\n"
-        "## Source References\n\n- `L001`: \"Hi.\"\n\n"
-        "# base\n"
-        "mode: new-image\n"
-        "style_ref: style-refs/archetype-character.png\n\n"
-        "Character reference sheet for Pinkie Pie. "
-        "Layout: top row — front full-body, three-quarter full-body, back full-body, same neutral standing pose, consistent scale. "
-        "Bottom row — four head close-ups. White background. No text, no labels, no watermarks. "
-        "Expressions: joy, surprise, concern, determination.\n"
-    )
-    validate_character_file(full, require_variants=True)
-
-    bad = tmp_path / "bad.md"
-    bad.write_text("# bad\n\n## Summary\n\nOnly summary.\n")
-    with pytest.raises(ValidationError):
-        validate_character_file(bad, require_variants=False)
 
 
 def test_project_event_lifecycle_passthrough() -> None:

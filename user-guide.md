@@ -24,9 +24,13 @@ Concept art is a *style* input — it does not stand in for canonical references
 
 ## 4. Extract characters and locations — Characters view
 
-Run **Extract characters** (list, then per-character or extract-all). This produces
-canonical records: a description, a base character-sheet prompt, and location
-prompts. Review and edit the files — these slugs and look descriptors are what
+Run **Find characters** to register the cast, then **Extract** each character
+(or **Extract all**). This fills each character record: summary, visual
+description, performance notes, continuity notes, and reference-sheet prompt
+variants (base plus durable looks like young/adult or post-injury, each with a
+story context). Review and edit records in the structured editor; use the
+**Refine** feedback box to have pi revise a record ("make her scar more
+prominent, add a post-duel variant"). These slugs and look descriptors are what
 panel prompts are built from.
 
 **Gate:** panel prompt drafting is blocked until at least one character with look
