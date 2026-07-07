@@ -579,9 +579,16 @@ def validate_panel_entities(
     if not character_slugs and not location_slug:
         return
     status = adaptation.status(slug)
-    unknown_characters = [item for item in (character_slugs or []) if item not in status.characters]
+    # A panel may reference a specific durable look via its variant flat key
+    # (e.g. "hero-young"); the bare character slug means the base look.
+    valid_characters = {
+        adaptation.variant_entity_key(character_slug, variant_key)
+        for character_slug, record in status.characters.items()
+        for variant_key in record.variants
+    } | set(status.characters)
+    unknown_characters = [item for item in (character_slugs or []) if item not in valid_characters]
     if unknown_characters:
-        known = ", ".join(sorted(status.characters)) or "(none extracted yet)"
+        known = ", ".join(sorted(valid_characters)) or "(none extracted yet)"
         raise HTTPException(
             status_code=422,
             detail=f"Unknown character slugs: {', '.join(unknown_characters)}. Known characters: {known}",

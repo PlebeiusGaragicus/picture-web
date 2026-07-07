@@ -273,23 +273,16 @@
   font-size: 0.78rem;
 }
 
-.character-edit-variant-remove {
+.character-edit-variant-head-actions {
   margin-left: auto;
+  display: flex;
+  gap: var(--space-3);
 }
 
 .character-edit-variant-meta {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-4);
-}
-
-.character-edit-variant-advanced summary {
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.character-edit-variant-advanced[open] summary {
-  margin-bottom: var(--space-3);
 }
 
 .character-edit-variant-add {

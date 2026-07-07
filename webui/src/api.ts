@@ -170,6 +170,10 @@ export const api = {
     request<AdaptationStatus>(`/api/projects/${slug}/characters/${characterSlug}`, {
       method: 'DELETE',
     }),
+  draftCharacterVariant: (slug: string, characterSlug: string, variantKey: string) =>
+    request<AdaptationCanvasImportResponse>(`/api/projects/${slug}/characters/${characterSlug}/variants/${variantKey}/draft-to-canvas`, {
+      method: 'POST',
+    }),
   resetCharacterData: (slug: string) =>
     request<AdaptationStatus>(`/api/projects/${slug}/adaptation/characters/reset`, {
       method: 'POST',

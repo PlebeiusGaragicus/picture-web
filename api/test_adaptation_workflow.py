@@ -9,7 +9,7 @@ import pytest
 
 from adaptation_workflow.events import clip_text, project_event
 from common import slugify as slugify_name
-from models import CharacterRecord, CharacterVariant
+from models import CharacterRecord, EntityVariant
 
 
 def test_slugify_name() -> None:
@@ -77,7 +77,7 @@ def _registered_record(slug: str, *, extracted: bool) -> CharacterRecord:
         visualDescription="Yellow coat.",
         performanceNotes="Shy.",
         continuityNotes="Stay yellow.",
-        variants={"base": CharacterVariant(prompt="Character reference sheet.", status="ready")},
+        variants={"base": EntityVariant(prompt="Character reference sheet.")},
     )
 
 

@@ -7,9 +7,9 @@ import { formatRequestError } from '../formatError';
 import { SYSTEM_TAGS, isCharacterCanvasNode, partitionAssetTagIds } from '../canvas/shared';
 import { CharacterEditModal, type CharacterDraft } from './CharacterEditModal';
 import { characterDisplayName, characterHubState, characterIsExtracted, slugifyKey } from './characterShared';
-import type { AdaptationStatus, Asset, CanvasDocument, CharacterRecord, CanvasNode, CharacterVariant, TagDefinition } from '../types';
+import type { AdaptationStatus, Asset, CanvasDocument, CharacterRecord, CanvasNode, EntityVariant, TagDefinition } from '../types';
 
-function latestAssetForVariant(variant: CharacterVariant, assetsById: Map<string, Asset>) {
+function latestAssetForVariant(variant: EntityVariant, assetsById: Map<string, Asset>) {
   const assetId = variant.activeAssetId ?? variant.assetIds[variant.assetIds.length - 1];
   return assetId ? assetsById.get(assetId) ?? null : null;
 }
@@ -45,7 +45,7 @@ export function CharactersHubView({
   canvas,
   projectTags,
   viewMode,
-  onDraftArtifactToCanvas,
+  onDraftVariantToCanvas,
   onOpenChatForAsset,
   onViewAsset,
   onCreateTag,
@@ -59,7 +59,7 @@ export function CharactersHubView({
   canvas: CanvasDocument;
   projectTags: TagDefinition[];
   viewMode: 'list' | 'canvas';
-  onDraftArtifactToCanvas: (key: string) => Promise<void>;
+  onDraftVariantToCanvas: (characterSlug: string, variantKey: string) => Promise<void>;
   onOpenChatForAsset: (nodeId: string, assetId: string) => void;
   onViewAsset: (assetId: string) => void;
   onCreateTag: (tag: TagDefinition) => void;
@@ -161,11 +161,11 @@ export function CharactersHubView({
     }
   };
 
-  const draftToCanvas = async (key: string) => {
+  const draftVariantToCanvas = async (key: string, variantKey: string) => {
     setBusyKey(key);
     setError(null);
     try {
-      await onDraftArtifactToCanvas(key);
+      await onDraftVariantToCanvas(key, variantKey);
     } catch (err) {
       setError(formatRequestError(err));
     } finally {
@@ -372,7 +372,7 @@ export function CharactersHubView({
                           type="button"
                           disabled={busy || !canPlaceOnCanvas}
                           title={canPlaceOnCanvas ? 'Create another tagged draft node on the canvas' : 'Add a prompt before drafting to canvas'}
-                          onClick={() => void draftToCanvas(characterSlug)}
+                          onClick={() => void draftVariantToCanvas(characterSlug, 'base')}
                         >
                           {busy ? 'Working…' : 'Draft'}
                         </button>
@@ -402,6 +402,7 @@ export function CharactersHubView({
           extractTask={extractOneTask}
           refineTask={refineTask}
           onSave={saveEdit}
+          onDraftVariant={(variantKey) => draftVariantToCanvas(editingKey, variantKey)}
           onClose={() => setEditingKey(null)}
           onRequestDelete={() => setPendingDeleteKey(editingKey)}
           onCreateTag={onCreateTag}

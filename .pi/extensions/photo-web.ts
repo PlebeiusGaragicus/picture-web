@@ -170,8 +170,6 @@ const TOOLS: Record<string, ToolDefinition> = {
             storyContext: Type.Optional(
               Type.String({ description: "When this look applies in the story, e.g. \"after the duel in chapter 2\"" }),
             ),
-            mode: Type.Optional(StringEnum(["new-image", "edit-reference"] as const)),
-            styleRef: Type.Optional(Type.String()),
             prompt: Type.Optional(Type.String({ description: "Complete reference-sheet prompt with layout block and Expressions line" })),
           }),
           { description: "Variant patches keyed by variant slug; 'base' is required for a complete character" },

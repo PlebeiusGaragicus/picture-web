@@ -78,9 +78,14 @@ def spawn_from_character_variant(
     canvas = library.read_stored_canvas(slug)
     x, y = next_canvas_position(canvas)
     display_name = adaptation.character_display_name(record)
+    tag_keys = ["comic-adaptation", "character-sheet", character_slug]
     if variant_key != "base":
         display_name = f"{display_name} ({link.label.strip() or variant_key})"
-    tags = library.node_tags("comic-adaptation", "character-sheet", character_slug)
+        # The variant's own entity tag rides along with the character tag: the
+        # base canonical anchors the design while this sheet is first made, and
+        # the variant tag carries this look's own canonical afterwards.
+        tag_keys.append(adaptation.variant_entity_key(character_slug, variant_key))
+    tags = library.node_tags(*tag_keys)
     node_id, saved = create_image_group_node(
         slug,
         display_name=display_name,

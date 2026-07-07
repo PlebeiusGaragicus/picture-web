@@ -18,7 +18,7 @@ import library
 import pi_profiles
 import pi_runtime
 from main import app
-from models import CharacterCreate, CharacterPatch, CharacterVariantPatch
+from models import CharacterCreate, CharacterPatch, EntityVariantPatch
 
 FAKE_PI = Path(__file__).parent / "testdata" / "fake_pi.py"
 
@@ -107,7 +107,7 @@ def register_character(name: str, *, extracted: bool) -> str:
             CharacterPatch(
                 visualDescription="Sturdy.",
                 performanceNotes="Kind.",
-                variants={"base": CharacterVariantPatch(prompt=BASE_SHEET_PROMPT)},
+                variants={"base": EntityVariantPatch(prompt=BASE_SHEET_PROMPT)},
             ),
         )
     return record.slug
@@ -811,7 +811,7 @@ def test_refine_character_prechecks(tmp_path, monkeypatch):
     adaptation.update_character(
         "farm-comic",
         "hero",
-        CharacterPatch(visualDescription="Sturdy.", variants={"base": CharacterVariantPatch(prompt=BASE_SHEET_PROMPT)}),
+        CharacterPatch(visualDescription="Sturdy.", variants={"base": EntityVariantPatch(prompt=BASE_SHEET_PROMPT)}),
     )
     profile.precheck(ctx, pi_profiles.TaskArgs(target="hero", instructions="darker mane"))
 
@@ -834,7 +834,6 @@ def test_refine_character_end_to_end(tmp_path, monkeypatch, live_api):
                         "post-duel": {
                             "label": "Post-duel",
                             "storyContext": "After the duel in chapter 2.",
-                            "mode": "edit-reference",
                             "prompt": "Same design as the reference image, add the scar. " + BASE_SHEET_PROMPT,
                         }
                     },

@@ -129,17 +129,13 @@ export interface GeneratePayload {
   visualStyleId?: string | null;
 }
 
-export interface CharacterVariant {
+export interface EntityVariant {
   label: string;
   /** When this look applies in the story, e.g. "after the duel in chapter 2". */
   storyContext: string;
-  mode: string;
-  styleRef: string;
   prompt: string;
   assetIds: string[];
   activeAssetId?: string | null;
-  finalized: boolean;
-  status: 'missing' | 'ready' | 'generated';
 }
 
 export interface CharacterRecord {
@@ -150,16 +146,14 @@ export interface CharacterRecord {
   performanceNotes: string;
   continuityNotes: string;
   userTags: string[];
-  variants: Record<string, CharacterVariant>;
+  variants: Record<string, EntityVariant>;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface CharacterVariantPatchPayload {
+export interface EntityVariantPatchPayload {
   label?: string;
   storyContext?: string;
-  mode?: string;
-  styleRef?: string;
   prompt?: string;
 }
 
@@ -171,7 +165,7 @@ export interface CharacterPatchPayload {
   performanceNotes?: string;
   continuityNotes?: string;
   userTags?: string[];
-  variants?: Record<string, CharacterVariantPatchPayload>;
+  variants?: Record<string, EntityVariantPatchPayload>;
   removeVariants?: string[];
 }
 

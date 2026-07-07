@@ -23,7 +23,7 @@ from models import (
     CharacterCreate,
     CharacterPatch,
     CharacterRecord,
-    CharacterVariant,
+    EntityVariant,
     AdaptationMetadata,
     AdaptationStatus,
     ArtifactKind,
@@ -57,8 +57,7 @@ def asset_exists(slug: str, asset_id: str) -> bool:
     return library.asset_json_path(slug, asset_id).is_file() and library.asset_png_path(slug, asset_id).is_file()
 
 
-def _clear_stale_link_group(slug: str, group: dict[str, Any]) -> bool:
-    """Drop missing asset ids from links; works on AdaptationAssetLink and CharacterVariant."""
+def _clear_stale_link_group(slug: str, group: dict[str, AdaptationAssetLink]) -> bool:
     changed = False
     for key, link in list(group.items()):
         asset_ids = [asset_id for asset_id in link.assetIds if asset_exists(slug, asset_id)]
@@ -76,6 +75,21 @@ def _clear_stale_link_group(slug: str, group: dict[str, Any]) -> bool:
     return changed
 
 
+def _clear_stale_variant_group(slug: str, group: dict[str, EntityVariant]) -> bool:
+    changed = False
+    for key, variant in list(group.items()):
+        asset_ids = [asset_id for asset_id in variant.assetIds if asset_exists(slug, asset_id)]
+        active_asset_id = variant.activeAssetId if variant.activeAssetId in asset_ids else (asset_ids[-1] if asset_ids else None)
+        if asset_ids != variant.assetIds or active_asset_id != variant.activeAssetId:
+            group[key] = variant.model_copy(update={"assetIds": asset_ids, "activeAssetId": active_asset_id})
+            changed = True
+    return changed
+
+
+def variant_status(variant: EntityVariant) -> str:
+    return "generated" if variant.assetIds else ("ready" if variant.prompt.strip() else "missing")
+
+
 def artifact_link_groups(metadata: AdaptationMetadata) -> tuple[dict[str, AdaptationAssetLink], ...]:
     return (metadata.locations,)
 
@@ -86,36 +100,26 @@ def variant_entity_key(character_slug: str, variant_key: str) -> str:
     return f"{character_slug}-{variant_key}"
 
 
-def resolve_character_variant_key(character_slug: str, flat_key: str) -> tuple[str, str] | None:
-    if flat_key == character_slug:
-        return character_slug, "base"
-    prefix = f"{character_slug}-"
-    if flat_key.startswith(prefix):
-        return character_slug, flat_key.removeprefix(prefix)
-    return None
+def character_entity_keys_and_names(metadata: AdaptationMetadata) -> tuple[list[str], dict[str, str]]:
+    """Flat entity-tag keys for every character variant, plus display names.
 
-
-def resolve_character_link(
-    metadata: AdaptationMetadata,
-    character_slug: str,
-    variant_key: str = "base",
-) -> CharacterVariant | None:
-    record = metadata.characters.get(character_slug)
-    if record is None:
-        return None
-    return record.variants.get(variant_key)
-
-
-def resolve_character_flat_link(metadata: AdaptationMetadata, flat_key: str) -> tuple[str, str, CharacterVariant] | None:
-    for slug in metadata.characters:
-        resolved = resolve_character_variant_key(slug, flat_key)
-        if resolved is None:
-            continue
-        character_slug, variant_key = resolved
-        link = resolve_character_link(metadata, character_slug, variant_key)
-        if link is not None:
-            return character_slug, variant_key, link
-    return None
+    The base variant shares the character's slug; other variants get
+    `slug-<variant>` tags of their own so each durable look can carry its own
+    canonical reference image."""
+    keys: list[str] = []
+    names: dict[str, str] = {}
+    for slug_key, record in metadata.characters.items():
+        display = character_display_name(record)
+        keys.append(slug_key)
+        if record.name.strip():
+            names[slug_key] = record.name
+        for variant_key, variant in record.variants.items():
+            if variant_key == "base":
+                continue
+            flat_key = variant_entity_key(slug_key, variant_key)
+            keys.append(flat_key)
+            names[flat_key] = f"{display} ({variant.label.strip() or variant_key})"
+    return keys, names
 
 
 def character_is_extracted(record: CharacterRecord) -> bool:
@@ -150,13 +154,6 @@ def create_character(slug: str, payload: CharacterCreate) -> CharacterRecord:
     return record
 
 
-def _variant_with_status(variant: CharacterVariant) -> CharacterVariant:
-    next_status = "generated" if variant.assetIds else ("ready" if variant.prompt.strip() else "missing")
-    if next_status == variant.status:
-        return variant
-    return variant.model_copy(update={"status": next_status})
-
-
 def update_character(slug: str, character_slug: str, patch: CharacterPatch) -> CharacterRecord:
     metadata = read_metadata(slug)
     record = metadata.characters.get(character_slug)
@@ -173,14 +170,14 @@ def update_character(slug: str, character_slug: str, patch: CharacterPatch) -> C
     for variant_key, variant_patch in (patch.variants or {}).items():
         if not re.match(SLUG_RE, variant_key):
             raise HTTPException(status_code=400, detail=f"Invalid variant key: {variant_key}")
-        existing = variants.get(variant_key, CharacterVariant())
+        existing = variants.get(variant_key, EntityVariant())
         merged = existing.model_copy(
             update={
                 key: value
                 for key, value in variant_patch.model_dump(exclude_none=True).items()
             }
         )
-        variants[variant_key] = _variant_with_status(merged)
+        variants[variant_key] = merged
     for variant_key in patch.removeVariants or []:
         variants.pop(variant_key, None)
     updates["variants"] = variants
@@ -214,7 +211,7 @@ def clear_stale_artifact_assets(slug: str, metadata: AdaptationMetadata) -> tupl
             changed = True
     for character_slug, record in list(metadata.characters.items()):
         variants = dict(record.variants)
-        if _clear_stale_link_group(slug, variants):
+        if _clear_stale_variant_group(slug, variants):
             metadata.characters[character_slug] = record.model_copy(update={"variants": variants})
             changed = True
     return metadata, changed
@@ -242,22 +239,9 @@ def ensure_adaptation(slug: str) -> Path:
 
 def import_artifact_to_canvas(slug: str, artifact_kind: str, artifact_key: str) -> AdaptationCanvasImportResponse:
     metadata = sync_location_links(slug, read_metadata(slug))
-    library.sync_entity_tags(
-        slug,
-        character_keys=list(metadata.characters.keys()),
-        location_keys=list(metadata.locations.keys()),
-    )
-    from canvas_nodes import spawn_from_character_variant, spawn_from_location
+    from canvas_nodes import spawn_from_location
 
-    if artifact_kind == "character-sheet":
-        resolved = resolve_character_flat_link(metadata, artifact_key)
-        if resolved is None:
-            raise HTTPException(status_code=404, detail=f"Unknown adaptation artifact: {artifact_kind}:{artifact_key}")
-        character_slug, variant_key, entry = resolved
-        if not entry.prompt.strip():
-            raise HTTPException(status_code=400, detail=f"Missing prompt for character: {artifact_key}")
-        node_id, saved = spawn_from_character_variant(slug, character_slug, variant_key)
-    elif artifact_kind == "location-prompt":
+    if artifact_kind == "location-prompt":
         entry = metadata.locations.get(artifact_key)
         if entry is None:
             raise HTTPException(status_code=404, detail=f"Unknown adaptation artifact: {artifact_kind}:{artifact_key}")
@@ -269,6 +253,22 @@ def import_artifact_to_canvas(slug: str, artifact_kind: str, artifact_key: str) 
     return AdaptationCanvasImportResponse(canvas=saved, importedNodeCount=1, nodeId=node_id)
 
 
+def draft_character_variant_to_canvas(slug: str, character_slug: str, variant_key: str) -> AdaptationCanvasImportResponse:
+    metadata = read_metadata(slug)
+    record = metadata.characters.get(character_slug)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Character not found: {character_slug}")
+    variant = record.variants.get(variant_key)
+    if variant is None:
+        raise HTTPException(status_code=404, detail=f"Unknown character variant: {character_slug}/{variant_key}")
+    if not variant.prompt.strip():
+        raise HTTPException(status_code=400, detail=f"Missing prompt for character variant: {character_slug}/{variant_key}")
+    from canvas_nodes import spawn_from_character_variant
+
+    node_id, saved = spawn_from_character_variant(slug, character_slug, variant_key)
+    return AdaptationCanvasImportResponse(canvas=saved, importedNodeCount=1, nodeId=node_id)
+
+
 def read_metadata(slug: str) -> AdaptationMetadata:
     ensure_adaptation(slug)
     return AdaptationMetadata.model_validate(library.read_json(metadata_path(slug)))
@@ -276,11 +276,12 @@ def read_metadata(slug: str) -> AdaptationMetadata:
 
 def write_metadata(slug: str, metadata: AdaptationMetadata) -> AdaptationMetadata:
     library.write_json(metadata_path(slug), metadata.model_dump(mode="json"))
+    character_keys, character_names = character_entity_keys_and_names(metadata)
     library.sync_entity_tags(
         slug,
-        character_keys=list(metadata.characters.keys()),
+        character_keys=character_keys,
         location_keys=list(metadata.locations.keys()),
-        character_names={key: record.name for key, record in metadata.characters.items() if record.name.strip()},
+        character_names=character_names,
     )
     return metadata
 
@@ -573,10 +574,10 @@ def status(slug: str) -> AdaptationStatus:
     # always wins over the record-derived default.
     canonical_by_tag_id: dict[str, str | None] = {}
     for character_slug, record in metadata.characters.items():
-        base = record.variants.get("base")
-        asset_id = (base.activeAssetId or (base.assetIds[0] if base.assetIds else None)) if base else None
-        if asset_id:
-            canonical_by_tag_id[library.normalize_tag_id(character_slug)] = asset_id
+        for variant_key, variant in record.variants.items():
+            asset_id = variant.activeAssetId or (variant.assetIds[0] if variant.assetIds else None)
+            if asset_id:
+                canonical_by_tag_id[library.normalize_tag_id(variant_entity_key(character_slug, variant_key))] = asset_id
     for location_key, link in metadata.locations.items():
         asset_id = link.activeAssetId or (link.assetIds[0] if link.assetIds else None)
         if asset_id:

@@ -454,7 +454,7 @@ function App() {
             canvas={workspace.canvas}
             projectTags={workspace.projectTags}
             viewMode={phaseViewMode === 'canvas' ? 'canvas' : 'list'}
-            onDraftArtifactToCanvas={(key) => workspace.draftArtifactToCanvas('character-sheet', key)}
+            onDraftVariantToCanvas={workspace.draftCharacterVariantToCanvas}
             onOpenChatForAsset={workspace.openChatForAsset}
             onViewAsset={workspace.openAssetInViewer}
             onCreateTag={workspace.createProjectTag}

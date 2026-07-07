@@ -138,8 +138,6 @@ def _character_record_context(record: CharacterRecord) -> str:
                 key: {
                     "label": variant.label,
                     "storyContext": variant.storyContext,
-                    "mode": variant.mode,
-                    "styleRef": variant.styleRef,
                     "prompt": variant.prompt,
                 }
                 for key, variant in record.variants.items()
@@ -416,11 +414,21 @@ def _panel_prompt_context_lines(ctx: AdaptationContext, panel: Any, document: An
         look = (base.prompt if base else "") or record.visualDescription or record.summary
         if look.strip():
             look_lines.append(f"- {slug}: {_clip(look, 400)}")
+        for variant_key, variant in record.variants.items():
+            if variant_key == "base":
+                continue
+            flat_key = adaptation.variant_entity_key(slug, variant_key)
+            story_context = variant.storyContext.strip()
+            delta = variant.prompt.strip() or variant.label.strip() or variant_key
+            prefix = f"[{story_context}] " if story_context else ""
+            look_lines.append(f"- {flat_key}: {prefix}{_clip(delta, 300)}")
     if look_lines:
         lines.append(
             "Canonical characters (the slugs before the colon are the ONLY valid characterSlugs "
             "values; any character visible in the panel must be described using these look "
-            "descriptors, never just their name):"
+            "descriptors, never just their name. Variant slugs like hero-young are the same "
+            "character in a different durable look — when this panel's story moment matches a "
+            "variant's bracketed story context, use the variant slug instead of the base slug):"
         )
         lines.extend(look_lines)
         lines.append("")

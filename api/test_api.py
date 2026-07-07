@@ -69,7 +69,6 @@ def create_extracted_character(
     if variant_key:
         variants[variant_key] = {
             "prompt": "Variant sheet.",
-            "mode": "edit-reference",
             "label": variant_key.replace("-", " ").title(),
             "storyContext": "Later in the story.",
         }
@@ -578,7 +577,6 @@ def test_character_crud_fields_variants_and_conflicts(tmp_path, monkeypatch):
                     "prompt": "Updated winter prompt.",
                     "label": "Winter Coat",
                     "storyContext": "During the blizzard chapters.",
-                    "mode": "edit-reference",
                 },
             },
         },
@@ -588,7 +586,7 @@ def test_character_crud_fields_variants_and_conflicts(tmp_path, monkeypatch):
     assert payload["summary"] == "Updated summary."
     assert payload["performanceNotes"] == "Brave."
     assert payload["variants"]["base"]["prompt"] == "Updated base prompt."
-    assert payload["variants"]["base"]["status"] == "ready"
+    assert "status" not in payload["variants"]["base"]
     assert payload["variants"]["winter-coat"]["storyContext"] == "During the blizzard chapters."
     assert payload["updatedAt"] >= created_updated_at
 
@@ -677,6 +675,90 @@ def test_character_rename_drops_stale_entity_tag(tmp_path, monkeypatch):
     assert "new-character-1" not in status["characters"]
 
 
+def test_variant_entity_tags_canonicals_and_draft(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    create_extracted_character(client, "hero", variant_key="post-duel")
+
+    # Each variant gets its own entity tag; names come from record.name + label.
+    tags = {tag["id"]: tag for tag in client.get("/api/projects/farm-comic/tags").json()}
+    assert {"hero", "hero-post-duel"} <= set(tags)
+    assert tags["hero-post-duel"]["entityKind"] == "character"
+    assert tags["hero-post-duel"]["name"] == "Hero (Post Duel)"
+
+    # Removing the variant drops its tag.
+    removed = client.patch(
+        "/api/projects/farm-comic/characters/hero",
+        json={"removeVariants": ["post-duel"]},
+    )
+    assert removed.status_code == 200
+    tags = {tag["id"] for tag in client.get("/api/projects/farm-comic/tags").json()}
+    assert "hero-post-duel" not in tags
+
+    # Re-add it and draft it to canvas: node is tagged with base + variant keys.
+    assert client.patch(
+        "/api/projects/farm-comic/characters/hero",
+        json={"variants": {"post-duel": {"prompt": "Variant sheet, add the scar.", "label": "Post-duel"}}},
+    ).status_code == 200
+    drafted = client.post("/api/projects/farm-comic/characters/hero/variants/post-duel/draft-to-canvas")
+    assert drafted.status_code == 200
+    node = drafted.json()["canvas"]["nodes"][drafted.json()["nodeId"]]
+    assert {"hero", "hero-post-duel", "character-sheet"} <= set(node["tags"])
+    assert node["displayName"] == "Hero (Post-duel)"
+
+    # Draft errors: unknown variant/character 404, empty prompt 400.
+    assert client.post("/api/projects/farm-comic/characters/hero/variants/nope/draft-to-canvas").status_code == 404
+    assert client.post("/api/projects/farm-comic/characters/nobody/variants/base/draft-to-canvas").status_code == 404
+    assert client.patch(
+        "/api/projects/farm-comic/characters/hero",
+        json={"variants": {"empty-look": {"label": "Empty"}}},
+    ).status_code == 200
+    assert client.post("/api/projects/farm-comic/characters/hero/variants/empty-look/draft-to-canvas").status_code == 400
+
+    # Per-variant canonical seeding: a variant with an asset seeds its own tag.
+    variant_asset = "01HVARIANTIMG"
+    make_png(library.asset_png_path("farm-comic", variant_asset), color="purple")
+    library.write_json(
+        library.asset_json_path("farm-comic", variant_asset),
+        {
+            "id": variant_asset,
+            "kind": "imported",
+            "title": "Post duel sheet",
+            "tags": [],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    metadata = adaptation.read_metadata("farm-comic")
+    variants = dict(metadata.characters["hero"].variants)
+    variants["post-duel"] = variants["post-duel"].model_copy(update={"assetIds": [variant_asset], "activeAssetId": variant_asset})
+    metadata.characters["hero"] = metadata.characters["hero"].model_copy(update={"variants": variants})
+    adaptation.write_metadata("farm-comic", metadata)
+    assert client.get("/api/projects/farm-comic/adaptation").status_code == 200
+    tags = {tag["id"]: tag for tag in client.get("/api/projects/farm-comic/tags").json()}
+    assert tags["hero-post-duel"]["canonicalAssetId"] == variant_asset
+
+
+def test_panel_entities_accept_variant_flat_keys(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    panel_id = _seed_panel_entities_project(client, tmp_path)
+    assert client.patch(
+        "/api/projects/farm-comic/characters/hero",
+        json={"variants": {"young": {"prompt": "Young hero sheet.", "label": "Young", "storyContext": "Childhood chapters."}}},
+    ).status_code == 200
+
+    patched = client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{panel_id}",
+        json={"characterSlugs": ["hero-young"]},
+    )
+    assert patched.status_code == 200
+    assert client.patch(
+        f"/api/projects/farm-comic/story-panels/panels/{panel_id}",
+        json={"characterSlugs": ["hero-elder"]},
+    ).status_code == 422
+
+
 def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monkeypatch):
     client = setup_tmp_library(tmp_path, monkeypatch)
     create_project(client)
@@ -695,8 +777,7 @@ def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monke
     assert location.status_code == 200
 
     first = client.post(
-        "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
-        json={"artifactKind": "character-sheet", "artifactKey": "hero"},
+        "/api/projects/farm-comic/characters/hero/variants/base/draft-to-canvas",
     )
     assert first.status_code == 200
     assert first.json()["importedNodeCount"] == 1
@@ -708,8 +789,7 @@ def test_import_single_character_and_location_artifact_to_canvas(tmp_path, monke
     assert "Full body character sheet" in first_node["prompt"]
 
     second = client.post(
-        "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
-        json={"artifactKind": "character-sheet", "artifactKey": "hero"},
+        "/api/projects/farm-comic/characters/hero/variants/base/draft-to-canvas",
     )
     assert second.status_code == 200
     assert second.json()["importedNodeCount"] == 1
@@ -1779,8 +1859,7 @@ def test_import_artifact_to_canvas_creates_empty_image_group(tmp_path, monkeypat
     create_extracted_character(client, "hero", prompt="Full body character sheet for the farm hero.")
 
     imported = client.post(
-        "/api/projects/farm-comic/adaptation/import-artifact-to-canvas",
-        json={"artifactKind": "character-sheet", "artifactKey": "hero"},
+        "/api/projects/farm-comic/characters/hero/variants/base/draft-to-canvas",
     )
     assert imported.status_code == 200
     node_id = imported.json()["nodeId"]

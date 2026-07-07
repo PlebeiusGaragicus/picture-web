@@ -24,7 +24,7 @@ Deliver results **only** through the `update_character` tool:
 ## Rules
 
 - Preserve the record's voice and existing detail; integrate feedback, don't rewrite wholesale.
-- When feedback asks for a new variant, follow the extract-character variant rules: slug-style key, `label`, `storyContext` (when the look applies in the story), `mode: edit-reference`, and a prompt stating only the visual delta from base.
+- When feedback asks for a new variant, follow the extract-character variant rules: slug-style key, `label`, `storyContext` (when the look applies in the story), and a prompt stating only the visual delta from base (the base sheet is attached automatically as a reference image at generation time).
 - When rewriting any variant prompt, keep the verbatim layout block and the `Expressions:` line (exactly four expressions):
 
 ```text

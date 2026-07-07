@@ -11,8 +11,6 @@ type PiTaskController = ReturnType<typeof usePiTask>;
 export interface CharacterVariantDraft {
   label: string;
   storyContext: string;
-  mode: string;
-  styleRef: string;
   prompt: string;
 }
 
@@ -41,8 +39,6 @@ function draftFromRecord(record: CharacterRecord, entityTagId: string): Characte
         {
           label: variant.label,
           storyContext: variant.storyContext,
-          mode: variant.mode,
-          styleRef: variant.styleRef,
           prompt: variant.prompt,
         },
       ]),
@@ -78,6 +74,7 @@ export function CharacterEditModal({
   extractTask,
   refineTask,
   onSave,
+  onDraftVariant,
   onClose,
   onRequestDelete,
   onCreateTag,
@@ -91,6 +88,7 @@ export function CharacterEditModal({
   extractTask: PiTaskController;
   refineTask: PiTaskController;
   onSave: (draft: CharacterDraft) => Promise<void>;
+  onDraftVariant: (variantKey: string) => Promise<void>;
   onClose: () => void;
   onRequestDelete: () => void;
   onCreateTag: (tag: TagDefinition) => void;
@@ -132,8 +130,6 @@ export function CharacterEditModal({
         [key]: {
           label: newVariantKey.trim(),
           storyContext: '',
-          mode: key === 'base' ? 'new-image' : 'edit-reference',
-          styleRef: '',
           prompt: '',
         },
       },
@@ -277,12 +273,25 @@ export function CharacterEditModal({
               <div key={variantKey} className="character-edit-variant-item character-edit-variant-card">
                 <div className="character-edit-variant-head">
                   <strong>{variantDisplayLabel(variantKey, variant)}</strong>
-                  <code className="muted">{variantKey}</code>
-                  {variantKey !== 'base' && (
-                    <button className="secondary character-edit-variant-remove" type="button" onClick={() => removeVariant(variantKey)}>
-                      Remove
+                  <code className="muted">{variantKey === 'base' ? characterSlug : `${characterSlug}-${variantKey}`}</code>
+                  <span className="character-edit-variant-head-actions">
+                    <button
+                      className="secondary"
+                      type="button"
+                      disabled={busy || !variant.prompt.trim() || !record.variants[variantKey]?.prompt.trim()}
+                      title={record.variants[variantKey]?.prompt.trim()
+                        ? 'Create a draft node on the canvas for this look (its sheet becomes this variant’s reference)'
+                        : 'Save a prompt first, then draft to canvas'}
+                      onClick={() => void onDraftVariant(variantKey)}
+                    >
+                      Draft to canvas
                     </button>
-                  )}
+                    {variantKey !== 'base' && (
+                      <button className="secondary" type="button" onClick={() => removeVariant(variantKey)}>
+                        Remove
+                      </button>
+                    )}
+                  </span>
                 </div>
                 {variantKey !== 'base' && (
                   <div className="character-edit-variant-meta">
@@ -315,28 +324,6 @@ export function CharacterEditModal({
                     onChange={(event) => setVariantField(variantKey, 'prompt', event.target.value)}
                   />
                 </label>
-                <details className="character-edit-variant-advanced">
-                  <summary className="muted">Advanced</summary>
-                  <div className="character-edit-variant-meta">
-                    <label className="field-label">
-                      Mode
-                      <input
-                        type="text"
-                        value={variant.mode}
-                        onChange={(event) => setVariantField(variantKey, 'mode', event.target.value)}
-                        placeholder="new-image | edit-reference"
-                      />
-                    </label>
-                    <label className="field-label">
-                      Style ref
-                      <input
-                        type="text"
-                        value={variant.styleRef}
-                        onChange={(event) => setVariantField(variantKey, 'styleRef', event.target.value)}
-                      />
-                    </label>
-                  </div>
-                </details>
               </div>
             );
           })}

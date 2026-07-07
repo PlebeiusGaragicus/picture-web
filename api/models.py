@@ -188,17 +188,17 @@ class AdaptationAssetLink(BaseModel):
     userTags: list[str] = Field(default_factory=list)
 
 
-class CharacterVariant(BaseModel):
+class EntityVariant(BaseModel):
+    """One durable look of a character/location: a reference-sheet prompt plus
+    its generated takes. Consistency mechanics (which image anchors the look)
+    live on the variant's entity tag, not here."""
+
     label: str = ""
     # When this look applies in the story, e.g. "after the duel in chapter 2".
     storyContext: str = ""
-    mode: str = "new-image"
-    styleRef: str = ""
     prompt: str = ""
     assetIds: list[str] = Field(default_factory=list)
     activeAssetId: str | None = None
-    finalized: bool = False
-    status: Literal["missing", "ready", "generated"] = "missing"
 
 
 class CharacterRecord(BaseModel):
@@ -209,7 +209,7 @@ class CharacterRecord(BaseModel):
     performanceNotes: str = ""
     continuityNotes: str = ""
     userTags: list[str] = Field(default_factory=list)
-    variants: dict[str, CharacterVariant] = Field(default_factory=dict)
+    variants: dict[str, EntityVariant] = Field(default_factory=dict)
     createdAt: str = ""
     updatedAt: str = ""
 
@@ -220,11 +220,9 @@ class CharacterCreate(BaseModel):
     slug: str | None = Field(default=None, pattern=SLUG_RE)
 
 
-class CharacterVariantPatch(BaseModel):
+class EntityVariantPatch(BaseModel):
     label: str | None = None
     storyContext: str | None = None
-    mode: str | None = None
-    styleRef: str | None = None
     prompt: str | None = None
 
 
@@ -236,7 +234,7 @@ class CharacterPatch(BaseModel):
     performanceNotes: str | None = None
     continuityNotes: str | None = None
     userTags: list[str] | None = None
-    variants: dict[str, CharacterVariantPatch] | None = None
+    variants: dict[str, EntityVariantPatch] | None = None
     removeVariants: list[str] | None = None
 
 

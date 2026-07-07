@@ -31,7 +31,7 @@ Do not invent visual details that are not supported by the book.
 
 ## Variants
 
-Always include a `base` variant with `mode: new-image`.
+Always include a `base` variant.
 
 Add extra variants only for **durable visual state changes** as defined by the story — not expressions or momentary poses. Good reasons:
 
@@ -46,8 +46,8 @@ Each non-base variant needs:
 - a slug-style key (e.g. `young`, `post-duel`),
 - `label` — short human label ("Post-duel"),
 - `storyContext` — when the look applies ("after the duel in chapter 2"),
-- `mode: edit-reference`,
-- a `prompt` stating only the **visual delta** from the base variant.
+- a `prompt` stating only the **visual delta** from the base variant (the base
+  reference sheet is attached automatically as a reference image at generation time).
 
 If there are no durable major visual changes, include only `base`.
 
@@ -61,13 +61,13 @@ Layout: top row — front full-body, three-quarter full-body, back full-body, sa
 
 From `performanceNotes`, choose **exactly four** expressions that fit the character's temperament and story role, and add a line in each prompt: `Expressions: [e1], [e2], [e3], [e4].`
 
-For the `base` prompt (`mode: new-image`):
+For the `base` prompt:
 
 1. `Character reference sheet for [name],` then essential visual facts.
 2. `Match the reference image's rendering, palette, line weight, shadows, and sheet layout exactly.`
 3. The layout block and `Expressions:` line.
 
-For non-base prompts (`mode: edit-reference`):
+For non-base prompts:
 
 1. `Character sheet for this character. Same design as the reference image.`
 2. State only the visual delta from the base variant.

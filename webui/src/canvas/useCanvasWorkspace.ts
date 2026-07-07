@@ -1045,6 +1045,20 @@ export function useCanvasWorkspace({
     window.setTimeout(() => focusNodeOnCanvas(matchingId), 0);
   }, [focusNodeOnCanvas, loadProject, onShowCanvasView, openProjectSlug, setError]);
 
+  const draftCharacterVariantToCanvas = useCallback(async (characterSlug: string, variantKey: string) => {
+    if (!openProjectSlug) return;
+    setError(null);
+    const result = await api.draftCharacterVariant(openProjectSlug, characterSlug, variantKey);
+    setCanvas(result.canvas);
+    await loadProject(openProjectSlug);
+    onShowCanvasView();
+    const matchingId = result.nodeId;
+    if (!matchingId) return;
+    setSelectedNodeIds([matchingId]);
+    setPopoverNodeId(matchingId);
+    window.setTimeout(() => focusNodeOnCanvas(matchingId), 0);
+  }, [focusNodeOnCanvas, loadProject, onShowCanvasView, openProjectSlug, setError]);
+
   const handleConceptCanvasUpdate = useCallback((canvasDoc: CanvasDocument, nodeId?: string) => {
     setCanvas(canvasDoc);
     const callbacks = toFlowNodesCallbacksRef.current;
@@ -1255,6 +1269,7 @@ export function useCanvasWorkspace({
     setTagCanonical,
     setProjectCover,
     draftArtifactToCanvas,
+    draftCharacterVariantToCanvas,
     handleConceptCanvasUpdate,
     handlePanelDraftedToCanvas,
     // chat
