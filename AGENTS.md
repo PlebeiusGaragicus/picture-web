@@ -1,5 +1,19 @@
 # Project Guidance
 
+## Branching & releases
+
+- **Day-to-day development happens on `dev`**, not `main`. Commit and iterate
+  there freely.
+- **`main` is stable-only.** Merge `dev` → `main` when a set of improvements
+  is coherent and verified (tests + frontend gate green, app boots). Pushing
+  `main` deploys the docs site (`.github/workflows/docs.yml`); it does NOT
+  build a release.
+- **Releases are tag-only.** A release builds only when a `vX.Y.Z` tag is
+  pushed (`.github/workflows/release.yml`), and the tag must match
+  `api/version.py`. Follow `docs/release-checklist.md`. Never tag from `dev`;
+  tag the merge commit on `main`.
+- CI (`.github/workflows/ci.yml`) runs on pushes to `dev`/`main` and on PRs.
+
 ## Breaking Changes Preferred
 
 This project is in active local development and does not preserve backwards compatibility for internal schemas, storage formats, API shapes, or UI state.

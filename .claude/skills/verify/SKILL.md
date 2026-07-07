@@ -1,16 +1,16 @@
 ---
 name: verify
-description: Boot an isolated photo-web stack (API + Vite) against a scratch library, seed it via the REST API, and drive the UI with Playwright to verify changes at the real surface.
+description: Boot an isolated comic-canvas stack (API + Vite) against a scratch library, seed it via the REST API, and drive the UI with Playwright to verify changes at the real surface.
 ---
 
-# Verify photo-web changes end-to-end
+# Verify comic-canvas changes end-to-end
 
-## Boot an isolated stack (never against the real photo-library)
+## Boot an isolated stack (never against the real ~/.comic-canvas)
 
 ```bash
 SCRATCH=$(mktemp -d)
 cd api
-PHOTO_WEB_LIBRARY_ROOT=$SCRATCH/lib PHOTO_WEB_TRASH_DIR=$SCRATCH/trash API_PORT=8798 \
+COMIC_CANVAS_HOME=$SCRATCH/lib COMIC_CANVAS_TRASH_DIR=$SCRATCH/trash API_PORT=8798 \
   ../.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8798 &   # no --reload; restart after backend edits
 cd ../webui
 API_PORT=8798 npm run dev -- --host 127.0.0.1 --port 5198 --strictPort &
