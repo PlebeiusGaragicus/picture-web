@@ -235,6 +235,8 @@ export interface StoryPanel {
   textStyle: StoryPanelTextStyle;
   pageId: string | null;
   panelKind: 'image' | 'text';
+  /** Panel spans its two-page spread: rect uses a unified 24-column space anchored on the left page. */
+  spansSpread?: boolean;
   rect: StoryPanelRect;
   layer: number;
   parentPanelId?: string | null;
@@ -283,7 +285,7 @@ export interface StoryPanelBookmarkCreatePayload {
 }
 
 export type StoryPanelPatchPayload = Partial<
-  Pick<StoryPanel, 'order' | 'title' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'storyText' | 'visibleText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'captions' | 'imagePrompts' | 'characterSlugs' | 'locationSlug' | 'finalized'>
+  Pick<StoryPanel, 'order' | 'title' | 'sourceKind' | 'startOffset' | 'endOffset' | 'selectedText' | 'storyText' | 'visibleText' | 'richText' | 'textStyle' | 'pageId' | 'panelKind' | 'spansSpread' | 'rect' | 'layer' | 'parentPanelId' | 'assetIds' | 'activeAssetId' | 'aspectRatio' | 'aspectRatioLocked' | 'imageCrop' | 'captions' | 'imagePrompts' | 'characterSlugs' | 'locationSlug' | 'finalized'>
 >;
 
 export interface AdaptationCanvasImportResponse {

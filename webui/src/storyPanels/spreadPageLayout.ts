@@ -4,6 +4,28 @@ export function interiorSpreadPages(pages: StoryPanelPage[]) {
   return pages.filter((page) => page.pageKind !== 'cover' && page.pageKind !== 'back-cover');
 }
 
+/** Right-page id per left page of each two-page spread (cover pairs with back cover). */
+export function spreadRightPageIdByLeftPageId(pages: StoryPanelPage[]): Map<string, string> {
+  const pairs = new Map<string, string>();
+  const cover = pages.find((page) => page.pageKind === 'cover');
+  const backCover = pages.find((page) => page.pageKind === 'back-cover');
+  if (cover && backCover) pairs.set(cover.id, backCover.id);
+  const interior = interiorSpreadPages(pages);
+  for (let index = 0; index + 1 < interior.length; index += 2) {
+    pairs.set(interior[index].id, interior[index + 1].id);
+  }
+  return pairs;
+}
+
+/** Inverse of spreadRightPageIdByLeftPageId. */
+export function spreadLeftPageIdByRightPageId(pages: StoryPanelPage[]): Map<string, string> {
+  const pairs = new Map<string, string>();
+  for (const [leftId, rightId] of spreadRightPageIdByLeftPageId(pages)) {
+    pairs.set(rightId, leftId);
+  }
+  return pairs;
+}
+
 /** Left-page index within interiorSpreadPages for a spread containing this interior page. */
 export function spreadInteriorStartIndex(interiorIndex: number): number {
   if (interiorIndex <= 0) return 0;

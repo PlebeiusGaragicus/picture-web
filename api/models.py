@@ -448,15 +448,22 @@ class AdaptationFileDocument(AdaptationFileBase):
 
 
 class StoryPanelRect(BaseModel):
-    x: float = Field(ge=0, le=12)
+    """Layout rect in page-grid columns/rows.
+
+    Single-page rects use columns 0-12. Panels that span a two-page spread use
+    a unified 24-column space (columns 0-12 = left page, 12-24 = right page);
+    the 12-column bound is enforced per panel via `spansSpread`.
+    """
+
+    x: float = Field(ge=0, le=2 * LAYOUT_GRID_COLUMNS)
     y: float = Field(ge=0)
-    w: float = Field(ge=0.25, le=12)
+    w: float = Field(ge=0.25, le=2 * LAYOUT_GRID_COLUMNS)
     h: float = Field(ge=0.25, le=12)
 
     @model_validator(mode="after")
     def fits_page_grid(self) -> "StoryPanelRect":
-        if self.x + self.w > LAYOUT_GRID_COLUMNS:
-            raise ValueError("Panel layout must fit within the 12-column page grid")
+        if self.x + self.w > 2 * LAYOUT_GRID_COLUMNS:
+            raise ValueError("Panel layout must fit within the 24-column spread grid")
         if self.y + self.h > LAYOUT_PAGE_ROWS:
             raise ValueError("Panel layout must fit within the page height grid")
         return self
@@ -524,6 +531,7 @@ class StoryPanel(BaseModel):
     textStyle: StoryPanelTextStyle = Field(default_factory=StoryPanelTextStyle)
     pageId: str | None = None
     panelKind: Literal["image", "text"] = "image"
+    spansSpread: bool = False
     rect: StoryPanelRect = Field(
         default_factory=lambda: StoryPanelRect(x=0, y=0, w=DEFAULT_AUTO_PLACE_W, h=DEFAULT_AUTO_PLACE_H),
     )
@@ -561,6 +569,12 @@ class StoryPanel(BaseModel):
             raise ValueError("Captions must be stored on their parent panel")
         if self.activeAssetId is not None and self.activeAssetId not in self.assetIds:
             raise ValueError("activeAssetId must be attached to the panel")
+        if not self.spansSpread:
+            if self.rect.x + self.rect.w > LAYOUT_GRID_COLUMNS + 1e-9:
+                raise ValueError("Panel layout must fit within the 12-column page grid")
+            for caption in self.captions:
+                if caption.rect.x + caption.rect.w > LAYOUT_GRID_COLUMNS + 1e-9:
+                    raise ValueError("Caption layout must fit within the 12-column page grid")
         return self
 
 
@@ -651,6 +665,7 @@ class StoryPanelPatch(BaseModel):
     textStyle: StoryPanelTextStyle | None = None
     pageId: str | None = Field(default=None, pattern=TAG_RE)
     panelKind: Literal["image", "text"] | None = None
+    spansSpread: bool | None = None
     rect: StoryPanelRect | None = None
     layer: int | None = Field(default=None, ge=0)
     parentPanelId: str | None = Field(default=None, pattern=TAG_RE)

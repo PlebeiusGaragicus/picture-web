@@ -1890,7 +1890,7 @@
 
 .story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-spread-labels {
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  gap: 0;
 }
 
 .story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-spread-labels h3.is-spread-slot-left {
@@ -1902,9 +1902,10 @@
 }
 
 .story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-print-sheet {
+  position: relative;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: minmax(0, 1fr);
-  gap: 14px;
+  gap: 0;
   width: 100%;
   aspect-ratio: 11 / 8.5;
   max-height: 100%;
@@ -1913,6 +1914,17 @@
   border: 0;
   border-radius: 0;
   box-shadow: none;
+}
+
+/* Fold guide: the two touching pages read as one page split by a dotted seam. */
+.story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-print-sheet::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  z-index: 20;
+  border-left: 1px dashed var(--slate-400);
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .story-panels-layout-workspace.is-spread.is-layout-preview-readable .story-panels-print-gutter,
@@ -2751,6 +2763,8 @@
   max-height: min(78vh, calc((100vw - 96px) * 8.5 / 11));
   margin: 0 auto;
   padding: var(--space-4);
+  /* Spread-spanning panels overhang the page; each page clips its own half. */
+  overflow: hidden;
   background: var(--slate-50);
   border-radius: var(--radius-lg);
 }

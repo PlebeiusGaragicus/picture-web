@@ -160,14 +160,39 @@ def render_booklet_pdf(slug: str, *, page_border: PageBorder = "black") -> bytes
     return buffer.getvalue()
 
 
-def _panels_by_page(document: StoryPanelDocument) -> dict[str, list[StoryPanel]]:
-    panels: dict[str, list[StoryPanel]] = {}
+def _spread_right_page_by_left(document: StoryPanelDocument) -> dict[str, str]:
+    """Right-page id per left page of each two-page spread.
+
+    The front cover pairs with the back cover (they face each other when the
+    booklet is closed); interior pages pair sequentially in reading order.
+    """
+    pages = sorted(document.pages, key=lambda page: (page.order, page.id))
+    pairs: dict[str, str] = {}
+    cover = next((page for page in pages if page.pageKind == "cover"), None)
+    back_cover = next((page for page in pages if page.pageKind == "back-cover"), None)
+    if cover and back_cover:
+        pairs[cover.id] = back_cover.id
+    interior = [page for page in pages if page.pageKind not in ("cover", "back-cover")]
+    for index in range(0, len(interior) - 1, 2):
+        pairs[interior[index].id] = interior[index + 1].id
+    return pairs
+
+
+def _panels_by_page(document: StoryPanelDocument) -> dict[str, list[tuple[StoryPanel, float]]]:
+    """Panels per page as (panel, column_offset); spread-spanning panels appear
+    on both pages of their spread (offset 0 on the left, 12 on the right)."""
+    right_by_left = _spread_right_page_by_left(document)
+    panels: dict[str, list[tuple[StoryPanel, float]]] = {}
     for panel in document.panels:
         if panel.pageId is None:
             continue
-        panels.setdefault(panel.pageId, []).append(panel)
+        panels.setdefault(panel.pageId, []).append((panel, 0.0))
+        if panel.spansSpread:
+            partner = right_by_left.get(panel.pageId)
+            if partner is not None:
+                panels.setdefault(partner, []).append((panel, float(GRID_COLUMNS)))
     for page_panels in panels.values():
-        page_panels.sort(key=lambda panel: (panel.layer, panel.rect.y, panel.rect.x, panel.order))
+        page_panels.sort(key=lambda entry: (entry[0].layer, entry[0].rect.y, entry[0].rect.x, entry[0].order))
     return panels
 
 
@@ -175,7 +200,7 @@ def _draw_sheet_side(
     pdf: canvas.Canvas,
     slug: str,
     document: StoryPanelDocument,
-    panels_by_page: dict[str, list[StoryPanel]],
+    panels_by_page: dict[str, list[tuple[StoryPanel, float]]],
     left_page: PrintPage,
     right_page: PrintPage,
     *,
@@ -195,7 +220,7 @@ def _draw_comic_page(
     pdf: canvas.Canvas,
     slug: str,
     document: StoryPanelDocument,
-    panels_by_page: dict[str, list[StoryPanel]],
+    panels_by_page: dict[str, list[tuple[StoryPanel, float]]],
     print_page: PrintPage,
     origin_x: float,
     *,
@@ -221,10 +246,19 @@ def _draw_comic_page(
         return
     page_panels = panels_by_page.get(print_page.page.id, [])
     page_rows = float(LAYOUT_PAGE_ROWS)
-    for panel in page_panels:
-        _draw_panel(pdf, panel, print_page.number, page_x, page_y, page_w, page_h, page_rows, slug=slug)
+    for panel, column_offset in page_panels:
+        clipped = panel.spansSpread
+        if clipped:
+            # Spanning panels overhang the page; clip each half to its page.
+            pdf.saveState()
+            clip = pdf.beginPath()
+            clip.rect(page_x, page_y, page_w, page_h)
+            pdf.clipPath(clip, stroke=0, fill=0)
+        _draw_panel(pdf, panel, print_page.number, page_x, page_y, page_w, page_h, page_rows, slug=slug, column_offset=column_offset)
         for caption in sorted(panel.captions, key=lambda item: (item.layer, item.rect.y, item.rect.x, item.id)):
-            _draw_caption(pdf, caption, page_x, page_y, page_w, page_h, page_rows)
+            _draw_caption(pdf, caption, page_x, page_y, page_w, page_h, page_rows, column_offset=column_offset)
+        if clipped:
+            pdf.restoreState()
     if print_page.number is not None:
         pdf.setFillColor(HexColor("#475569"))
         pdf.setFont("Helvetica", 7)
@@ -248,8 +282,9 @@ def _draw_panel(
     page_rows: float,
     *,
     slug: str,
+    column_offset: float = 0.0,
 ) -> None:
-    x = page_x + (panel.rect.x / GRID_COLUMNS) * page_w
+    x = page_x + ((panel.rect.x - column_offset) / GRID_COLUMNS) * page_w
     w = (panel.rect.w / GRID_COLUMNS) * page_w
     h = (panel.rect.h / page_rows) * page_h
     y = page_y + page_h - ((panel.rect.y / page_rows) * page_h) - h
@@ -267,8 +302,10 @@ def _draw_caption(
     page_w: float,
     page_h: float,
     page_rows: float,
+    *,
+    column_offset: float = 0.0,
 ) -> None:
-    x = page_x + (caption.rect.x / GRID_COLUMNS) * page_w
+    x = page_x + ((caption.rect.x - column_offset) / GRID_COLUMNS) * page_w
     w = (caption.rect.w / GRID_COLUMNS) * page_w
     h = (caption.rect.h / page_rows) * page_h
     y = page_y + page_h - ((caption.rect.y / page_rows) * page_h) - h

@@ -1493,6 +1493,61 @@ def test_story_panel_rect_rejects_layout_past_page_height():
     assert rect.y + rect.h == LAYOUT_PAGE_ROWS
 
 
+def test_story_panel_spread_span_rect_and_print_pairing():
+    from models import StoryPanel
+
+    # Single-page panels stay inside the 12-column grid; spanning panels get 24.
+    with pytest.raises(ValueError, match="12-column page grid"):
+        StoryPanel(id="panel-001", order=0, rect=StoryPanelRect(x=4, y=0, w=16, h=4))
+    spanning = StoryPanel(
+        id="panel-001", order=0, spansSpread=True, pageId="page-002",
+        rect=StoryPanelRect(x=4, y=0, w=16, h=4),
+    )
+    assert spanning.rect.w == 16
+
+    document = story_panels.empty_document()
+    document.panels = [spanning]
+    pages = sorted(document.pages, key=lambda page: (page.order, page.id))
+    interior = [page for page in pages if page.pageKind not in ("cover", "back-cover")]
+
+    pairs = story_panels_print._spread_right_page_by_left(document)
+    cover = next(page for page in pages if page.pageKind == "cover")
+    back_cover = next(page for page in pages if page.pageKind == "back-cover")
+    assert pairs[cover.id] == back_cover.id
+    assert pairs[interior[0].id] == interior[1].id
+
+    # The spanning panel draws on both pages of its spread: left at offset 0,
+    # right shifted by 12 columns.
+    document.panels = [spanning.model_copy(update={"pageId": interior[0].id})]
+    by_page = story_panels_print._panels_by_page(document)
+    assert [(panel.id, offset) for panel, offset in by_page[interior[0].id]] == [("panel-001", 0.0)]
+    assert [(panel.id, offset) for panel, offset in by_page[interior[1].id]] == [("panel-001", 12.0)]
+
+
+def test_story_panels_booklet_pdf_with_spanning_panel(tmp_path, monkeypatch):
+    client = setup_tmp_library(tmp_path, monkeypatch)
+    create_project(client)
+    root = library.project_dir("farm-comic") / "adaptation"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "book.txt").write_text("Alpha opens the door.\n")
+
+    document = client.get("/api/projects/farm-comic/story-panels").json()
+    interior = [page for page in document["pages"] if page["pageKind"] not in ("cover", "back-cover")]
+    document["panels"].append({
+        "id": "panel-span",
+        "order": 99,
+        "pageId": interior[0]["id"],
+        "spansSpread": True,
+        "rect": {"x": 2, "y": 1, "w": 20, "h": 6},
+    })
+    saved = client.put("/api/projects/farm-comic/story-panels", json=document)
+    assert saved.status_code == 200
+
+    response = client.get("/api/projects/farm-comic/story-panels/print/booklet.pdf")
+    assert response.status_code == 200
+    assert response.content.startswith(b"%PDF")
+
+
 def test_story_panels_caption_outline_offsets_match_css_shadow():
     offsets = story_panels_print._caption_outline_offsets()
 

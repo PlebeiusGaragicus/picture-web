@@ -72,9 +72,10 @@ function largestAspectRectInBounds(
   rect: StoryPanelRect,
   pageRows: number,
   targetAspect: number,
+  columns: number,
 ): StoryPanelRect {
   const rows = Math.max(1, pageRows);
-  const maxWidth = LAYOUT_GRID_COLUMNS - rect.x;
+  const maxWidth = columns - rect.x;
   const maxHeight = rows - rect.y;
   let width = maxWidth;
   let height = heightForWidth(width, pageRows, targetAspect);
@@ -91,11 +92,12 @@ export function snapRectToAspectRatio(
   targetAspect: number,
   panelKind: StoryPanel['panelKind'],
   clampRect: (rect: StoryPanelRect, panelKind: StoryPanel['panelKind']) => StoryPanelRect,
+  columns: number = LAYOUT_GRID_COLUMNS,
 ): StoryPanelRect {
   const candidates = [
     clampRect({ ...rect, h: heightForWidth(rect.w, pageRows, targetAspect) }, panelKind),
     clampRect({ ...rect, w: widthForHeight(rect.h, pageRows, targetAspect) }, panelKind),
-    clampRect(largestAspectRectInBounds(rect, pageRows, targetAspect), panelKind),
+    clampRect(largestAspectRectInBounds(rect, pageRows, targetAspect, columns), panelKind),
   ];
   return candidates.reduce((best, candidate) => (
     aspectRatioError(candidate, pageRows, targetAspect) < aspectRatioError(best, pageRows, targetAspect)
@@ -181,18 +183,19 @@ function cornerLimits(
   anchor: StoryPanelRect,
   corner: 'nw' | 'ne' | 'sw' | 'se',
   pageRows: number,
+  columns: number = LAYOUT_GRID_COLUMNS,
 ): { maxWidth: number; maxHeight: number } {
   const rows = Math.max(1, pageRows);
   const right = anchor.x + anchor.w;
   const bottom = anchor.y + anchor.h;
   if (corner === 'se') {
-    return { maxWidth: LAYOUT_GRID_COLUMNS - anchor.x, maxHeight: rows - anchor.y };
+    return { maxWidth: columns - anchor.x, maxHeight: rows - anchor.y };
   }
   if (corner === 'nw') {
     return { maxWidth: right, maxHeight: bottom };
   }
   if (corner === 'ne') {
-    return { maxWidth: LAYOUT_GRID_COLUMNS - anchor.x, maxHeight: bottom };
+    return { maxWidth: columns - anchor.x, maxHeight: bottom };
   }
   return { maxWidth: right, maxHeight: rows - anchor.y };
 }
@@ -229,8 +232,9 @@ export function snapNearestAspectRect(
   targetAspect: number,
   snapScale: number,
   limits?: { minWidth: number; minHeight: number },
+  columns: number = LAYOUT_GRID_COLUMNS,
 ): StoryPanelRect {
-  const { maxWidth, maxHeight } = cornerLimits(anchor, corner, pageRows);
+  const { maxWidth, maxHeight } = cornerLimits(anchor, corner, pageRows, columns);
   const minWidth = limits?.minWidth ?? 0.25;
   const minHeight = limits?.minHeight ?? 0.25;
   const step = 1 / snapScale;
@@ -279,6 +283,7 @@ export type LockedAspectPointerInput = {
   pageRows: number;
   targetAspect: number;
   bounds: AspectResizeBounds;
+  columns?: number;
 };
 
 export function lockedAspectRectFromPointer(input: LockedAspectPointerInput): StoryPanelRect {
@@ -292,6 +297,7 @@ export function lockedAspectRectFromPointer(input: LockedAspectPointerInput): St
     pageRows,
     targetAspect,
     bounds,
+    columns = LAYOUT_GRID_COLUMNS,
   } = input;
   const proposedWidth = proposedWidthFromDraggedCorner(
     anchor,
@@ -303,7 +309,7 @@ export function lockedAspectRectFromPointer(input: LockedAspectPointerInput): St
     pageRows,
     targetAspect,
   );
-  const { maxWidth, maxHeight } = cornerLimits(anchor, corner, pageRows);
+  const { maxWidth, maxHeight } = cornerLimits(anchor, corner, pageRows, columns);
   const { w } = fitAspectDimensions(
     proposedWidth,
     pageRows,

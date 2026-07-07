@@ -27,6 +27,7 @@ export function captionAsPanel(parent: StoryPanel, caption: StoryPanelCaption): 
     textStyle: caption.textStyle,
     pageId: parent.pageId,
     panelKind: 'text',
+    spansSpread: parent.spansSpread,
     rect: caption.rect,
     layer: caption.layer,
     parentPanelId: parent.id,

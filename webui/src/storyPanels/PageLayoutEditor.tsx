@@ -31,6 +31,8 @@ import {
   nextSpreadAnchorPageIndex,
   previousSpreadAnchorPageIndex,
   spreadAnchorPageIndexForPageId,
+  spreadLeftPageIdByRightPageId,
+  spreadRightPageIdByLeftPageId,
   spreadVisiblePages,
 } from './spreadPageLayout';
 import {
@@ -68,6 +70,7 @@ import {
 } from './panelPlacement';
 import { captionAsPanel, isBookLinked, isCaption, isPanel, isUnplaced, layoutPanels, topLevelPanels } from './panelModel';
 import { inferDocumentChangeLabel, type StoryPanelHistoryEntry } from './storyPanelHistory';
+import { readLastLayoutPageId, writeLastLayoutPageId } from './lastLayoutPage';
 import { sortedStoryPages, storyPageNumberById as mapStoryPageNumbers } from './pageNumbers';
 import { HoverTooltip } from '../ui';
 import {
@@ -284,10 +287,30 @@ function sortedPages(document: StoryPanelDocument) {
   return [...document.pages].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }
 
-function sortedPanelsForPage(document: StoryPanelDocument, pageId: string) {
+/** How many layout columns a panel's rect lives in (24 when it spans a spread). */
+function panelLayoutColumns(panel: Pick<StoryPanel, 'spansSpread'>) {
+  return panel.spansSpread ? gridColumns * 2 : gridColumns;
+}
+
+type PagePanelEntry = { panel: StoryPanel; offsetColumns: number };
+
+/** Panels rendered on a page: its own panels, plus spread-spanning panels
+ * anchored on the spread's left page shown shifted by 12 columns. */
+function panelEntriesForPage(
+  document: StoryPanelDocument,
+  pageId: string,
+  leftPageIdByRightPageId: Map<string, string>,
+): PagePanelEntry[] {
+  const partnerLeftId = leftPageIdByRightPageId.get(pageId) ?? null;
   return layoutPanels(document)
-    .filter((panel) => panel.pageId === pageId)
-    .sort((a, b) => a.layer - b.layer || a.rect.y - b.rect.y || a.rect.x - b.rect.x);
+    .flatMap((panel): PagePanelEntry[] => {
+      if (panel.pageId === pageId) return [{ panel, offsetColumns: 0 }];
+      if (panel.spansSpread && partnerLeftId !== null && panel.pageId === partnerLeftId) {
+        return [{ panel, offsetColumns: gridColumns }];
+      }
+      return [];
+    })
+    .sort((a, b) => a.panel.layer - b.panel.layer || a.panel.rect.y - b.panel.rect.y || a.panel.rect.x - b.panel.rect.x);
 }
 
 function findPanelOrCaption(document: StoryPanelDocument, panelId: string | null) {
@@ -352,9 +375,9 @@ function fixedPageShortLabel(page: StoryPanelDocument['pages'][number] | null | 
   return '';
 }
 
-function panelStyle(panel: StoryPanel, rows: number): CSSProperties {
+function panelStyle(panel: StoryPanel, rows: number, offsetColumns = 0): CSSProperties {
   return {
-    left: `${(panel.rect.x / gridColumns) * 100}%`,
+    left: `${((panel.rect.x - offsetColumns) / gridColumns) * 100}%`,
     top: `${(panel.rect.y / rows) * 100}%`,
     width: `${(panel.rect.w / gridColumns) * 100}%`,
     height: `${(panel.rect.h / rows) * 100}%`,
@@ -366,24 +389,24 @@ function roundStep(value: number, scale: number) {
   return Math.round(value * scale) / scale;
 }
 
-function clampRect(rect: StoryPanelRect, panelKind: StoryPanel['panelKind'] = 'image'): StoryPanelRect {
+function clampRect(rect: StoryPanelRect, panelKind: StoryPanel['panelKind'] = 'image', columns: number = gridColumns): StoryPanelRect {
   const minWidth = panelKind === 'text' ? minTextPanelWidth : minPanelWidth;
   const minHeight = panelKind === 'text' ? minTextPanelHeight : minPanelHeight;
-  const w = Math.min(gridColumns, Math.max(minWidth, roundStep(rect.w, panelSnapScale)));
+  const w = Math.min(columns, Math.max(minWidth, roundStep(rect.w, panelSnapScale)));
   let h = Math.max(minHeight, roundStep(rect.h, panelSnapScale));
   h = Math.min(h, LAYOUT_PAGE_ROWS);
-  const x = Math.min(gridColumns - w, Math.max(0, roundStep(rect.x, panelSnapScale)));
+  const x = Math.min(columns - w, Math.max(0, roundStep(rect.x, panelSnapScale)));
   let y = Math.max(0, roundStep(rect.y, panelSnapScale));
   y = Math.min(y, LAYOUT_PAGE_ROWS - h);
   return { x, y, w, h };
 }
 
-function clampPanelRect(rect: StoryPanelRect, panel: Pick<StoryPanel, 'panelKind' | 'sourceKind' | 'parentPanelId'>): StoryPanelRect {
-  if (isCaption(panel as StoryPanel)) return clampCaptionRect(rect);
-  return clampRect(rect, panel.panelKind);
+function clampPanelRect(rect: StoryPanelRect, panel: Pick<StoryPanel, 'panelKind' | 'sourceKind' | 'parentPanelId' | 'spansSpread'>): StoryPanelRect {
+  if (isCaption(panel as StoryPanel)) return clampCaptionRect(rect, panelLayoutColumns(panel));
+  return clampRect(rect, panel.panelKind, panelLayoutColumns(panel));
 }
 
-function resizeRectFromCorner(rect: StoryPanelRect, corner: ResizeCorner, deltaColumns: number, deltaRows: number, panel: Pick<StoryPanel, 'panelKind' | 'sourceKind' | 'parentPanelId'>): StoryPanelRect {
+function resizeRectFromCorner(rect: StoryPanelRect, corner: ResizeCorner, deltaColumns: number, deltaRows: number, panel: Pick<StoryPanel, 'panelKind' | 'sourceKind' | 'parentPanelId' | 'spansSpread'>): StoryPanelRect {
   const right = rect.x + rect.w;
   const bottom = rect.y + rect.h;
   const caption = isCaption(panel as StoryPanel);
@@ -492,7 +515,16 @@ export function PageLayoutEditor({
   const [pageMenu, setPageMenu] = useState<PageContextMenu | null>(null);
   const [pageMenuSubmenu, setPageMenuSubmenu] = useState<'create' | 'place' | null>(null);
   const [placementPickerTarget, setPlacementPickerTarget] = useState<PlacementPickerTarget | null>(null);
-  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [currentPageIndex, setCurrentPageIndex] = useState(() => {
+    const lastPageId = readLastLayoutPageId(projectSlug);
+    if (!lastPageId) return 0;
+    const initialPages = sortedPages(document);
+    if (layoutMode === 'spread') {
+      return spreadAnchorPageIndexForPageId(lastPageId, initialPages, interiorSpreadPages(initialPages));
+    }
+    const index = initialPages.findIndex((page) => page.id === lastPageId);
+    return index >= 0 ? index : 0;
+  });
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [pendingPageDeleteId, setPendingPageDeleteId] = useState<string | null>(null);
   const [pendingPanelDeleteId, setPendingPanelDeleteId] = useState<string | null>(null);
@@ -521,6 +553,8 @@ export function PageLayoutEditor({
   const coverPage = pages.find((page) => page.pageKind === 'cover') ?? null;
   const backCoverPage = pages.find((page) => page.pageKind === 'back-cover') ?? null;
   const spreadPages = interiorSpreadPages(pages);
+  const spreadRightIdByLeftId = spreadRightPageIdByLeftPageId(pages);
+  const spreadLeftIdByRightId = spreadLeftPageIdByRightPageId(pages);
   const lastSpreadStartIndex = lastSpreadAnchorPageIndex(pages, spreadPages);
   const isSinglePageMode = layoutMode !== 'spread';
   const hasSinglePageSidePanel = layoutMode === 'single';
@@ -558,7 +592,13 @@ export function PageLayoutEditor({
   const visiblePageIds = new Set(
     visiblePages.flatMap((page) => (page ? [page.id] : [])),
   );
-  const visibleSelectedPanel = selectedPanel && selectedPanel.pageId && visiblePageIds.has(selectedPanel.pageId) ? selectedPanel : null;
+  const panelIsVisible = (panel: StoryPanel) => {
+    if (!panel.pageId) return false;
+    if (visiblePageIds.has(panel.pageId)) return true;
+    const rightPageId = panel.spansSpread ? spreadRightIdByLeftId.get(panel.pageId) : undefined;
+    return rightPageId !== undefined && visiblePageIds.has(rightPageId);
+  };
+  const visibleSelectedPanel = selectedPanel && panelIsVisible(selectedPanel) ? selectedPanel : null;
   const panelKindHost = panelKindHostFor(displayDocument, visibleSelectedPanel);
   const imageInfoHost = imageInfoHostFor(displayDocument, visibleSelectedPanel);
   const captionHostPanel = imageInfoHost;
@@ -753,6 +793,10 @@ export function PageLayoutEditor({
     if (selectedPageId && pages.some((page) => page.id === selectedPageId)) return;
     setSelectedPageId(pages[clampedPageIndex]?.id ?? pages[0]?.id ?? null);
   }, [clampedPageIndex, pages, selectedPageId]);
+  const currentPageIdForRecall = pages[clampedPageIndex]?.id ?? null;
+  useEffect(() => {
+    if (currentPageIdForRecall) writeLastLayoutPageId(projectSlug, currentPageIdForRecall);
+  }, [projectSlug, currentPageIdForRecall]);
   useEffect(() => {
     if (layoutMode !== 'single' || singleSidePanel !== 'info' || !selectedPanel) {
       previousPageIndexRef.current = clampedPageIndex;
@@ -1104,7 +1148,7 @@ export function PageLayoutEditor({
     const pageRows = LAYOUT_PAGE_ROWS;
     const text = captionTextDrafts[captionId] ?? caption.visibleText;
     const nextHeight = fitCaptionHeightRows(caption, text, grid, pageRows, CAPTION_GRID_SNAP);
-    updatePanelById(captionId, { rect: clampCaptionRect({ ...caption.rect, h: nextHeight }) });
+    updatePanelById(captionId, { rect: clampCaptionRect({ ...caption.rect, h: nextHeight }, panelLayoutColumns(caption)) });
   };
   const adjustCaptionTextSizeToFit = (captionId: string) => {
     const caption = findPanelOrCaption(displayDocument, captionId);
@@ -1156,7 +1200,7 @@ export function PageLayoutEditor({
       visibleText: '',
       richText: plainTextToRichText(''),
       textStyle: { ...defaultCaptionTextStyle },
-      rect: clampCaptionRect(defaultCaptionRect(parent, captions)),
+      rect: defaultCaptionRect(parent, captions, panelLayoutColumns(parent)),
       layer: parent.layer + 1 + captions.length,
     };
     commitDocument({
@@ -1283,7 +1327,15 @@ export function PageLayoutEditor({
   const snapPanelToAspectRatio = (panel: StoryPanel, aspectRatio: string) => {
     if (!panel.pageId) return;
     const pageRows = LAYOUT_PAGE_ROWS;
-    const nextRect = snapRectToAspectRatio(panel.rect, pageRows, parseAspectRatio(aspectRatio), panel.panelKind, clampRect);
+    const columns = panelLayoutColumns(panel);
+    const nextRect = snapRectToAspectRatio(
+      panel.rect,
+      pageRows,
+      parseAspectRatio(aspectRatio),
+      panel.panelKind,
+      (rect, panelKind) => clampRect(rect, panelKind, columns),
+      columns,
+    );
     updatePanelById(panel.id, { rect: nextRect, aspectRatio });
   };
   const snapPanelToPageSizeFraction = (panel: StoryPanel, axis: 'width' | 'height', fraction: PageSizeFraction) => {
@@ -1315,6 +1367,46 @@ export function PageLayoutEditor({
     } finally {
       setIsSnappingAspect(false);
     }
+  };
+  /** Left page of the spread containing the panel's page, or null when the page has no spread partner. */
+  const spreadSpanAnchorPageIdFor = (panel: StoryPanel): string | null => {
+    if (!panel.pageId) return null;
+    if (spreadRightIdByLeftId.has(panel.pageId)) return panel.pageId;
+    return spreadLeftIdByRightId.get(panel.pageId) ?? null;
+  };
+  const spanPanelAcrossSpread = (panel: StoryPanel) => {
+    const anchorPageId = spreadSpanAnchorPageIdFor(panel);
+    if (!anchorPageId || panel.spansSpread) return;
+    const offset = anchorPageId === panel.pageId ? 0 : gridColumns;
+    const spanColumns = gridColumns * 2;
+    updatePanelById(panel.id, {
+      pageId: anchorPageId,
+      spansSpread: true,
+      rect: clampRect({ ...panel.rect, x: panel.rect.x + offset }, panel.panelKind, spanColumns),
+      captions: (panel.captions ?? []).map((caption) => ({
+        ...caption,
+        rect: clampCaptionRect({ ...caption.rect, x: caption.rect.x + offset }, spanColumns),
+      })),
+    });
+  };
+  const unspanPanel = (panel: StoryPanel) => {
+    if (!panel.pageId || !panel.spansSpread) return;
+    const rightPageId = spreadRightIdByLeftId.get(panel.pageId);
+    const movesRight = rightPageId !== undefined && panel.rect.x + panel.rect.w / 2 >= gridColumns;
+    const offset = movesRight ? gridColumns : 0;
+    updatePanelById(panel.id, {
+      pageId: movesRight && rightPageId ? rightPageId : panel.pageId,
+      spansSpread: false,
+      rect: clampRect({
+        ...panel.rect,
+        x: panel.rect.x - offset,
+        w: Math.min(panel.rect.w, gridColumns),
+      }, panel.panelKind),
+      captions: (panel.captions ?? []).map((caption) => ({
+        ...caption,
+        rect: clampCaptionRect({ ...caption.rect, x: caption.rect.x - offset }),
+      })),
+    });
   };
   const togglePanelAspectRatioLock = (panel: StoryPanel) => {
     if (panel.aspectRatioLocked) {
@@ -1497,12 +1589,24 @@ export function PageLayoutEditor({
   const updatePanelDuringDrag = (event: React.PointerEvent, state: DragState) => {
     const draggedPanel = findPanelOrCaption(displayDocument, state.panelId);
     if (!draggedPanel) return;
-    const targetPageId = isCaption(draggedPanel) ? state.pageId : pageIdFromPointer(event.clientX, event.clientY) ?? state.pageId;
-    const pageElement = pageRefs.current[targetPageId] ?? pageRefs.current[state.pageId];
+    // Spanning panels stay anchored to the spread's left page; both page grids
+    // share column metrics, so any mounted grid of the spread works for math.
+    const spanning = Boolean(draggedPanel.spansSpread);
+    const targetPageId = isCaption(draggedPanel) || spanning
+      ? state.pageId
+      : pageIdFromPointer(event.clientX, event.clientY) ?? state.pageId;
+    const spreadPartnerId = spanning ? spreadRightIdByLeftId.get(state.pageId) : undefined;
+    const pageElement = pageRefs.current[targetPageId]
+      ?? pageRefs.current[state.pageId]
+      ?? (spreadPartnerId ? pageRefs.current[spreadPartnerId] : null);
     if (!pageElement) return;
     const bounds = pageElement.getBoundingClientRect();
     const columnWidth = bounds.width / gridColumns;
     const rowHeight = Math.max(22, bounds.height / LAYOUT_PAGE_ROWS);
+    // When only the spread's right page grid is mounted, its origin sits 12
+    // columns into the spanning panel's unified coordinate space.
+    const gridOriginColumns = spanning && pageElement !== pageRefs.current[state.pageId] ? gridColumns : 0;
+    const gridOriginLeft = bounds.left - gridOriginColumns * columnWidth;
     const snapScale = draggedPanel && isCaption(draggedPanel) ? CAPTION_GRID_SNAP : panelSnapScale;
     const deltaColumns = targetPageId === state.pageId ? roundStep((event.clientX - state.startClientX) / columnWidth, snapScale) : roundStep((event.clientX - bounds.left) / columnWidth, snapScale) - state.startRect.x;
     const deltaRows = targetPageId === state.pageId ? roundStep((event.clientY - state.startClientY) / rowHeight, snapScale) : roundStep((event.clientY - bounds.top) / rowHeight, snapScale) - state.startRect.y;
@@ -1517,12 +1621,13 @@ export function PageLayoutEditor({
             anchor: state.startRect,
             corner: state.corner ?? 'se',
             pointer: { clientX: event.clientX, clientY: event.clientY },
-            pageBounds: { left: bounds.left, top: bounds.top },
+            pageBounds: { left: gridOriginLeft, top: bounds.top },
             columnWidthPx: columnWidth,
             rowHeightPx: rowHeight,
             pageRows,
             targetAspect: parseAspectRatio(draggedPanel.aspectRatio),
             bounds: { minWidth, minHeight, snapScale: PANEL_DRAG_SNAP_SCALE },
+            columns: panelLayoutColumns(draggedPanel),
           });
           nextPatch = { rect };
         } else {
@@ -1605,6 +1710,7 @@ export function PageLayoutEditor({
           parseAspectRatio(resizedPanel.aspectRatio),
           PANEL_COMMIT_SNAP_SCALE,
           { minWidth, minHeight },
+          panelLayoutColumns(resizedPanel),
         );
         nextDocument = updatePanelOrCaptionById(nextDocument, resizedPanel.id, { rect });
       }
@@ -1887,7 +1993,7 @@ export function PageLayoutEditor({
                     </article>
                   );
                 }
-                const pagePanels = sortedPanelsForPage(displayDocument, page.id);
+                const pagePanels = panelEntriesForPage(displayDocument, page.id, spreadLeftIdByRightId);
                 const pageRows = LAYOUT_PAGE_ROWS;
                 return (
                   <article
@@ -1906,13 +2012,13 @@ export function PageLayoutEditor({
                       onPointerUp={endDrag}
                       onPointerCancel={endDrag}
                     >
-                      {pagePanels.map((panel) => (
+                      {pagePanels.map(({ panel, offsetColumns }) => (
                         <div
-                          key={panel.id}
+                          key={`${panel.id}-${offsetColumns}`}
                           role="presentation"
                           className={`story-panels-page-panel is-${panel.panelKind} ${isCaption(panel) ? 'is-caption' : ''} ${captionPanelClassName(panel)} ${panel.panelKind === 'image' && panel.activeAssetId ? 'has-image' : ''} ${cropModePanelId === panel.id ? 'is-crop-mode' : ''} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id && dragState.activated ? 'is-dragging' : ''}`}
                           style={{
-                            ...panelStyle(panel, pageRows),
+                            ...panelStyle(panel, pageRows, offsetColumns),
                             ...(panel.panelKind === 'text' ? panelCanvasTextStyle(
                               panel,
                               selectedPanelId,
@@ -1985,7 +2091,7 @@ export function PageLayoutEditor({
               </article>
             );
           }
-          const pagePanels = sortedPanelsForPage(displayDocument, page.id);
+          const pagePanels = panelEntriesForPage(displayDocument, page.id, spreadLeftIdByRightId);
           const pageRows = LAYOUT_PAGE_ROWS;
           return (
             <article
@@ -2013,13 +2119,13 @@ export function PageLayoutEditor({
                   onPointerUp={endDrag}
                   onPointerCancel={endDrag}
                 >
-                  {pagePanels.map((panel) => (
+                  {pagePanels.map(({ panel, offsetColumns }) => (
                     <div
-                      key={panel.id}
+                      key={`${panel.id}-${offsetColumns}`}
                       role="presentation"
                       className={`story-panels-page-panel is-${panel.panelKind} ${isCaption(panel) ? 'is-caption' : ''} ${captionPanelClassName(panel)} ${panel.panelKind === 'image' && panel.activeAssetId ? 'has-image' : ''} ${cropModePanelId === panel.id ? 'is-crop-mode' : ''} ${selectedPanelId === panel.id ? 'is-selected' : ''} ${flashingPanelId === panel.id ? 'is-flashing' : ''} ${dragState?.panelId === panel.id && dragState.activated ? 'is-dragging' : ''}`}
                       style={{
-                        ...panelStyle(panel, pageRows),
+                        ...panelStyle(panel, pageRows, offsetColumns),
                         ...(panel.panelKind === 'text' ? panelCanvasTextStyle(
                           panel,
                           selectedPanelId,
@@ -2146,6 +2252,33 @@ export function PageLayoutEditor({
                       onClick={() => updatePanelById(panelKindHost.id, { panelKind: 'text' })}
                     >
                       Text / caption
+                    </button>
+                  </div>
+                </div>
+                )}
+                {panelKindHost && (panelKindHost.spansSpread || spreadSpanAnchorPageIdFor(panelKindHost)) && (
+                <div className="story-panels-info-control">
+                  <span>Page span</span>
+                  <div className="story-panels-kind-toggle" role="tablist" aria-label="Page span">
+                    <button
+                      type="button"
+                      className={!panelKindHost.spansSpread ? 'is-active' : ''}
+                      role="tab"
+                      aria-selected={!panelKindHost.spansSpread}
+                      disabled={isSaving}
+                      onClick={() => unspanPanel(panelKindHost)}
+                    >
+                      Single page
+                    </button>
+                    <button
+                      type="button"
+                      className={panelKindHost.spansSpread ? 'is-active' : ''}
+                      role="tab"
+                      aria-selected={Boolean(panelKindHost.spansSpread)}
+                      disabled={isSaving}
+                      onClick={() => spanPanelAcrossSpread(panelKindHost)}
+                    >
+                      Both pages
                     </button>
                   </div>
                 </div>

@@ -21,17 +21,17 @@ function roundCaptionStep(value: number) {
   return Math.round(value * CAPTION_GRID_SNAP) / CAPTION_GRID_SNAP;
 }
 
-export function clampCaptionRect(rect: StoryPanelRect): StoryPanelRect {
-  const w = Math.min(CAPTION_GRID_COLUMNS, Math.max(CAPTION_MIN_WIDTH, roundCaptionStep(rect.w)));
+export function clampCaptionRect(rect: StoryPanelRect, columns: number = CAPTION_GRID_COLUMNS): StoryPanelRect {
+  const w = Math.min(columns, Math.max(CAPTION_MIN_WIDTH, roundCaptionStep(rect.w)));
   let h = Math.max(CAPTION_MIN_HEIGHT, roundCaptionStep(rect.h));
   h = Math.min(h, LAYOUT_PAGE_ROWS);
-  const x = Math.min(CAPTION_GRID_COLUMNS - w, Math.max(0, roundCaptionStep(rect.x)));
+  const x = Math.min(columns - w, Math.max(0, roundCaptionStep(rect.x)));
   let y = Math.max(0, roundCaptionStep(rect.y));
   y = Math.min(y, LAYOUT_PAGE_ROWS - h);
   return { x, y, w, h };
 }
 
-export function defaultCaptionRect(parent: StoryPanel, captions: StoryPanel[]): StoryPanelRect {
+export function defaultCaptionRect(parent: StoryPanel, captions: StoryPanel[], columns: number = CAPTION_GRID_COLUMNS): StoryPanelRect {
   const gap = 1 / CAPTION_GRID_SNAP;
   const bottom = captions.length
     ? Math.max(...captions.map((caption) => caption.rect.y + caption.rect.h))
@@ -41,7 +41,7 @@ export function defaultCaptionRect(parent: StoryPanel, captions: StoryPanel[]): 
     y: bottom + gap,
     w: parent.rect.w,
     h: 0.5,
-  });
+  }, columns);
 }
 
 export function captionLabel(index: number) {
