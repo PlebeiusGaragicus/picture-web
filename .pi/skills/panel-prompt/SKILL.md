@@ -1,10 +1,10 @@
 ---
 name: panel-prompt
 description: >-
-  Draft one verbose, imagen-ready image prompt for a single comic panel from
-  the panel's story text, surrounding panels, canonical character looks, and
-  the injected imagen prompt guide. Delivers via the set_panel_image_prompt
-  tool.
+  Draft one verbose, generation-ready image prompt for a single comic panel
+  from the panel's story text, surrounding panels, canonical character looks,
+  and the injected Gemini image prompt guide. Delivers via the
+  set_panel_image_prompt tool.
 disable-model-invocation: false
 ---
 
@@ -16,8 +16,8 @@ The user provides:
 2. Runner context containing: optional **user guidance** (an idea, concept,
    or direction for the image), story context for the panels before/after,
    **THIS PANEL's story text** (the moment to draw), canonical character
-   looks, an optional project visual style note, and the **imagen prompt
-   guide**.
+   looks, an optional project visual style note, and the **Gemini image
+   prompt guide**.
 
 Write **one** image-generation prompt that depicts THIS PANEL's moment.
 Surrounding panels are context only — do not depict their events.
@@ -28,7 +28,7 @@ choices but never overrides canonical character looks or the guide's rules.
 
 ## Rules
 
-- Follow the imagen prompt guide exactly, including its required output shape
+- Follow the Gemini image prompt guide exactly, including its required output shape
   (subject → action → setting → characters → composition/lighting).
 - Any character visible in the panel must be described using their canonical
   look descriptors from the runner context, not just their name. Only
@@ -65,7 +65,7 @@ again.
 
 # User Request
 
-Read the runner context and deliver one imagen-ready prompt for THIS PANEL
+Read the runner context and deliver one generation-ready prompt for THIS PANEL
 via set_panel_image_prompt.
 
 **User:** `@$`

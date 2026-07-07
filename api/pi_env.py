@@ -9,9 +9,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SKILLS_DIR = REPO_ROOT / ".pi" / "skills"
-LIBRARY_ROOT = Path(os.environ.get("PHOTO_WEB_LIBRARY_ROOT", str(REPO_ROOT / "photo-library")))
+import paths
+
+REPO_ROOT = paths.REPO_ROOT
+SKILLS_DIR = paths.PI_SKILLS_DIR
+LIBRARY_ROOT = paths.HOME
 
 NODE22_BIN_CANDIDATES = (
     Path("/opt/homebrew/opt/node@22/bin"),
@@ -110,6 +112,13 @@ class AdaptationContext:
 
 
 def find_pi_binary() -> str:
+    import app_config
+
+    override = app_config.get_value("piBinary")
+    if override:
+        if Path(override).is_file():
+            return override
+        raise RuntimeError(f"Configured piBinary does not exist: {override}")
     pi = shutil.which("pi", path=pi_runtime_env().get("PATH"))
     if not pi:
         pi = shutil.which("pi")

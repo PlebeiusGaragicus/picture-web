@@ -1,6 +1,5 @@
 .venv/
 __pycache__/
-photo-library/
 .pytest_cache/
 node_modules/
 dist/
@@ -9,4 +8,5 @@ dist/
 .DS_Store
 .env
 
-books/
+books/dist-release/
+build/

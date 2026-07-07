@@ -1015,7 +1015,7 @@ export function PanelChunkList({
                       type="button"
                       className="secondary"
                       disabled={isCreating || promptTaskBusy}
-                      title="Have pi draft an imagen-ready prompt from the panel's story text"
+                      title="Have pi draft a generation-ready prompt from the panel's story text"
                       onClick={() => onDraftPrompt(panelEditorPanel.id)}
                     >
                       {promptTaskBusy ? 'Drafting…' : 'Draft with pi'}
@@ -1144,7 +1144,7 @@ export function PanelChunkList({
             <h2 id="draft-input-title">Draft with input</h2>
             <p className="muted">
               Give pi an idea, concept, or direction for this panel's image. It will build a full
-              imagen-ready prompt around it, using the panel's story text and character looks.
+              generation-ready prompt around it, using the panel's story text and character looks.
             </p>
             <label>
               Your idea

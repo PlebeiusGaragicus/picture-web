@@ -1,23 +1,27 @@
 # Architecture
 
 Local single-user app: FastAPI backend (`api/`), React + Vite UI (`webui/`),
-all user data under gitignored `photo-library/`. The backend is the only layer
-that touches the filesystem, validation, Gemini, and the pi agent.
+all user data under `~/.comic-canvas/` (override: `COMIC_CANVAS_HOME`, legacy
+`PHOTO_WEB_LIBRARY_ROOT`). The backend is the only layer that touches the
+filesystem, validation, Gemini, and the pi agent.
 
 ```text
 webui (React, React Flow)  ── REST /api ──  api (FastAPI)
                                               ├─ gemini.py            → Google GenAI image generation
                                               ├─ pi_runtime.py        → in-process pi tasks
                                               │    └─ pi --mode rpc (JSON-RPC subprocess)
-                                              └─ photo-library/       → all pixels + JSON
+                                              └─ ~/.comic-canvas/     → all pixels + JSON
 ```
 
 ## Backend module map
 
 | Module | Role |
 |--------|------|
-| `main.py` | App factory; includes routers, nothing else. |
-| `routes/` | One router per feature: `projects`, `canvas`, `adaptation`, `characters`, `locations`, `concept_art`, `sessions`, `story_panels`. Routers hold no logic. |
+| `main.py` | App factory; includes routers + the packaged-mode shutdown lifespan, nothing else. |
+| `routes/` | One router per feature: `projects`, `canvas`, `adaptation`, `characters`, `locations`, `concept_art`, `sessions`, `settings`, `story_panels`. Routers hold no logic. |
+| `paths.py` | Single source of truth for the home dir (`COMIC_CANVAS_HOME` → `PHOTO_WEB_LIBRARY_ROOT` → `~/.comic-canvas`) and `resource_path()` for bundled read-only assets (web dist, `.pi/skills`, `.pi/extensions`, `prompts/seed-defaults`, `api/prompt_guides`) — resolves identically in a repo checkout and inside the PyInstaller onedir bundle. Modules keep their own patchable constants (`library.LIBRARY_ROOT` etc.) derived from it. |
+| `app_config.py` / `version.py` | `config.json` (chmod 600: gemini key, auth token, port, piBinary; env overrides win) + `meta.json` version stamping (warn-only, no migrations pre-1.0) + `APP_VERSION`. |
+| `appmain.py` / `cli.py` / `preflight.py` | Packaged entrypoint: static UI mount, cookie-token auth middleware (loopback + Origin checks; active only when a token is configured, so dev/tests are unaffected), port picking, single-instance lock, file logging, programmatic uvicorn; the `comic-canvas` CLI (start/open/doctor/logs/update/uninstall); startup preflight that hard-requires the *system* pi + Node 22 (`COMIC_CANVAS_SKIP_PI_CHECK=1` bypass). See `package-app.md`. |
 | `library.py` | Projects, assets (`{id}.json` + `{id}.png`, ULID ids), canvas.json, tag registry, generated-asset creation. Canonical JSON IO: `read_json`/`write_json`. |
 | `models.py` | All Pydantic models, single file. |
 | `common.py` | `utc_now()`, `slugify(value, fallback)` — the only implementations. |
@@ -88,7 +92,9 @@ One invocation path:
    character profiles) declare `TaskProfile.tools`. The runtime then adds
    `--extension .pi/extensions/photo-web.ts` and sets `PHOTO_WEB_API`
    (origin: `PHOTO_WEB_API` env override, else `http://127.0.0.1:{API_PORT}`),
-   `PHOTO_WEB_PROJECT`, `PHOTO_WEB_TASK`, and `PHOTO_WEB_ALLOWED_TOOLS`. The
+   `PHOTO_WEB_PROJECT`, `PHOTO_WEB_TASK`, `PHOTO_WEB_ALLOWED_TOOLS`, and
+   (when the API enforces token auth, i.e. packaged mode) `PHOTO_WEB_TOKEN`,
+   which the extension sends as a Bearer header. The
    extension registers only the allow-listed tools
    (`set_panel_image_prompt`, `replace_panel_image_prompt`,
    `create_concept_card`, `register_character`, `list_characters`,
@@ -157,7 +163,7 @@ attaches to each running task's SSE stream, and browses the
 ## Storage layout (per project)
 
 ```text
-photo-library/projects/<slug>/
+~/.comic-canvas/projects/<slug>/
   project.json                 # name, createdAt, cover
   canvas.json                  # nodes + viewport
   tags.json                    # tag registry (user + entity tags)

@@ -26,7 +26,9 @@ from fastapi import HTTPException
 
 import adaptation
 import agent_sessions
+import app_config
 import library
+import paths
 from pi_env import (
     AdaptationContext,
     BookSession,
@@ -63,7 +65,7 @@ def _api_origin() -> str:
 
 
 def _extension_path() -> Path:
-    return Path(__file__).resolve().parent.parent / ".pi" / "extensions" / "photo-web.ts"
+    return paths.PI_EXTENSION_PATH
 
 
 def _snapshot_dir(slug: str) -> Path:
@@ -567,6 +569,9 @@ class PiSessionManager:
                 "PHOTO_WEB_TASK": handle.id,
                 "PHOTO_WEB_ALLOWED_TOOLS": ",".join(tools),
             }
+            token = app_config.get_value("authToken")
+            if token:
+                extra_env["PHOTO_WEB_TOKEN"] = token
 
         events_path = _snapshot_dir(handle.slug) / f"{handle.id}.events.jsonl"
         with events_path.open("a", encoding="utf-8") as events_file:

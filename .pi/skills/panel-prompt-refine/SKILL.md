@@ -15,7 +15,7 @@ The user provides:
 2. The **current prompt** to revise.
 3. **User feedback** to apply.
 4. Runner context: panel story text, surrounding panels, canonical character
-   looks and locations, and the **imagen prompt guide**.
+   looks and locations, and the **Gemini image prompt guide**.
 
 Rewrite the current prompt applying the feedback. This is a revision, not a
 redraft:
@@ -23,7 +23,7 @@ redraft:
 - Change only what the feedback asks for (plus anything that must change to
   stay consistent with it).
 - Preserve the rest of the prompt's content, characters, and structure.
-- The result must still follow the imagen prompt guide's output shape and
+- The result must still follow the Gemini image prompt guide's output shape and
   rules, and still describe visible characters with their canonical look
   descriptors.
 - Plain prose only: no headings, bullets, brackets, or meta commentary.
@@ -44,7 +44,7 @@ nothing else. If the tool returns an error, fix the prompt and call it again.
 
 # User Request
 
-Read the current prompt and feedback, then deliver the revised imagen-ready
-prompt via replace_panel_image_prompt.
+Read the current prompt and feedback, then deliver the revised
+generation-ready prompt via replace_panel_image_prompt.
 
 **User:** `@$`

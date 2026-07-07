@@ -8,11 +8,13 @@ export function ProjectLanding({
   error,
   onOpen,
   onCreated,
+  onOpenSettings,
 }: {
   projects: Project[];
   error: string | null;
   onOpen: (slug: string) => void;
   onCreated: (slug: string) => void;
+  onOpenSettings?: () => void;
 }) {
   const [name, setName] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
@@ -50,6 +52,17 @@ export function ProjectLanding({
           </span>
           <h1 className="landing-title">Comic Canvas</h1>
           <p className="landing-tagline">Turn a manuscript into a laid-out, illustrated comic.</p>
+          {onOpenSettings && (
+            <button
+              type="button"
+              className="icon-button landing-settings-button"
+              title="Settings"
+              aria-label="Settings"
+              onClick={onOpenSettings}
+            >
+              ⚙
+            </button>
+          )}
         </header>
         {error && <p className="error error-banner landing-error">{error}</p>}
         <div className="project-list">

@@ -1,5 +1,19 @@
 # Comic Canvas — Packaging & Distribution Plan (macOS + Linux)
 
+> **Status: IMPLEMENTED (2026-07-07).** All workstreams landed: `api/paths.py`
+> / `app_config.py` / `appmain.py` / `cli.py` / `preflight.py` /
+> `routes/settings.py`, cookie-token auth, `~/.comic-canvas` home (data
+> moved), PyInstaller spec + `scripts/build-release.sh` +
+> `scripts/smoke-frozen.sh`, `install.sh` / `scripts/uninstall.sh`, CI +
+> release workflows, README/ARCHITECTURE updates, `docs/release-checklist.md`.
+> Deltas from the plan below: auth is **cookie-based** (set via `/?token=` →
+> 302, `SameSite=Strict`) instead of header-based, because asset images load
+> via plain `<img src="/api/...">`; auth activates only when a token is
+> configured so dev/tests are untouched; the Gemini key lives in
+> chmod-600 `config.json` (no keychain); `PHOTO_WEB_TOKEN` carries the token
+> to the pi extension's callbacks. The first release still needs a `v0.1.0`
+> tag pushed to exercise the release workflow.
+
 How to take photo-web from "clone the repo and run `./run`" to an installable
 app named **comic-canvas**, distributed from GitHub Releases via a
 `curl … | bash` installer, storing all user data in `~/.comic-canvas/`, and

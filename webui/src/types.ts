@@ -556,3 +556,18 @@ export interface PiTraceDocument {
   steps: PiTraceStep[];
   stats: PiTraceStats;
 }
+
+export interface SettingsCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+  hint?: string | null;
+}
+
+export interface SettingsInfo {
+  appVersion: string;
+  libraryVersion: string | null;
+  homePath: string;
+  geminiKeyConfigured: boolean;
+  checks: SettingsCheck[];
+}

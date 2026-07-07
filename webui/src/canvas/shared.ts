@@ -233,6 +233,10 @@ export const modelCapabilities: Record<string, { aspectRatios: string[]; imageSi
     aspectRatios: ['1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9'],
     imageSizes: ['512', '1K', '2K', '4K'],
   },
+  'gemini-3.1-flash-lite-image': {
+    aspectRatios: ['1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+    imageSizes: ['1K'],
+  },
   'gemini-3-pro-image': {
     aspectRatios: ['1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
     imageSizes: ['1K', '2K', '4K'],

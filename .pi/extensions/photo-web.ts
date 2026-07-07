@@ -10,6 +10,7 @@
  *                           registered, so out-of-profile tools do not exist
  *                           in the system prompt at all
  *   PHOTO_WEB_TASK          task id (diagnostics only)
+ *   PHOTO_WEB_TOKEN         optional bearer token when the API enforces auth
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -17,16 +18,20 @@ import { Type } from "typebox";
 
 const API = process.env.PHOTO_WEB_API ?? "http://127.0.0.1:8787";
 const PROJECT = process.env.PHOTO_WEB_PROJECT ?? "";
+const TOKEN = process.env.PHOTO_WEB_TOKEN ?? "";
 
 async function callApi(method: string, path: string, body?: unknown): Promise<string> {
   if (!PROJECT) {
     throw new Error("PHOTO_WEB_PROJECT is not set; the runtime must provide the project slug");
   }
+  const headers: Record<string, string> = {
+    ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+    ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+  };
   const response = await fetch(`${API}${path}`, {
     method,
-    ...(body === undefined
-      ? {}
-      : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+    headers,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const text = await response.text();
   if (!response.ok) {
@@ -53,7 +58,7 @@ const TOOLS: Record<string, ToolDefinition> = {
       "Call exactly once with the complete final prompt text.",
     parameters: Type.Object({
       panelId: Type.String({ description: "The target panel id, e.g. panel-004" }),
-      prompt: Type.String({ description: "The complete imagen-ready prompt text (plain prose)" }),
+      prompt: Type.String({ description: "The complete generation-ready prompt text (plain prose)" }),
       characterSlugs: Type.Array(Type.String(), {
         description:
           "Slugs of every character visible in this panel, chosen only from the canonical character slugs in the context. Empty array if none.",

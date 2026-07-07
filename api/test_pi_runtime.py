@@ -622,7 +622,7 @@ def test_draft_panel_prompt_plan_context_and_guide(tmp_path, monkeypatch):
     assert "Rain begins." in prompt  # panel after
     assert "hero:" in prompt  # canonical character look
     assert "Character reference sheet" in prompt
-    assert "Imagen prompt guide" in prompt
+    assert "Gemini image prompt guide" in prompt
     assert pi_profiles.load_prompt_guide().rstrip() in prompt
 
 

@@ -59,7 +59,7 @@ human-led; you decide the beats. Place panels onto pages in the **Layout** view.
 ## 7. Draft panel prompts — Story or Layout view (panel editor)
 
 Open a panel and use **Draft with pi** (or **Draft with input…** to seed an idea).
-Pi writes an imagen-ready prompt using the canonical character looks and location
+Pi writes a generation-ready prompt using the canonical character looks and location
 descriptions, and tags the panel with `characterSlugs`/`locationSlug`. Review the
 **Who and where** chips and adjust if needed. Iterate with the one-line
 **Refine** feedback input.
@@ -67,7 +67,7 @@ descriptions, and tags the panel with `characterSlugs`/`locationSlug`. Review th
 ## 8. Draft to canvas and generate
 
 Per saved prompt, click **Draft to canvas**. This creates a canvas node with the
-prompt plus the tagged entities' reference sheets as imagen reference images.
+prompt plus the tagged entities' reference sheets as Gemini reference images.
 Generate; the resulting asset **auto-attaches back to the panel** and becomes its
 active image.
 

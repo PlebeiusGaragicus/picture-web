@@ -12,6 +12,7 @@ import { BookTextView } from './storyPanels/BookTextView';
 import { readAutoPlaceEnabled, writeAutoPlaceEnabled } from './storyPanels/autoPlace';
 import { LayoutEditorView } from './storyPanels/LayoutEditorView';
 import { ProjectLanding } from './ProjectLanding';
+import { SettingsModal } from './SettingsModal';
 import { ProjectPhaseSidebar } from './ProjectPhaseSidebar';
 import { ProjectTopBar } from './ProjectTopBar';
 import type { ProjectPhase } from './projectNavigation';
@@ -49,6 +50,7 @@ function App() {
   const [storyHasBookText, setStoryHasBookText] = useState(false);
   const [storyAutoPlaceEnabled, setStoryAutoPlaceEnabled] = useState(readAutoPlaceEnabled);
   const [showExportPdfModal, setShowExportPdfModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [exportPageBorder, setExportPageBorder] = useState<BookletPageBorder>('black');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   // Bumped after story-panel recovery so Story/Layout remount and reload panels.json.
@@ -184,15 +186,19 @@ function App() {
 
   if (!openProjectSlug) {
     return (
-      <ProjectLanding
-        projects={projects}
-        error={error}
-        onOpen={openProject}
-        onCreated={async (nextSlug) => {
-          await loadProjects();
-          await openProject(nextSlug);
-        }}
-      />
+      <>
+        <ProjectLanding
+          projects={projects}
+          error={error}
+          onOpen={openProject}
+          onCreated={async (nextSlug) => {
+            await loadProjects();
+            await openProject(nextSlug);
+          }}
+          onOpenSettings={() => setShowSettingsModal(true)}
+        />
+        {showSettingsModal && <SettingsModal onClose={() => setShowSettingsModal(false)} />}
+      </>
     );
   }
 
@@ -406,6 +412,15 @@ function App() {
                     onShowArchivedChange={workspace.setShowArchived}
                   />
                 ) : null}
+                <button
+                  type="button"
+                  className="icon-button"
+                  title="Settings"
+                  aria-label="Settings"
+                  onClick={() => setShowSettingsModal(true)}
+                >
+                  ⚙
+                </button>
               </>
             )}
           />
@@ -539,6 +554,7 @@ function App() {
             </div>
         </Modal>
       )}
+      {showSettingsModal && <SettingsModal onClose={() => setShowSettingsModal(false)} />}
     </div>
   );
 }

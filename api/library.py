@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import HTTPException, UploadFile
 from PIL import Image
 
+import paths
 from ids import new_seed, new_ulid
 from common import utc_now
 from models import (
@@ -41,10 +42,9 @@ from models import (
     EntityKind,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-LIBRARY_ROOT = Path(os.environ.get("PHOTO_WEB_LIBRARY_ROOT", str(REPO_ROOT / "photo-library")))
+LIBRARY_ROOT = paths.HOME
 PROJECTS_ROOT = LIBRARY_ROOT / "projects"
-SEED_DEFAULTS_ROOT = REPO_ROOT / "prompts" / "seed-defaults"
+SEED_DEFAULTS_ROOT = paths.SEED_DEFAULTS_DIR
 SYSTEM_TRASH = Path(os.environ.get("PHOTO_WEB_TRASH_DIR", str(Path.home() / ".Trash")))
 THUMB_MAX_SIZE = (384, 384)
 DEFAULT_STARTER_DRAFT_NODE_ID = "draft_seed"

@@ -1,4 +1,4 @@
-import type { AdaptationCanvasImportResponse, AdaptationStatus, CharacterPatchPayload, CharacterRecord, AgentSession, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, ImageGroupNodeResponse, LocationPatchPayload, LocationRecord, PiTaskProfile, PiTaskStatus, PiTraceDocument, Project, ProjectDetail, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
+import type { AdaptationCanvasImportResponse, AdaptationStatus, CharacterPatchPayload, CharacterRecord, AgentSession, Asset, CanvasDocument, ChatSession, ChatTurnPayload, ChatTurnResponse, ConceptArtSubjectKind, ConceptCard, ConceptNodeResponse, CreateChatSessionPayload, GeneratePayload, ImageGroupNodeResponse, LocationPatchPayload, LocationRecord, PiTaskProfile, PiTaskStatus, PiTraceDocument, Project, ProjectDetail, SettingsInfo, StoryPanelBookmarkCreatePayload, StoryPanelCreatePayload, StoryPanelDocument, StoryPanelPatchPayload, TagDefinition, TagRegistryDocument, VisualStyleDefinition } from './types';
 
 const DEBUG = import.meta.env.DEV;
 
@@ -314,6 +314,12 @@ export const api = {
     request<ChatTurnResponse>(`/api/projects/${slug}/chat-sessions/${sessionId}/turns`, {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+  getSettings: () => request<SettingsInfo>('/api/settings'),
+  putGeminiKey: (apiKey: string) =>
+    request<SettingsInfo>('/api/settings/gemini-key', {
+      method: 'PUT',
+      body: JSON.stringify({ apiKey }),
     }),
   importAsset: (slug: string, file: File, position?: { x: number; y: number }) => {
     const data = new FormData();

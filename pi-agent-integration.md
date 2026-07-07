@@ -272,7 +272,7 @@ validated twice (schema at call time, domain state after the run).
 `_panel_prompt_context_lines` is a miniature retrieval system written in plain
 Python: the panel's story text, ±2 neighboring panels, one clipped "look line"
 per canonical character/location variant, the project's visual style, and the
-Imagen prompt guide. The application decides what the agent sees, in what order,
+Gemini image prompt guide. The application decides what the agent sees, in what order,
 clipped to what length.
 
 This inverts the usual agent pattern ("give the model search tools and let it

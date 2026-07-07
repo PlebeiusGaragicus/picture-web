@@ -19,15 +19,16 @@ from typing import Any, Callable, Iterator
 from fastapi import HTTPException
 
 import adaptation
+import paths
 from pi_env import AdaptationContext, BookSession
 from common import utc_now
 from models import CharacterRecord
 
 
-PROMPT_GUIDES_DIR = Path(__file__).resolve().parent / "prompt_guides"
+PROMPT_GUIDES_DIR = paths.PROMPT_GUIDES_DIR
 
 
-def load_prompt_guide(name: str = "imagen") -> str:
+def load_prompt_guide(name: str = "gemini-image") -> str:
     """Model-specific image-prompt guide injected into prompt-authoring profiles."""
     return (PROMPT_GUIDES_DIR / f"{name}.md").read_text()
 
@@ -474,7 +475,7 @@ def _panel_prompt_context_lines(ctx: AdaptationContext, panel: Any, document: An
         lines.append(_clip(default_style.prompt, 300))
         lines.append("")
 
-    lines.append("Imagen prompt guide (follow exactly):")
+    lines.append("Gemini image prompt guide (follow exactly):")
     lines.append(load_prompt_guide().rstrip())
     return lines
 

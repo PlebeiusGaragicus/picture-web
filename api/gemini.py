@@ -11,11 +11,13 @@ from typing import Any
 
 from dotenv import load_dotenv
 from google import genai
+
+import app_config
+import paths
 from google.genai import types
 from PIL import Image
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-LIBRARY_ROOT = Path(os.environ.get("PHOTO_WEB_LIBRARY_ROOT", str(REPO_ROOT / "photo-library")))
+LIBRARY_ROOT = paths.HOME
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gemini-3.1-flash-image"
@@ -29,10 +31,12 @@ def library_root() -> Path:
 
 def load_client() -> genai.Client:
     load_dotenv(LIBRARY_ROOT / ".env")
-    api_key = os.environ.get("GOOGLE_API_KEY", "").strip()
+    # get_value checks the GOOGLE_API_KEY env (populated by .env above) before config.json.
+    api_key = app_config.get_value("geminiApiKey") or ""
     if not api_key:
         raise RuntimeError(
-            "GOOGLE_API_KEY is not set. Add it to photo-library/.env or export it."
+            "GOOGLE_API_KEY is not set. Add it in Settings, or put it in "
+            f"{LIBRARY_ROOT / '.env'}, or export it."
         )
     logger.debug("loaded Gemini client api_key_present=%s", bool(api_key))
     return genai.Client(api_key=api_key)
@@ -55,8 +59,9 @@ def reference_image_limit(model: str) -> int:
     normalized = model.strip().lower()
     if "2.5-flash-image" in normalized or "2-5-flash-image" in normalized:
         return 3
-    if "image" in normalized:
-        return 14
+    if "3-pro-image" in normalized:
+        # Documented cap: up to 6 object images + 5 character images.
+        return 11
     return 14
 
 
