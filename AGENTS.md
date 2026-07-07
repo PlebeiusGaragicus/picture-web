@@ -14,6 +14,18 @@
   tag the merge commit on `main`.
 - CI (`.github/workflows/ci.yml`) runs on pushes to `dev`/`main` and on PRs.
 
+## Data isolation
+
+Four data homes; never cross them:
+
+- Installed app (`comic-canvas`): `~/.comic-canvas` — the user's real
+  projects. Dev tooling must NEVER write here.
+- `./run` dev stack: repo-local `dev-library/` (gitignored; `./run` exports
+  `COMIC_CANVAS_HOME` unless already set).
+- pytest: throwaway tmpdir (`api/conftest.py` sets the default; tests
+  additionally monkeypatch the per-module `LIBRARY_ROOT` constants).
+- Playwright e2e: `webui/e2e/.library` (wiped per run).
+
 ## Breaking Changes Preferred
 
 This project is in active local development and does not preserve backwards compatibility for internal schemas, storage formats, API shapes, or UI state.

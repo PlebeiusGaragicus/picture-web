@@ -85,9 +85,13 @@ Each project opens into six views (left sidebar):
 ```
 
 Creates/reuses `.venv`, installs Python + web UI deps, then starts the API on
-`:8787` (uvicorn `--reload`) and Vite on `:5173`. Dev shares
-`~/.comic-canvas` by default; point `COMIC_CANVAS_HOME` (or the legacy
-`PHOTO_WEB_LIBRARY_ROOT`) at a scratch dir to keep experiments isolated.
+`:8787` (uvicorn `--reload`) and Vite on `:5173`.
+
+**Data isolation:** dev and the installed app never share data. `./run`
+defaults to a repo-local `dev-library/` (gitignored); the installed
+`comic-canvas` owns `~/.comic-canvas`. Set `COMIC_CANVAS_HOME` explicitly if
+you deliberately want dev code pointed elsewhere. Copy a real project into
+dev with `cp -r ~/.comic-canvas/projects/<slug> dev-library/projects/`.
 
 Tests and gates:
 

@@ -19,5 +19,4 @@ nav:
   - Pi Agent Methodology: pi-agent-integration.md
   - Development:
       - Release checklist: release-checklist.md
-      - Design resolutions: resolutions.md
       - Interactions migration: interactions-migration.md
