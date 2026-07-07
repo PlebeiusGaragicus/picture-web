@@ -1,6 +1,6 @@
 # Image resolution and aspect ratio
 
-> **Deprecated.** This document is outdated and no longer maintained. See [`AGENTS.md`](../AGENTS.md) and the application source for current behavior.
+> **Deprecated.** This document is outdated and no longer maintained. See [`AGENTS.md`](https://github.com/PlebeiusGaragicus/picture-web/blob/main/AGENTS.md) and the application source for current behavior.
 
 This project uses Google’s **Nano Banana** image models (Gemini native image generation) via the [Gemini API](https://ai.google.dev/gemini-api/docs/image-generation). Output size is controlled with two fields on `ImageConfig`, not with raw pixel width×height.
 

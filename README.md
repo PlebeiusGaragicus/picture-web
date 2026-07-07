@@ -5,10 +5,12 @@ parent → child lineage, a story/panel layout editor with booklet PDF export,
 and narrow **pi agent** tasks that extract characters, locations, and concept
 art from a source book.
 
-![Example canvas showing image lineage from sketches to final illustrations](assets/example-canvas.jpg)
+![Example canvas showing image lineage from sketches to final illustrations](docs/assets/example-canvas.jpg)
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the system layout and [AGENTS.md](AGENTS.md)
-for project conventions.
+**Documentation:** <https://plebeiusgaragicus.github.io/picture-web/> —
+user guide, [architecture](docs/architecture.md), packaging, and the pi agent
+methodology. Project conventions for contributors/agents live in
+[AGENTS.md](AGENTS.md).
 
 ## Install (macOS arm64, Linux x86_64)
 
@@ -95,7 +97,7 @@ cd webui && npm run build                    # frontend gate (tsc + vite)
 cd webui && npm run test:e2e                 # Playwright (scratch library)
 ```
 
-Packaging (see [package-app.md](package-app.md) for the full plan):
+Packaging (see [docs/packaging.md](docs/packaging.md) for the full plan):
 
 ```bash
 scripts/build-release.sh      # freeze with PyInstaller + smoke test + tarball

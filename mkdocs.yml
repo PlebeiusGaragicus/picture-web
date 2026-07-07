@@ -1,0 +1,23 @@
+site_name: Comic Canvas
+site_description: Build comic books with AI assistance — canvas, layout editor, and pi agent tasks.
+site_url: https://plebeiusgaragicus.github.io/picture-web/
+repo_url: https://github.com/PlebeiusGaragicus/picture-web
+
+theme:
+  name: material
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - User Guide: user-guide.md
+  - Architecture: architecture.md
+  - Packaging & Distribution: packaging.md
+  - Pi Agent Methodology: pi-agent-integration.md
+  - Development:
+      - Release checklist: release-checklist.md
+      - Design resolutions: resolutions.md
+      - Interactions migration: interactions-migration.md
