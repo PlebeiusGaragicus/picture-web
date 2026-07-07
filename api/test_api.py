@@ -9,7 +9,7 @@ import library
 import gemini
 import chat_sessions
 import adaptation
-import adaptation_workflow.config as workflow_config
+import pi_env
 import story_panels
 import story_panels_print
 from fastapi.testclient import TestClient
@@ -2088,7 +2088,7 @@ def test_agent_sessions_trace_and_archive(tmp_path, monkeypatch):
     import agent_sessions
 
     client = setup_tmp_library(tmp_path, monkeypatch)
-    monkeypatch.setattr(workflow_config, "LIBRARY_ROOT", library.LIBRARY_ROOT)
+    monkeypatch.setattr(pi_env, "LIBRARY_ROOT", library.LIBRARY_ROOT)
     create_project(client)
     root = library.project_dir("farm-comic") / "adaptation"
     root.mkdir(parents=True, exist_ok=True)

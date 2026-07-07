@@ -27,14 +27,14 @@ from fastapi import HTTPException
 import adaptation
 import agent_sessions
 import library
-from adaptation_workflow.config import (
+from pi_env import (
     AdaptationContext,
     BookSession,
     ensure_node_runtime,
     find_pi_binary,
     pi_runtime_env,
 )
-from adaptation_workflow.events import project_event
+from pi_events import project_event
 from common import utc_now
 from ids import new_ulid
 from models import PiTaskStatus

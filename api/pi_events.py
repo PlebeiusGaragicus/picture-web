@@ -63,4 +63,3 @@ def project_event(event: dict[str, Any]) -> dict[str, Any] | None:
     if event_type in LIFECYCLE_TYPES:
         return {"type": event_type}
     return None
-

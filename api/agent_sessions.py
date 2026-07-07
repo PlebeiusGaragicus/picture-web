@@ -9,7 +9,7 @@ from fastapi import HTTPException
 
 import adaptation
 import library
-from adaptation_workflow.config import AdaptationContext
+from pi_env import AdaptationContext
 from common import utc_now
 from ids import new_ulid
 from models import (

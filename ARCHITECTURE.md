@@ -30,7 +30,7 @@ webui (React, React Flow)  ── REST /api ──  api (FastAPI)
 | `agent_sessions.py` / `pi_session_trace.py` | Pi agent session registry and session-file trace parsing. |
 | `pi_runtime.py` / `pi_profiles.py` | In-process pi task runtime (one `pi --mode rpc` subprocess per step, `task_progress` between steps, SSE event ring buffer, abort, restart-safe snapshots) and the narrow task profiles it runs (`read-book`, `discover-characters`/`discover-locations`, `extract-character`/`extract-location` (targeted), `extract-all-characters`/`extract-all-locations` (multi-step), `refine-character`/`refine-location` (targeted, feedback-driven), `suggest-concept-character/location`, `draft-panel-prompt`, `refine-panel-prompt`; the character/location record plumbing is one `_EntityKind`-parameterized implementation). Profiles with `tools` get the photo-web extension loaded with a scoped allow-list (see the pi agent seam). |
 | `story_panels.py` / `story_panels_print.py` | Panel chunks, page layout, booklet PDF (reportlab). Panels carry entity links (`characterSlugs`/`locationSlug`, validated against `adaptation.status()`, written by the human patch path or the agent's `set_panel_image_prompt` delivery). `draft_panel_to_canvas` turns a saved image prompt into an `imageGroup` node whose `refs` are the tagged entities' canonical assets (409 if any entity has no asset yet) with `sourcePanelId` set; `library.attach_generated_assets_to_canvas` uses `sourcePanelId` to auto-attach generated assets back onto the panel. |
-| `adaptation_workflow/` | Pi plumbing for `pi_runtime`: `config.py` (context, pi/node discovery), `events.py` (`project_event`), `diagnostics.py` (`TaskDiagnostics`). |
+| `pi_env.py` / `pi_events.py` | Pi plumbing for `pi_runtime`: `pi_env.py` (`AdaptationContext`, `BookSession`, pi/node binary discovery), `pi_events.py` (`project_event` RPC-event projection). |
 
 ## Canvas model
 
@@ -83,7 +83,7 @@ One invocation path:
    profiles (extract-character) take a `target`; duplicates are keyed on
    `(profile, target)` and answered with 409.
 
-   **Tools-as-API (pi-idea §6):** profiles whose output is a domain object
+   **Tools-as-API:** profiles whose output is a domain object
    (`draft-panel-prompt`, `refine-panel-prompt`, `suggest-concept-*`, the
    character profiles) declare `TaskProfile.tools`. The runtime then adds
    `--extension .pi/extensions/photo-web.ts` and sets `PHOTO_WEB_API`
@@ -107,14 +107,18 @@ One invocation path:
 `pi_session_trace.py` parses pi's on-disk session `.jsonl` files for the trace
 view and is transport-independent.
 
-### Planned direction
+### Product direction
 
-See [pi-idea.md](pi-idea.md) for the full verified design (pi SDK/RPC/extension findings, PiSessionManager, narrow single-purpose task profiles, domain tools). The product direction is button-driven AI augmentation — many narrow pi agents (character/scene/prop extraction, panel image-prompt drafting/refinement), no general chat agent.
+The product direction is button-driven AI augmentation — many narrow pi
+agents (character/location extraction, panel image-prompt drafting/refinement),
+no general chat agent. Explicit non-goals (decided 2026-07): no "super" pi
+agent with the full tool catalog, no batch drafting/generation (everything is
+one-at-a-time, human-reviewed), no agent-led panel creation, and no
+`generate_image` tool — spending image credits stays a human click.
 
 The detached-bash layer and the legacy book-chat feature (with its
 `PiRpcClient` sync-turn path) are gone; all pi work runs on the in-process
-**PiSessionManager**. Panel prompt drafting/refinement, the imagen prompt
-guide injection, and tools-as-API delivery (pi-idea §6) are implemented.
+**PiSessionManager**.
 The Agent view is a pi task dashboard: it polls `GET /pi-tasks?active=true`,
 attaches to each running task's SSE stream, and browses the
 `agent_sessions` registry + parsed traces.

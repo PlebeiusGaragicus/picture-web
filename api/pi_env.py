@@ -1,4 +1,4 @@
-"""Path resolution and adaptation workspace configuration."""
+"""Pi runtime environment: workspace paths, book sessions, pi/node binary discovery."""
 
 from __future__ import annotations
 
@@ -7,15 +7,12 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = REPO_ROOT / ".pi" / "skills"
 LIBRARY_ROOT = Path(os.environ.get("PHOTO_WEB_LIBRARY_ROOT", str(REPO_ROOT / "photo-library")))
 
-WORKFLOW_STAGES = ("ingest", "characters", "scene-list", "scenes", "locations", "moments", "all")
-STYLE_TEMPLATE = "Style:\nColor palette:\nRealism:\nLighting:\n"
 NODE22_BIN_CANDIDATES = (
     Path("/opt/homebrew/opt/node@22/bin"),
     Path("/usr/local/opt/node@22/bin"),
@@ -110,9 +107,6 @@ class AdaptationContext:
             book_session_path=sessions / "book-session.json",
             book_path=book_path,
         )
-
-
-
 
 
 def find_pi_binary() -> str:

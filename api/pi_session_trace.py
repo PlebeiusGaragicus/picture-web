@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from adaptation_workflow.events import clip_text
+from pi_events import clip_text
 from models import (
     PiTraceAssistantStep,
     PiTraceDocument,

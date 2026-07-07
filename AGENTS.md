@@ -26,7 +26,7 @@ Workspace settings in `.vscode/settings.json` point the editor at `.venv/bin/pyt
 
 ## Python tests
 
-Tests live under `api/` (`test_api.py`, `test_adaptation_workflow.py`). Run from the **repo root**.
+Tests live under `api/` (`test_api.py`, `test_pi_profiles.py`, `test_pi_env.py`, ...). Run from the **repo root**.
 
 **Preferred — one test or small scope** (fast, minimal output):
 

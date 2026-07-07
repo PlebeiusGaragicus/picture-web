@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import adaptation
-import adaptation_workflow.config as workflow_config
+import pi_env
 import gemini
 import library
 import pi_profiles
@@ -29,7 +29,7 @@ def setup_tmp_library(tmp_path, monkeypatch) -> TestClient:
     monkeypatch.setattr(library, "PROJECTS_ROOT", root / "projects")
     monkeypatch.setattr(library, "SYSTEM_TRASH", tmp_path / "system-trash")
     monkeypatch.setattr(gemini, "LIBRARY_ROOT", root)
-    monkeypatch.setattr(workflow_config, "LIBRARY_ROOT", root)
+    monkeypatch.setattr(pi_env, "LIBRARY_ROOT", root)
     return TestClient(app)
 
 
@@ -153,7 +153,7 @@ def write_book_session_manifest(root: Path) -> None:
 
 def test_profiles_prompts_and_flags(tmp_path, monkeypatch):
     _client, _root = setup_project_with_book(tmp_path, monkeypatch)
-    ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
+    ctx = pi_env.AdaptationContext.for_slug("farm-comic")
 
     read_book = pi_profiles.get_profile("read-book")
     steps = list(read_book.plan(ctx, pi_profiles.TaskArgs()))
@@ -174,7 +174,7 @@ def test_profiles_prompts_and_flags(tmp_path, monkeypatch):
 
 def test_discover_characters_precheck_requires_book_session(tmp_path, monkeypatch):
     setup_project_with_book(tmp_path, monkeypatch)
-    ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
+    ctx = pi_env.AdaptationContext.for_slug("farm-comic")
     with pytest.raises(HTTPException) as exc_info:
         pi_profiles.get_profile("discover-characters").precheck(ctx, pi_profiles.TaskArgs())
     assert exc_info.value.status_code == 409
@@ -184,7 +184,7 @@ def test_extract_character_precheck_target_validation(tmp_path, monkeypatch):
     setup_project_with_book(tmp_path, monkeypatch)
     root = library.project_dir("farm-comic") / "adaptation"
     write_book_session_manifest(root)
-    ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
+    ctx = pi_env.AdaptationContext.for_slug("farm-comic")
     profile = pi_profiles.get_profile("extract-character")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -606,7 +606,7 @@ def test_draft_panel_prompt_plan_context_and_guide(tmp_path, monkeypatch):
         client,
         ["The barn at dawn.", "Hero feeds the chickens.", "A fox watches from the fence.", "Rain begins."],
     )
-    ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
+    ctx = pi_env.AdaptationContext.for_slug("farm-comic")
     args = pi_profiles.TaskArgs(target=panel_ids[2])
 
     profile = pi_profiles.get_profile("draft-panel-prompt")
@@ -630,7 +630,7 @@ def test_draft_panel_prompt_injects_user_guidance(tmp_path, monkeypatch):
     client, root = setup_project_with_book(tmp_path, monkeypatch)
     seed_extracted_character(root)
     (panel_id,) = make_story_panels(client, ["Hero feeds the chickens at dawn."])
-    ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
+    ctx = pi_env.AdaptationContext.for_slug("farm-comic")
     profile = pi_profiles.get_profile("draft-panel-prompt")
 
     args = pi_profiles.TaskArgs(target=panel_id, instructions="focus on the rooster in the foreground")
@@ -649,7 +649,7 @@ def test_draft_panel_prompt_injects_user_guidance(tmp_path, monkeypatch):
 
 def test_draft_panel_prompt_prechecks(tmp_path, monkeypatch):
     client, root = setup_project_with_book(tmp_path, monkeypatch)
-    ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
+    ctx = pi_env.AdaptationContext.for_slug("farm-comic")
     profile = pi_profiles.get_profile("draft-panel-prompt")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -685,7 +685,7 @@ def test_draft_panel_prompt_prechecks(tmp_path, monkeypatch):
 
 def test_refine_panel_prompt_prechecks(tmp_path, monkeypatch):
     client, root = setup_project_with_book(tmp_path, monkeypatch)
-    ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
+    ctx = pi_env.AdaptationContext.for_slug("farm-comic")
     profile = pi_profiles.get_profile("refine-panel-prompt")
     (panel_id,) = make_story_panels(client, ["Hero rests."])
 
@@ -812,7 +812,7 @@ def test_refine_character_prechecks(tmp_path, monkeypatch):
     setup_project_with_book(tmp_path, monkeypatch)
     root = library.project_dir("farm-comic") / "adaptation"
     write_book_session_manifest(root)
-    ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
+    ctx = pi_env.AdaptationContext.for_slug("farm-comic")
     profile = pi_profiles.get_profile("refine-character")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -910,7 +910,7 @@ def test_extract_location_precheck_target_validation(tmp_path, monkeypatch):
     setup_project_with_book(tmp_path, monkeypatch)
     root = library.project_dir("farm-comic") / "adaptation"
     write_book_session_manifest(root)
-    ctx = workflow_config.AdaptationContext.for_slug("farm-comic")
+    ctx = pi_env.AdaptationContext.for_slug("farm-comic")
     profile = pi_profiles.get_profile("extract-location")
 
     with pytest.raises(HTTPException) as exc_info:

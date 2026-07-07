@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterator
 from fastapi import HTTPException
 
 import adaptation
-from adaptation_workflow.config import AdaptationContext, BookSession
+from pi_env import AdaptationContext, BookSession
 from common import utc_now
 from models import CharacterRecord
 
@@ -414,7 +414,7 @@ def _entity_look_lines(records: dict[str, Any]) -> list[str]:
 
 
 def _panel_prompt_context_lines(ctx: AdaptationContext, panel: Any, document: Any) -> list[str]:
-    """Small assembled context per pi-idea §0.4: panel text, neighbors, cast looks, style, guide."""
+    """Small assembled context: panel text, neighbors, cast looks, style, guide."""
     lines: list[str] = []
 
     ordered = _sorted_story_panels(document)
