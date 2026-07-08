@@ -7,15 +7,16 @@ art from a source book.
 
 ![Example canvas showing image lineage from sketches to final illustrations](docs/assets/example-canvas.jpg)
 
-**Documentation:** <https://plebeiusgaragicus.github.io/picture-web/> —
-user guide, [architecture](docs/architecture.md), packaging, and the pi agent
-methodology. Project conventions for contributors/agents live in
-[AGENTS.md](AGENTS.md).
+**Documentation:** <https://plebchat.me/comic-canvas/> —
+user guide, development model, architecture, packaging, and the pi agent
+methodology. The site is built with MkDocs from the [docs/](docs/) directory
+of this repo ([source](docs/architecture.md)). Project conventions for
+contributors/agents live in [AGENTS.md](AGENTS.md).
 
 ## Install (macOS arm64, Linux x86_64)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PlebeiusGaragicus/picture-web/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PlebeiusGaragicus/comic-canvas/main/install.sh | bash
 ```
 
 Then launch:
@@ -85,9 +86,13 @@ Each project opens into six views (left sidebar):
 ```
 
 Creates/reuses `.venv`, installs Python + web UI deps, then starts the API on
-`:8787` (uvicorn `--reload`) and Vite on `:5173`. Dev shares
-`~/.comic-canvas` by default; point `COMIC_CANVAS_HOME` (or the legacy
-`PHOTO_WEB_LIBRARY_ROOT`) at a scratch dir to keep experiments isolated.
+`:8787` (uvicorn `--reload`) and Vite on `:5173`.
+
+**Data isolation:** dev and the installed app never share data. `./run`
+defaults to a repo-local `dev-library/` (gitignored); the installed
+`comic-canvas` owns `~/.comic-canvas`. Set `COMIC_CANVAS_HOME` explicitly if
+you deliberately want dev code pointed elsewhere. Copy a real project into
+dev with `cp -r ~/.comic-canvas/projects/<slug> dev-library/projects/`.
 
 Tests and gates:
 

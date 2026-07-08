@@ -45,7 +45,11 @@ from models import (
 LIBRARY_ROOT = paths.HOME
 PROJECTS_ROOT = LIBRARY_ROOT / "projects"
 SEED_DEFAULTS_ROOT = paths.SEED_DEFAULTS_DIR
-SYSTEM_TRASH = Path(os.environ.get("PHOTO_WEB_TRASH_DIR", str(Path.home() / ".Trash")))
+SYSTEM_TRASH = Path(
+    os.environ.get("COMIC_CANVAS_TRASH_DIR")
+    or os.environ.get("PHOTO_WEB_TRASH_DIR")
+    or str(Path.home() / ".Trash")
+)
 THUMB_MAX_SIZE = (384, 384)
 DEFAULT_STARTER_DRAFT_NODE_ID = "draft_seed"
 logger = logging.getLogger(__name__)

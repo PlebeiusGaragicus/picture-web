@@ -24,5 +24,5 @@
    **draft** release.
 6. **Fill in the draft** (schema-changes line, highlights) and publish.
 7. **Verify install path.**
-   `curl -fsSL https://raw.githubusercontent.com/PlebeiusGaragicus/picture-web/main/install.sh | bash`
+   `curl -fsSL https://raw.githubusercontent.com/PlebeiusGaragicus/comic-canvas/main/install.sh | bash`
    on a machine (or container for Linux), then `comic-canvas doctor`.

@@ -14,7 +14,7 @@ import sys
 import webbrowser
 from pathlib import Path
 
-GITHUB_REPO = "PlebeiusGaragicus/picture-web"
+GITHUB_REPO = "PlebeiusGaragicus/comic-canvas"
 INSTALL_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/install.sh"
 
 

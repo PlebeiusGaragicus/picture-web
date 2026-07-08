@@ -29,8 +29,8 @@ export default defineConfig({
       url: `http://127.0.0.1:${API_PORT}/api/health`,
       reuseExistingServer: false,
       env: {
-        PHOTO_WEB_LIBRARY_ROOT: libraryDir,
-        PHOTO_WEB_TRASH_DIR: trashDir,
+        COMIC_CANVAS_HOME: libraryDir,
+        COMIC_CANVAS_TRASH_DIR: trashDir,
       },
       timeout: 30_000,
     },

@@ -10,7 +10,7 @@ art from a source book.
 ## Install (macOS arm64, Linux x86_64)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PlebeiusGaragicus/picture-web/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PlebeiusGaragicus/comic-canvas/main/install.sh | bash
 ```
 
 Then launch:

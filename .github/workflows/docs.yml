@@ -1,12 +1,12 @@
-name: Docs
+name: Deploy docs
 
 on:
   push:
     branches: [main]
     paths:
       - "docs/**"
-      - "mkdocs.yml"
-      - ".github/workflows/docs.yml"
+      - mkdocs.yml
+      - .github/workflows/docs.yml
   workflow_dispatch:
 
 permissions:

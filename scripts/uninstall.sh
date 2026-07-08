@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Remove the comic-canvas application (never your projects).
-#   curl -fsSL https://raw.githubusercontent.com/PlebeiusGaragicus/picture-web/main/scripts/uninstall.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/PlebeiusGaragicus/comic-canvas/main/scripts/uninstall.sh | bash
 
 set -euo pipefail
 

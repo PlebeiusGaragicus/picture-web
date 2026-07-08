@@ -2,8 +2,10 @@
 
 Local single-user app: FastAPI backend (`api/`), React + Vite UI (`webui/`),
 all user data under `~/.comic-canvas/` (override: `COMIC_CANVAS_HOME`, legacy
-`PHOTO_WEB_LIBRARY_ROOT`). The backend is the only layer that touches the
-filesystem, validation, Gemini, and the pi agent.
+`PHOTO_WEB_LIBRARY_ROOT`). Dev mode (`./run`) is isolated by default to a
+repo-local `dev-library/`; tests and Playwright use throwaway dirs. The
+backend is the only layer that touches the filesystem, validation, Gemini,
+and the pi agent.
 
 ```text
 webui (React, React Flow)  ── REST /api ──  api (FastAPI)
