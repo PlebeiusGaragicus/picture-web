@@ -10,14 +10,12 @@
   build a release.
 - **Releases are tag-only.** A release builds only when a `vX.Y.Z` tag is
   pushed (`.github/workflows/release.yml`), and the tag must match
-  `api/version.py`. Follow `docs/docs/release-checklist.md`. Never tag from `dev`;
+  `api/version.py`. Follow `docs/release-checklist.md`. Never tag from `dev`;
   tag the merge commit on `main`.
 - CI (`.github/workflows/ci.yml`) runs on pushes to `dev`/`main` and on PRs.
-- **Docs are a submodule.** `docs/` is the public
-  [comic-canvas-docs](https://github.com/PlebeiusGaragicus/comic-canvas-docs)
-  repo (this app repo is private, so Pages deploys from there on ITS `main`).
-  To change docs: commit + push inside `docs/`, then commit the submodule
-  pointer bump here. Site content lives at `docs/docs/*.md`; never put
+- **Docs live in this repo.** Site content is `docs/*.md`, built with MkDocs
+  (`mkdocs.yml` at the repo root) and deployed to GitHub Pages by
+  `.github/workflows/docs.yml` on pushes to `main`. Never put
   private/internal-only notes there — it publishes to the public site.
 
 ## Data isolation

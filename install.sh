@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # comic-canvas installer for macOS (arm64) and Linux (x86_64).
 #
-#   curl -fsSL https://raw.githubusercontent.com/PlebeiusGaragicus/picture-web/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/PlebeiusGaragicus/comic-canvas/main/install.sh | bash
 #
 # Flags:
 #   --version vX.Y.Z   install a specific release (default: latest)
@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-REPO="PlebeiusGaragicus/picture-web"
+REPO="PlebeiusGaragicus/comic-canvas"
 HOME_DIR="${COMIC_CANVAS_HOME:-$HOME/.comic-canvas}"
 APP_DIR="$HOME_DIR/app"
 BIN_DIR="$HOME/.local/bin"
